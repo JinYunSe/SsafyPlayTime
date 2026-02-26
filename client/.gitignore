@@ -1,0 +1,89 @@
+# ═══════════════════════════════════════════
+# Unity 클라이언트 .gitignore
+# 프로젝트 루트/client/ 에 .gitignore로 복사하세요
+# ═══════════════════════════════════════════
+
+# ─── Unity 자동 생성 폴더 ───
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+
+# ─── Unity 메모리 프로파일러 ───
+/[Mm]emoryCaptures/
+
+# ─── 에셋 번들 ───
+/[Aa]sset[Bb]undles/
+
+# ─── Unity Streaming Assets ───
+/[Ss]treamingAssets/
+
+# ─── Visual Studio / Rider ───
+.vs/
+.idea/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# ─── Visual Studio Code ───
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# ─── JetBrains Rider ───
+.idea/
+*.sln.iml
+
+# ─── OS 생성 파일 ───
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ─── 빌드 결과물 ───
+*.apk
+*.aab
+*.unitypackage
+*.app
+*.exe
+*.dll
+!Assets/Plugins/**/*.dll
+
+# ─── Crash Reports ───
+sysinfo.txt
+crashlytics-build.properties
+
+# ─── NuGet ───
+*.nupkg
+
+# ─── TextMeshPro (최초 임포트 후 포함시키세요) ───
+# Assets/TextMesh Pro/
+
+# ─── 환경 변수 ───
+.env
+.env.local
+.env.*.local
+
+# ─── 에디터 백업 ───
+*~
+*.swp
+*.swo
