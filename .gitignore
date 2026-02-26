@@ -1,0 +1,41 @@
+# ═══════════════════════════════════════════
+# 프로젝트 루트 .gitignore
+# 모노레포 최상위에 배치하세요
+# ═══════════════════════════════════════════
+
+# ─── OS 생성 파일 ───
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ─── 환경 변수 (루트) ───
+.env
+.env.local
+.env.dev
+.env.prod
+!.env.example
+
+# ─── Docker 볼륨 데이터 ───
+mysql_data/
+redis_data/
+pgdata/
+
+# ─── SSL 인증서 ───
+nginx/ssl/*.pem
+nginx/ssl/*.key
+nginx/ssl/*.crt
+!nginx/ssl/.gitkeep
+
+# ─── IDE ───
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ─── 에디터 백업 ───
+*.bak
+*.orig
