@@ -20,7 +20,13 @@ namespace SSAFYPlayTime.EditorTools
 
             EnsureEventSystem();
 
-            var canvasObject = new GameObject("LobbyCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster), typeof(SSAFYPlayTime.LobbyCanvasUIController));
+            var canvasObject = new GameObject(
+                "LobbyCanvas",
+                typeof(Canvas),
+                typeof(CanvasScaler),
+                typeof(GraphicRaycaster),
+                typeof(SSAFYPlayTime.LobbyCanvasUIController));
+
             var canvas = canvasObject.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
 
@@ -85,13 +91,13 @@ namespace SSAFYPlayTime.EditorTools
 
         private static void BuildNicknamePanel(RectTransform panel, out TMP_InputField nicknameInput, out Button confirmButton)
         {
-            var title = CreateText("Title", panel, "Enter Nickname", 44);
+            var title = CreateText("Title", panel, "닉네임 입력", 44);
             SetRect(title.rectTransform, new Vector2(0.5f, 0.7f), new Vector2(600, 80));
 
-            nicknameInput = CreateInput("NicknameInput", panel, "Nickname");
+            nicknameInput = CreateInput("NicknameInput", panel, "닉네임");
             SetRect(nicknameInput.GetComponent<RectTransform>(), new Vector2(0.5f, 0.52f), new Vector2(520, 60));
 
-            confirmButton = CreateButton("ConfirmButton", panel, "Confirm");
+            confirmButton = CreateButton("ConfirmButton", panel, "확인");
             SetRect(confirmButton.GetComponent<RectTransform>(), new Vector2(0.5f, 0.38f), new Vector2(240, 60));
         }
 
@@ -104,14 +110,14 @@ namespace SSAFYPlayTime.EditorTools
             out Transform roomListContent,
             out GameObject roomItemTemplate)
         {
-            header = CreateText("Header", panel, "Nickname:", 30);
+            header = CreateText("Header", panel, "닉네임:", 30);
             header.alignment = TextAlignmentOptions.Left;
             SetAnchorRect(header.rectTransform, new Vector2(0.05f, 0.92f), new Vector2(0.55f, 0.98f));
 
-            createButton = CreateButton("CreateRoomButton", panel, "Create Room");
+            createButton = CreateButton("CreateRoomButton", panel, "방 만들기");
             SetAnchorRect(createButton.GetComponent<RectTransform>(), new Vector2(0.72f, 0.92f), new Vector2(0.85f, 0.98f));
 
-            refreshButton = CreateButton("RefreshButton", panel, "Refresh List");
+            refreshButton = CreateButton("RefreshButton", panel, "목록 새로고침");
             SetAnchorRect(refreshButton.GetComponent<RectTransform>(), new Vector2(0.86f, 0.92f), new Vector2(0.99f, 0.98f));
 
             var listContainer = CreatePanel("RoomListContainer", panel);
@@ -121,7 +127,7 @@ namespace SSAFYPlayTime.EditorTools
             var scroll = BuildScrollView(listContainer, out roomListContent);
 
             roomItemTemplate = CreateRoomItemTemplate(roomListContent);
-            status = CreateText("Status", panel, "Press Refresh List.", 24);
+            status = CreateText("Status", panel, "목록을 새로고침하세요.", 24);
             SetAnchorRect(status.rectTransform, new Vector2(0.05f, 0.03f), new Vector2(0.95f, 0.10f));
 
             scroll.vertical = true;
@@ -130,14 +136,14 @@ namespace SSAFYPlayTime.EditorTools
 
         private static void BuildRoomPanel(RectTransform panel, out TMP_Text roomTitle, out TMP_Text roomMembers, out Button leaveButton)
         {
-            roomTitle = CreateText("RoomTitle", panel, "Room", 40);
+            roomTitle = CreateText("RoomTitle", panel, "방 정보", 40);
             SetRect(roomTitle.rectTransform, new Vector2(0.5f, 0.78f), new Vector2(900, 80));
 
-            roomMembers = CreateText("RoomMembers", panel, "Members", 28);
+            roomMembers = CreateText("RoomMembers", panel, "참여 인원", 28);
             roomMembers.alignment = TextAlignmentOptions.TopLeft;
             SetRect(roomMembers.rectTransform, new Vector2(0.5f, 0.48f), new Vector2(900, 420));
 
-            leaveButton = CreateButton("LeaveRoomButton", panel, "Leave to Lobby");
+            leaveButton = CreateButton("LeaveRoomButton", panel, "로비로 나가기");
             SetRect(leaveButton.GetComponent<RectTransform>(), new Vector2(0.5f, 0.14f), new Vector2(280, 60));
         }
 
@@ -156,17 +162,17 @@ namespace SSAFYPlayTime.EditorTools
             SetRect(box, new Vector2(0.5f, 0.5f), new Vector2(700, 450));
             box.GetComponent<Image>().color = Color.white;
 
-            var title = CreateText("Title", box, "Create Room", 36);
+            var title = CreateText("Title", box, "방 만들기", 36);
             SetRect(title.rectTransform, new Vector2(0.5f, 0.84f), new Vector2(500, 60));
             title.color = Color.black;
 
-            roomNameInput = CreateInput("RoomNameInput", box, "Room name");
+            roomNameInput = CreateInput("RoomNameInput", box, "방 이름");
             SetRect(roomNameInput.GetComponent<RectTransform>(), new Vector2(0.5f, 0.66f), new Vector2(520, 56));
 
-            privateToggle = CreateToggle("PrivateToggle", box, "Private room");
+            privateToggle = CreateToggle("PrivateToggle", box, "비공개 방");
             SetRect(privateToggle.GetComponent<RectTransform>(), new Vector2(0.35f, 0.52f), new Vector2(220, 40));
 
-            passwordInput = CreateInput("PasswordInput", box, "Password");
+            passwordInput = CreateInput("PasswordInput", box, "비밀번호");
             passwordInput.contentType = TMP_InputField.ContentType.Password;
             passwordInput.inputType = TMP_InputField.InputType.Password;
             SetRect(passwordInput.GetComponent<RectTransform>(), new Vector2(0.5f, 0.40f), new Vector2(520, 56));
@@ -175,10 +181,10 @@ namespace SSAFYPlayTime.EditorTools
             validation.color = Color.red;
             SetRect(validation.rectTransform, new Vector2(0.5f, 0.28f), new Vector2(600, 44));
 
-            confirm = CreateButton("CreateConfirmButton", box, "Create");
+            confirm = CreateButton("CreateConfirmButton", box, "생성");
             SetRect(confirm.GetComponent<RectTransform>(), new Vector2(0.38f, 0.14f), new Vector2(220, 56));
 
-            cancel = CreateButton("CreateCancelButton", box, "Cancel");
+            cancel = CreateButton("CreateCancelButton", box, "취소");
             SetRect(cancel.GetComponent<RectTransform>(), new Vector2(0.62f, 0.14f), new Vector2(220, 56));
         }
 
@@ -195,11 +201,11 @@ namespace SSAFYPlayTime.EditorTools
             SetRect(box, new Vector2(0.5f, 0.5f), new Vector2(620, 360));
             box.GetComponent<Image>().color = Color.white;
 
-            var title = CreateText("Title", box, "Enter Password", 34);
+            var title = CreateText("Title", box, "비밀번호 입력", 34);
             SetRect(title.rectTransform, new Vector2(0.5f, 0.78f), new Vector2(500, 60));
             title.color = Color.black;
 
-            passwordInput = CreateInput("JoinPasswordInput", box, "Password");
+            passwordInput = CreateInput("JoinPasswordInput", box, "비밀번호");
             passwordInput.contentType = TMP_InputField.ContentType.Password;
             passwordInput.inputType = TMP_InputField.InputType.Password;
             SetRect(passwordInput.GetComponent<RectTransform>(), new Vector2(0.5f, 0.55f), new Vector2(500, 56));
@@ -208,10 +214,10 @@ namespace SSAFYPlayTime.EditorTools
             validation.color = Color.red;
             SetRect(validation.rectTransform, new Vector2(0.5f, 0.40f), new Vector2(540, 44));
 
-            join = CreateButton("JoinButton", box, "Join");
+            join = CreateButton("JoinButton", box, "입장");
             SetRect(join.GetComponent<RectTransform>(), new Vector2(0.38f, 0.20f), new Vector2(200, 56));
 
-            cancel = CreateButton("CancelButton", box, "Cancel");
+            cancel = CreateButton("CancelButton", box, "취소");
             SetRect(cancel.GetComponent<RectTransform>(), new Vector2(0.62f, 0.20f), new Vector2(200, 56));
         }
 
@@ -239,6 +245,10 @@ namespace SSAFYPlayTime.EditorTools
             tmp.fontSize = fontSize;
             tmp.color = Color.white;
             tmp.alignment = TextAlignmentOptions.Center;
+            if (TmpFontFallbackBootstrap.ActiveFallbackFont != null)
+            {
+                tmp.font = TmpFontFallbackBootstrap.ActiveFallbackFont;
+            }
             return tmp;
         }
 
@@ -274,6 +284,10 @@ namespace SSAFYPlayTime.EditorTools
             text.color = Color.black;
             text.fontSize = 24;
             text.alignment = TextAlignmentOptions.Left;
+            if (TmpFontFallbackBootstrap.ActiveFallbackFont != null)
+            {
+                text.font = TmpFontFallbackBootstrap.ActiveFallbackFont;
+            }
             SetAnchorRect(text.rectTransform, Vector2.zero, Vector2.one);
 
             var placeholderGo = new GameObject("Placeholder", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -283,6 +297,10 @@ namespace SSAFYPlayTime.EditorTools
             placeholderText.color = new Color(0.45f, 0.45f, 0.45f, 1f);
             placeholderText.fontSize = 22;
             placeholderText.alignment = TextAlignmentOptions.Left;
+            if (TmpFontFallbackBootstrap.ActiveFallbackFont != null)
+            {
+                placeholderText.font = TmpFontFallbackBootstrap.ActiveFallbackFont;
+            }
             SetAnchorRect(placeholderText.rectTransform, Vector2.zero, Vector2.one);
 
             var input = go.GetComponent<TMP_InputField>();
@@ -290,6 +308,7 @@ namespace SSAFYPlayTime.EditorTools
             input.textComponent = text;
             input.placeholder = placeholderText;
             input.lineType = TMP_InputField.LineType.SingleLine;
+            input.characterValidation = TMP_InputField.CharacterValidation.None;
             return input;
         }
 
@@ -373,7 +392,7 @@ namespace SSAFYPlayTime.EditorTools
 
         private static GameObject CreateRoomItemTemplate(Transform parent)
         {
-            var button = CreateButton("RoomItemTemplate", parent, "OPEN  Room  (0)");
+            var button = CreateButton("RoomItemTemplate", parent, "공개/입장가능 방 (0)");
             var layout = button.gameObject.AddComponent<LayoutElement>();
             layout.preferredHeight = 52;
             return button.gameObject;
