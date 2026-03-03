@@ -80,7 +80,10 @@ namespace SSAFYPlayTime
 
         [Header("Room View")]
         [SerializeField] private TMP_Text roomTitleText;
-        [SerializeField] private TMP_Text roomMembersText;
+        [SerializeField] private TMP_Text playerOneText;
+        [SerializeField] private TMP_Text playerTwoText;
+        [SerializeField] private TMP_Text playerThreeText;
+        [SerializeField] private TMP_Text playerFourText;
         [SerializeField] private Button leaveRoomButton;
         [SerializeField] private Button startGameButton;
         [SerializeField] private string gameplaySceneName = string.Empty;
@@ -110,8 +113,10 @@ namespace SSAFYPlayTime
         [SerializeField] private string statusHostMigrationFailedFormat = "호스트 이관 실패: {0}";
         [SerializeField] private string validationEnterNickname = "닉네임을 입력해주세요.";
         [SerializeField] private string validationNicknameInUse = "이미 사용 중인 닉네임입니다.";
+        [SerializeField] private string validationNicknameLengthExceeded = "닉네임은 영문/숫자 최대 16자, 한글 포함 시 최대 8자입니다.";
         [SerializeField] private string validationEnterRoomName = "방 이름을 입력해주세요.";
         [SerializeField] private string validationRoomNameInUse = "이미 사용 중인 방 이름입니다.";
+        [SerializeField] private string validationRoomNameLengthExceeded = "방 이름은 영문/숫자 최대 16자, 한글 포함 시 최대 8자입니다.";
         [SerializeField] private string validationPrivatePasswordRequired = "비공개 방은 비밀번호가 필요합니다.";
         [SerializeField] private string validationPasswordNumericOnly = "비밀번호는 숫자만 사용할 수 있습니다.";
         [SerializeField] private string validationInvalidPassword = "비밀번호가 올바르지 않습니다.";
@@ -122,8 +127,7 @@ namespace SSAFYPlayTime
         [SerializeField] private string roomStateFull = "가득참";
         [SerializeField] private string roomTagPrivate = "[비공개]";
         [SerializeField] private string roomTagPublic = "[공개]";
-        [SerializeField] private string roomMembersFormat = "방장: {0}\n\n인원: {1}/{2}";
-        [SerializeField] private string roomParticipantsFormat = "참여자: {0}";
+        [SerializeField] private string emptyPlayerSlot = "-";
         [SerializeField] private string nicknameHeaderFormat = "닉네임: {0}";
 
         private readonly List<RoomSnapshot> _roomSnapshots = new();
@@ -179,9 +183,19 @@ namespace SSAFYPlayTime
             createRoomOpenButton.onClick.AddListener(OpenCreateRoomModal);
             refreshRoomsButton.onClick.AddListener(OnRefreshRoomsClicked);
 
+            if (nicknameInput != null)
+            {
+                nicknameInput.onValueChanged.AddListener(_ => EnforceNameInputLimit(nicknameInput));
+            }
+
             createPrivateToggle.onValueChanged.AddListener(OnPrivateToggleChanged);
             createConfirmButton.onClick.AddListener(OnCreateRoomConfirmed);
             createCancelButton.onClick.AddListener(() => createRoomModal.SetActive(false));
+
+            if (createRoomNameInput != null)
+            {
+                createRoomNameInput.onValueChanged.AddListener(_ => EnforceNameInputLimit(createRoomNameInput));
+            }
 
             passwordJoinButton.onClick.AddListener(OnPasswordConfirmed);
             passwordCancelButton.onClick.AddListener(() => passwordModal.SetActive(false));
@@ -235,6 +249,12 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            if (!IsWithinNameLengthLimit(entered))
+            {
+                SetNicknameValidation(validationNicknameLengthExceeded);
+                return;
+            }
+
             SetNicknameValidation(string.Empty);
 
             if (!await EnsureLobbyRunnerAsync())
@@ -283,6 +303,12 @@ namespace SSAFYPlayTime
             if (string.IsNullOrEmpty(roomName))
             {
                 SetCreateValidation(validationEnterRoomName);
+                return;
+            }
+
+            if (!IsWithinNameLengthLimit(roomName))
+            {
+                SetCreateValidation(validationRoomNameLengthExceeded);
                 return;
             }
 
@@ -620,16 +646,34 @@ namespace SSAFYPlayTime
             var state = _currentRoomIsPrivate ? roomTagPrivate : roomTagPublic;
             SyncCurrentRoomOwnerFromRoster();
             roomTitleText.text = $"{state} {_currentRoomName}";
-            var baseText = string.Format(roomMembersFormat, _currentRoomOwner, currentPlayers, MaxPlayers);
-            var participants = BuildParticipantDisplayText();
-            roomMembersText.text = string.IsNullOrEmpty(participants)
-                ? baseText
-                : $"{baseText}\n\n{string.Format(roomParticipantsFormat, participants)}";
+            UpdatePlayerSlots();
             if (startGameButton != null)
             {
                 var canStart = _runner != null && _runner.IsRunning && _runner.IsServer && currentPlayers > 1;
                 startGameButton.gameObject.SetActive(true);
                 startGameButton.interactable = canStart;
+            }
+        }
+
+        private void UpdatePlayerSlots()
+        {
+            var slotTexts = new[] { playerOneText, playerTwoText, playerThreeText, playerFourText };
+            var orderedNames = _roomParticipantsByPlayerId.Values
+                .Where(v => !string.IsNullOrWhiteSpace(v?.Nickname))
+                .OrderBy(v => v.PlayerId)
+                .Select(v => v.Nickname)
+                .Take(slotTexts.Length)
+                .ToList();
+
+            for (var i = 0; i < slotTexts.Length; i++)
+            {
+                var slot = slotTexts[i];
+                if (slot == null)
+                {
+                    continue;
+                }
+
+                slot.text = i < orderedNames.Count ? orderedNames[i] : emptyPlayerSlot;
             }
         }
 
@@ -838,21 +882,6 @@ namespace SSAFYPlayTime
             {
                 return string.Empty;
             }
-        }
-
-        private string BuildParticipantDisplayText()
-        {
-            if (_roomParticipantsByPlayerId.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            var names = _roomParticipantsByPlayerId.Values
-                .Where(v => !string.IsNullOrWhiteSpace(v?.Nickname))
-                .OrderBy(v => v.PlayerId)
-                .Select(v => v.Nickname)
-                .ToList();
-            return names.Count == 0 ? string.Empty : string.Join(", ", names);
         }
 
         private void RegisterParticipant(PlayerRef player, string nickname)
@@ -1189,6 +1218,7 @@ namespace SSAFYPlayTime
             {
                 roomItemTemplate = FindChildByNames("방항목템플릿", "RoomItemTemplate");
             }
+
         }
 
         private GameObject FindChildByNames(params string[] names)
@@ -1493,6 +1523,79 @@ namespace SSAFYPlayTime
                 .Where(c => char.IsLetterOrDigit(c) || char.IsWhiteSpace(c) || c == '.' || c == '_' || c == '-')
                 .ToArray();
             return new string(chars).Trim();
+        }
+
+        private static bool IsWithinNameLengthLimit(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return false;
+            }
+
+            var maxLength = ContainsHangul(value) ? 8 : 16;
+            return value.Length <= maxLength;
+        }
+
+        private static bool ContainsHangul(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return false;
+            }
+
+            for (var i = 0; i < value.Length; i++)
+            {
+                var c = value[i];
+                if ((c >= '\u1100' && c <= '\u11FF') ||
+                    (c >= '\u3130' && c <= '\u318F') ||
+                    (c >= '\uAC00' && c <= '\uD7AF'))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void EnforceNameInputLimit(TMP_InputField input)
+        {
+            if (input == null)
+            {
+                return;
+            }
+
+            var current = input.text ?? string.Empty;
+            var normalized = NormalizeNameInput(current);
+            if (string.Equals(current, normalized, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            input.SetTextWithoutNotify(normalized);
+            input.caretPosition = normalized.Length;
+            input.selectionAnchorPosition = normalized.Length;
+            input.selectionFocusPosition = normalized.Length;
+        }
+
+        private static string NormalizeNameInput(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return string.Empty;
+            }
+
+            var filteredChars = value
+                .Where(c => char.IsLetterOrDigit(c) || char.IsWhiteSpace(c) || c == '.' || c == '_' || c == '-')
+                .ToArray();
+            var filtered = new string(filteredChars);
+
+            var maxLength = ContainsHangul(filtered) ? 8 : 16;
+            if (filtered.Length <= maxLength)
+            {
+                return filtered;
+            }
+
+            return filtered.Substring(0, maxLength);
         }
 
         private static char ValidateNumericPasswordChar(string text, int charIndex, char addedChar)
