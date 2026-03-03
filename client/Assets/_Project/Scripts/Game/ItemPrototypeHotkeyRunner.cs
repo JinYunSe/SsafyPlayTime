@@ -28,6 +28,8 @@ namespace SSAFYPlayTime
         private const string PrototypeSatelliteWarningName = "Prototype_SatelliteWarning";
         private const string PrototypeSatelliteExplosionName = "Prototype_SatelliteExplosion";
         private const string PrototypeHitDummyName = "PrototypeHitDummy";
+        // 팀 작업 간섭 방지를 위해 기본값은 비활성화한다.
+        private const bool EnableAutoBootstrapOnPlay = false;
 
         private static ItemPrototypeHotkeyRunner _instance;
 
@@ -136,6 +138,11 @@ namespace SSAFYPlayTime
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
+            if (!EnableAutoBootstrapOnPlay)
+            {
+                return;
+            }
+
             if (_instance != null || FindObjectOfType<ItemPrototypeHotkeyRunner>() != null)
             {
                 return;
