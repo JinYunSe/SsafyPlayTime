@@ -4,9 +4,9 @@ using System.IO;
 
 namespace SSAFYPlayTime
 {
-    internal static class ItemPresentationTableCsvLoader
+    public static class ItemPresentationTableCsvLoader
     {
-        internal readonly struct Row
+        public readonly struct Row
         {
             public Row(
                 string itemId,

@@ -41,6 +41,8 @@ namespace SSAFYPlayTime
         [SerializeField] private string soundAssetTableRelativePath = DefaultSoundAssetTableRelativePath;
         [SerializeField] private string vfxAssetTableRelativePath = DefaultVfxAssetTableRelativePath;
         [SerializeField] private string itemPresentationTableRelativePath = DefaultItemPresentationTableRelativePath;
+        [SerializeField] private bool enablePresentationFromTables = true;
+        [SerializeField] private float defaultPrototypeSfxVolume = 1f;
 
         [Header("Target")]
         [SerializeField] private Transform targetRoot;
@@ -126,6 +128,8 @@ namespace SSAFYPlayTime
         private bool _assetTablesApplied;
         private Dictionary<string, ItemTableCsvLoader.Row> _itemTableRows;
         private ItemPrototypeDataCatalog _dataCatalog;
+        private readonly Dictionary<string, AudioClip> _audioClipCache = new(System.StringComparer.Ordinal);
+        private readonly Dictionary<string, AudioSource> _loopingSfxSources = new(System.StringComparer.Ordinal);
 
         private string _statusLine = "Ready";
 
@@ -180,6 +184,12 @@ namespace SSAFYPlayTime
         private void OnDisable()
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
+            StopAllLoopingSfx();
+        }
+
+        private void OnDestroy()
+        {
+            StopAllLoopingSfx();
         }
 
         private void Start()

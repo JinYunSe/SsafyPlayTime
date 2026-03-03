@@ -180,6 +180,7 @@ namespace SSAFYPlayTime
         private void TriggerBlackholeBomb()
         {
             ResolveTarget();
+            PlayItemUsePresentation(ItemIdBlackholeBomb, GetTargetPosition());
             StartCoroutine(CoBlackholeBomb());
         }
 
@@ -259,12 +260,14 @@ namespace SSAFYPlayTime
         private void TriggerGrowth()
         {
             ResolveTarget();
+            PlayItemUsePresentation(ItemIdGrowth, GetTargetPosition());
             StartScaleBuff(growthScaleMultiplier, growthDurationSec, "Growth item");
         }
 
         private void TriggerShrink()
         {
             ResolveTarget();
+            PlayItemUsePresentation(ItemIdShrink, GetTargetPosition());
             StartScaleBuff(shrinkScaleMultiplier, shrinkDurationSec, "Shrink item");
         }
 
@@ -316,6 +319,7 @@ namespace SSAFYPlayTime
         private void TriggerAmericano()
         {
             ResolveTarget();
+            PlayItemUsePresentation(ItemIdAmericano, GetTargetPosition());
             _isSuperArmorActive = true;
             _superArmorEndTime = Time.time + superArmorDurationSec;
 
@@ -357,6 +361,7 @@ namespace SSAFYPlayTime
             }
 
             EnsureFlamethrowerParticle();
+            PlayItemUsePresentation(ItemIdFlamethrower, GetTargetPosition(), forceLoopSfx: true);
             SetStatus($"Flamethrower: active ({flamethrowerMaxUseSec:0.0}s)");
         }
 
@@ -366,6 +371,7 @@ namespace SSAFYPlayTime
             _flamethrowerEndTickTimer = TickTimer.None;
             _flamethrowerTickTimer = TickTimer.None;
             StopFlamethrowerParticle();
+            StopItemUseLoopSfx(ItemIdFlamethrower);
             SetStatus(reason);
         }
 
@@ -550,6 +556,7 @@ namespace SSAFYPlayTime
         private void TriggerInvisibility()
         {
             ResolveTarget();
+            PlayItemUsePresentation(ItemIdInvisibility, GetTargetPosition());
 
             if (_invisibilityRoutine != null)
             {
@@ -579,6 +586,7 @@ namespace SSAFYPlayTime
         private void TriggerSatelliteStrike()
         {
             ResolveTarget();
+            PlayItemUsePresentation(ItemIdSatelliteStrike, GetTargetPosition());
             StartCoroutine(CoSatelliteStrike());
         }
 
@@ -678,6 +686,7 @@ namespace SSAFYPlayTime
             _lastFlamethrowerTickHitCount = 0;
             _lastFlamethrowerTickDamage = 0f;
             StopFlamethrowerParticle();
+            StopAllLoopingSfx();
             RestoreFlamethrowerRangeIfBoosted();
             _hitDummy?.ResetDummy();
 

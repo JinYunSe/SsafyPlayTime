@@ -4,9 +4,9 @@ using System.IO;
 
 namespace SSAFYPlayTime
 {
-    internal static class SoundAssetTableCsvLoader
+    public static class SoundAssetTableCsvLoader
     {
-        internal readonly struct Row
+        public readonly struct Row
         {
             public Row(
                 string sfxId,

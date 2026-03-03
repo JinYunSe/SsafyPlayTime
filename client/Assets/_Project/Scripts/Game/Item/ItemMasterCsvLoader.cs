@@ -4,9 +4,9 @@ using System.IO;
 
 namespace SSAFYPlayTime.Gameplay.Items
 {
-    internal static class ItemMasterCsvLoader
+    public static class ItemMasterCsvLoader
     {
-        internal readonly struct Row
+        public readonly struct Row
         {
             public Row(
                 string itemId,
