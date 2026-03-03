@@ -354,8 +354,59 @@ namespace SSAFYPlayTime
                 satelliteForce = row.Force;
             });
 
+            _itemTableRows = rows;
             _itemTableApplied = true;
             Debug.Log($"[ItemPrototype] ItemTable applied: {resolvedPath}");
+        }
+
+        private void LoadAssetMetadataTablesIfNeeded()
+        {
+            if (!loadAssetMetadataTables || _assetTablesApplied)
+            {
+                return;
+            }
+
+            if (!SoundAssetTableCsvLoader.TryLoadFromDisk(
+                    soundAssetTableRelativePath,
+                    out var soundRows,
+                    out var soundPath,
+                    out var soundError))
+            {
+                Debug.LogWarning($"[ItemPrototype] SoundAssetTable load failed: {soundError}");
+                return;
+            }
+
+            if (!VfxAssetTableCsvLoader.TryLoadFromDisk(
+                    vfxAssetTableRelativePath,
+                    out var vfxRows,
+                    out var vfxPath,
+                    out var vfxError))
+            {
+                Debug.LogWarning($"[ItemPrototype] VfxAssetTable load failed: {vfxError}");
+                return;
+            }
+
+            if (!ItemPresentationTableCsvLoader.TryLoadFromDisk(
+                    itemPresentationTableRelativePath,
+                    out var presentationRows,
+                    out var presentationPath,
+                    out var presentationError))
+            {
+                Debug.LogWarning($"[ItemPrototype] ItemPresentationTable load failed: {presentationError}");
+                return;
+            }
+
+            _dataCatalog = new ItemPrototypeDataCatalog(soundRows, vfxRows, presentationRows);
+            _assetTablesApplied = true;
+
+            var validationWarnings = _dataCatalog.ValidateReferences(_itemTableRows);
+            for (var i = 0; i < validationWarnings.Count; i++)
+            {
+                Debug.LogWarning($"[ItemPrototype] Data validation: {validationWarnings[i]}");
+            }
+
+            Debug.Log(
+                $"[ItemPrototype] AssetTables applied: sound={soundPath}, vfx={vfxPath}, presentation={presentationPath}, warnings={validationWarnings.Count}");
         }
 
         private static void ApplyItemTableRow(

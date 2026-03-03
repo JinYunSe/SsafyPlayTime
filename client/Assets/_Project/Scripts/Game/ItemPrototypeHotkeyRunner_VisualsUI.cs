@@ -132,7 +132,7 @@ namespace SSAFYPlayTime
         private void DrawHotkeyGuide()
         {
             const float top = 16f;
-            var lineCount = 27;
+            var lineCount = 30;
             var height = 20f + lineCount * UiLineHeight;
             var rect = new Rect(Screen.width - UiPanelWidth - 16f, top, UiPanelWidth, height);
             GUI.Box(rect, "Item Prototype (1~7)");
@@ -206,6 +206,17 @@ namespace SSAFYPlayTime
 
             GUI.Label(new Rect(x, y, UiPanelWidth - 24f, UiLineHeight), $"ItemTable: {(loadValuesFromItemTable ? "ON" : "OFF")}");
             y += UiLineHeight;
+            GUI.Label(new Rect(x, y, UiPanelWidth - 24f, UiLineHeight), loadAssetMetadataTables
+                ? $"AssetTables: {(_assetTablesApplied ? "ON (Loaded)" : "ON (Pending)")}"
+                : "AssetTables: OFF");
+            y += UiLineHeight;
+
+            if (_assetTablesApplied && _dataCatalog != null)
+            {
+                GUI.Label(new Rect(x, y, UiPanelWidth - 24f, UiLineHeight),
+                    $"AssetRows: SFX {_dataCatalog.SoundAssetRows.Count} / VFX {_dataCatalog.VfxAssetRows.Count} / Pres {_dataCatalog.PresentationRows.Count}");
+                y += UiLineHeight;
+            }
 
             if (_hitDummy != null)
             {

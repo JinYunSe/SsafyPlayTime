@@ -14,6 +14,9 @@ namespace SSAFYPlayTime
         private const float RunnerLookupIntervalSec = 1f;
 
         private const string DefaultItemTableRelativePath = "_Project/Data/ItemTable.csv";
+        private const string DefaultSoundAssetTableRelativePath = "_Project/Data/SoundAssetTable.csv";
+        private const string DefaultVfxAssetTableRelativePath = "_Project/Data/VfxAssetTable.csv";
+        private const string DefaultItemPresentationTableRelativePath = "_Project/Data/ItemPresentationTable.csv";
         private const string ItemIdBlackholeBomb = "ITEM_BLACKHOLE_BOMB";
         private const string ItemIdGrowth = "ITEM_GROWTH";
         private const string ItemIdShrink = "ITEM_SHRINK";
@@ -34,6 +37,10 @@ namespace SSAFYPlayTime
         [Header("Data Source")]
         [SerializeField] private bool loadValuesFromItemTable = true;
         [SerializeField] private string itemTableRelativePath = DefaultItemTableRelativePath;
+        [SerializeField] private bool loadAssetMetadataTables = true;
+        [SerializeField] private string soundAssetTableRelativePath = DefaultSoundAssetTableRelativePath;
+        [SerializeField] private string vfxAssetTableRelativePath = DefaultVfxAssetTableRelativePath;
+        [SerializeField] private string itemPresentationTableRelativePath = DefaultItemPresentationTableRelativePath;
 
         [Header("Target")]
         [SerializeField] private Transform targetRoot;
@@ -116,6 +123,9 @@ namespace SSAFYPlayTime
         private NetworkRunner _runnerCache;
         private float _nextRunnerLookupTime;
         private bool _itemTableApplied;
+        private bool _assetTablesApplied;
+        private Dictionary<string, ItemTableCsvLoader.Row> _itemTableRows;
+        private ItemPrototypeDataCatalog _dataCatalog;
 
         private string _statusLine = "Ready";
 
@@ -158,6 +168,7 @@ namespace SSAFYPlayTime
             _instance = this;
             DontDestroyOnLoad(gameObject);
             LoadValuesFromItemTableIfNeeded();
+            LoadAssetMetadataTablesIfNeeded();
             CaptureBaseFlamethrowerRangeIfNeeded();
         }
 
