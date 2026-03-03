@@ -16,9 +16,9 @@ MonoBehaviour:
     AppIdFusion: 7481e9c8-0252-40a9-99e8-b5fa8281e2d7
     AppIdChat: 
     AppIdVoice: 
-    AppVersion: 
+    AppVersion: ssafy-playtime-v1
     UseNameServer: 1
-    FixedRegion: 
+    FixedRegion: kr
     Server: 
     Port: 0
     ProxyServer: 
