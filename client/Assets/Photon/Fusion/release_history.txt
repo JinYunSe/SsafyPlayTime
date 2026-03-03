@@ -1,3 +1,24 @@
+# 2.0.11
+
+## Stable
+
+### Build 1743 (Feb 09, 2026)
+
+**Bug Fixes**
+
+- Fixed: Implement unused UnloadUnusedPrefabsOnShutdown function (backport from 2.1)
+- Fixed: Inconsistent `NetworkId` between clients in long-running sessions
+
+# 2.0.10
+
+## Stable
+
+### Build 1688 (Jan 27, 2026)
+
+**Bug Fixes**
+
+- Fixed: ConnectionToken null on Single Player Mode
+
 # 2.0.9
 
 ## Stable
