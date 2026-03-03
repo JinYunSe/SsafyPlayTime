@@ -120,6 +120,7 @@ namespace SSAFYPlayTime
             _flamethrowerUniqueTargetIds.Clear();
             var hitCount = 0;
             var damageTotal = 0f;
+            var stunDamageTotal = 0f;
 
             for (var i = 0; i < overlapCount; i++)
             {
@@ -150,16 +151,18 @@ namespace SSAFYPlayTime
 
                 if (hitTransform.TryGetComponent<PrototypeDamageDummy>(out var dummy))
                 {
-                    dummy.ApplyDamage(flamethrowerDamagePerTick, "Flamethrower");
+                    dummy.ApplyDamage(flamethrowerDamagePerTick, flamethrowerStunDamagePerTick, "Flamethrower");
                     damageTotal += flamethrowerDamagePerTick;
+                    stunDamageTotal += flamethrowerStunDamagePerTick;
                 }
                 else
                 {
                     var dummyInParent = hitTransform.GetComponentInParent<PrototypeDamageDummy>();
                     if (dummyInParent != null)
                     {
-                        dummyInParent.ApplyDamage(flamethrowerDamagePerTick, "Flamethrower");
+                        dummyInParent.ApplyDamage(flamethrowerDamagePerTick, flamethrowerStunDamagePerTick, "Flamethrower");
                         damageTotal += flamethrowerDamagePerTick;
+                        stunDamageTotal += flamethrowerStunDamagePerTick;
                     }
                 }
 
@@ -174,7 +177,8 @@ namespace SSAFYPlayTime
 
             _lastFlamethrowerTickHitCount = hitCount;
             _lastFlamethrowerTickDamage = damageTotal;
-            SetStatus($"Flamethrower tick: hits={hitCount}, dmg={damageTotal:0.0}");
+            _lastFlamethrowerTickStunDamage = stunDamageTotal;
+            SetStatus($"Flamethrower tick: hits={hitCount}, hpDmg={damageTotal:0.0}, stunDmg={stunDamageTotal:0.0}");
         }
 
         private void TriggerBlackholeBomb()
@@ -861,6 +865,7 @@ namespace SSAFYPlayTime
             _nextFlamethrowerTickTime = 0f;
             _lastFlamethrowerTickHitCount = 0;
             _lastFlamethrowerTickDamage = 0f;
+            _lastFlamethrowerTickStunDamage = 0f;
             StopFlamethrowerParticle();
             StopAllLoopingSfx();
             RestoreFlamethrowerRangeIfBoosted();

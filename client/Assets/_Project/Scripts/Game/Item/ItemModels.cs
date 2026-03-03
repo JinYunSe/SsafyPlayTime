@@ -97,7 +97,8 @@ namespace SSAFYPlayTime.Gameplay.Items
             float range,
             float radius,
             float pushForce,
-            float damagePerTick)
+            float damagePerTick,
+            float stunDamagePerTick)
         {
             Origin = origin;
             Forward = forward;
@@ -105,6 +106,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             Radius = radius;
             PushForce = pushForce;
             DamagePerTick = damagePerTick;
+            StunDamagePerTick = stunDamagePerTick;
         }
 
         public Vector3 Origin { get; }
@@ -113,5 +115,6 @@ namespace SSAFYPlayTime.Gameplay.Items
         public float Radius { get; }
         public float PushForce { get; }
         public float DamagePerTick { get; }
+        public float StunDamagePerTick { get; }
     }
 }

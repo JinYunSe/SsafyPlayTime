@@ -182,6 +182,9 @@ namespace SSAFYPlayTime
             GUI.Label(new Rect(x, y, UiPanelWidth - 24f, UiLineHeight),
                 $"FlameLastDmg: {_lastFlamethrowerTickDamage:0.0}");
             y += UiLineHeight;
+            GUI.Label(new Rect(x, y, UiPanelWidth - 24f, UiLineHeight),
+                $"FlameLastStun: {_lastFlamethrowerTickStunDamage:0.0}");
+            y += UiLineHeight;
 
             var armorRemain = _isSuperArmorActive ? GetRemainingSeconds(_superArmorTickTimer, _superArmorEndTime) : 0f;
             GUI.Label(new Rect(x, y, UiPanelWidth - 24f, UiLineHeight), _isSuperArmorActive
@@ -229,11 +232,18 @@ namespace SSAFYPlayTime
                 GUI.Label(new Rect(x, y, UiPanelWidth - 24f, UiLineHeight),
                     $"DummyHP: {_hitDummy.CurrentHp:0.0}/{_hitDummy.MaxHp:0.0} ({hpRatio * 100f:0}%)");
                 y += UiLineHeight;
+                var stunRatio = _hitDummy.MaxStunGauge > 0f ? _hitDummy.CurrentStunGauge / _hitDummy.MaxStunGauge : 0f;
                 GUI.Label(new Rect(x, y, UiPanelWidth - 24f, UiLineHeight),
-                    $"DummyHits: {_hitDummy.HitCount}  TotalDmg: {_hitDummy.TotalDamageTaken:0.0}");
+                    $"DummyStun: {_hitDummy.CurrentStunGauge:0.0}/{_hitDummy.MaxStunGauge:0.0} ({stunRatio * 100f:0}%) {(_hitDummy.IsStunned ? "[STUN]" : string.Empty)}");
                 y += UiLineHeight;
                 GUI.Label(new Rect(x, y, UiPanelWidth - 24f, UiLineHeight),
-                    $"DummyLast: {_hitDummy.LastDamageSource} {_hitDummy.LastDamageAmount:0.0} ({sinceText})");
+                    $"DummyHits: {_hitDummy.HitCount}  HPDmg:{_hitDummy.TotalDamageTaken:0.0}  StunDmg:{_hitDummy.TotalStunTaken:0.0}");
+                y += UiLineHeight;
+                GUI.Label(new Rect(x, y, UiPanelWidth - 24f, UiLineHeight),
+                    $"DummyLast: {_hitDummy.LastDamageSource} HP:{_hitDummy.LastDamageAmount:0.0} ST:{_hitDummy.LastStunDamageAmount:0.0} ({sinceText})");
+                y += UiLineHeight;
+                GUI.Label(new Rect(x, y, UiPanelWidth - 24f, UiLineHeight),
+                    $"DummyState: StunCount {_hitDummy.StunCount} / DeathCount {_hitDummy.DeathCount}");
                 y += UiLineHeight;
             }
             else

@@ -55,6 +55,7 @@ namespace SSAFYPlayTime
         [SerializeField] private bool autoAttachPrototypeControllerOnDummy = true;
         [SerializeField] private bool autoCreateHitDummyIfMissing = true;
         [SerializeField] private float hitDummyInitialHp = 300f;
+        [SerializeField] private float hitDummyInitialStunGauge = 100f;
 
         [Header("Blackhole Bomb")]
         [SerializeField] private float blackholeDelaySec = 3f;
@@ -80,6 +81,7 @@ namespace SSAFYPlayTime
         [SerializeField] private float flamethrowerPushForce = 2f;
         [SerializeField] private float flamethrowerTickIntervalSec = 0.2f;
         [SerializeField] private float flamethrowerDamagePerTick = 4f;
+        [SerializeField] private float flamethrowerStunDamagePerTick = 6f;
 
         [Header("Invisibility")]
         [SerializeField] private float invisibilityDurationSec = 8f;
@@ -123,6 +125,7 @@ namespace SSAFYPlayTime
         private readonly HashSet<int> _flamethrowerUniqueTargetIds = new();
         private int _lastFlamethrowerTickHitCount;
         private float _lastFlamethrowerTickDamage;
+        private float _lastFlamethrowerTickStunDamage;
 
         private PrototypeDamageDummy _hitDummy;
 

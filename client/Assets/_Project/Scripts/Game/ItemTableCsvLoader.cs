@@ -14,6 +14,7 @@ namespace SSAFYPlayTime
                 float durationSec,
                 float range,
                 float baseDamage,
+                float stunDamage,
                 float force,
                 float tickIntervalSec,
                 float useDelaySec,
@@ -29,6 +30,7 @@ namespace SSAFYPlayTime
                 DurationSec = durationSec;
                 Range = range;
                 BaseDamage = baseDamage;
+                StunDamage = stunDamage;
                 Force = force;
                 TickIntervalSec = tickIntervalSec;
                 UseDelaySec = useDelaySec;
@@ -45,6 +47,7 @@ namespace SSAFYPlayTime
             public float DurationSec { get; }
             public float Range { get; }
             public float BaseDamage { get; }
+            public float StunDamage { get; }
             public float Force { get; }
             public float TickIntervalSec { get; }
             public float UseDelaySec { get; }
@@ -121,6 +124,7 @@ namespace SSAFYPlayTime
                     PrototypeCsvUtility.ReadFloat(cells, headerIndex, "durationSec", 0f),
                     PrototypeCsvUtility.ReadFloat(cells, headerIndex, "range", 0f),
                     PrototypeCsvUtility.ReadFloat(cells, headerIndex, "baseDamage", 0f),
+                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "stunDamage", 0f),
                     PrototypeCsvUtility.ReadFloat(cells, headerIndex, "force", 0f),
                     PrototypeCsvUtility.ReadFloat(cells, headerIndex, "tickIntervalSec", 0f),
                     PrototypeCsvUtility.ReadFloat(cells, headerIndex, "useDelaySec", 0f),

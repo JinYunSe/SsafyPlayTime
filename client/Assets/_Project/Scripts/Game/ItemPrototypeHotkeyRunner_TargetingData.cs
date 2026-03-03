@@ -207,6 +207,7 @@ namespace SSAFYPlayTime
             }
 
             _hitDummy.SetMaxHp(hitDummyInitialHp);
+            _hitDummy.SetMaxStunGauge(hitDummyInitialStunGauge);
             _hitDummy.ResetDummy();
         }
 
@@ -326,6 +327,11 @@ namespace SSAFYPlayTime
                 if (row.BaseDamage > 0f)
                 {
                     flamethrowerDamagePerTick = row.BaseDamage;
+                }
+
+                if (row.StunDamage > 0f)
+                {
+                    flamethrowerStunDamagePerTick = row.StunDamage;
                 }
 
                 if (row.Force > 0f)

@@ -255,7 +255,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                 Mathf.Max(0f, flameDef.Master.Range),
                 DefaultFlamethrowerRadius,
                 Mathf.Max(0f, flameDef.Master.Force),
-                Mathf.Max(0f, flameDef.Master.BaseDamage));
+                Mathf.Max(0f, flameDef.Master.BaseDamage),
+                Mathf.Max(0f, flameDef.Master.StunDamage));
             _bridge.OnFlamethrowerTick(request);
         }
 
