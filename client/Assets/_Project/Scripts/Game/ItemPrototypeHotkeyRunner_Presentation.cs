@@ -1,5 +1,8 @@
 using System.IO;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace SSAFYPlayTime
 {
@@ -229,6 +232,11 @@ namespace SSAFYPlayTime
 
         private AudioClip LoadAudioClipFromAssetKey(string assetKey)
         {
+            if (TryLoadAudioClipFromAssetPath(assetKey, out var clipFromAssetPath))
+            {
+                return clipFromAssetPath;
+            }
+
             var resourcesPath = NormalizeAssetKeyToResourcesPath(assetKey);
             if (string.IsNullOrWhiteSpace(resourcesPath))
             {
@@ -247,6 +255,11 @@ namespace SSAFYPlayTime
 
         private static GameObject LoadVfxPrefabFromAssetKey(string assetKey)
         {
+            if (TryLoadPrefabFromAssetPath(assetKey, out var prefabFromAssetPath))
+            {
+                return prefabFromAssetPath;
+            }
+
             var resourcesPath = NormalizeAssetKeyToResourcesPath(assetKey);
             if (string.IsNullOrWhiteSpace(resourcesPath))
             {
@@ -286,6 +299,44 @@ namespace SSAFYPlayTime
             }
 
             return normalized;
+        }
+
+        private static bool TryLoadAudioClipFromAssetPath(string assetKey, out AudioClip clip)
+        {
+            clip = null;
+            if (string.IsNullOrWhiteSpace(assetKey))
+            {
+                return false;
+            }
+
+#if UNITY_EDITOR
+            if (assetKey.StartsWith("Assets/", System.StringComparison.OrdinalIgnoreCase))
+            {
+                clip = AssetDatabase.LoadAssetAtPath<AudioClip>(assetKey);
+                return clip != null;
+            }
+#endif
+
+            return false;
+        }
+
+        private static bool TryLoadPrefabFromAssetPath(string assetKey, out GameObject prefab)
+        {
+            prefab = null;
+            if (string.IsNullOrWhiteSpace(assetKey))
+            {
+                return false;
+            }
+
+#if UNITY_EDITOR
+            if (assetKey.StartsWith("Assets/", System.StringComparison.OrdinalIgnoreCase))
+            {
+                prefab = AssetDatabase.LoadAssetAtPath<GameObject>(assetKey);
+                return prefab != null;
+            }
+#endif
+
+            return false;
         }
     }
 }
