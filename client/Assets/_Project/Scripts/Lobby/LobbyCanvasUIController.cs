@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Fusion;
@@ -26,13 +27,22 @@ namespace SSAFYPlayTime
             public bool IsOpen;
         }
 
+        private sealed class ParticipantPresence
+        {
+            public int PlayerId;
+            public string Nickname;
+        }
+
         private const string PrivateKey = "isPrivate";
         private const string PasswordKey = "password";
         private const string OwnerKey = "owner";
         private const string StartedKey = "started";
+        private const string PlayerRosterLabel = "participants";
         private const int MaxPlayers = 4;
         private const string FallbackAppVersion = "ssafy-playtime-v1";
         private const string SharedLobbyName = "ssafy-main-lobby";
+        private static readonly ReliableKey PlayerRosterReliableKey =
+            ReliableKey.FromInts(unchecked((int)0x53534146), unchecked((int)0x504C4159), 1, 0);
 
         [Header("Panels")]
         [SerializeField] private GameObject nicknamePanel;
@@ -44,6 +54,7 @@ namespace SSAFYPlayTime
         [Header("Nickname")]
         [SerializeField] private TMP_InputField nicknameInput;
         [SerializeField] private Button nicknameConfirmButton;
+        [SerializeField] private TMP_Text nicknameValidationText;
 
         [Header("Lobby")]
         [SerializeField] private TMP_Text lobbyHeaderText;
@@ -97,8 +108,12 @@ namespace SSAFYPlayTime
         [SerializeField] private string statusDisconnectedFormat = "연결 종료: {0}";
         [SerializeField] private string statusHostMigrationInitFailed = "호스트 이관 실패: 러너 초기화 실패";
         [SerializeField] private string statusHostMigrationFailedFormat = "호스트 이관 실패: {0}";
+        [SerializeField] private string validationEnterNickname = "닉네임을 입력해주세요.";
+        [SerializeField] private string validationNicknameInUse = "이미 사용 중인 닉네임입니다.";
         [SerializeField] private string validationEnterRoomName = "방 이름을 입력해주세요.";
+        [SerializeField] private string validationRoomNameInUse = "이미 사용 중인 방 이름입니다.";
         [SerializeField] private string validationPrivatePasswordRequired = "비공개 방은 비밀번호가 필요합니다.";
+        [SerializeField] private string validationPasswordNumericOnly = "비밀번호는 숫자만 사용할 수 있습니다.";
         [SerializeField] private string validationInvalidPassword = "비밀번호가 올바르지 않습니다.";
         [SerializeField] private string validationRoomUnavailable = "이미 종료된 방입니다.";
         [SerializeField] private string accessPrivate = "비공개";
@@ -108,6 +123,7 @@ namespace SSAFYPlayTime
         [SerializeField] private string roomTagPrivate = "[비공개]";
         [SerializeField] private string roomTagPublic = "[공개]";
         [SerializeField] private string roomMembersFormat = "방장: {0}\n\n인원: {1}/{2}";
+        [SerializeField] private string roomParticipantsFormat = "참여자: {0}";
         [SerializeField] private string nicknameHeaderFormat = "닉네임: {0}";
 
         private readonly List<RoomSnapshot> _roomSnapshots = new();
@@ -118,6 +134,7 @@ namespace SSAFYPlayTime
         private string _currentRoomName = string.Empty;
         private bool _currentRoomIsPrivate;
         private string _currentRoomOwner = "-";
+        private int _currentOwnerPlayerId = -1;
         private string _pendingPrivateRoomName = string.Empty;
         private string _pendingPrivateRoomPassword = string.Empty;
         private bool _isNicknameConfirmed;
@@ -126,6 +143,7 @@ namespace SSAFYPlayTime
         private bool _isShuttingDownRunner;
         private DateTime _lastSessionListUpdatedAtUtc = DateTime.MinValue;
         private readonly SemaphoreSlim _runnerLock = new(1, 1);
+        private readonly Dictionary<int, ParticipantPresence> _roomParticipantsByPlayerId = new();
 
         private void Start()
         {
@@ -168,6 +186,20 @@ namespace SSAFYPlayTime
             passwordJoinButton.onClick.AddListener(OnPasswordConfirmed);
             passwordCancelButton.onClick.AddListener(() => passwordModal.SetActive(false));
 
+            if (createPasswordInput != null)
+            {
+                ConfigureNumericPasswordInput(createPasswordInput);
+                createPasswordInput.onValidateInput += ValidateNumericPasswordChar;
+                createPasswordInput.onValueChanged.AddListener(_ => EnforceNumericPasswordInput(createPasswordInput));
+            }
+
+            if (joinPasswordInput != null)
+            {
+                ConfigureNumericPasswordInput(joinPasswordInput);
+                joinPasswordInput.onValidateInput += ValidateNumericPasswordChar;
+                joinPasswordInput.onValueChanged.AddListener(_ => EnforceNumericPasswordInput(joinPasswordInput));
+            }
+
             leaveRoomButton.onClick.AddListener(OnLeaveRoomClicked);
             if (startGameButton != null)
             {
@@ -199,14 +231,30 @@ namespace SSAFYPlayTime
             entered = SanitizeNameToken(entered);
             if (string.IsNullOrEmpty(entered))
             {
-                entered = $"Player{UnityEngine.Random.Range(1000, 10000)}";
+                SetNicknameValidation(validationEnterNickname);
+                return;
+            }
+
+            SetNicknameValidation(string.Empty);
+
+            if (!await EnsureLobbyRunnerAsync())
+            {
+                SetNicknameValidation(statusNetworkLobbyFailed);
+                return;
+            }
+
+            await WaitForInitialSessionListAsync();
+
+            if (IsNicknameAlreadyUsed(entered))
+            {
+                SetNicknameValidation(validationNicknameInUse);
+                return;
             }
 
             _nickname = entered;
             nicknameInput.text = entered;
             _isNicknameConfirmed = true;
             ShowLobbyPanel();
-            await EnsureLobbyRunnerAsync();
             RefreshRoomList();
         }
 
@@ -238,9 +286,21 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            if (IsRoomNameAlreadyUsed(roomName))
+            {
+                SetCreateValidation(validationRoomNameInUse);
+                return;
+            }
+
             if (isPrivate && string.IsNullOrWhiteSpace(password))
             {
                 SetCreateValidation(validationPrivatePasswordRequired);
+                return;
+            }
+
+            if (isPrivate && !IsNumericPassword(password))
+            {
+                SetCreateValidation(validationPasswordNumericOnly);
                 return;
             }
 
@@ -299,7 +359,11 @@ namespace SSAFYPlayTime
             _currentRoomName = roomName;
             _currentRoomIsPrivate = isPrivate;
             _currentRoomOwner = _nickname;
+            _currentOwnerPlayerId = _runner.LocalPlayer.PlayerId;
             _isInLobby = false;
+            RegisterParticipant(_runner.LocalPlayer, _nickname);
+            UpdateOwnerSessionProperty();
+            BroadcastPlayerRoster();
             Debug.Log($"[Lobby] Room created: name={roomName}, private={isPrivate}, owner={_nickname}, runnerActive={_runner != null && _runner.IsRunning}");
             createRoomModal.SetActive(false);
             ShowRoomPanel();
@@ -444,6 +508,7 @@ namespace SSAFYPlayTime
                     GameMode = GameMode.Client,
                     SessionName = room.Name,
                     SceneManager = GetOrAddSceneManager(),
+                    ConnectionToken = BuildConnectionToken(_nickname),
                     CustomLobbyName = SharedLobbyName,
                     CustomPhotonAppSettings = appSettings
                 });
@@ -463,7 +528,9 @@ namespace SSAFYPlayTime
             _currentRoomName = room.Name;
             _currentRoomIsPrivate = room.IsPrivate;
             _currentRoomOwner = string.IsNullOrWhiteSpace(room.OwnerNickname) ? "-" : room.OwnerNickname;
+            _currentOwnerPlayerId = -1;
             _isInLobby = false;
+            RegisterParticipant(_runner.LocalPlayer, _nickname);
             Debug.Log($"[Lobby] Room joined: name={room.Name}, private={room.IsPrivate}");
             ShowRoomPanel();
             UpdateRoomPanel();
@@ -530,6 +597,7 @@ namespace SSAFYPlayTime
         {
             _currentRoomName = string.Empty;
             _currentRoomOwner = "-";
+            _currentOwnerPlayerId = -1;
             _currentRoomIsPrivate = false;
 
             await ShutdownRunnerAsync();
@@ -550,8 +618,13 @@ namespace SSAFYPlayTime
                 : 1;
 
             var state = _currentRoomIsPrivate ? roomTagPrivate : roomTagPublic;
+            SyncCurrentRoomOwnerFromRoster();
             roomTitleText.text = $"{state} {_currentRoomName}";
-            roomMembersText.text = string.Format(roomMembersFormat, _currentRoomOwner, currentPlayers, MaxPlayers);
+            var baseText = string.Format(roomMembersFormat, _currentRoomOwner, currentPlayers, MaxPlayers);
+            var participants = BuildParticipantDisplayText();
+            roomMembersText.text = string.IsNullOrEmpty(participants)
+                ? baseText
+                : $"{baseText}\n\n{string.Format(roomParticipantsFormat, participants)}";
             if (startGameButton != null)
             {
                 var canStart = _runner != null && _runner.IsRunning && _runner.IsServer && currentPlayers > 1;
@@ -567,6 +640,7 @@ namespace SSAFYPlayTime
             roomPanel.SetActive(false);
             createRoomModal.SetActive(false);
             passwordModal.SetActive(false);
+            SetNicknameValidation(string.Empty);
         }
 
         private void ShowLobbyPanel()
@@ -691,6 +765,8 @@ namespace SSAFYPlayTime
             _isInLobby = false;
             _lastSessionListUpdatedAtUtc = DateTime.MinValue;
             _roomSnapshots.Clear();
+            _roomParticipantsByPlayerId.Clear();
+            _currentOwnerPlayerId = -1;
         }
 
         private bool TryCreateRunner(out NetworkRunner runner)
@@ -736,6 +812,260 @@ namespace SSAFYPlayTime
             return settings;
         }
 
+        private static byte[] BuildConnectionToken(string nickname)
+        {
+            var safeName = SanitizeNameToken(nickname);
+            if (string.IsNullOrEmpty(safeName))
+            {
+                return Array.Empty<byte>();
+            }
+
+            return Encoding.UTF8.GetBytes(safeName);
+        }
+
+        private static string DecodeConnectionToken(byte[] token)
+        {
+            if (token == null || token.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                return SanitizeNameToken(Encoding.UTF8.GetString(token));
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private string BuildParticipantDisplayText()
+        {
+            if (_roomParticipantsByPlayerId.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var names = _roomParticipantsByPlayerId.Values
+                .Where(v => !string.IsNullOrWhiteSpace(v?.Nickname))
+                .OrderBy(v => v.PlayerId)
+                .Select(v => v.Nickname)
+                .ToList();
+            return names.Count == 0 ? string.Empty : string.Join(", ", names);
+        }
+
+        private void RegisterParticipant(PlayerRef player, string nickname)
+        {
+            if (!player.IsRealPlayer)
+            {
+                return;
+            }
+
+            var safeName = SanitizeNameToken(nickname);
+            if (string.IsNullOrEmpty(safeName))
+            {
+                return;
+            }
+
+            _roomParticipantsByPlayerId[player.PlayerId] = new ParticipantPresence
+            {
+                PlayerId = player.PlayerId,
+                Nickname = safeName
+            };
+        }
+
+        private void TryRegisterParticipantFromToken(NetworkRunner runner, PlayerRef player)
+        {
+            if (runner == null || !runner.IsRunning || !player.IsRealPlayer)
+            {
+                return;
+            }
+
+            var nickname = DecodeConnectionToken(runner.GetPlayerConnectionToken(player));
+            if (string.IsNullOrEmpty(nickname) && player == runner.LocalPlayer)
+            {
+                nickname = _nickname;
+            }
+
+            RegisterParticipant(player, nickname);
+        }
+
+        private string BuildRosterPayload()
+        {
+            var entries = _roomParticipantsByPlayerId.Values
+                .OrderBy(p => p.PlayerId)
+                .Where(p => !string.IsNullOrWhiteSpace(p?.Nickname))
+                .Select(p => $"{p.PlayerId}={p.Nickname}");
+            return $"{_currentOwnerPlayerId};{string.Join("|", entries)}";
+        }
+
+        private void ApplyRosterPayload(string payload)
+        {
+            _roomParticipantsByPlayerId.Clear();
+
+            if (string.IsNullOrWhiteSpace(payload))
+            {
+                _currentOwnerPlayerId = -1;
+                SyncCurrentRoomOwnerFromRoster();
+                return;
+            }
+
+            var separatorIndex = payload.IndexOf(';');
+            if (separatorIndex >= 0)
+            {
+                var ownerToken = payload.Substring(0, separatorIndex);
+                if (!int.TryParse(ownerToken, out _currentOwnerPlayerId))
+                {
+                    _currentOwnerPlayerId = -1;
+                }
+                payload = payload.Substring(separatorIndex + 1);
+            }
+            else
+            {
+                _currentOwnerPlayerId = -1;
+            }
+
+            var entries = payload.Split('|');
+            for (var i = 0; i < entries.Length; i++)
+            {
+                var entry = entries[i];
+                if (string.IsNullOrWhiteSpace(entry))
+                {
+                    continue;
+                }
+
+                var idSeparator = entry.IndexOf('=');
+                if (idSeparator <= 0 || idSeparator >= entry.Length - 1)
+                {
+                    continue;
+                }
+
+                if (!int.TryParse(entry.Substring(0, idSeparator), out var playerId))
+                {
+                    continue;
+                }
+
+                var nickname = SanitizeNameToken(entry.Substring(idSeparator + 1));
+                if (string.IsNullOrEmpty(nickname))
+                {
+                    continue;
+                }
+
+                _roomParticipantsByPlayerId[playerId] = new ParticipantPresence
+                {
+                    PlayerId = playerId,
+                    Nickname = nickname
+                };
+            }
+
+            SyncCurrentRoomOwnerFromRoster();
+        }
+
+        private void BroadcastPlayerRoster()
+        {
+            if (_runner == null || !_runner.IsRunning || !_runner.IsServer)
+            {
+                return;
+            }
+
+            var payload = BuildRosterPayload();
+            var bytes = Encoding.UTF8.GetBytes(payload);
+
+            foreach (var player in _runner.ActivePlayers)
+            {
+                try
+                {
+                    _runner.SendReliableDataToPlayer(player, PlayerRosterReliableKey, bytes);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[Lobby] Failed to send roster to {player}: {e.Message}");
+                }
+            }
+        }
+
+        private void SyncCurrentRoomOwnerFromRoster()
+        {
+            if (_currentOwnerPlayerId > 0 &&
+                _roomParticipantsByPlayerId.TryGetValue(_currentOwnerPlayerId, out var ownerPresence) &&
+                !string.IsNullOrWhiteSpace(ownerPresence?.Nickname))
+            {
+                _currentRoomOwner = ownerPresence.Nickname;
+                return;
+            }
+
+            if (_runner != null && _runner.IsRunning && _runner.IsServer && _runner.LocalPlayer.IsRealPlayer)
+            {
+                _currentOwnerPlayerId = _runner.LocalPlayer.PlayerId;
+                _currentRoomOwner = string.IsNullOrWhiteSpace(_nickname) ? "-" : _nickname;
+            }
+            else if (string.IsNullOrWhiteSpace(_currentRoomOwner))
+            {
+                _currentRoomOwner = "-";
+            }
+        }
+
+        private void UpdateOwnerSessionProperty()
+        {
+            if (_runner == null || !_runner.IsRunning || !_runner.IsServer || !_runner.SessionInfo.IsValid)
+            {
+                return;
+            }
+
+            try
+            {
+                _runner.SessionInfo.UpdateCustomProperties(new Dictionary<string, SessionProperty>
+                {
+                    { OwnerKey, _currentRoomOwner }
+                });
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Lobby] Failed to update owner property: {e.Message}");
+            }
+        }
+
+        private void RecalculateOwnerAfterLeave()
+        {
+            if (_runner == null || !_runner.IsRunning || !_runner.IsServer)
+            {
+                return;
+            }
+
+            if (_currentOwnerPlayerId > 0 && _roomParticipantsByPlayerId.ContainsKey(_currentOwnerPlayerId))
+            {
+                SyncCurrentRoomOwnerFromRoster();
+                return;
+            }
+
+            var nextOwner = _runner.ActivePlayers
+                .Where(p => p.IsRealPlayer)
+                .OrderBy(p => p.PlayerId)
+                .FirstOrDefault();
+
+            if (nextOwner.IsRealPlayer)
+            {
+                _currentOwnerPlayerId = nextOwner.PlayerId;
+                if (_currentOwnerPlayerId == _runner.LocalPlayer.PlayerId)
+                {
+                    _currentRoomOwner = _nickname;
+                    RegisterParticipant(nextOwner, _nickname);
+                }
+                else
+                {
+                    SyncCurrentRoomOwnerFromRoster();
+                }
+            }
+            else
+            {
+                _currentOwnerPlayerId = -1;
+                _currentRoomOwner = "-";
+            }
+
+            UpdateOwnerSessionProperty();
+        }
+
         private void SetLobbyStatus(string message)
         {
             if (lobbyStatusText != null)
@@ -749,6 +1079,57 @@ namespace SSAFYPlayTime
             if (createValidationText != null)
             {
                 createValidationText.text = message;
+            }
+        }
+
+        private void SetNicknameValidation(string message)
+        {
+            if (nicknameValidationText != null)
+            {
+                nicknameValidationText.text = message;
+            }
+        }
+
+        private bool IsNicknameAlreadyUsed(string nickname)
+        {
+            if (string.IsNullOrWhiteSpace(nickname))
+            {
+                return false;
+            }
+
+            return _roomSnapshots.Any(r =>
+                !string.IsNullOrWhiteSpace(r.OwnerNickname) &&
+                string.Equals(r.OwnerNickname, nickname, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool IsRoomNameAlreadyUsed(string roomName)
+        {
+            if (string.IsNullOrWhiteSpace(roomName))
+            {
+                return false;
+            }
+
+            return _roomSnapshots.Any(r =>
+                !string.IsNullOrWhiteSpace(r.Name) &&
+                string.Equals(r.Name, roomName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private async Task WaitForInitialSessionListAsync()
+        {
+            if (_lastSessionListUpdatedAtUtc != DateTime.MinValue)
+            {
+                return;
+            }
+
+            var timeoutAt = DateTime.UtcNow.AddSeconds(2);
+            while (DateTime.UtcNow < timeoutAt)
+            {
+                if (_lastSessionListUpdatedAtUtc != DateTime.MinValue)
+                {
+                    break;
+                }
+
+                await Task.Delay(50);
             }
         }
 
@@ -1012,6 +1393,34 @@ namespace SSAFYPlayTime
 
         void INetworkRunnerCallbacks.OnPlayerJoined(NetworkRunner runner, PlayerRef player)
         {
+            if (runner != _runner)
+            {
+                return;
+            }
+
+            if (runner.IsServer)
+            {
+                TryRegisterParticipantFromToken(runner, player);
+
+                if (player == runner.LocalPlayer && !_roomParticipantsByPlayerId.ContainsKey(player.PlayerId))
+                {
+                    RegisterParticipant(player, _nickname);
+                }
+
+                if (_currentOwnerPlayerId <= 0 && runner.LocalPlayer.IsRealPlayer)
+                {
+                    _currentOwnerPlayerId = runner.LocalPlayer.PlayerId;
+                    _currentRoomOwner = _nickname;
+                    UpdateOwnerSessionProperty();
+                }
+
+                BroadcastPlayerRoster();
+            }
+            else if (player == runner.LocalPlayer)
+            {
+                RegisterParticipant(player, _nickname);
+            }
+
             if (roomPanel.activeSelf)
             {
                 UpdateRoomPanel();
@@ -1020,6 +1429,22 @@ namespace SSAFYPlayTime
 
         void INetworkRunnerCallbacks.OnPlayerLeft(NetworkRunner runner, PlayerRef player)
         {
+            if (runner != _runner)
+            {
+                return;
+            }
+
+            if (player.IsRealPlayer)
+            {
+                _roomParticipantsByPlayerId.Remove(player.PlayerId);
+            }
+
+            if (runner.IsServer)
+            {
+                RecalculateOwnerAfterLeave();
+                BroadcastPlayerRoster();
+            }
+
             if (roomPanel.activeSelf)
             {
                 UpdateRoomPanel();
@@ -1070,6 +1495,77 @@ namespace SSAFYPlayTime
             return new string(chars).Trim();
         }
 
+        private static char ValidateNumericPasswordChar(string text, int charIndex, char addedChar)
+        {
+            return IsNumericPasswordChar(addedChar) ? addedChar : '\0';
+        }
+
+        private static bool IsNumericPassword(string value)
+        {
+            if (value == null)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < value.Length; i++)
+            {
+                if (!IsNumericPasswordChar(value[i]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool IsNumericPasswordChar(char c)
+        {
+            return c >= '0' && c <= '9';
+        }
+
+        private static void ConfigureNumericPasswordInput(TMP_InputField input)
+        {
+            if (input == null)
+            {
+                return;
+            }
+
+            input.keyboardType = TouchScreenKeyboardType.NumberPad;
+            input.characterValidation = TMP_InputField.CharacterValidation.Integer;
+            input.lineType = TMP_InputField.LineType.SingleLine;
+        }
+
+        private static void EnforceNumericPasswordInput(TMP_InputField input)
+        {
+            if (input == null)
+            {
+                return;
+            }
+
+            var current = input.text ?? string.Empty;
+            var filtered = FilterNumericPassword(current);
+            if (string.Equals(current, filtered, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            input.SetTextWithoutNotify(filtered);
+            input.caretPosition = filtered.Length;
+            input.selectionAnchorPosition = filtered.Length;
+            input.selectionFocusPosition = filtered.Length;
+        }
+
+        private static string FilterNumericPassword(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return string.Empty;
+            }
+
+            var chars = value.Where(IsNumericPasswordChar).ToArray();
+            return new string(chars);
+        }
+
         void INetworkRunnerCallbacks.OnConnectedToServer(NetworkRunner runner) { }
         void INetworkRunnerCallbacks.OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason)
         {
@@ -1088,7 +1584,19 @@ namespace SSAFYPlayTime
             }
 
         }
-        void INetworkRunnerCallbacks.OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
+        void INetworkRunnerCallbacks.OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token)
+        {
+            if (runner != _runner || !runner.IsServer)
+            {
+                return;
+            }
+
+            var nickname = DecodeConnectionToken(token);
+            if (!string.IsNullOrEmpty(nickname))
+            {
+                Debug.Log($"[Lobby] Connect request from {request.RemoteAddress}: {PlayerRosterLabel}={nickname}");
+            }
+        }
         void INetworkRunnerCallbacks.OnConnectFailed(NetworkRunner runner, NetAddress remoteAddress, NetConnectFailedReason reason) { }
         void INetworkRunnerCallbacks.OnUserSimulationMessage(NetworkRunner runner, SimulationMessagePtr message) { }
         void INetworkRunnerCallbacks.OnCustomAuthenticationResponse(NetworkRunner runner, Dictionary<string, object> data) { }
@@ -1136,6 +1644,15 @@ namespace SSAFYPlayTime
                     return;
                 }
 
+                if (_runner.IsServer && _runner.LocalPlayer.IsRealPlayer)
+                {
+                    RegisterParticipant(_runner.LocalPlayer, _nickname);
+                    _currentOwnerPlayerId = _runner.LocalPlayer.PlayerId;
+                    _currentRoomOwner = _nickname;
+                    UpdateOwnerSessionProperty();
+                    BroadcastPlayerRoster();
+                }
+
                 Debug.Log("[Lobby] Host migration completed.");
                 ShowRoomPanel();
                 UpdateRoomPanel();
@@ -1147,7 +1664,32 @@ namespace SSAFYPlayTime
         }
         void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input) { }
         void INetworkRunnerCallbacks.OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
-        void INetworkRunnerCallbacks.OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, ArraySegment<byte> data) { }
+        void INetworkRunnerCallbacks.OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, ArraySegment<byte> data)
+        {
+            if (runner != _runner || key != PlayerRosterReliableKey)
+            {
+                return;
+            }
+
+            string payload;
+            try
+            {
+                payload = data.Array == null
+                    ? string.Empty
+                    : Encoding.UTF8.GetString(data.Array, data.Offset, data.Count);
+            }
+            catch
+            {
+                payload = string.Empty;
+            }
+
+            ApplyRosterPayload(payload);
+
+            if (roomPanel.activeSelf)
+            {
+                UpdateRoomPanel();
+            }
+        }
         void INetworkRunnerCallbacks.OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
         void INetworkRunnerCallbacks.OnSceneLoadStart(NetworkRunner runner) { }
         void INetworkRunnerCallbacks.OnSceneLoadDone(NetworkRunner runner) { }
