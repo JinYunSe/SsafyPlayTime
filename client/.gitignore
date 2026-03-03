@@ -57,7 +57,6 @@ $RECYCLE.BIN/
 # ─── 빌드 결과물 ───
 *.apk
 *.aab
-*.unitypackage
 *.app
 *.exe
 
