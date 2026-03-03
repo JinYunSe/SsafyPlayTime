@@ -361,7 +361,7 @@ namespace SSAFYPlayTime
             }
 
             EnsureFlamethrowerParticle();
-            PlayItemUsePresentation(ItemIdFlamethrower, GetTargetPosition(), forceLoopSfx: true);
+            PlayItemUsePresentation(ItemIdFlamethrower, GetTargetPosition(), forceLoopSfx: true, suppressStartVfx: true);
             SetStatus($"Flamethrower: active ({flamethrowerMaxUseSec:0.0}s)");
         }
 
@@ -386,6 +386,7 @@ namespace SSAFYPlayTime
                 var main = _flamethrowerParticle.main;
                 main.loop = true;
                 main.playOnAwake = false;
+                main.simulationSpace = ParticleSystemSimulationSpace.World;
                 main.startLifetime = new ParticleSystem.MinMaxCurve(0.18f, 0.32f);
                 main.startSpeed = new ParticleSystem.MinMaxCurve(6f, 9f);
                 main.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.18f);
@@ -398,20 +399,195 @@ namespace SSAFYPlayTime
 
                 var shape = _flamethrowerParticle.shape;
                 shape.shapeType = ParticleSystemShapeType.Cone;
-                shape.angle = 12f;
-                shape.radius = 0.04f;
-                shape.length = 0.3f;
+                shape.angle = 24f;
+                shape.radius = 0.12f;
+                shape.length = 0.6f;
+                shape.randomDirectionAmount = 0.2f;
 
                 var limit = _flamethrowerParticle.limitVelocityOverLifetime;
                 limit.enabled = true;
-                limit.dampen = 0.35f;
+                limit.dampen = 0.15f;
+
+                var noise = _flamethrowerParticle.noise;
+                noise.enabled = true;
+                noise.strength = 0.45f;
+                noise.frequency = 0.8f;
+                noise.scrollSpeed = 0.35f;
             }
 
+            ConfigureFlamethrowerParticleRenderer();
             UpdateFlamethrowerParticleProfile();
             if (!_flamethrowerParticle.isPlaying)
             {
                 _flamethrowerParticle.Play();
             }
+        }
+
+        private void ConfigureFlamethrowerParticleRenderer()
+        {
+            if (_flamethrowerParticle == null)
+            {
+                return;
+            }
+
+            if (_flamethrowerFallbackMaterial == null)
+            {
+                if (!TryCreateFlamethrowerMaterialFromVfxAsset(out _flamethrowerFallbackMaterial))
+                {
+                    TryCreateFlamethrowerFallbackMaterial(out _flamethrowerFallbackMaterial);
+                }
+            }
+
+            var renderer = _flamethrowerParticle.GetComponent<ParticleSystemRenderer>();
+            if (renderer == null)
+            {
+                return;
+            }
+
+            renderer.renderMode = ParticleSystemRenderMode.Billboard;
+            if (_flamethrowerFallbackMaterial != null)
+            {
+                renderer.sharedMaterial = _flamethrowerFallbackMaterial;
+            }
+        }
+
+        private bool TryCreateFlamethrowerMaterialFromVfxAsset(out Material material)
+        {
+            material = null;
+            if (_dataCatalog == null)
+            {
+                return false;
+            }
+
+            if (!TryResolveStartVfx(ItemIdFlamethrower, out var vfxId))
+            {
+                return false;
+            }
+
+            if (!_dataCatalog.VfxAssetRows.TryGetValue(vfxId, out var row))
+            {
+                return false;
+            }
+
+            var prefab = LoadVfxPrefabFromAssetKey(row.AssetKey);
+            if (prefab == null)
+            {
+                return false;
+            }
+
+            var sourceRenderer = prefab.GetComponentInChildren<ParticleSystemRenderer>(true);
+            if (sourceRenderer == null || sourceRenderer.sharedMaterial == null)
+            {
+                return false;
+            }
+
+            var sourceMaterial = sourceRenderer.sharedMaterial;
+            if (sourceMaterial.shader == null)
+            {
+                return false;
+            }
+
+            material = new Material(sourceMaterial);
+            material.name = "PrototypeFlamethrowerFromAsset";
+            return true;
+        }
+
+        private bool TryCreateFlamethrowerFallbackMaterial(out Material material)
+        {
+            material = null;
+            var shader =
+                Shader.Find("Universal Render Pipeline/Particles/Unlit") ??
+                Shader.Find("Particles/Standard Unlit") ??
+                Shader.Find("Legacy Shaders/Particles/Additive") ??
+                Shader.Find("Sprites/Default");
+
+            if (shader == null)
+            {
+                return false;
+            }
+
+            material = new Material(shader);
+            material.name = "PrototypeFlamethrowerFallback";
+            var tint = new Color(1f, 0.45f, 0.12f, 0.9f);
+            if (material.HasProperty("_BaseColor"))
+            {
+                material.SetColor("_BaseColor", tint);
+            }
+
+            if (material.HasProperty("_Color"))
+            {
+                material.SetColor("_Color", tint);
+            }
+
+            if (_flamethrowerFallbackTexture == null)
+            {
+                _flamethrowerFallbackTexture = CreateFlamethrowerFallbackTexture();
+            }
+
+            if (_flamethrowerFallbackTexture != null)
+            {
+                if (material.HasProperty("_BaseMap"))
+                {
+                    material.SetTexture("_BaseMap", _flamethrowerFallbackTexture);
+                }
+
+                if (material.HasProperty("_MainTex"))
+                {
+                    material.SetTexture("_MainTex", _flamethrowerFallbackTexture);
+                }
+            }
+
+            return true;
+        }
+
+
+        private void DisposeFlamethrowerFallbackMaterial()
+        {
+            if (_flamethrowerFallbackMaterial == null)
+            {
+                return;
+            }
+
+            Destroy(_flamethrowerFallbackMaterial);
+            _flamethrowerFallbackMaterial = null;
+
+            if (_flamethrowerFallbackTexture != null)
+            {
+                Destroy(_flamethrowerFallbackTexture);
+                _flamethrowerFallbackTexture = null;
+            }
+        }
+
+        private static Texture2D CreateFlamethrowerFallbackTexture()
+        {
+            const int size = 64;
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            texture.name = "PrototypeFlamethrowerSprite";
+            texture.wrapMode = TextureWrapMode.Clamp;
+            texture.filterMode = FilterMode.Bilinear;
+
+            var center = (size - 1) * 0.5f;
+            var maxDistance = center;
+            for (var y = 0; y < size; y++)
+            {
+                for (var x = 0; x < size; x++)
+                {
+                    var dx = x - center;
+                    var dy = y - center;
+                    var distance = Mathf.Sqrt(dx * dx + dy * dy) / maxDistance;
+                    var alpha = Mathf.Clamp01(1f - distance);
+                    alpha = Mathf.Pow(alpha, 1.7f);
+
+                    var hot = new Color(1f, 0.8f, 0.35f, 1f);
+                    var edge = new Color(1f, 0.35f, 0.08f, 1f);
+                    var color = Color.Lerp(edge, hot, alpha);
+                    color.a = alpha;
+                    texture.SetPixel(x, y, color);
+                }
+            }
+
+            texture.Apply(false, false);
+            return texture;
         }
 
         private void UpdateFlamethrowerParticlePose(Vector3 origin, Vector3 forward)
@@ -460,12 +636,12 @@ namespace SSAFYPlayTime
                 Mathf.Max(0.24f, flamethrowerRadius * 0.75f));
 
             var emission = _flamethrowerParticle.emission;
-            emission.rateOverTime = Mathf.Lerp(170f, 320f, widthRatio);
+            emission.rateOverTime = Mathf.Lerp(220f, 420f, widthRatio);
 
             var shape = _flamethrowerParticle.shape;
-            shape.radius = Mathf.Max(0.1f, flamethrowerRadius * 0.42f);
-            shape.angle = Mathf.Lerp(18f, 30f, widthRatio);
-            shape.length = flamethrowerRange;
+            shape.radius = Mathf.Max(0.12f, flamethrowerRadius * 0.6f);
+            shape.angle = Mathf.Lerp(22f, 36f, widthRatio);
+            shape.length = Mathf.Max(0.6f, flamethrowerRange * 0.35f);
         }
 
         private void CaptureBaseFlamethrowerRangeIfNeeded()

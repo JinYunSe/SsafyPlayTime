@@ -29,7 +29,7 @@ namespace SSAFYPlayTime
         private const string PrototypeSatelliteExplosionName = "Prototype_SatelliteExplosion";
         private const string PrototypeHitDummyName = "PrototypeHitDummy";
         // 팀 작업 간섭 방지를 위해 기본값은 비활성화한다.
-        private static readonly bool EnableAutoBootstrapOnPlay = false;
+        private static readonly bool EnableAutoBootstrapOnPlay = true;
 
         private static ItemPrototypeHotkeyRunner _instance;
 
@@ -115,6 +115,8 @@ namespace SSAFYPlayTime
         private TickTimer _flamethrowerEndTickTimer = TickTimer.None;
         private TickTimer _flamethrowerTickTimer = TickTimer.None;
         private ParticleSystem _flamethrowerParticle;
+        private Material _flamethrowerFallbackMaterial;
+        private Texture2D _flamethrowerFallbackTexture;
         private float _baseFlamethrowerRange = -1f;
         private bool _isFlamethrowerRangeBoostedByBlackhole;
         private readonly Collider[] _flamethrowerOverlapBuffer = new Collider[128];
@@ -132,6 +134,8 @@ namespace SSAFYPlayTime
         private ItemPrototypeDataCatalog _dataCatalog;
         private readonly Dictionary<string, AudioClip> _audioClipCache = new(System.StringComparer.Ordinal);
         private readonly Dictionary<string, AudioSource> _loopingSfxSources = new(System.StringComparer.Ordinal);
+        private readonly Dictionary<string, GameObject> _loopingVfxInstances = new(System.StringComparer.Ordinal);
+        private readonly Dictionary<string, VfxAssetTableCsvLoader.Row> _loopingVfxRows = new(System.StringComparer.Ordinal);
 
         private string _statusLine = "Ready";
 
@@ -192,11 +196,14 @@ namespace SSAFYPlayTime
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
             StopAllLoopingSfx();
+            StopAllLoopingVfx();
         }
 
         private void OnDestroy()
         {
             StopAllLoopingSfx();
+            StopAllLoopingVfx();
+            DisposeFlamethrowerFallbackMaterial();
         }
 
         private void Start()

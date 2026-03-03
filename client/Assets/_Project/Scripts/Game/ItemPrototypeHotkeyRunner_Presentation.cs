@@ -8,7 +8,11 @@ namespace SSAFYPlayTime
 {
     public sealed partial class ItemPrototypeHotkeyRunner
     {
-        private void PlayItemUsePresentation(string itemId, Vector3 worldPosition, bool forceLoopSfx = false)
+        private void PlayItemUsePresentation(
+            string itemId,
+            Vector3 worldPosition,
+            bool forceLoopSfx = false,
+            bool suppressStartVfx = false)
         {
             if (!enablePresentationFromTables || !_assetTablesApplied || _dataCatalog == null)
             {
@@ -20,7 +24,8 @@ namespace SSAFYPlayTime
                 PlaySfxById(sfxId, worldPosition, loop, volume, spatial);
             }
 
-            if (TryResolveStartVfx(itemId, out var vfxId))
+            var allowItemVfx = string.Equals(itemId, ItemIdFlamethrower, System.StringComparison.Ordinal);
+            if (!suppressStartVfx && allowItemVfx && TryResolveStartVfx(itemId, out var vfxId))
             {
                 SpawnVfxById(vfxId, worldPosition);
             }
@@ -131,11 +136,154 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            var instance = Instantiate(prefab, worldPosition, Quaternion.identity);
+            var instance = Instantiate(prefab);
+            ApplyVfxTransform(instance, row, worldPosition, GetTargetForward());
+            PlayAllChildParticleSystems(instance);
             if (row.LifetimeSec > 0f)
             {
                 // 테이블 수명값이 있으면 자동 정리한다.
                 Destroy(instance, row.LifetimeSec);
+            }
+        }
+
+        private bool StartItemUseLoopVfx(string itemId, Vector3 worldPosition, Vector3 forward)
+        {
+            if (!enablePresentationFromTables || !_assetTablesApplied || _dataCatalog == null)
+            {
+                return false;
+            }
+
+            if (!TryResolveStartVfx(itemId, out var vfxId))
+            {
+                return false;
+            }
+
+            if (!_dataCatalog.VfxAssetRows.TryGetValue(vfxId, out var row))
+            {
+                return false;
+            }
+
+            var prefab = LoadVfxPrefabFromAssetKey(row.AssetKey);
+            if (prefab == null)
+            {
+                return false;
+            }
+
+            if (!_loopingVfxInstances.TryGetValue(itemId, out var instance) || instance == null)
+            {
+                instance = Instantiate(prefab);
+                _loopingVfxInstances[itemId] = instance;
+            }
+
+            _loopingVfxRows[itemId] = row;
+            ApplyVfxTransform(instance, row, worldPosition, forward);
+            PlayAllChildParticleSystems(instance);
+            return true;
+        }
+
+        private void UpdateItemUseLoopVfxPose(string itemId, Vector3 worldPosition, Vector3 forward)
+        {
+            if (!_loopingVfxInstances.TryGetValue(itemId, out var instance) || instance == null)
+            {
+                return;
+            }
+
+            if (!_loopingVfxRows.TryGetValue(itemId, out var row))
+            {
+                return;
+            }
+
+            ApplyVfxTransform(instance, row, worldPosition, forward);
+        }
+
+        private void StopItemUseLoopVfx(string itemId)
+        {
+            if (_loopingVfxInstances.TryGetValue(itemId, out var instance) && instance != null)
+            {
+                Destroy(instance);
+            }
+
+            _loopingVfxInstances.Remove(itemId);
+            _loopingVfxRows.Remove(itemId);
+        }
+
+        private void StopAllLoopingVfx()
+        {
+            foreach (var pair in _loopingVfxInstances)
+            {
+                if (pair.Value == null)
+                {
+                    continue;
+                }
+
+                Destroy(pair.Value);
+            }
+
+            _loopingVfxInstances.Clear();
+            _loopingVfxRows.Clear();
+        }
+
+        private void ApplyVfxTransform(
+            GameObject instance,
+            VfxAssetTableCsvLoader.Row row,
+            Vector3 worldPosition,
+            Vector3 forward)
+        {
+            if (instance == null)
+            {
+                return;
+            }
+
+            var attachType = row.AttachType ?? string.Empty;
+            var useMuzzle = attachType.Equals("Muzzle", System.StringComparison.OrdinalIgnoreCase);
+            var useSelf = attachType.Equals("Self", System.StringComparison.OrdinalIgnoreCase);
+
+            if ((useMuzzle || useSelf) && targetRoot != null)
+            {
+                instance.transform.SetParent(targetRoot, false);
+
+                if (useMuzzle)
+                {
+                    instance.transform.localPosition = new Vector3(0f, 1.2f, 0.7f);
+                }
+                else
+                {
+                    instance.transform.localPosition = Vector3.up * 1.1f;
+                }
+
+                instance.transform.localRotation = Quaternion.identity;
+            }
+            else
+            {
+                if (instance.transform.parent != null)
+                {
+                    instance.transform.SetParent(null, true);
+                }
+
+                if (forward.sqrMagnitude < 0.0001f)
+                {
+                    forward = Vector3.forward;
+                }
+
+                instance.transform.position = worldPosition;
+                instance.transform.rotation = Quaternion.LookRotation(forward.normalized, Vector3.up);
+            }
+
+            var uniformScale = Mathf.Max(0.01f, row.Scale);
+            instance.transform.localScale = Vector3.one * uniformScale;
+        }
+
+        private static void PlayAllChildParticleSystems(GameObject instance)
+        {
+            if (instance == null)
+            {
+                return;
+            }
+
+            var systems = instance.GetComponentsInChildren<ParticleSystem>(true);
+            for (var i = 0; i < systems.Length; i++)
+            {
+                systems[i].Play(true);
             }
         }
 
