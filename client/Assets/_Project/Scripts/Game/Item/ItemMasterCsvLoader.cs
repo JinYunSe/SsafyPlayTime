@@ -132,7 +132,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             resolvedPath = string.Empty;
             error = string.Empty;
 
-            if (!PrototypeCsvUtility.TryReadCsvText(
+            if (!ItemCsvUtility.TryReadCsvText(
                     relativeOrAbsolutePath,
                     "ItemMaster",
                     out resolvedPath,
@@ -151,15 +151,15 @@ namespace SSAFYPlayTime.Gameplay.Items
             error = string.Empty;
 
             using var reader = new StringReader(csvText);
-            var headerLine = PrototypeCsvUtility.ReadNextDataLine(reader);
+            var headerLine = ItemCsvUtility.ReadNextDataLine(reader);
             if (headerLine == null)
             {
                 error = "ItemMaster header is missing.";
                 return false;
             }
 
-            var header = PrototypeCsvUtility.ParseCsvLine(headerLine);
-            var headerIndex = PrototypeCsvUtility.BuildHeaderIndex(header);
+            var header = ItemCsvUtility.ParseCsvLine(headerLine);
+            var headerIndex = ItemCsvUtility.BuildHeaderIndex(header);
             if (!headerIndex.ContainsKey("itemId"))
             {
                 error = "itemId column is missing in ItemMaster.";
@@ -174,55 +174,55 @@ namespace SSAFYPlayTime.Gameplay.Items
                     continue;
                 }
 
-                var cells = PrototypeCsvUtility.ParseCsvLine(line);
-                var itemId = PrototypeCsvUtility.ReadString(cells, headerIndex, "itemId", string.Empty);
+                var cells = ItemCsvUtility.ParseCsvLine(line);
+                var itemId = ItemCsvUtility.ReadString(cells, headerIndex, "itemId", string.Empty);
                 if (string.IsNullOrWhiteSpace(itemId))
                 {
                     continue;
                 }
 
-                var itemTypeText = PrototypeCsvUtility.ReadString(cells, headerIndex, "itemType", "Consumable");
-                var useTypeText = PrototypeCsvUtility.ReadString(cells, headerIndex, "useType", "Instant");
+                var itemTypeText = ItemCsvUtility.ReadString(cells, headerIndex, "itemType", "Consumable");
+                var useTypeText = ItemCsvUtility.ReadString(cells, headerIndex, "useType", "Instant");
                 var itemType = ParseItemType(itemTypeText);
                 var useType = ParseUseType(useTypeText);
 
                 var row = new Row(
                     itemId,
-                    PrototypeCsvUtility.ReadString(cells, headerIndex, "itemName", itemId),
+                    ItemCsvUtility.ReadString(cells, headerIndex, "itemName", itemId),
                     itemType,
                     useType,
-                    PrototypeCsvUtility.ReadBool(cells, headerIndex, "requiresHandEquip", true),
-                    PrototypeCsvUtility.ReadInt(cells, headerIndex, "holdSlotCount", 1),
-                    PrototypeCsvUtility.ReadBool(cells, headerIndex, "consumeOnUse", itemType == ItemType.Consumable),
-                    PrototypeCsvUtility.ReadBool(cells, headerIndex, "dropOnStun", true),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "cooldownSec", 0f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "durationSec", 0f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "range", 0f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "baseDamage", 0f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "stunDamage", 0f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "force", 0f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "tickIntervalSec", 0f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "useDelaySec", 0f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "warningTimeSec", 0f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "scaleMultiplier", 1f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "moveSpeedMultiplier", 1f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "baseDamageMultiplier", 1f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "knockbackResistMultiplier", 1f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "gravityMultiplier", 1f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "jumpMultiplier", 1f),
-                    PrototypeCsvUtility.ReadInt(cells, headerIndex, "superArmorLevel", 0),
-                    PrototypeCsvUtility.ReadBool(cells, headerIndex, "revealOnAttack", false),
-                    PrototypeCsvUtility.ReadBool(cells, headerIndex, "canMelee", false),
-                    PrototypeCsvUtility.ReadBool(cells, headerIndex, "canThrow", false),
-                    PrototypeCsvUtility.ReadInt(cells, headerIndex, "durability", 0),
-                    PrototypeCsvUtility.ReadBool(cells, headerIndex, "stunDropEnabled", true),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "maxActiveUseSec", 0f),
-                    PrototypeCsvUtility.ReadFloat(cells, headerIndex, "overheatCooldownSec", 0f),
-                    PrototypeCsvUtility.ReadString(cells, headerIndex, "prefabPath", string.Empty),
-                    PrototypeCsvUtility.ReadString(cells, headerIndex, "iconPath", string.Empty),
-                    PrototypeCsvUtility.ReadString(cells, headerIndex, "sfxId", string.Empty),
-                    PrototypeCsvUtility.ReadString(cells, headerIndex, "vfxId", string.Empty),
-                    PrototypeCsvUtility.ReadBool(cells, headerIndex, "enabled", true));
+                    ItemCsvUtility.ReadBool(cells, headerIndex, "requiresHandEquip", true),
+                    ItemCsvUtility.ReadInt(cells, headerIndex, "holdSlotCount", 1),
+                    ItemCsvUtility.ReadBool(cells, headerIndex, "consumeOnUse", itemType == ItemType.Consumable),
+                    ItemCsvUtility.ReadBool(cells, headerIndex, "dropOnStun", true),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "cooldownSec", 0f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "durationSec", 0f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "range", 0f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "baseDamage", 0f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "stunDamage", 0f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "force", 0f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "tickIntervalSec", 0f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "useDelaySec", 0f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "warningTimeSec", 0f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "scaleMultiplier", 1f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "moveSpeedMultiplier", 1f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "baseDamageMultiplier", 1f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "knockbackResistMultiplier", 1f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "gravityMultiplier", 1f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "jumpMultiplier", 1f),
+                    ItemCsvUtility.ReadInt(cells, headerIndex, "superArmorLevel", 0),
+                    ItemCsvUtility.ReadBool(cells, headerIndex, "revealOnAttack", false),
+                    ItemCsvUtility.ReadBool(cells, headerIndex, "canMelee", false),
+                    ItemCsvUtility.ReadBool(cells, headerIndex, "canThrow", false),
+                    ItemCsvUtility.ReadInt(cells, headerIndex, "durability", 0),
+                    ItemCsvUtility.ReadBool(cells, headerIndex, "stunDropEnabled", true),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "maxActiveUseSec", 0f),
+                    ItemCsvUtility.ReadFloat(cells, headerIndex, "overheatCooldownSec", 0f),
+                    ItemCsvUtility.ReadString(cells, headerIndex, "prefabPath", string.Empty),
+                    ItemCsvUtility.ReadString(cells, headerIndex, "iconPath", string.Empty),
+                    ItemCsvUtility.ReadString(cells, headerIndex, "sfxId", string.Empty),
+                    ItemCsvUtility.ReadString(cells, headerIndex, "vfxId", string.Empty),
+                    ItemCsvUtility.ReadBool(cells, headerIndex, "enabled", true));
 
                 if (!row.Enabled)
                 {
@@ -256,3 +256,4 @@ namespace SSAFYPlayTime.Gameplay.Items
         }
     }
 }
+

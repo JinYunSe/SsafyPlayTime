@@ -1,6 +1,9 @@
 ﻿using System.Collections;
 using Fusion;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace SSAFYPlayTime
 {
@@ -193,18 +196,20 @@ namespace SSAFYPlayTime
             SetStatus("Blackhole bomb: throw");
 
             var startPos = GetTargetPosition() + Vector3.up * 1.2f + GetTargetForward() * 0.7f;
-            var center = GetTargetPosition() + GetTargetForward() * 6f;
+            var throwDirection = (GetTargetForward() + Vector3.up * 0.35f).normalized;
 
             var bomb = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             bomb.name = PrototypeBlackholeName;
             bomb.transform.position = startPos;
             bomb.transform.localScale = Vector3.one * 0.45f;
-
-            var collider = bomb.GetComponent<Collider>();
-            if (collider != null)
-            {
-                Destroy(collider);
-            }
+            var bombBody = bomb.AddComponent<Rigidbody>();
+            bombBody.mass = 4f;
+            bombBody.drag = 0.3f;
+            bombBody.angularDrag = 0.1f;
+            bombBody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            bombBody.interpolation = RigidbodyInterpolation.Interpolate;
+            bombBody.AddForce(throwDirection * 8f, ForceMode.VelocityChange);
+            bombBody.AddTorque(Random.onUnitSphere * 4f, ForceMode.VelocityChange);
 
             var renderer = bomb.GetComponent<Renderer>();
             if (renderer != null)
@@ -212,27 +217,38 @@ namespace SSAFYPlayTime
                 ConfigureBlackholeVisualMaterial(renderer.material);
             }
 
-            var throwElapsed = 0f;
-            const float throwDuration = 0.35f;
-            while (throwElapsed < throwDuration)
-            {
-                throwElapsed += Time.deltaTime;
-                var t = Mathf.Clamp01(throwElapsed / throwDuration);
-                var arcHeight = 1.2f * (1f - Mathf.Pow(2f * t - 1f, 2f));
-                bomb.transform.position = Vector3.Lerp(startPos, center, t) + Vector3.up * arcHeight;
-                yield return null;
-            }
-
-            bomb.transform.position = center;
             SetStatus($"Blackhole bomb: armed ({blackholeDelaySec:0.0}s)");
             yield return new WaitForSeconds(blackholeDelaySec);
+            var center = bomb != null ? bomb.transform.position : startPos;
+
+            if (bombBody != null)
+            {
+                // 폭발 시점 위치를 고정하기 위해 속도를 제거한다.
+                bombBody.velocity = Vector3.zero;
+                bombBody.angularVelocity = Vector3.zero;
+                bombBody.isKinematic = true;
+            }
+
+            if (bomb != null && bomb.TryGetComponent<Collider>(out var bombCollider))
+            {
+                // 블랙홀 시각 구체는 충돌을 만들지 않아야 한다.
+                bombCollider.enabled = false;
+            }
+
+            if (bomb != null)
+            {
+                bomb.transform.position = center;
+                // 던지는 구체가 아니라, 흡입 시작 구간의 구체에 블랙홀 이펙트를 부착한다.
+                TryAttachBlackholeEffect(bomb.transform);
+            }
 
             SetStatus($"Blackhole bomb: gravity ({blackholeDurationSec:0.0}s)");
             var elapsed = 0f;
+            var expandDuration = Mathf.Max(0.01f, blackholeDurationSec / Mathf.Max(0.01f, blackholeExpandSpeedMultiplier));
             while (elapsed < blackholeDurationSec)
             {
                 elapsed += Time.deltaTime;
-                var ramp = Mathf.Clamp01(elapsed / blackholeDurationSec);
+                var ramp = Mathf.Clamp01(elapsed / expandDuration);
 
                 var overlaps = Physics.OverlapSphere(center, blackholeRadius, physicsMask, QueryTriggerInteraction.Ignore);
                 for (var i = 0; i < overlaps.Length; i++)
@@ -244,21 +260,290 @@ namespace SSAFYPlayTime
                     }
 
                     var toCenter = center - body.worldCenterOfMass;
+                    if (!ShouldPullByBlackhole(overlaps[i], body, toCenter))
+                    {
+                        continue;
+                    }
+
+                    var root = body.transform.root;
                     var distance = Mathf.Max(toCenter.magnitude, 0.35f);
+                    var pullMultiplier = GetBlackholePullMultiplier(root);
                     var pullStrength =
                         (blackholeForce * blackholePullStrengthMultiplier * (0.4f + ramp * 1.6f)) /
-                        Mathf.Sqrt(distance);
+                        Mathf.Sqrt(distance) * pullMultiplier;
+
+                    if (IsPlayerTarget(root))
+                    {
+                        ApplyPlayerEscapeDamping(body, toCenter.normalized);
+                    }
+
                     body.AddForce(toCenter.normalized * pullStrength, ForceMode.Acceleration);
                 }
 
-                bomb.transform.Rotate(Vector3.up, 220f * Time.deltaTime, Space.World);
-                bomb.transform.localScale = Vector3.one * Mathf.Lerp(0.45f, blackholeRadius * 2f, ramp);
+                if (bomb != null)
+                {
+                    bomb.transform.position = center;
+                    bomb.transform.Rotate(Vector3.up, 220f * Time.deltaTime, Space.World);
+                    bomb.transform.localScale = Vector3.one * Mathf.Lerp(0.45f, blackholeRadius * 2f, ramp);
+                }
                 yield return null;
             }
 
-            Destroy(bomb);
+            if (bomb != null)
+            {
+                Destroy(bomb);
+            }
+
             ApplyFlamethrowerRangeBoostAfterBlackhole();
             SetStatus($"Blackhole bomb: end (FlameRange={flamethrowerRange:0.0})");
+        }
+
+        private void TryAttachBlackholeEffect(Transform bombTransform)
+        {
+            if (bombTransform == null)
+            {
+                return;
+            }
+
+            var prefab = TryLoadBlackholeEffectPrefab();
+            if (prefab == null)
+            {
+                return;
+            }
+
+            var instance = Instantiate(prefab, bombTransform);
+            instance.name = "Prototype_BlackholeFx";
+            instance.transform.localPosition = Vector3.zero;
+            instance.transform.localRotation = Quaternion.identity;
+            instance.transform.localScale = Vector3.one * Mathf.Max(0.001f, blackholeEffectScale);
+            DisableAllChildColliders(instance);
+        }
+
+        private GameObject TryLoadBlackholeEffectPrefab()
+        {
+            if (_blackholeEffectPrefabCache != null)
+            {
+                return _blackholeEffectPrefabCache;
+            }
+
+#if UNITY_EDITOR
+            if (!string.IsNullOrWhiteSpace(blackholeEffectPrefabAssetPath))
+            {
+                _blackholeEffectPrefabCache = AssetDatabase.LoadAssetAtPath<GameObject>(blackholeEffectPrefabAssetPath);
+                if (_blackholeEffectPrefabCache != null)
+                {
+                    return _blackholeEffectPrefabCache;
+                }
+            }
+
+            var guids = AssetDatabase.FindAssets("Effect_02_BlackHole t:Prefab");
+            if (guids != null && guids.Length > 0)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guids[0]);
+                _blackholeEffectPrefabCache = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                if (_blackholeEffectPrefabCache != null)
+                {
+                    blackholeEffectPrefabAssetPath = path;
+                    return _blackholeEffectPrefabCache;
+                }
+            }
+#endif
+
+            _blackholeEffectPrefabCache = Resources.Load<GameObject>("Effect_02_BlackHole");
+            return _blackholeEffectPrefabCache;
+        }
+
+        private static void DisableAllChildColliders(GameObject root)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            var colliders = root.GetComponentsInChildren<Collider>(true);
+            for (var i = 0; i < colliders.Length; i++)
+            {
+                colliders[i].enabled = false;
+            }
+        }
+
+        private bool ShouldPullByBlackhole(Collider hitCollider, Rigidbody body, Vector3 toCenter)
+        {
+            if (hitCollider == null || body == null || toCenter.sqrMagnitude <= 0.0001f)
+            {
+                return false;
+            }
+
+            var root = body.transform.root;
+            if (root == null)
+            {
+                return false;
+            }
+
+            if (root == transform)
+            {
+                return false;
+            }
+
+            if (HasVfxLikeComponent(hitCollider.transform))
+            {
+                return false;
+            }
+
+            if (root.CompareTag("Player"))
+            {
+                return true;
+            }
+
+            if (root.GetComponentInParent<PrototypeDamageDummy>() != null)
+            {
+                return true;
+            }
+
+            if (HasItemKeyword(root.name))
+            {
+                return true;
+            }
+
+            return HasItemLikeComponent(root);
+        }
+
+        private float GetBlackholePullMultiplier(Transform root)
+        {
+            if (IsPlayerTarget(root))
+            {
+                return Mathf.Max(0.05f, blackholePlayerPullMultiplier);
+            }
+
+            if (IsDummyTarget(root) || IsItemTarget(root))
+            {
+                return Mathf.Max(0.05f, blackholeItemPullMultiplier);
+            }
+
+            return 1f;
+        }
+
+        private void ApplyPlayerEscapeDamping(Rigidbody body, Vector3 toCenterDir)
+        {
+            if (body == null || toCenterDir.sqrMagnitude <= 0.0001f)
+            {
+                return;
+            }
+
+            var clampedDamping = Mathf.Clamp01(blackholePlayerEscapeDamping);
+            if (clampedDamping <= 0f)
+            {
+                return;
+            }
+
+            var awayDir = -toCenterDir;
+            var awaySpeed = Vector3.Dot(body.velocity, awayDir);
+            if (awaySpeed <= 0f)
+            {
+                return;
+            }
+
+            body.velocity += toCenterDir * (awaySpeed * clampedDamping);
+        }
+
+        private static bool IsPlayerTarget(Transform root)
+        {
+            return root != null && root.CompareTag("Player");
+        }
+
+        private static bool IsDummyTarget(Transform root)
+        {
+            return root != null && root.GetComponentInParent<PrototypeDamageDummy>() != null;
+        }
+
+        private static bool IsItemTarget(Transform root)
+        {
+            if (root == null)
+            {
+                return false;
+            }
+
+            return HasItemKeyword(root.name) || HasItemLikeComponent(root);
+        }
+
+        private static bool HasVfxLikeComponent(Transform candidate)
+        {
+            if (candidate == null)
+            {
+                return false;
+            }
+
+            if (candidate.GetComponentInParent<ParticleSystem>() != null)
+            {
+                return true;
+            }
+
+            if (candidate.GetComponentInParent<TrailRenderer>() != null)
+            {
+                return true;
+            }
+
+            if (candidate.GetComponentInParent<LineRenderer>() != null)
+            {
+                return true;
+            }
+
+            // VFX Graph 컴포넌트 이름을 문자열로 판별해 패키지 의존성을 피한다.
+            var components = candidate.GetComponentsInParent<Component>(true);
+            for (var i = 0; i < components.Length; i++)
+            {
+                var component = components[i];
+                if (component == null)
+                {
+                    continue;
+                }
+
+                if (component.GetType().Name.IndexOf("VisualEffect", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool HasItemLikeComponent(Transform root)
+        {
+            var components = root.GetComponents<Component>();
+            for (var i = 0; i < components.Length; i++)
+            {
+                var component = components[i];
+                if (component == null)
+                {
+                    continue;
+                }
+
+                if (component is Transform || component is Rigidbody || component is Collider || component is Renderer)
+                {
+                    continue;
+                }
+
+                var typeName = component.GetType().Name;
+                if (typeName.IndexOf("Item", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool HasItemKeyword(string objectName)
+        {
+            if (string.IsNullOrWhiteSpace(objectName))
+            {
+                return false;
+            }
+
+            return objectName.IndexOf("item", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   objectName.IndexOf("pickup", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   objectName.IndexOf("drop", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   objectName.IndexOf("loot", System.StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private void TriggerGrowth()

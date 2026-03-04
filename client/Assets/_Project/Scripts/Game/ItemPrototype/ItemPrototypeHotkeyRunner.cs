@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using Fusion;
 using UnityEngine;
@@ -34,6 +34,8 @@ namespace SSAFYPlayTime
 
         [Header("Authority")]
         [SerializeField] private bool hostAuthorityOnlyWhenRunnerExists = true;
+        [Header("Runtime Switch")]
+        [SerializeField] private bool enablePrototypeRuntime = false;
 
         [Header("Data Source")]
         [SerializeField] private bool loadValuesFromItemTable = true;
@@ -60,9 +62,16 @@ namespace SSAFYPlayTime
         [SerializeField] private float blackholeDelaySec = 3f;
         [SerializeField] private float blackholeDurationSec = 6f;
         [SerializeField] private float blackholeRadius = 9f;
-        [SerializeField] private float blackholeForce = 8f;
+        [SerializeField] private float blackholeForce = 14f;
         [SerializeField] private float blackholePullStrengthMultiplier = 2.25f;
         [SerializeField] private float blackholeFlamethrowerRangeBoostMultiplier = 3f;
+        [SerializeField] private float blackholeExpandSpeedMultiplier = 1.5f;
+        [SerializeField] private float blackholePlayerPullMultiplier = 1.5f;
+        [SerializeField] private float blackholeItemPullMultiplier = 1.5f;
+        [SerializeField] private float blackholePlayerEscapeDamping = 0.2f;
+        [SerializeField] private string blackholeEffectPrefabAssetPath =
+            "Assets/SpecialSkillsEffectsPack/AllEffects/EffectsSet_1(NotScriptBased)/Effects/Effect_02_BlackHole/Effect_02_BlackHole.prefab";
+        [SerializeField] private float blackholeEffectScale = 0.07f;
 
         [Header("Growth/Shrink")]
         [SerializeField] private float growthDurationSec = 8f;
@@ -125,6 +134,7 @@ namespace SSAFYPlayTime
         private int _lastFlamethrowerTickHitCount;
         private float _lastFlamethrowerTickDamage;
         private float _lastFlamethrowerTickStunDamage;
+        private GameObject _blackholeEffectPrefabCache;
 
         private PrototypeDamageDummy _hitDummy;
 
@@ -164,6 +174,14 @@ namespace SSAFYPlayTime
 
         private void Awake()
         {
+            if (!enablePrototypeRuntime)
+            {
+                // 개발 전환 이후 기본값은 프로토타입 비활성이다.
+                _isPrototypeSceneActive = false;
+                enabled = false;
+                return;
+            }
+
             if (_instance != null && _instance != this)
             {
                 Destroy(gameObject);
@@ -176,12 +194,21 @@ namespace SSAFYPlayTime
 
         private void OnEnable()
         {
+            if (!enablePrototypeRuntime)
+            {
+                return;
+            }
+
             SceneManager.sceneLoaded += OnSceneLoaded;
         }
 
         private void OnDisable()
         {
-            SceneManager.sceneLoaded -= OnSceneLoaded;
+            if (enablePrototypeRuntime)
+            {
+                SceneManager.sceneLoaded -= OnSceneLoaded;
+            }
+
             StopAllLoopingSfx();
             StopAllLoopingVfx();
         }

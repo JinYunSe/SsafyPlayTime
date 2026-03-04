@@ -23,6 +23,9 @@ namespace SSAFYPlayTime
         private int _stunCount;
         private int _deathCount;
         private float _stunEndTime;
+        private Rigidbody _cachedBody;
+        private Vector3 _initialPosition;
+        private Quaternion _initialRotation;
 
         public float MaxHp => maxHp;
         public float CurrentHp => currentHp;
@@ -38,6 +41,13 @@ namespace SSAFYPlayTime
         public float LastHitTime => _lastHitTime;
         public int StunCount => _stunCount;
         public int DeathCount => _deathCount;
+
+        private void Awake()
+        {
+            _cachedBody = GetComponent<Rigidbody>();
+            _initialPosition = transform.position;
+            _initialRotation = transform.rotation;
+        }
 
         public void SetMaxHp(float value)
         {
@@ -92,6 +102,22 @@ namespace SSAFYPlayTime
             _lastHitTime = 0f;
             _stunCount = 0;
             _deathCount = 0;
+
+            ResetTransformToInitial();
+        }
+
+        private void ResetTransformToInitial()
+        {
+            if (_cachedBody != null)
+            {
+                _cachedBody.velocity = Vector3.zero;
+                _cachedBody.angularVelocity = Vector3.zero;
+                _cachedBody.position = _initialPosition;
+                _cachedBody.rotation = _initialRotation;
+                return;
+            }
+
+            transform.SetPositionAndRotation(_initialPosition, _initialRotation);
         }
 
         public void ApplyDamage(float amount, string source)
