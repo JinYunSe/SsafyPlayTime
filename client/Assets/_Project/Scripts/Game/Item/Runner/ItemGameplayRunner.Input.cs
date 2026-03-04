@@ -8,6 +8,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         {
             TickAudioListenerGuard();
             UpdateFlamethrowerVisualFollow();
+            TickLocalDebugController();
 
             if (!enableHotkeys || itemRuntimeHost == null)
             {

@@ -402,7 +402,6 @@ GameObject:
   - component: {fileID: 794972294}
   - component: {fileID: 794972293}
   - component: {fileID: 794972292}
-  - component: {fileID: 794972291}
   m_Layer: 0
   m_Name: PrototypePlayerTarget
   m_TagString: Player
@@ -410,31 +409,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &794972291
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 794972290}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 81500a141cec4854fae85375780290ef, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  targetRoot: {fileID: 0}
-  itemRunner: {fileID: 0}
-  moveSpeed: 6
-  turnLerp: 12
-  cameraPivotHeight: 1.4
-  mouseSensitivity: 3
-  zoomSpeed: 2
-  minPitch: -20
-  maxPitch: 70
-  defaultPitch: 20
-  minDistance: 2
-  maxDistance: 10
-  defaultDistance: 5
 --- !u!54 &794972292
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -786,7 +760,6 @@ GameObject:
   - component: {fileID: 1455346336}
   - component: {fileID: 1455346335}
   - component: {fileID: 1455346334}
-  - component: {fileID: 1455346333}
   m_Layer: 0
   m_Name: PrototypeHitDummy
   m_TagString: Untagged
@@ -794,25 +767,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1455346333
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1455346332}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1a9a6cf707677b640a115b2f24a14869, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  maxHp: 300
-  currentHp: 300
-  maxStunGauge: 100
-  currentStunGauge: 0
-  stunRecoveryPerSec: 6
-  stunDurationSec: 1.5
-  isStunned: 0
 --- !u!54 &1455346334
 Rigidbody:
   m_ObjectHideFlags: 0
