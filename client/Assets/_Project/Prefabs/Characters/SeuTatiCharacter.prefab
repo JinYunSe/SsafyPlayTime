@@ -221,6 +221,8 @@ MonoBehaviour:
   mainJoint: {fileID: 6312373798420986774}
   animator: {fileID: 0}
   fallbackAnimatorController: {fileID: 0}
+  syncPhysicsObjects: []
+  config: {fileID: 11400000, guid: 75abf164104853249b9f62f7cd147f60, type: 2}
 --- !u!114 &7377329257842934339
 MonoBehaviour:
   m_ObjectHideFlags: 0
