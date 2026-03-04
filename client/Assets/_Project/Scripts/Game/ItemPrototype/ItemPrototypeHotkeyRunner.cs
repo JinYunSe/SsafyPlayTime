@@ -28,8 +28,7 @@ namespace SSAFYPlayTime
         private const string PrototypeSatelliteWarningName = "Prototype_SatelliteWarning";
         private const string PrototypeSatelliteExplosionName = "Prototype_SatelliteExplosion";
         private const string PrototypeHitDummyName = "PrototypeHitDummy";
-        // 팀 작업 간섭 방지를 위해 기본값은 비활성화한다.
-        private static readonly bool EnableAutoBootstrapOnPlay = false;
+        private const string PrototypeRuntimeSceneName = "ItemScene";
 
         private static ItemPrototypeHotkeyRunner _instance;
 
@@ -141,28 +140,11 @@ namespace SSAFYPlayTime
         private readonly Dictionary<string, VfxAssetTableCsvLoader.Row> _loopingVfxRows = new(System.StringComparer.Ordinal);
 
         private string _statusLine = "Ready";
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        private static void Bootstrap()
-        {
-            if (!EnableAutoBootstrapOnPlay)
-            {
-                return;
-            }
-
-            if (_instance != null || FindObjectOfType<ItemPrototypeHotkeyRunner>() != null)
-            {
-                return;
-            }
-
-            var go = new GameObject("ItemPrototypeHotkeyRunner");
-            DontDestroyOnLoad(go);
-            go.AddComponent<ItemPrototypeHotkeyRunner>();
-        }
+        private bool _isPrototypeSceneActive;
 
         public static void NotifyStunnedFromGameplay()
         {
-            if (_instance == null)
+            if (_instance == null || !_instance._isPrototypeSceneActive)
             {
                 return;
             }
@@ -172,6 +154,11 @@ namespace SSAFYPlayTime
 
         public void NotifyStunnedFromSystem()
         {
+            if (!_isPrototypeSceneActive)
+            {
+                return;
+            }
+
             ApplyStunDrop();
         }
 
@@ -184,10 +171,7 @@ namespace SSAFYPlayTime
             }
 
             _instance = this;
-            DontDestroyOnLoad(gameObject);
-            LoadValuesFromItemTableIfNeeded();
-            LoadAssetMetadataTablesIfNeeded();
-            CaptureBaseFlamethrowerRangeIfNeeded();
+            RefreshPrototypeSceneActivation(SceneManager.GetActiveScene());
         }
 
         private void OnEnable()
@@ -207,15 +191,28 @@ namespace SSAFYPlayTime
             StopAllLoopingSfx();
             StopAllLoopingVfx();
             DisposeFlamethrowerFallbackMaterial();
+
+            if (_instance == this)
+            {
+                _instance = null;
+            }
         }
 
         private void Start()
         {
-            ResolveTarget();
+            if (_isPrototypeSceneActive)
+            {
+                ResolveTarget();
+            }
         }
 
         private void Update()
         {
+            if (!_isPrototypeSceneActive)
+            {
+                return;
+            }
+
             HandleHotkeys();
             TickTimedStates();
             TickFlamethrower();
@@ -223,12 +220,65 @@ namespace SSAFYPlayTime
 
         private void OnGUI()
         {
+            if (!_isPrototypeSceneActive)
+            {
+                return;
+            }
+
             DrawHotkeyGuide();
         }
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
+            RefreshPrototypeSceneActivation(scene);
+        }
+
+        private static bool IsPrototypeRuntimeScene(Scene scene)
+        {
+            if (!scene.IsValid())
+            {
+                return false;
+            }
+
+            if (string.Equals(scene.name, PrototypeRuntimeSceneName, System.StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            var scenePath = scene.path ?? string.Empty;
+            return scenePath.EndsWith("/ItemScene.unity", System.StringComparison.OrdinalIgnoreCase) ||
+                   scenePath.EndsWith("\\ItemScene.unity", System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void RefreshPrototypeSceneActivation(Scene scene)
+        {
+            var shouldActivate = IsPrototypeRuntimeScene(scene);
+            if (!shouldActivate)
+            {
+                if (_isPrototypeSceneActive)
+                {
+                    ResetPrototypeRuntimeState("ItemPrototype disabled (non-ItemScene)");
+                }
+
+                _isPrototypeSceneActive = false;
+                targetRoot = null;
+                _hitDummy = null;
+                _runnerCache = null;
+                Destroy(gameObject);
+                return;
+            }
+
+            if (_isPrototypeSceneActive)
+            {
+                return;
+            }
+
+            _isPrototypeSceneActive = true;
+            LoadValuesFromItemTableIfNeeded();
+            LoadAssetMetadataTablesIfNeeded();
+            CaptureBaseFlamethrowerRangeIfNeeded();
             ResolveTarget();
+            SetStatus("ItemPrototype enabled (ItemScene)");
         }
 
         private void HandleHotkeys()
