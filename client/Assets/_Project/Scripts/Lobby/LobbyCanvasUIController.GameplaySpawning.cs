@@ -47,10 +47,10 @@ namespace SSAFYPlayTime
         {
             return SanitizeCharacterIndexOrNone(characterIndex) switch
             {
-                (int)CharacterKind.Ghost => aiJiGameplayCharacterPrefab,
-                (int)CharacterKind.Glasses => pitGameplayCharacterPrefab,
-                (int)CharacterKind.Green => seuTatiGameplayCharacterPrefab,
-                (int)CharacterKind.Ssaty => waiJeuGameplayCharacterPrefab,
+                (int)CharacterKind.AiJi => aiJiGameplayCharacterPrefab,
+                (int)CharacterKind.Pit => pitGameplayCharacterPrefab,
+                (int)CharacterKind.SeuTati => seuTatiGameplayCharacterPrefab,
+                (int)CharacterKind.WaiJeu => waiJeuGameplayCharacterPrefab,
                 _ => null
             };
         }
@@ -109,7 +109,7 @@ namespace SSAFYPlayTime
                 : -1;
             if (selectedCharacter < 0)
             {
-                selectedCharacter = (int)CharacterKind.Ghost;
+                selectedCharacter = (int)CharacterKind.AiJi;
             }
 
             var prefab = GetGameplayCharacterPrefabByIndex(selectedCharacter);
