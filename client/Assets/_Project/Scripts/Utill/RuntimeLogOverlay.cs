@@ -20,6 +20,8 @@ namespace SSAFYPlayTime
 
         private GameObject _panel;
         private TMP_Text _text;
+        private ScrollRect _scrollRect;
+        private RectTransform _textRect;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
@@ -124,13 +126,37 @@ namespace SSAFYPlayTime
             var panelImage = _panel.GetComponent<Image>();
             panelImage.color = new Color(0f, 0f, 0f, 0.7f);
 
+            var scrollViewObject = new GameObject("ScrollView", typeof(RectTransform), typeof(Image), typeof(Mask), typeof(ScrollRect));
+            scrollViewObject.transform.SetParent(_panel.transform, false);
+            var scrollViewRect = scrollViewObject.GetComponent<RectTransform>();
+            scrollViewRect.anchorMin = Vector2.zero;
+            scrollViewRect.anchorMax = Vector2.one;
+            scrollViewRect.offsetMin = new Vector2(10f, 10f);
+            scrollViewRect.offsetMax = new Vector2(-10f, -46f);
+
+            var scrollViewImage = scrollViewObject.GetComponent<Image>();
+            scrollViewImage.color = new Color(0f, 0f, 0f, 0.15f);
+            var scrollViewMask = scrollViewObject.GetComponent<Mask>();
+            scrollViewMask.showMaskGraphic = false;
+
+            var contentObject = new GameObject("Content", typeof(RectTransform));
+            contentObject.transform.SetParent(scrollViewObject.transform, false);
+            var contentRect = contentObject.GetComponent<RectTransform>();
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = new Vector2(1f, 1f);
+            contentRect.pivot = new Vector2(0.5f, 1f);
+            contentRect.anchoredPosition = Vector2.zero;
+            contentRect.sizeDelta = Vector2.zero;
+
             var textObject = new GameObject("Text", typeof(RectTransform), typeof(TextMeshProUGUI));
-            textObject.transform.SetParent(_panel.transform, false);
+            textObject.transform.SetParent(contentObject.transform, false);
             var textRect = textObject.GetComponent<RectTransform>();
-            textRect.anchorMin = Vector2.zero;
-            textRect.anchorMax = Vector2.one;
-            textRect.offsetMin = new Vector2(10f, 10f);
-            textRect.offsetMax = new Vector2(-52f, -10f);
+            textRect.anchorMin = new Vector2(0f, 1f);
+            textRect.anchorMax = new Vector2(1f, 1f);
+            textRect.pivot = new Vector2(0.5f, 1f);
+            textRect.anchoredPosition = Vector2.zero;
+            textRect.sizeDelta = new Vector2(0f, 0f);
+            _textRect = textRect;
 
             var text = textObject.GetComponent<TextMeshProUGUI>();
             var fallbackFont = TmpFontFallbackBootstrap.ActiveFallbackFont;
@@ -140,10 +166,18 @@ namespace SSAFYPlayTime
             }
             text.fontSize = 18f;
             text.enableWordWrapping = false;
-            text.alignment = TextAlignmentOptions.BottomLeft;
+            text.alignment = TextAlignmentOptions.TopLeft;
             text.color = new Color(0.9f, 0.95f, 1f, 1f);
             text.text = string.Empty;
             _text = text;
+
+            _scrollRect = scrollViewObject.GetComponent<ScrollRect>();
+            _scrollRect.content = contentRect;
+            _scrollRect.viewport = scrollViewRect;
+            _scrollRect.horizontal = false;
+            _scrollRect.vertical = true;
+            _scrollRect.movementType = ScrollRect.MovementType.Clamped;
+            _scrollRect.scrollSensitivity = 28f;
 
             CreateTopRightButton("CloseButton", "X", new Vector2(-8f, -8f), 32f, ClosePanel);
             CreateTopRightButton("CopyButton", "Copy", new Vector2(-48f, -8f), 72f, CopyLogsToClipboard);
@@ -260,6 +294,21 @@ namespace SSAFYPlayTime
             if (_text != null)
             {
                 _text.text = string.Join("\n", _lines);
+                if (_textRect != null && _scrollRect != null)
+                {
+                    Canvas.ForceUpdateCanvases();
+                    var viewportWidth = _scrollRect.viewport != null ? _scrollRect.viewport.rect.width : _textRect.rect.width;
+                    var preferredHeight = _text.GetPreferredValues(_text.text, viewportWidth, 0f).y;
+                    _textRect.sizeDelta = new Vector2(0f, preferredHeight);
+                    var contentRect = _scrollRect.content;
+                    if (contentRect != null)
+                    {
+                        contentRect.sizeDelta = new Vector2(contentRect.sizeDelta.x, preferredHeight);
+                    }
+
+                    Canvas.ForceUpdateCanvases();
+                    _scrollRect.verticalNormalizedPosition = 0f;
+                }
             }
         }
 
