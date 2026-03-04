@@ -19,7 +19,7 @@
 
 ## 3) 현재 코드 반영 내역
 - 추가된 핵심 스크립트:
-  - `Assets/_Project/Scripts/Game/ItemPrototypeHotkeyRunner.cs`
+  - `Assets/_Project/Scripts/Game/ItemPrototype/ItemPrototypeHotkeyRunner.cs`
 - 주요 기능:
   - `1`: 블랙홀 폭탄 프로토타입
   - `2`: 커지는 아이템 프로토타입

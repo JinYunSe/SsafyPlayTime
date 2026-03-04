@@ -29,7 +29,7 @@ namespace SSAFYPlayTime
         private const string PrototypeSatelliteExplosionName = "Prototype_SatelliteExplosion";
         private const string PrototypeHitDummyName = "PrototypeHitDummy";
         // 팀 작업 간섭 방지를 위해 기본값은 비활성화한다.
-        private static readonly bool EnableAutoBootstrapOnPlay = true;
+        private static readonly bool EnableAutoBootstrapOnPlay = false;
 
         private static ItemPrototypeHotkeyRunner _instance;
 
