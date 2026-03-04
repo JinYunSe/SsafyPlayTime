@@ -233,6 +233,12 @@ namespace SSAFYPlayTime
             {
                 // 블랙홀 시각 구체는 충돌을 만들지 않아야 한다.
                 bombCollider.enabled = false;
+                // 발동 이후 범위 구체 메시는 숨기고 이펙트만 표시한다.
+                var bombRenderer = bomb.GetComponent<Renderer>();
+                if (bombRenderer != null)
+                {
+                    bombRenderer.enabled = false;
+                }
             }
 
             if (bomb != null)
@@ -317,6 +323,7 @@ namespace SSAFYPlayTime
             instance.transform.localRotation = Quaternion.identity;
             instance.transform.localScale = Vector3.one * Mathf.Max(0.001f, blackholeEffectScale);
             DisableAllChildColliders(instance);
+            DisableUnsupportedGrabPassRenderers(instance);
         }
 
         private GameObject TryLoadBlackholeEffectPrefab()
@@ -364,6 +371,51 @@ namespace SSAFYPlayTime
             for (var i = 0; i < colliders.Length; i++)
             {
                 colliders[i].enabled = false;
+            }
+        }
+
+        private static void DisableUnsupportedGrabPassRenderers(GameObject root)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            // URP에서 GrabPass 기반 디스토션은 콘솔 경고를 반복 출력하므로 렌더링만 비활성화한다.
+            var renderers = root.GetComponentsInChildren<Renderer>(true);
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                var renderer = renderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                var rendererName = renderer.gameObject.name ?? string.Empty;
+                if (rendererName.IndexOf("Distort", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    renderer.enabled = false;
+                    continue;
+                }
+
+                var materials = renderer.sharedMaterials;
+                for (var m = 0; m < materials.Length; m++)
+                {
+                    var material = materials[m];
+                    if (material == null)
+                    {
+                        continue;
+                    }
+
+                    var shaderName = material.shader != null ? material.shader.name : string.Empty;
+                    if (shaderName.IndexOf("Distortion Effect", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        shaderName.IndexOf("Grab", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        material.name.IndexOf("Distort", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        renderer.enabled = false;
+                        break;
+                    }
+                }
             }
         }
 
