@@ -1,116 +1,82 @@
-using System.Collections;
-using System.Collections.Generic;
+using SSAFYPlayTime.Character;
 using UnityEngine;
 
-public class NetworkPlayer : MonoBehaviour
+public sealed class NetworkPlayer : MonoBehaviour
 {
-    [SerializeField]
-    Rigidbody rigidbody3D;
+    [Header("References")]
+    [SerializeField] private Rigidbody rigidbody3D;
+    [SerializeField] private ConfigurableJoint mainJoint;
+    [SerializeField] private Animator animator;
+    [SerializeField] private SyncPhysicsObject[] syncPhysicsObjects;
 
-    [SerializeField]
-    ConfigurableJoint mainJoint;
+    [Header("Config")]
+    [SerializeField] private PlayerMotorConfig config;
 
-    [SerializeField]
-    Animator animator;
+    private readonly GroundProbe _groundProbe = new();
+    private readonly PlayerMotorStateMachine _stateMachine = new();
 
-    //Input
-    Vector2 moveInputVector = Vector2.zero;
-    bool isJumpButtonPressed = false;
+    private Vector2 _moveInput;
+    private bool _jumpPressed;
+    private bool _isGrounded;
 
-    //Controller settings
-    float maxSpeed = 3;
-
-    //States
-    bool isGrounded = false;
-
-    //Raycasts
-    RaycastHit[] raycastHits = new RaycastHit[10];
-
-    //Syncing of physics objects
-    SyncPhysicsObject[] syncPhysicsObjects;
-
-    void Awake()
+    private void Awake()
     {
-        syncPhysicsObjects = GetComponentsInChildren<SyncPhysicsObject>();
+        if (syncPhysicsObjects == null || syncPhysicsObjects.Length == 0)
+            syncPhysicsObjects = GetComponentsInChildren<SyncPhysicsObject>(true);
     }
 
-    // Start is called before the first frame update
-    void Start()
+    private void Update()
     {
-        
-    }
-
-    // Update is called once per frame
-    void Update()
-    {
-        //Move input
-        moveInputVector.x = Input.GetAxis("Horizontal");
-        moveInputVector.y = Input.GetAxis("Vertical");
-
-
+        _moveInput = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
         if (Input.GetKeyDown(KeyCode.Space))
-            isJumpButtonPressed = true;
+            _jumpPressed = true;
     }
 
-    void FixedUpdate()
+    private void FixedUpdate()
     {
-        //Assume that we are not grounded. 
-        isGrounded = false;
+        if (config == null || rigidbody3D == null || mainJoint == null)
+            return;
 
-        //Check if we are grounded
-        int numberOfHits = Physics.SphereCastNonAlloc(rigidbody3D.position, 0.1f, transform.up * -1, raycastHits, 0.5f);
+        _isGrounded = _groundProbe.IsGrounded(
+            rigidbody3D.position,
+            transform,
+            config.groundProbeRadius,
+            config.groundProbeDistance);
 
-        //Check for valid results
-        for (int i = 0; i < numberOfHits; i++)
+        if (!_isGrounded)
+            rigidbody3D.AddForce(Vector3.down * config.extraGravity, ForceMode.Acceleration);
+
+        var inputMagnitude = _moveInput.magnitude;
+        var forwardVelocity = Vector3.Dot(transform.forward, rigidbody3D.velocity);
+
+        if (inputMagnitude > 0.001f)
         {
-            //Ignore self hits
-            if (raycastHits[i].transform.root == transform)
-                continue;
+            var desired = Quaternion.LookRotation(new Vector3(_moveInput.x, 0f, -_moveInput.y), transform.up);
+            mainJoint.targetRotation = Quaternion.RotateTowards(
+                mainJoint.targetRotation,
+                desired,
+                Time.fixedDeltaTime * config.rotateSpeedDeg);
 
-            isGrounded = true;
-
-            break;
+            if (Mathf.Abs(forwardVelocity) < config.maxSpeed)
+                rigidbody3D.AddForce(transform.forward * inputMagnitude * config.acceleration, ForceMode.Acceleration);
         }
 
-        //Apply extra gravity to charcter to make it less floaty
-        if (!isGrounded)
-            rigidbody3D.AddForce(Vector3.down * 10);
-
-        float inputMagnitued = moveInputVector.magnitude;
-
-        Vector3 localVelocifyVsForward = transform.forward * Vector3.Dot(transform.forward, rigidbody3D.velocity);
-
-        float localForwardVelocity = localVelocifyVsForward.magnitude;
-
-        if (inputMagnitued != 0)
+        if (_isGrounded && _jumpPressed)
         {
-            Quaternion desiredDirection = Quaternion.LookRotation(new Vector3(moveInputVector.x, 0, moveInputVector.y * -1), transform.up);
-
-            //Rotate target towards direction
-            mainJoint.targetRotation = Quaternion.RotateTowards(mainJoint.targetRotation, desiredDirection, Time.fixedDeltaTime * 300);
-
-            if(localForwardVelocity < maxSpeed)
-            {
-                //Move the character in the direction it is facing
-                rigidbody3D.AddForce(transform.forward * inputMagnitued * 30);
-            }
+            rigidbody3D.AddForce(Vector3.up * config.jumpImpulse, ForceMode.Impulse);
+            _jumpPressed = false;
+            _stateMachine.SetJump();
         }
 
-        if(isGrounded && isJumpButtonPressed)
-        {
-            rigidbody3D.AddForce(Vector3.up * 20, ForceMode.Impulse);
+        _stateMachine.Tick(_isGrounded, inputMagnitude, Time.fixedDeltaTime, config);
 
-            isJumpButtonPressed = false;
+        if (animator != null)
+        {
+            animator.SetFloat("movementSpeed", Mathf.Abs(forwardVelocity) * 0.4f);
+            animator.SetInteger("MotorState", (int)_stateMachine.CurrentState);
         }
 
-        animator.SetFloat("movementSpeed", localForwardVelocity * 0.4f);
-
-
-        //Update the joints rotation based on the animations
-        for (int i = 0; i < syncPhysicsObjects.Length; i++)
-        {
+        for (var i = 0; i < syncPhysicsObjects.Length; i++)
             syncPhysicsObjects[i].UpdateJointFromAnimation();
-        }
-
     }
 }

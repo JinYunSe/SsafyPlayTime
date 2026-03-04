@@ -217,6 +217,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   rigidbody3D: {fileID: 4029321899869973288}
   mainJoint: {fileID: 5977047356337186682}
+  animator: {fileID: 0}
+  syncPhysicsObjects: []
+  config: {fileID: 11400000, guid: 75abf164104853249b9f62f7cd147f60, type: 2}
 --- !u!1 &6099292820056759283
 GameObject:
   m_ObjectHideFlags: 0
