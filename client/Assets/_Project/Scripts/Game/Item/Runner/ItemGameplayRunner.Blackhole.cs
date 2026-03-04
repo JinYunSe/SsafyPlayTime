@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using UnityEngine;
+using UnityEngine.Rendering;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -154,6 +155,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             DisableUnsupportedGrabPassRenderers(instance);
+            ConfigureBlackholeOuterLayerVisual(instance);
         }
 
         private GameObject TryLoadBlackholeEffectPrefab()
@@ -306,14 +308,156 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 return false;
             }
-
             return objectName.IndexOf("item", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    objectName.IndexOf("dummy", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    objectName.IndexOf("pickup", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    objectName.IndexOf("drop", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    objectName.IndexOf("loot", StringComparison.OrdinalIgnoreCase) >= 0;
         }
-
+        private void ConfigureBlackholeOuterLayerVisual(GameObject root)
+        {
+            if (root == null)
+            {
+                return;
+            }
+            var renderers = root.GetComponentsInChildren<Renderer>(true);
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                var renderer = renderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+                var rendererName = renderer.gameObject.name ?? string.Empty;
+                if (rendererName.IndexOf("OuterLayer", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+                var materials = renderer.materials;
+                if (materials == null || materials.Length == 0)
+                {
+                    continue;
+                }
+                for (var m = 0; m < materials.Length; m++)
+                {
+                    var material = materials[m];
+                    if (NeedsOuterLayerFallback(material))
+                    {
+                        var fallback = GetOrCreateBlackholeOuterLayerFallbackMaterial();
+                        if (fallback != null)
+                        {
+                            materials[m] = fallback;
+                            material = fallback;
+                        }
+                    }
+                    ApplyBlackholeOuterLayerColor(material);
+                }
+                renderer.materials = materials;
+            }
+        }
+        private static bool NeedsOuterLayerFallback(Material material)
+        {
+            if (material == null || material.shader == null)
+            {
+                return true;
+            }
+            if (!material.shader.isSupported)
+            {
+                return true;
+            }
+            var shaderName = material.shader.name ?? string.Empty;
+            if (GraphicsSettings.currentRenderPipeline == null)
+            {
+                return false;
+            }
+            return shaderName.IndexOf("PolygonArsenal/PolyRimLightTransparent", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+        private Material GetOrCreateBlackholeOuterLayerFallbackMaterial()
+        {
+            if (_blackholeOuterLayerFallbackMaterial != null)
+            {
+                return _blackholeOuterLayerFallbackMaterial;
+            }
+            var fallbackShader =
+                Shader.Find("Universal Render Pipeline/Particles/Unlit") ??
+                Shader.Find("Universal Render Pipeline/Unlit") ??
+                Shader.Find("Particles/Standard Unlit") ??
+                Shader.Find("Legacy Shaders/Particles/Alpha Blended") ??
+                Shader.Find("Standard");
+            if (fallbackShader == null)
+            {
+                return null;
+            }
+            _blackholeOuterLayerFallbackMaterial = new Material(fallbackShader)
+            {
+                name = "Item_Blackhole_OuterLayer_Fallback",
+                hideFlags = HideFlags.DontSave
+            };
+            ApplyBlackholeOuterLayerColor(_blackholeOuterLayerFallbackMaterial);
+            return _blackholeOuterLayerFallbackMaterial;
+        }
+        private void ApplyBlackholeOuterLayerColor(Material material)
+        {
+            if (material == null)
+            {
+                return;
+            }
+            var baseColor = blackholeOuterLayerColor;
+            if (material.HasProperty("_BaseColor"))
+            {
+                material.SetColor("_BaseColor", baseColor);
+            }
+            if (material.HasProperty("_Color"))
+            {
+                material.SetColor("_Color", baseColor);
+            }
+            if (material.HasProperty("_InnerColor"))
+            {
+                material.SetColor("_InnerColor", new Color(baseColor.r * 0.75f, baseColor.g * 0.75f, baseColor.b * 0.75f, 1f));
+            }
+            if (material.HasProperty("_RimColor"))
+            {
+                material.SetColor("_RimColor", blackholeOuterLayerRimColor);
+            }
+            if (material.HasProperty("_TintColor"))
+            {
+                material.SetColor("_TintColor", baseColor);
+            }
+            if (material.HasProperty("_Surface"))
+            {
+                material.SetFloat("_Surface", 1f);
+            }
+            if (material.HasProperty("_Blend"))
+            {
+                material.SetFloat("_Blend", 0f);
+            }
+            if (material.HasProperty("_SrcBlend"))
+            {
+                material.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+            }
+            if (material.HasProperty("_DstBlend"))
+            {
+                material.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+            }
+            if (material.HasProperty("_ZWrite"))
+            {
+                material.SetFloat("_ZWrite", 0f);
+            }
+            material.SetOverrideTag("RenderType", "Transparent");
+            material.renderQueue = (int)RenderQueue.Transparent;
+            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.EnableKeyword("_ALPHABLEND_ON");
+            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        }
+        private void ReleaseBlackholeOuterLayerFallbackMaterial()
+        {
+            if (_blackholeOuterLayerFallbackMaterial == null)
+            {
+                return;
+            }
+            Destroy(_blackholeOuterLayerFallbackMaterial);
+            _blackholeOuterLayerFallbackMaterial = null;
+        }
         private static void DisableUnsupportedGrabPassRenderers(GameObject root)
         {
             if (root == null)
@@ -360,3 +504,4 @@ namespace SSAFYPlayTime.Gameplay.Items
         }
     }
 }
+
