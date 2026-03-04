@@ -16,6 +16,11 @@ namespace SSAFYPlayTime
 
             if (TryResolveTargetFromRunner())
             {
+                if (autoAttachPrototypeControllerOnDummy)
+                {
+                    EnsurePrototypeController(targetRoot);
+                }
+
                 EnsureHitDummy();
                 return;
             }
@@ -26,6 +31,11 @@ namespace SSAFYPlayTime
                 targetRoot = taggedPlayer.transform;
                 CacheBaseScale();
                 EnsureTargetVisibleForPrototype();
+                if (autoAttachPrototypeControllerOnDummy)
+                {
+                    EnsurePrototypeController(targetRoot);
+                }
+
                 EnsureHitDummy();
                 return;
             }
@@ -36,6 +46,11 @@ namespace SSAFYPlayTime
                 targetRoot = controller.transform;
                 CacheBaseScale();
                 EnsureTargetVisibleForPrototype();
+                if (autoAttachPrototypeControllerOnDummy)
+                {
+                    EnsurePrototypeController(targetRoot);
+                }
+
                 EnsureHitDummy();
                 return;
             }
@@ -163,11 +178,6 @@ namespace SSAFYPlayTime
 
         private void EnsureHitDummy()
         {
-            if (!autoCreateHitDummyIfMissing)
-            {
-                return;
-            }
-
             if (_hitDummy != null)
             {
                 return;
@@ -176,6 +186,11 @@ namespace SSAFYPlayTime
             var existing = GameObject.Find(PrototypeHitDummyName);
             if (existing == null)
             {
+                if (!autoCreateHitDummyIfMissing)
+                {
+                    return;
+                }
+
                 var spawnOrigin = targetRoot != null ? targetRoot.position : Vector3.zero;
                 var spawnForward = targetRoot != null ? targetRoot.forward : Vector3.forward;
                 spawnForward.y = 0f;
