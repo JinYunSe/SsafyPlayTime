@@ -13,6 +13,9 @@ public class NetworkPlayer : MonoBehaviour
     [SerializeField]
     Animator animator;
 
+    [SerializeField]
+    RuntimeAnimatorController fallbackAnimatorController;
+
     //Input
     Vector2 moveInputVector = Vector2.zero;
     bool isJumpButtonPressed = false;
@@ -32,6 +35,7 @@ public class NetworkPlayer : MonoBehaviour
     void Awake()
     {
         syncPhysicsObjects = GetComponentsInChildren<SyncPhysicsObject>();
+        EnsureAnimatorBinding();
     }
 
     // Start is called before the first frame update
@@ -103,7 +107,10 @@ public class NetworkPlayer : MonoBehaviour
             isJumpButtonPressed = false;
         }
 
-        animator.SetFloat("movementSpeed", localForwardVelocity * 0.4f);
+        if (animator != null)
+        {
+            animator.SetFloat("movementSpeed", localForwardVelocity * 0.4f);
+        }
 
 
         //Update the joints rotation based on the animations
@@ -112,5 +119,31 @@ public class NetworkPlayer : MonoBehaviour
             syncPhysicsObjects[i].UpdateJointFromAnimation();
         }
 
+    }
+
+    void EnsureAnimatorBinding()
+    {
+        if (animator == null)
+        {
+            animator = GetComponentInChildren<Animator>(true);
+        }
+
+        if (animator == null)
+        {
+            // Last-resort fallback so character does not remain in bind pose.
+            animator = gameObject.AddComponent<Animator>();
+        }
+
+        if (animator.runtimeAnimatorController == null && fallbackAnimatorController != null)
+        {
+            animator.runtimeAnimatorController = fallbackAnimatorController;
+        }
+
+        animator.applyRootMotion = false;
+        animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+        animator.updateMode = AnimatorUpdateMode.Normal;
+        animator.enabled = true;
+        animator.Rebind();
+        animator.Update(0f);
     }
 }
