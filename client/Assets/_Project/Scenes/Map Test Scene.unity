@@ -134,7 +134,7 @@ GameObject:
   - component: {fileID: 49710520}
   - component: {fileID: 49710519}
   - component: {fileID: 49710518}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Stair (1)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -239,7 +239,7 @@ GameObject:
   - component: {fileID: 61303147}
   - component: {fileID: 61303146}
   - component: {fileID: 61303145}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Ground
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -344,7 +344,7 @@ GameObject:
   - component: {fileID: 160843761}
   - component: {fileID: 160843760}
   - component: {fileID: 160843759}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Stage
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -828,7 +828,7 @@ GameObject:
   - component: {fileID: 537718463}
   - component: {fileID: 537718462}
   - component: {fileID: 537718461}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Stair
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1173,7 +1173,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1073457231}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Main Stage
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1363,7 +1363,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1303757751}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Stair Group
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1748,7 +1748,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 2017845309}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Environment
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1819,6 +1819,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   heightStep: 0.5
   heightInterval: 5
+  maxHeight: 3.5
 --- !u!1 &2056302386 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 4745874965057220924, guid: d9d4af982485aab45b1d905523536406,
@@ -1961,7 +1962,7 @@ GameObject:
   - component: {fileID: 2121744923}
   - component: {fileID: 2121744922}
   - component: {fileID: 2121744921}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Stair (2)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
