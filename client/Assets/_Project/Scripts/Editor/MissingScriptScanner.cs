@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -69,6 +70,88 @@ namespace SSAFYPlayTime.EditorTools
             else
             {
                 Debug.LogWarning($"[MissingScriptScanner] Removed {removedTotal} missing script components in total.");
+            }
+        }
+
+        [MenuItem("Tools/Diagnostics/Find Missing Scripts In Prefabs")]
+        public static void FindMissingScriptsInPrefabs()
+        {
+            var totalMissing = 0;
+            var prefabGuids = AssetDatabase.FindAssets("t:Prefab", new[] { "Assets" });
+            for (var i = 0; i < prefabGuids.Length; i++)
+            {
+                var prefabPath = AssetDatabase.GUIDToAssetPath(prefabGuids[i]);
+                if (string.IsNullOrWhiteSpace(prefabPath))
+                {
+                    continue;
+                }
+
+                var root = PrefabUtility.LoadPrefabContents(prefabPath);
+                if (root == null)
+                {
+                    continue;
+                }
+
+                var missingInPrefab = ScanRecursive(root, Path.GetFileNameWithoutExtension(prefabPath));
+                if (missingInPrefab > 0)
+                {
+                    Debug.LogWarning($"[MissingScriptScanner] Prefab={prefabPath}, MissingCount={missingInPrefab}", root);
+                }
+
+                totalMissing += missingInPrefab;
+                PrefabUtility.UnloadPrefabContents(root);
+            }
+
+            if (totalMissing == 0)
+            {
+                Debug.Log("[MissingScriptScanner] No missing scripts found in prefabs.");
+            }
+            else
+            {
+                Debug.LogWarning($"[MissingScriptScanner] Found {totalMissing} missing script components in prefabs.");
+            }
+        }
+
+        [MenuItem("Tools/Diagnostics/Remove Missing Scripts In Prefabs")]
+        public static void RemoveMissingScriptsInPrefabs()
+        {
+            var removedTotal = 0;
+            var prefabGuids = AssetDatabase.FindAssets("t:Prefab", new[] { "Assets" });
+            for (var i = 0; i < prefabGuids.Length; i++)
+            {
+                var prefabPath = AssetDatabase.GUIDToAssetPath(prefabGuids[i]);
+                if (string.IsNullOrWhiteSpace(prefabPath))
+                {
+                    continue;
+                }
+
+                var root = PrefabUtility.LoadPrefabContents(prefabPath);
+                if (root == null)
+                {
+                    continue;
+                }
+
+                var removedInPrefab = RemoveRecursive(root);
+                if (removedInPrefab > 0)
+                {
+                    PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+                    removedTotal += removedInPrefab;
+                    Debug.LogWarning($"[MissingScriptScanner] Removed {removedInPrefab} missing script components in prefab '{prefabPath}'.", root);
+                }
+
+                PrefabUtility.UnloadPrefabContents(root);
+            }
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+
+            if (removedTotal == 0)
+            {
+                Debug.Log("[MissingScriptScanner] No missing scripts to remove in prefabs.");
+            }
+            else
+            {
+                Debug.LogWarning($"[MissingScriptScanner] Removed {removedTotal} missing script components in prefabs.");
             }
         }
 
