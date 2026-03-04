@@ -63,8 +63,10 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private float blackholeItemPullMultiplier = 1.5f;
         [SerializeField] private float blackholePlayerEscapeDamping = 0.2f;
         [SerializeField] private string blackholeEffectPrefabAssetPath =
-            "Assets/SpecialSkillsEffectsPack/AllEffects/EffectsSet_1(NotScriptBased)/Effects/Effect_02_BlackHole/Effect_02_BlackHole.prefab";
-        [SerializeField] private float blackholeEffectScale = 0.07f;
+            "Assets/Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple.prefab";
+        [SerializeField] private float blackholeEffectScale = 0.7f;
+        [SerializeField] private Color blackholeOuterLayerColor = new Color(0.08f, 0.02f, 0.14f, 0.28f);
+        [SerializeField] private Color blackholeOuterLayerRimColor = new Color(0.52f, 0.3f, 0.82f, 0.45f);
 
         [Header("화염방사기")]
         [SerializeField] private LayerMask physicsMask = ~0;
@@ -95,6 +97,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private GameObject _flamethrowerFxRoot;
         private GameObject _flamethrowerEffectPrefabCache;
         private GameObject _blackholeEffectPrefabCache;
+        private Material _blackholeOuterLayerFallbackMaterial;
         private NetworkRunner _runnerCache;
         private float _nextRunnerLookupTime;
         private bool _presentationLoaded;
