@@ -26,6 +26,24 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private bool enableHotkeys = true;
         [SerializeField] private bool forceReplaceHeldItemOnHotkey = true;
 
+        [Header("로컬 테스트 컨트롤")]
+        [SerializeField] private bool enableLocalDebugController = true;
+        [SerializeField] private bool resetRuntimeStateOnSpace = true;
+        [SerializeField] private float localMoveSpeed = 6f;
+        [SerializeField] private float localTurnLerp = 12f;
+        [SerializeField] private string localDebugDummyName = "PrototypeHitDummy";
+        [SerializeField] private float localDebugDummyForwardOffset = 7f;
+        [SerializeField] private float localDebugDummyHeight = 1f;
+        [SerializeField] private float localCameraPivotHeight = 1.4f;
+        [SerializeField] private float localCameraMouseSensitivity = 3f;
+        [SerializeField] private float localCameraZoomSpeed = 2f;
+        [SerializeField] private float localCameraMinPitch = -20f;
+        [SerializeField] private float localCameraMaxPitch = 70f;
+        [SerializeField] private float localCameraDefaultPitch = 20f;
+        [SerializeField] private float localCameraMinDistance = 2f;
+        [SerializeField] private float localCameraMaxDistance = 10f;
+        [SerializeField] private float localCameraDefaultDistance = 5f;
+
         [Header("권한")]
         [SerializeField] private bool hostAuthorityOnlyWhenRunnerExists = true;
 
@@ -85,6 +103,20 @@ namespace SSAFYPlayTime.Gameplay.Items
         private bool _audioPolicyCaptured;
         private bool _previousAudioListenerPause;
         private float _previousAudioListenerVolume;
+        private Transform _debugControlTarget;
+        private Rigidbody _debugControlBody;
+        private Vector3 _debugInitialPosition;
+        private Quaternion _debugInitialRotation;
+        private bool _debugControlInitialized;
+        private Camera _debugRuntimeCamera;
+        private float _debugDefaultYaw;
+        private float _debugYaw;
+        private float _debugPitch;
+        private float _debugDistance;
+        private RigidbodyConstraints _debugOriginalConstraints;
+        private bool _debugConstraintsCaptured;
+        private Transform _debugDummyTarget;
+        private Rigidbody _debugDummyBody;
         private bool _flamethrowerVisualActive;
         private float _flamethrowerVisualRange;
         private float _flamethrowerVisualRadius;

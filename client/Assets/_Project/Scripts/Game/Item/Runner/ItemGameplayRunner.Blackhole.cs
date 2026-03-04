@@ -308,6 +308,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             return objectName.IndexOf("item", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   objectName.IndexOf("dummy", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    objectName.IndexOf("pickup", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    objectName.IndexOf("drop", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    objectName.IndexOf("loot", StringComparison.OrdinalIgnoreCase) >= 0;
