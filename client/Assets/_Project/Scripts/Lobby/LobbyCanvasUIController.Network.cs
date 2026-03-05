@@ -11,6 +11,7 @@ namespace SSAFYPlayTime
 {
     public sealed partial class LobbyCanvasUIController
     {
+        // Fusion 로비에서 방 목록이 갱신될 때 호출. UI에 반영할 RoomSnapshot 목록을 재구성한다.
         void INetworkRunnerCallbacks.OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList)
         {
             _isInLobby = true;
@@ -41,6 +42,8 @@ namespace SSAFYPlayTime
             LogRoomSnapshotSummary();
         }
 
+        // 플레이어가 방에 입장했을 때 호출. 서버는 참가자를 등록하고 방장을 지정한다.
+        // GameScene이 활성화된 상태라면 즉시 캐릭터 스폰도 수행한다.
         void INetworkRunnerCallbacks.OnPlayerJoined(NetworkRunner runner, PlayerRef player)
         {
             if (runner != _runner)
@@ -82,6 +85,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 플레이어가 방을 나갔을 때 호출. 스폰된 캐릭터를 제거하고 참가자 목록을 정리한다.
         void INetworkRunnerCallbacks.OnPlayerLeft(NetworkRunner runner, PlayerRef player)
         {
             if (runner != _runner)
@@ -282,6 +286,8 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 매 네트워크 틱마다 로컬 플레이어의 입력을 수집해 Fusion에 전달한다.
+        // 서버의 FixedUpdateNetwork에서 GetInput<PlayerNetworkInput>()으로 꺼내 사용된다.
         void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input)
         {
             input.Set(new PlayerNetworkInput
@@ -348,6 +354,7 @@ namespace SSAFYPlayTime
 
         void INetworkRunnerCallbacks.OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
 
+        // 씬 전환이 시작될 때 호출. 스폰 목록과 SpawnPointGroup 캐시를 초기화한다.
         void INetworkRunnerCallbacks.OnSceneLoadStart(NetworkRunner runner)
         {
             if (runner != _runner)
@@ -359,6 +366,7 @@ namespace SSAFYPlayTime
             _cachedSpawnPointGroup = null;
         }
 
+        // 씬 전환이 완료됐을 때 호출. GameScene이면 로비 UI를 숨기고 서버에서 캐릭터를 스폰한다.
         void INetworkRunnerCallbacks.OnSceneLoadDone(NetworkRunner runner)
         {
             if (runner != _runner)

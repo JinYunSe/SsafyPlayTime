@@ -7,18 +7,27 @@ using UnityEngine.SceneManagement;
 
 namespace SSAFYPlayTime
 {
+    // GameScene에서의 캐릭터 스폰을 담당하는 파셜 클래스.
+    // 서버(IsServer)에서만 동작하며 각 플레이어에게 선택한 캐릭터를 Fusion으로 생성한다.
     public sealed partial class LobbyCanvasUIController
     {
         [Header("Gameplay Spawning")]
+        // 각 캐릭터 종류별 게임플레이용 프리팹 (NetworkObject 포함)
         [SerializeField] private GameObject aiJiGameplayCharacterPrefab;
         [SerializeField] private GameObject pitGameplayCharacterPrefab;
         [SerializeField] private GameObject seuTatiGameplayCharacterPrefab;
         [SerializeField] private GameObject waiJeuGameplayCharacterPrefab;
 
+        // 씬 전환 후 DontDestroyOnLoad 처리됐는지 여부 (중복 호출 방지)
         private bool _isPersistentAcrossScenes;
+
+        // 스폰된 캐릭터 NetworkObject를 PlayerId 키로 관리 (퇴장 시 Despawn에 사용)
         private readonly Dictionary<int, NetworkObject> _spawnedGameplayNetworkCharacters = new();
+
+        // 씬에서 찾아둔 SpawnPointGroup 캐시 (OnSceneLoadStart 시 null 초기화)
         private SpawnPointGroup _cachedSpawnPointGroup;
 
+        // DontDestroyOnLoad를 한 번만 호출하도록 보장한다.
         private void EnsurePersistentAcrossScenes()
         {
             if (_isPersistentAcrossScenes)
@@ -30,6 +39,7 @@ namespace SSAFYPlayTime
             _isPersistentAcrossScenes = true;
         }
 
+        // 현재 활성 씬 이름이 gameplaySceneName과 일치하는지 확인한다.
         private bool IsActiveGameplayScene()
         {
             if (string.IsNullOrWhiteSpace(gameplaySceneName))
@@ -42,6 +52,7 @@ namespace SSAFYPlayTime
             return string.Equals(activeScene.name, requested, StringComparison.OrdinalIgnoreCase);
         }
 
+        // characterIndex(0~3)에 해당하는 게임플레이 캐릭터 프리팹을 반환한다.
         private GameObject GetGameplayCharacterPrefabByIndex(int characterIndex)
         {
             return SanitizeCharacterIndexOrNone(characterIndex) switch
@@ -54,6 +65,7 @@ namespace SSAFYPlayTime
             };
         }
 
+        // 현재 접속 중인 실제 플레이어를 PlayerId 오름차순으로 정렬해 반환한다.
         private List<PlayerRef> GetOrderedActivePlayers()
         {
             if (_runner == null || !_runner.IsRunning)
@@ -67,6 +79,7 @@ namespace SSAFYPlayTime
                 .ToList();
         }
 
+        // 씬에서 SpawnPointGroup을 찾아 캐시한다. 이미 캐시됐으면 재사용한다.
         private SpawnPointGroup GetOrFindSpawnPointGroup()
         {
             if (_cachedSpawnPointGroup == null)
@@ -74,6 +87,8 @@ namespace SSAFYPlayTime
             return _cachedSpawnPointGroup;
         }
 
+        // 특정 플레이어의 캐릭터를 SpawnPointGroup 랜덤 포인트에 서버에서 스폰한다.
+        // 이미 스폰됐거나 서버가 아닌 경우 즉시 반환한다.
         private void TrySpawnGameplayNetworkCharacter(PlayerRef player)
         {
             if (_runner == null || !_runner.IsRunning || !_runner.IsServer || !player.IsRealPlayer)
@@ -135,6 +150,8 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 현재 접속된 모든 플레이어에 대해 캐릭터 스폰을 순차 호출한다.
+        // OnSceneLoadDone 시점에 서버에서 한 번 호출된다.
         private void TrySpawnGameplayNetworkCharactersForAllPlayers()
         {
             if (_runner == null || !_runner.IsRunning || !_runner.IsServer || !IsActiveGameplayScene())
