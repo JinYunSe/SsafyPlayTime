@@ -220,9 +220,9 @@ MonoBehaviour:
   rigidbody3D: {fileID: 4029321899869973288}
   mainJoint: {fileID: 5977047356337186682}
   animator: {fileID: 0}
-  fallbackAnimatorController: {fileID: 0}
   syncPhysicsObjects: []
   config: {fileID: 11400000, guid: 75abf164104853249b9f62f7cd147f60, type: 2}
+  fallbackAnimatorController: {fileID: 0}
 --- !u!114 &3048865779075330190
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -240,7 +240,14 @@ MonoBehaviour:
   Flags: 262145
   NestedObjects: []
   NetworkedBehaviours:
+  - {fileID: 3482118129036842810}
   - {fileID: 3735632080659111276}
+  - {fileID: 4804079187783391023}
+  - {fileID: 6881000107063494824}
+  - {fileID: 8529912440855999399}
+  - {fileID: 4931926374100470854}
+  - {fileID: 6234766629987201867}
+  - {fileID: 3794268257290590606}
   ForceRemoteRenderTimeframe: 0
 --- !u!114 &3735632080659111276
 MonoBehaviour:
@@ -370,6 +377,10 @@ PrefabInstance:
         type: 3}
       insertIndex: -1
       addedObject: {fileID: 474479460799056830}
+    - targetCorrespondingSourceObject: {fileID: 8147827683474319665, guid: 536451e9c5ba22645b20b1128bf8f223,
+        type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 4804079187783391023}
     - targetCorrespondingSourceObject: {fileID: -7145078682610172542, guid: 536451e9c5ba22645b20b1128bf8f223,
         type: 3}
       insertIndex: -1
@@ -382,6 +393,10 @@ PrefabInstance:
         type: 3}
       insertIndex: -1
       addedObject: {fileID: 7848846330912669646}
+    - targetCorrespondingSourceObject: {fileID: -7145078682610172542, guid: 536451e9c5ba22645b20b1128bf8f223,
+        type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 6881000107063494824}
     - targetCorrespondingSourceObject: {fileID: -3488457133692037254, guid: 536451e9c5ba22645b20b1128bf8f223,
         type: 3}
       insertIndex: -1
@@ -394,6 +409,10 @@ PrefabInstance:
         type: 3}
       insertIndex: -1
       addedObject: {fileID: 5736653527580451439}
+    - targetCorrespondingSourceObject: {fileID: -3488457133692037254, guid: 536451e9c5ba22645b20b1128bf8f223,
+        type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 8529912440855999399}
     - targetCorrespondingSourceObject: {fileID: 6115508046882847259, guid: 536451e9c5ba22645b20b1128bf8f223,
         type: 3}
       insertIndex: -1
@@ -406,6 +425,10 @@ PrefabInstance:
         type: 3}
       insertIndex: -1
       addedObject: {fileID: 20913883476754876}
+    - targetCorrespondingSourceObject: {fileID: 6115508046882847259, guid: 536451e9c5ba22645b20b1128bf8f223,
+        type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 4931926374100470854}
     - targetCorrespondingSourceObject: {fileID: -1581456030472649203, guid: 536451e9c5ba22645b20b1128bf8f223,
         type: 3}
       insertIndex: -1
@@ -418,6 +441,10 @@ PrefabInstance:
         type: 3}
       insertIndex: -1
       addedObject: {fileID: 7236003321485382951}
+    - targetCorrespondingSourceObject: {fileID: -1581456030472649203, guid: 536451e9c5ba22645b20b1128bf8f223,
+        type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 6234766629987201867}
     - targetCorrespondingSourceObject: {fileID: -8170192190282937638, guid: 536451e9c5ba22645b20b1128bf8f223,
         type: 3}
       insertIndex: -1
@@ -430,6 +457,10 @@ PrefabInstance:
         type: 3}
       insertIndex: -1
       addedObject: {fileID: 3949633911252812311}
+    - targetCorrespondingSourceObject: {fileID: -8170192190282937638, guid: 536451e9c5ba22645b20b1128bf8f223,
+        type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 3794268257290590606}
   m_SourcePrefab: {fileID: 100100000, guid: 536451e9c5ba22645b20b1128bf8f223, type: 3}
 --- !u!1 &61475263497628893 stripped
 GameObject:
@@ -587,6 +618,23 @@ ConfigurableJoint:
   m_EnablePreprocessing: 1
   m_MassScale: 1
   m_ConnectedMassScale: 1
+--- !u!114 &4931926374100470854
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 61475263497628893}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 158639473, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _stateAuthorityChangeErrorCorrectionDelta: 0
+  SyncScale: 0
+  SyncParent: 0
+  _autoAOIOverride: 1
+  DisableSharedModeInterpolation: 0
 --- !u!1 &1986725151548015036 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: -3488457133692037254, guid: 536451e9c5ba22645b20b1128bf8f223,
@@ -745,6 +793,23 @@ ConfigurableJoint:
   m_EnablePreprocessing: 1
   m_MassScale: 1
   m_ConnectedMassScale: 1
+--- !u!114 &8529912440855999399
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1986725151548015036}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 158639473, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _stateAuthorityChangeErrorCorrectionDelta: 0
+  SyncScale: 0
+  SyncParent: 0
+  _autoAOIOverride: 1
+  DisableSharedModeInterpolation: 0
 --- !u!1 &2672366705331011575 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 8147827683474319665, guid: 536451e9c5ba22645b20b1128bf8f223,
@@ -903,6 +968,23 @@ ConfigurableJoint:
   m_EnablePreprocessing: 1
   m_MassScale: 1
   m_ConnectedMassScale: 1
+--- !u!114 &4804079187783391023
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2672366705331011575}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 158639473, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _stateAuthorityChangeErrorCorrectionDelta: 0
+  SyncScale: 0
+  SyncParent: 0
+  _autoAOIOverride: 1
+  DisableSharedModeInterpolation: 0
 --- !u!1 &4470186952838484171 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: -1581456030472649203, guid: 536451e9c5ba22645b20b1128bf8f223,
@@ -1061,6 +1143,23 @@ ConfigurableJoint:
   m_EnablePreprocessing: 1
   m_MassScale: 1
   m_ConnectedMassScale: 1
+--- !u!114 &6234766629987201867
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4470186952838484171}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 158639473, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _stateAuthorityChangeErrorCorrectionDelta: 0
+  SyncScale: 0
+  SyncParent: 0
+  _autoAOIOverride: 1
+  DisableSharedModeInterpolation: 0
 --- !u!1 &5247632053394778948 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: -7145078682610172542, guid: 536451e9c5ba22645b20b1128bf8f223,
@@ -1219,6 +1318,23 @@ ConfigurableJoint:
   m_EnablePreprocessing: 1
   m_MassScale: 1
   m_ConnectedMassScale: 1
+--- !u!114 &6881000107063494824
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5247632053394778948}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 158639473, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _stateAuthorityChangeErrorCorrectionDelta: 0
+  SyncScale: 0
+  SyncParent: 0
+  _autoAOIOverride: 1
+  DisableSharedModeInterpolation: 0
 --- !u!4 &6020881944609042733 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 536451e9c5ba22645b20b1128bf8f223,
@@ -1383,3 +1499,20 @@ ConfigurableJoint:
   m_EnablePreprocessing: 1
   m_MassScale: 1
   m_ConnectedMassScale: 1
+--- !u!114 &3794268257290590606
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6528359337130368028}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 158639473, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _stateAuthorityChangeErrorCorrectionDelta: 0
+  SyncScale: 0
+  SyncParent: 0
+  _autoAOIOverride: 1
+  DisableSharedModeInterpolation: 0

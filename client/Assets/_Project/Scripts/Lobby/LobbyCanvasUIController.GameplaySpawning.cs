@@ -14,11 +14,10 @@ namespace SSAFYPlayTime
         [SerializeField] private GameObject pitGameplayCharacterPrefab;
         [SerializeField] private GameObject seuTatiGameplayCharacterPrefab;
         [SerializeField] private GameObject waiJeuGameplayCharacterPrefab;
-        [SerializeField] private string gameplaySpawnPointName = "PlayerSpawnPoint";
-        [SerializeField] private Vector3 gameplayFallbackSpawnPosition = new Vector3(0f, 1f, 0f);
 
         private bool _isPersistentAcrossScenes;
         private readonly Dictionary<int, NetworkObject> _spawnedGameplayNetworkCharacters = new();
+        private SpawnPointGroup _cachedSpawnPointGroup;
 
         private void EnsurePersistentAcrossScenes()
         {
@@ -68,28 +67,11 @@ namespace SSAFYPlayTime
                 .ToList();
         }
 
-        private Vector3 ResolveSpawnPositionForPlayer(int playerId)
+        private SpawnPointGroup GetOrFindSpawnPointGroup()
         {
-            var spawnPosition = gameplayFallbackSpawnPosition;
-            if (!string.IsNullOrWhiteSpace(gameplaySpawnPointName))
-            {
-                var spawnPoint = GameObject.Find(gameplaySpawnPointName);
-                if (spawnPoint != null)
-                {
-                    spawnPosition = spawnPoint.transform.position;
-                }
-            }
-
-            var orderedPlayers = GetOrderedActivePlayers();
-            var slotIndex = orderedPlayers.FindIndex(p => p.PlayerId == playerId);
-            if (slotIndex < 0)
-            {
-                slotIndex = 0;
-            }
-
-            // Place up to 4 players in a horizontal line around the spawn center.
-            var lateralOffset = (slotIndex - 1.5f) * 2.2f;
-            return spawnPosition + new Vector3(lateralOffset, 0f, 0f);
+            if (_cachedSpawnPointGroup == null)
+                _cachedSpawnPointGroup = UnityEngine.Object.FindObjectOfType<SpawnPointGroup>();
+            return _cachedSpawnPointGroup;
         }
 
         private void TrySpawnGameplayNetworkCharacter(PlayerRef player)
@@ -125,10 +107,19 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            var spawnPosition = ResolveSpawnPositionForPlayer(player.PlayerId);
+            var spawnGroup = GetOrFindSpawnPointGroup();
+            Vector3 spawnPosition;
+            Quaternion spawnRotation;
+            if (spawnGroup == null || !spawnGroup.ClaimRandomPoint(out spawnPosition, out spawnRotation))
+            {
+                spawnPosition = new Vector3(0f, 1f, 0f);
+                spawnRotation = Quaternion.identity;
+                Debug.LogWarning($"[Lobby] SpawnPointGroup not found or no available points. player={player.PlayerId}, using fallback position.");
+            }
+
             try
             {
-                var spawned = _runner.Spawn(prefab, spawnPosition, Quaternion.identity, player);
+                var spawned = _runner.Spawn(prefab, spawnPosition, spawnRotation, player);
                 if (spawned == null)
                 {
                     Debug.LogWarning($"[Lobby] Network spawn returned null. player={player.PlayerId}, prefab={prefab.name}");

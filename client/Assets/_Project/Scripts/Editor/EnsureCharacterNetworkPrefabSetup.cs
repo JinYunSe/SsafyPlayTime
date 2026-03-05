@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Fusion;
 using UnityEditor;
 using UnityEngine;
@@ -64,6 +65,20 @@ namespace SSAFYPlayTime.Editor
                 {
                     prefabRoot.AddComponent<NetworkTransform>();
                     changed = true;
+                }
+
+                // 자식 Rigidbody(래그돌 부위)에도 NetworkTransform 추가
+                var childRigidbodies = prefabRoot.GetComponentsInChildren<Rigidbody>()
+                    .Where(rb => rb.gameObject != prefabRoot)
+                    .ToList();
+
+                foreach (var rb in childRigidbodies)
+                {
+                    if (rb.GetComponent<NetworkTransform>() == null)
+                    {
+                        rb.gameObject.AddComponent<NetworkTransform>();
+                        changed = true;
+                    }
                 }
 
                 if (changed)
