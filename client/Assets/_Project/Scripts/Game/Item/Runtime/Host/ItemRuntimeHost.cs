@@ -121,6 +121,16 @@ namespace SSAFYPlayTime.Gameplay.Items
             return _controller.TryUseHeldItem(ownerPos, ownerForward, targetPosition, out reason);
         }
 
+        public bool TryDropHeldItem(out string reason)
+        {
+            if (!EnsureReady(out reason))
+            {
+                return false;
+            }
+
+            return _controller.TryDropHeldItem(ItemDropReason.Manual, out reason);
+        }
+
         public void TickRuntime()
         {
             if (_controller == null)

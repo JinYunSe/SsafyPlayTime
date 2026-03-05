@@ -22,13 +22,6 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return false;
             }
 
-            var now = _bridge.Now;
-            if (IsCoolingDown(_heldItemId, now, out var remain))
-            {
-                reason = $"Cooldown remains: {remain:0.00}s";
-                return false;
-            }
-
             ownerForward = NormalizeForward(ownerForward);
             if (targetPosition == Vector3.zero)
             {
@@ -73,8 +66,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                     ToggleFlamethrower(def);
                     return true;
 
-                case ItemIds.OfficeTool:
-                    // 사무용품 계열은 전투 상세 로직을 별도 시스템에서 처리한다.
+                case ItemIds.WaterMelonSword:
+                    // 수박검 계열은 전투 상세 로직을 별도 시스템에서 처리한다.
                     return true;
 
                 default:
@@ -171,11 +164,6 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            if (_catalog.TryGetDefinition(ItemIds.Flamethrower, out var flameDef))
-            {
-                SetCooldown(flameDef.Master.ItemId, flameDef.Master.OverheatCooldownSec);
-            }
-
             _isFlamethrowerActive = false;
             _equipmentEndAt = 0f;
             _nextFlamethrowerTickAt = 0f;
@@ -196,7 +184,6 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private void ConsumeHeldItem(ItemDefinition def)
         {
-            SetCooldown(def.Master.ItemId, def.Master.CooldownSec);
             var consumedId = def.Master.ItemId;
             SetHeldItem(string.Empty);
             _bridge.OnItemConsumed(consumedId);

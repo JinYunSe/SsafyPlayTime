@@ -1,11 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Gameplay.Items
 {
     /// <summary>
-    /// 아이템 보유/사용/쿨다운/버프 상태를 순수 로직으로 관리한다.
+    /// 아이템 보유/사용/버프 상태를 순수 로직으로 관리한다.
     /// </summary>
     public sealed partial class ItemRuntimeController
     {
@@ -14,7 +13,6 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private readonly ItemCatalog _catalog;
         private readonly IItemRuntimeBridge _bridge;
-        private readonly Dictionary<string, float> _cooldownEndTimes = new(StringComparer.Ordinal);
 
         private string _heldItemId = string.Empty;
         private bool _isFlamethrowerActive;
@@ -63,6 +61,22 @@ namespace SSAFYPlayTime.Gameplay.Items
             return true;
         }
 
+        public bool TryDropHeldItem(ItemDropReason reason, out string error)
+        {
+            error = string.Empty;
+            if (string.IsNullOrWhiteSpace(_heldItemId))
+            {
+                error = "No held item.";
+                return false;
+            }
+
+            StopFlamethrowerIfNeeded();
+            var droppedItemId = _heldItemId;
+            SetHeldItem(string.Empty);
+            _bridge.OnItemDropped(droppedItemId, reason);
+            return true;
+        }
+
         public void Tick(Vector3 ownerPosition, Vector3 ownerForward)
         {
             var now = _bridge.Now;
@@ -87,16 +101,12 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            StopFlamethrowerIfNeeded();
-            var dropped = _heldItemId;
-            SetHeldItem(string.Empty);
-            _bridge.OnItemDropped(dropped, ItemDropReason.Stunned);
+            TryDropHeldItem(ItemDropReason.Stunned, out _);
         }
 
         public void ResetRuntimeState()
         {
             StopFlamethrowerIfNeeded();
-            _cooldownEndTimes.Clear();
             _activeBuffMask = ItemBuffMask.None;
             _growthEndAt = 0f;
             _shrinkEndAt = 0f;
@@ -104,35 +114,6 @@ namespace SSAFYPlayTime.Gameplay.Items
             _invisibilityEndAt = 0f;
             SetHeldItem(string.Empty);
             NotifyBuffStateChanged();
-        }
-
-        private void SetCooldown(string itemId, float cooldownSec)
-        {
-            if (cooldownSec <= 0f)
-            {
-                return;
-            }
-
-            _cooldownEndTimes[itemId] = _bridge.Now + cooldownSec;
-        }
-
-        private bool IsCoolingDown(string itemId, float now, out float remain)
-        {
-            remain = 0f;
-            if (!_cooldownEndTimes.TryGetValue(itemId, out var endAt))
-            {
-                return false;
-            }
-
-            remain = endAt - now;
-            if (remain <= 0f)
-            {
-                _cooldownEndTimes.Remove(itemId);
-                remain = 0f;
-                return false;
-            }
-
-            return true;
         }
 
         private void SetHeldItem(string itemId)
