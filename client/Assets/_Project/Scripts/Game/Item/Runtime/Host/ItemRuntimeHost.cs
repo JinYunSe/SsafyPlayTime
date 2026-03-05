@@ -45,6 +45,8 @@ namespace SSAFYPlayTime.Gameplay.Items
         public string LastError => _lastError;
         public Transform OwnerTransform => ownerTransform;
         public float Now => Time.time;
+        public ItemCatalogLoadOptions CatalogLoadOptions =>
+            new ItemCatalogLoadOptions(itemMasterPath, soundAssetPath, vfxAssetPath, presentationPath);
 
         private void Awake()
         {
@@ -77,11 +79,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             _loadWarnings.Clear();
             _lastError = string.Empty;
 
-            var options = new ItemCatalogLoadOptions(
-                itemMasterPath,
-                soundAssetPath,
-                vfxAssetPath,
-                presentationPath);
+            var options = CatalogLoadOptions;
 
             if (!ItemCatalogLoader.TryLoadFromDisk(options, out var catalog, out var warnings, out var error))
             {
