@@ -140,12 +140,10 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            if (Input.GetMouseButton(1))
-            {
-                _debugYaw += Input.GetAxis("Mouse X") * localCameraMouseSensitivity;
-                _debugPitch -= Input.GetAxis("Mouse Y") * localCameraMouseSensitivity;
-                _debugPitch = Mathf.Clamp(_debugPitch, localCameraMinPitch, localCameraMaxPitch);
-            }
+            // 우클릭 없이 마우스 이동만으로 카메라를 회전한다.
+            _debugYaw += Input.GetAxis("Mouse X") * localCameraMouseSensitivity;
+            _debugPitch -= Input.GetAxis("Mouse Y") * localCameraMouseSensitivity;
+            _debugPitch = Mathf.Clamp(_debugPitch, localCameraMinPitch, localCameraMaxPitch);
 
             var scroll = Input.mouseScrollDelta.y;
             if (Mathf.Abs(scroll) > 0.0001f)
@@ -232,11 +230,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 itemRuntimeHost.ResetRuntimeState();
             }
 
-            if (_blackholeRoutine != null)
-            {
-                StopCoroutine(_blackholeRoutine);
-                _blackholeRoutine = null;
-            }
+            StopAllBlackholeRoutines();
 
             StopFlamethrowerParticle();
             StopAllLoopingSfx();

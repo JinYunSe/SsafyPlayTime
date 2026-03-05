@@ -22,10 +22,6 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private Transform targetRoot;
         [SerializeField] private bool runOnlyInItemScene = true;
 
-        [Header("입력")]
-        [SerializeField] private bool enableHotkeys = true;
-        [SerializeField] private bool forceReplaceHeldItemOnHotkey = true;
-
         [Header("로컬 테스트 컨트롤")]
         [SerializeField] private bool enableLocalDebugController = true;
         [SerializeField] private bool resetRuntimeStateOnSpace = true;
@@ -91,7 +87,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private bool _eventsBound;
         private float _flamethrowerRangeMultiplier = 1f;
-        private Coroutine _blackholeRoutine;
+        private readonly HashSet<Coroutine> _activeBlackholeRoutines = new();
         private ParticleSystem _flamethrowerParticle;
         private ParticleSystem[] _flamethrowerParticles = Array.Empty<ParticleSystem>();
         private GameObject _flamethrowerFxRoot;

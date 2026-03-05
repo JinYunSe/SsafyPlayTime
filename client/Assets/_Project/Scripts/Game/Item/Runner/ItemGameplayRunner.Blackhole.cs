@@ -19,6 +19,8 @@ namespace SSAFYPlayTime.Gameplay.Items
             bomb.name = BlackholeVisualName;
             bomb.transform.position = startPos;
             bomb.transform.localScale = Vector3.one * 0.45f;
+            ApplyBlackholeShellTransparency(bomb);
+            TryAttachBlackholeEffect(bomb.transform);
 
             var bombBody = bomb.AddComponent<Rigidbody>();
             bombBody.mass = 4f;
@@ -125,13 +127,16 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 Destroy(bomb);
             }
-
-            _blackholeRoutine = null;
         }
 
         private void TryAttachBlackholeEffect(Transform blackholeTransform)
         {
             if (blackholeTransform == null)
+            {
+                return;
+            }
+
+            if (blackholeTransform.Find("Item_BlackholeFx") != null)
             {
                 return;
             }
@@ -156,6 +161,69 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             DisableUnsupportedGrabPassRenderers(instance);
             ConfigureBlackholeOuterLayerVisual(instance);
+        }
+
+        private static void ApplyBlackholeShellTransparency(GameObject bomb)
+        {
+            if (bomb == null)
+            {
+                return;
+            }
+
+            var renderer = bomb.GetComponent<Renderer>();
+            if (renderer == null)
+            {
+                return;
+            }
+
+            // 내부 이펙트가 가려지지 않도록 투척 구체도 반투명으로 설정한다.
+            var material = renderer.material;
+            if (material == null)
+            {
+                renderer.enabled = false;
+                return;
+            }
+
+            var shellColor = new Color(0.07f, 0.07f, 0.08f, 0.14f);
+            if (material.HasProperty("_BaseColor"))
+            {
+                material.SetColor("_BaseColor", shellColor);
+            }
+            if (material.HasProperty("_Color"))
+            {
+                material.SetColor("_Color", shellColor);
+            }
+            if (material.HasProperty("_Surface"))
+            {
+                material.SetFloat("_Surface", 1f);
+            }
+            if (material.HasProperty("_Blend"))
+            {
+                material.SetFloat("_Blend", 0f);
+            }
+            if (material.HasProperty("_SrcBlend"))
+            {
+                material.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+            }
+            if (material.HasProperty("_DstBlend"))
+            {
+                material.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+            }
+            if (material.HasProperty("_ZWrite"))
+            {
+                material.SetFloat("_ZWrite", 0f);
+            }
+            if (material.HasProperty("_Mode"))
+            {
+                material.SetFloat("_Mode", 3f);
+            }
+
+            material.SetOverrideTag("RenderType", "Transparent");
+            material.renderQueue = (int)RenderQueue.Transparent;
+            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.EnableKeyword("_ALPHABLEND_ON");
+            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
         }
 
         private GameObject TryLoadBlackholeEffectPrefab()
