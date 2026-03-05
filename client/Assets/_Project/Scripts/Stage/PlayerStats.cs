@@ -1,13 +1,14 @@
-using System.Collections;
-using System.Collections.Generic;
+using System;
+
 using UnityEngine;
 
 public class PlayerStats : MonoBehaviour
 {
-    // 일단 PlayerStats 파일 프리팹에 오버라이드를 함
     public int currentHealth = 100;
 
-    // 일단 플레이어 위치도 여기 Script에 구현함
+    // 죽었을 때 알림 이벤트
+    public event Action<PlayerStats> OnDied;
+
     void Start()
     {
         SpawnManager spawnManager = GameObject.FindObjectOfType<SpawnManager>();
@@ -15,17 +16,19 @@ public class PlayerStats : MonoBehaviour
         if (spawnManager != null)
         {
             Vector3 spawnPos = spawnManager.GetSpawnPosition();
-
             transform.position = spawnPos;
         }
         else
         {
-            Debug.LogError("SpawnManager를 찾을 수 없습니다! 씬에 배치했는지 확인하세요.");
+            Debug.LogError("SpawnManager를 찾을 수 없습니다! 씬에 배치했는지 확인하세요");
         }
     }
 
     public void TakeDamage(int damage)
     {
+        if (currentHealth <= 0)
+            return;
+
         currentHealth -= damage;
         Debug.Log("현재 체력: " + currentHealth);
 
@@ -35,6 +38,13 @@ public class PlayerStats : MonoBehaviour
 
     void Die()
     {
-        Destroy(gameObject);
+        currentHealth = 0;
+
+        // 카메라/관전 전환 같은 외부 로직에게 먼저 알림
+        OnDied?.Invoke(this);
+
+        // 바로 Destroy하면 다른 스크립트가 참조 중일 때 꼬일 수 있어서
+        // 최소 1프레임 뒤에 삭제하는 게 안전
+        Destroy(gameObject, 0.05f);
     }
 }

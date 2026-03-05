@@ -53,7 +53,7 @@ public sealed class NetworkPlayer : MonoBehaviour
 
         if (inputMagnitude > 0.001f)
         {
-            var desired = Quaternion.LookRotation(new Vector3(_moveInput.x, 0f, -_moveInput.y), transform.up);
+            var desired = Quaternion.LookRotation(new Vector3(-_moveInput.x, 0f, _moveInput.y), transform.up);
             mainJoint.targetRotation = Quaternion.RotateTowards(
                 mainJoint.targetRotation,
                 desired,
