@@ -282,7 +282,14 @@ namespace SSAFYPlayTime
             }
         }
 
-        void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input) { }
+        void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input)
+        {
+            input.Set(new PlayerNetworkInput
+            {
+                Move = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical")),
+                Jump = Input.GetKey(KeyCode.Space)
+            });
+        }
         void INetworkRunnerCallbacks.OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
 
         void INetworkRunnerCallbacks.OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, ArraySegment<byte> data)
@@ -349,6 +356,7 @@ namespace SSAFYPlayTime
             }
 
             _spawnedGameplayNetworkCharacters.Clear();
+            _cachedSpawnPointGroup = null;
         }
 
         void INetworkRunnerCallbacks.OnSceneLoadDone(NetworkRunner runner)
