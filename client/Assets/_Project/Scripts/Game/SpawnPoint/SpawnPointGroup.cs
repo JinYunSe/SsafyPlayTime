@@ -1,9 +1,15 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+// GameScene의 SpawnPointGroup GameObject에 부착되는 컴포넌트.
+// 자식 오브젝트(Point)들을 스폰 위치 풀로 관리하며,
+// 서버가 캐릭터를 생성할 때 ClaimRandomPoint()로 중복 없이 랜덤 배정한다.
 public sealed class SpawnPointGroup : MonoBehaviour
 {
+    // 자식 오브젝트 Transform 배열 (각 Point의 위치·회전 정보)
     private Transform[] _points;
+
+    // 아직 사용되지 않은 Point의 인덱스 목록. 배정 시 제거되어 중복을 방지한다.
     private readonly List<int> _availableIndices = new();
 
     private void Awake()
@@ -45,6 +51,7 @@ public sealed class SpawnPointGroup : MonoBehaviour
         ResetAvailable();
     }
 
+    // _availableIndices를 전체 인덱스로 초기화한다.
     private void ResetAvailable()
     {
         _availableIndices.Clear();
