@@ -33,3 +33,13 @@
 - `ItemFieldDropFactory.cs`: 필드 드랍 오브젝트 생성기
 - `ItemFieldPrefabResolver.cs`: 프리팹 경로 해석기
 - `ItemFieldPositionUtility.cs`: 링 배치/지면 위치 계산 유틸
+
+## Integration
+- `ItemCharacterAutoAttachBootstrap.cs`: 캐릭터 프리팹 수정 없이 아이템 컴포넌트 자동 결합
+- `ItemCharacterUseInteractor.cs`: 캐릭터 입력 기반 아이템 사용 호출
+- `ItemCharacterHeldItemPresenter.cs`: 보유 아이템 손 장착 시각화
+- `ItemCharacterBuffApplier.cs`: 버프 상태를 캐릭터 시각/배율 정보로 변환
+- `ItemFieldInteractionService.cs`: 실게임 적용용 필드 스폰/획득/사용 서비스 API
+
+## Test
+- `ItemFieldDropDevTestInput.cs`: 개발 테스트 입력(1키 스폰, 우클릭 상호작용, F키 수동 드랍) 전용 컨트롤러

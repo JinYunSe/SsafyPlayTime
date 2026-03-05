@@ -142,6 +142,21 @@ namespace SSAFYPlayTime.Gameplay.Items
             itemRuntimeHost = runtimeHost;
         }
 
+        public void SetUseLegacyInput(bool enabled)
+        {
+            useLegacyInput = enabled;
+        }
+
+        public void SetInteractorRoot(Transform root)
+        {
+            interactorRoot = root;
+        }
+
+        public void SetPickupKey(KeyCode key)
+        {
+            pickupKey = key;
+        }
+
         private void OnValidate()
         {
             pickupRadius = Mathf.Max(0.1f, pickupRadius);
