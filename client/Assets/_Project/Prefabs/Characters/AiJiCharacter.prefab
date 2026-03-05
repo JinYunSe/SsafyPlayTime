@@ -46,8 +46,10 @@ GameObject:
   - component: {fileID: 7848740417640629547}
   - component: {fileID: 8510528026072984226}
   - component: {fileID: 3164507818068856467}
+  - component: {fileID: 9028925187560969079}
+  - component: {fileID: 4880530773400701238}
   m_Layer: 0
-  m_Name: SsatyCharacter
+  m_Name: AiJiCharacter
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -250,8 +252,45 @@ MonoBehaviour:
   rigidbody3D: {fileID: 4618390453993469017}
   mainJoint: {fileID: 7848740417640629547}
   animator: {fileID: 0}
+  fallbackAnimatorController: {fileID: 0}
   syncPhysicsObjects: []
   config: {fileID: 11400000, guid: 75abf164104853249b9f62f7cd147f60, type: 2}
+--- !u!114 &9028925187560969079
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4106621260892783438}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  SortKey: 2553387132
+  ObjectInterest: 1
+  Flags: 262145
+  NestedObjects: []
+  NetworkedBehaviours:
+  - {fileID: 4880530773400701238}
+  ForceRemoteRenderTimeframe: 0
+--- !u!114 &4880530773400701238
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4106621260892783438}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 158639473, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _stateAuthorityChangeErrorCorrectionDelta: 0
+  SyncScale: 0
+  SyncParent: 0
+  _autoAOIOverride: 1
+  DisableSharedModeInterpolation: 0
 --- !u!1001 &5710873699891313638
 PrefabInstance:
   m_ObjectHideFlags: 0
