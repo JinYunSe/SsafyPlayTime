@@ -1,3 +1,5 @@
+using System;
+using System.Collections;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Gameplay.Items
@@ -38,12 +40,19 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private void OnBlackholeRequested(BlackholeSkillRequest request)
         {
-            if (_blackholeRoutine != null)
+            Coroutine routine = null;
+            routine = StartCoroutine(CoBlackholeSkillTracked(request, () =>
             {
-                StopCoroutine(_blackholeRoutine);
-            }
+                if (routine != null)
+                {
+                    _activeBlackholeRoutines.Remove(routine);
+                }
+            }));
 
-            _blackholeRoutine = StartCoroutine(CoBlackholeSkill(request));
+            if (routine != null)
+            {
+                _activeBlackholeRoutines.Add(routine);
+            }
         }
 
         private void OnFlamethrowerStarted(string itemId, float endAtSec)
@@ -62,6 +71,33 @@ namespace SSAFYPlayTime.Gameplay.Items
         private void OnFlamethrowerTicked(FlamethrowerTickRequest request)
         {
             TickFlamethrower(in request);
+        }
+
+        private IEnumerator CoBlackholeSkillTracked(BlackholeSkillRequest request, Action onFinished)
+        {
+            yield return CoBlackholeSkill(request);
+            onFinished?.Invoke();
+        }
+
+        private void StopAllBlackholeRoutines()
+        {
+            if (_activeBlackholeRoutines.Count == 0)
+            {
+                return;
+            }
+
+            // 여러 블랙홀 코루틴을 한 번에 정리한다.
+            foreach (var routine in _activeBlackholeRoutines)
+            {
+                if (routine == null)
+                {
+                    continue;
+                }
+
+                StopCoroutine(routine);
+            }
+
+            _activeBlackholeRoutines.Clear();
         }
     }
 }

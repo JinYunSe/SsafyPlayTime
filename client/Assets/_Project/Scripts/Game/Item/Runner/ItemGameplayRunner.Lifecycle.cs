@@ -41,11 +41,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         {
             UnbindRuntimeEvents();
 
-            if (_blackholeRoutine != null)
-            {
-                StopCoroutine(_blackholeRoutine);
-                _blackholeRoutine = null;
-            }
+            StopAllBlackholeRoutines();
 
             StopFlamethrowerParticle();
             StopAllLoopingSfx();
