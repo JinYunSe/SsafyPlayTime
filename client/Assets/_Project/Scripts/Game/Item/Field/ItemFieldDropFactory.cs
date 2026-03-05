@@ -1,4 +1,7 @@
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace SSAFYPlayTime.Gameplay.Items
 {
@@ -7,7 +10,11 @@ namespace SSAFYPlayTime.Gameplay.Items
     /// </summary>
     public sealed class ItemFieldDropFactory
     {
+        private const string BlackholeFieldEffectAssetPath =
+            "Assets/Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple.prefab";
+        private const float WaterMelonSwordScaleMultiplier = 1.3f;
         private readonly IItemFieldPrefabResolver _prefabResolver;
+        private GameObject _blackholeEffectPrefabCache;
 
         public ItemFieldDropFactory(IItemFieldPrefabResolver prefabResolver)
         {
@@ -21,21 +28,34 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return null;
             }
 
-            var prefab = _prefabResolver?.Resolve(definition.Master.PrefabPath);
             GameObject instance;
-            if (prefab != null)
+            if (string.Equals(definition.Master.ItemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal))
             {
-                instance = Object.Instantiate(prefab, position, Quaternion.identity, parent);
+                instance = CreateBlackholeFieldDropRoot(position, parent);
             }
             else
             {
-                instance = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                instance.transform.position = position;
-                instance.transform.localScale = Vector3.one * 0.45f;
-                if (parent != null)
+                var prefab = _prefabResolver?.Resolve(definition.Master.PrefabPath);
+                if (prefab != null)
                 {
-                    instance.transform.SetParent(parent, true);
+                    instance = Object.Instantiate(prefab, position, Quaternion.identity, parent);
                 }
+                else
+                {
+                    instance = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    instance.transform.position = position;
+                    instance.transform.localScale = Vector3.one * 0.45f;
+                    if (parent != null)
+                    {
+                        instance.transform.SetParent(parent, true);
+                    }
+                }
+            }
+
+            if (string.Equals(definition.Master.ItemId, ItemIds.WaterMelonSword, System.StringComparison.Ordinal))
+            {
+                ApplyScaleMultiplier(instance, WaterMelonSwordScaleMultiplier);
+                ApplyUrpMaterialFallback(instance);
             }
 
             instance.name = $"FieldItem_{definition.Master.ItemId}";
@@ -50,6 +70,173 @@ namespace SSAFYPlayTime.Gameplay.Items
             return fieldDrop;
         }
 
+        private GameObject CreateBlackholeFieldDropRoot(Vector3 position, Transform parent)
+        {
+            var root = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            root.transform.position = position;
+            root.transform.localScale = Vector3.one * 0.45f;
+            if (parent != null)
+            {
+                root.transform.SetParent(parent, true);
+            }
+
+            ApplyBlackholeShellTransparency(root);
+
+            var effectPrefab = TryLoadBlackholeFieldEffectPrefab();
+            if (effectPrefab != null)
+            {
+                var effectInstance = Object.Instantiate(effectPrefab, root.transform);
+                effectInstance.name = "Item_BlackholeFx";
+                effectInstance.transform.localPosition = Vector3.zero;
+                effectInstance.transform.localRotation = Quaternion.identity;
+                effectInstance.transform.localScale = Vector3.one * 0.7f;
+                DisableColliders(effectInstance);
+                DisableUnsupportedDistortionRenderers(effectInstance);
+            }
+
+            return root;
+        }
+
+        private static void ApplyBlackholeShellTransparency(GameObject root)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            var renderer = root.GetComponent<Renderer>();
+            if (renderer == null)
+            {
+                return;
+            }
+
+            // 내부 이펙트가 가려지지 않도록 외곽 구체를 반투명으로 설정한다.
+            var material = renderer.material;
+            if (material == null)
+            {
+                renderer.enabled = false;
+                return;
+            }
+
+            var shellColor = new Color(0.07f, 0.07f, 0.08f, 0.14f);
+            if (material.HasProperty("_BaseColor"))
+            {
+                material.SetColor("_BaseColor", shellColor);
+            }
+            if (material.HasProperty("_Color"))
+            {
+                material.SetColor("_Color", shellColor);
+            }
+
+            if (material.HasProperty("_Surface"))
+            {
+                material.SetFloat("_Surface", 1f);
+            }
+            if (material.HasProperty("_Blend"))
+            {
+                material.SetFloat("_Blend", 0f);
+            }
+            if (material.HasProperty("_SrcBlend"))
+            {
+                material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            }
+            if (material.HasProperty("_DstBlend"))
+            {
+                material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            }
+            if (material.HasProperty("_ZWrite"))
+            {
+                material.SetFloat("_ZWrite", 0f);
+            }
+            if (material.HasProperty("_Mode"))
+            {
+                material.SetFloat("_Mode", 3f);
+            }
+
+            material.SetOverrideTag("RenderType", "Transparent");
+            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.EnableKeyword("_ALPHABLEND_ON");
+            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        }
+
+        private GameObject TryLoadBlackholeFieldEffectPrefab()
+        {
+            if (_blackholeEffectPrefabCache != null)
+            {
+                return _blackholeEffectPrefabCache;
+            }
+
+#if UNITY_EDITOR
+            _blackholeEffectPrefabCache = AssetDatabase.LoadAssetAtPath<GameObject>(BlackholeFieldEffectAssetPath);
+            if (_blackholeEffectPrefabCache != null)
+            {
+                return _blackholeEffectPrefabCache;
+            }
+#endif
+            _blackholeEffectPrefabCache = Resources.Load<GameObject>("Effect_02_BlackHole");
+            return _blackholeEffectPrefabCache;
+        }
+
+        private static void DisableColliders(GameObject root)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            var colliders = root.GetComponentsInChildren<Collider>(true);
+            for (var i = 0; i < colliders.Length; i++)
+            {
+                colliders[i].enabled = false;
+            }
+        }
+
+        private static void DisableUnsupportedDistortionRenderers(GameObject root)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            var renderers = root.GetComponentsInChildren<Renderer>(true);
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                var renderer = renderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                var rendererName = renderer.gameObject.name ?? string.Empty;
+                if (rendererName.IndexOf("Distort", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    renderer.enabled = false;
+                    continue;
+                }
+
+                var materials = renderer.sharedMaterials;
+                for (var m = 0; m < materials.Length; m++)
+                {
+                    var material = materials[m];
+                    if (material == null)
+                    {
+                        continue;
+                    }
+
+                    var shaderName = material.shader != null ? material.shader.name : string.Empty;
+                    if (shaderName.IndexOf("Distortion Effect", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        shaderName.IndexOf("Grab", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        material.name.IndexOf("Distort", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        renderer.enabled = false;
+                        break;
+                    }
+                }
+            }
+        }
+
         private static void EnsureCollider(GameObject target)
         {
             if (target.GetComponentInChildren<Collider>() != null)
@@ -58,6 +245,141 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             target.AddComponent<SphereCollider>();
+        }
+
+        private static void ApplyScaleMultiplier(GameObject target, float multiplier)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            var safeMultiplier = Mathf.Max(0.01f, multiplier);
+            target.transform.localScale *= safeMultiplier;
+        }
+
+        private static void ApplyUrpMaterialFallback(GameObject root)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            var renderers = root.GetComponentsInChildren<Renderer>(true);
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                var renderer = renderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                var materials = renderer.materials;
+                var replaced = false;
+                for (var m = 0; m < materials.Length; m++)
+                {
+                    var source = materials[m];
+                    if (source == null || !NeedsUrpFallback(source))
+                    {
+                        continue;
+                    }
+
+                    var fallbackShader =
+                        Shader.Find("Universal Render Pipeline/Lit") ??
+                        Shader.Find("Universal Render Pipeline/Simple Lit") ??
+                        Shader.Find("Standard");
+                    if (fallbackShader == null)
+                    {
+                        continue;
+                    }
+
+                    // URP 미지원 셰이더(마젠타)를 런타임 호환 머티리얼로 치환한다.
+                    var fallback = new Material(fallbackShader)
+                    {
+                        name = $"{source.name}_URPFallback"
+                    };
+                    CopyMainSurfaceProperties(source, fallback);
+                    materials[m] = fallback;
+                    replaced = true;
+                }
+
+                if (replaced)
+                {
+                    renderer.materials = materials;
+                }
+            }
+        }
+
+        private static bool NeedsUrpFallback(Material material)
+        {
+            if (material == null || material.shader == null)
+            {
+                return true;
+            }
+
+            if (!material.shader.isSupported)
+            {
+                return true;
+            }
+
+            if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline == null)
+            {
+                return false;
+            }
+
+            var shaderName = material.shader.name ?? string.Empty;
+            return string.Equals(shaderName, "Standard", System.StringComparison.OrdinalIgnoreCase) ||
+                   shaderName.StartsWith("Legacy Shaders/", System.StringComparison.OrdinalIgnoreCase) ||
+                   shaderName.StartsWith("Mobile/", System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void CopyMainSurfaceProperties(Material source, Material destination)
+        {
+            if (source == null || destination == null)
+            {
+                return;
+            }
+
+            var color = Color.white;
+            if (source.HasProperty("_BaseColor"))
+            {
+                color = source.GetColor("_BaseColor");
+            }
+            else if (source.HasProperty("_Color"))
+            {
+                color = source.GetColor("_Color");
+            }
+
+            if (destination.HasProperty("_BaseColor"))
+            {
+                destination.SetColor("_BaseColor", color);
+            }
+            if (destination.HasProperty("_Color"))
+            {
+                destination.SetColor("_Color", color);
+            }
+
+            Texture mainTexture = null;
+            if (source.HasProperty("_BaseMap"))
+            {
+                mainTexture = source.GetTexture("_BaseMap");
+            }
+            else if (source.HasProperty("_MainTex"))
+            {
+                mainTexture = source.GetTexture("_MainTex");
+            }
+
+            if (mainTexture != null)
+            {
+                if (destination.HasProperty("_BaseMap"))
+                {
+                    destination.SetTexture("_BaseMap", mainTexture);
+                }
+                if (destination.HasProperty("_MainTex"))
+                {
+                    destination.SetTexture("_MainTex", mainTexture);
+                }
+            }
         }
     }
 }
