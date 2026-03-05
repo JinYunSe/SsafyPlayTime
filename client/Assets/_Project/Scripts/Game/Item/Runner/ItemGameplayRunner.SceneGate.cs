@@ -29,6 +29,11 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 root.AddComponent<ItemGameplayRunner>();
             }
+
+            if (root.GetComponent<ItemFieldSystemBootstrap>() == null)
+            {
+                root.AddComponent<ItemFieldSystemBootstrap>();
+            }
         }
 
         private bool ShouldRunInCurrentScene()

@@ -23,3 +23,13 @@
 
 ## Runner
 - `ItemGameplayRunner*.cs`: ItemScene 전용 실행/입력/표현/물리 연출
+
+## Field
+- `ItemFieldDrop.cs`: 필드 아이템 엔티티(아이템 ID/획득 상태)
+- `ItemFieldDropSpawner.cs`: 필드 배치/드랍 오케스트레이션
+- `ItemFieldPickupInteractor.cs`: 우클릭/외부 호출 기반 획득 인터랙션
+- `ItemFieldSystemBootstrap.cs`: Host-Field 컴포넌트 자동 연결
+- `ItemFieldCatalogProvider.cs`: 카탈로그 캐시 로더
+- `ItemFieldDropFactory.cs`: 필드 드랍 오브젝트 생성기
+- `ItemFieldPrefabResolver.cs`: 프리팹 경로 해석기
+- `ItemFieldPositionUtility.cs`: 링 배치/지면 위치 계산 유틸
