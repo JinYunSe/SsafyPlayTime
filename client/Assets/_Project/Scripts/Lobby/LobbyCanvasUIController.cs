@@ -204,6 +204,11 @@ namespace SSAFYPlayTime
         private readonly int[] _selectedCharacterIndexBySlot = { -1, -1, -1, -1 };
         private readonly int[] _playerIdBySlot = { -1, -1, -1, -1 };
         private readonly Dictionary<int, int> _selectedCharacterIndexByPlayerId = new();
+
+        // 로컬 플레이어가 선택한 캐릭터 인덱스.
+        // ShutdownRunnerAsync로 초기화되지 않으며 호스트 마이그레이션 후
+        // 새 방장에게 캐릭터 선택을 재전송할 때 사용된다. 연쇄 마이그레이션에도 유지된다.
+        private int _localSelectedCharacterIndex = -1;
         private readonly Dictionary<Transform, Vector3> _characterBaseLocalScales = new();
         private readonly Dictionary<Transform, float> _characterBaseBoundsHeights = new();
         private readonly Dictionary<Transform, int> _characterOptionIndexByTransform = new();
@@ -1322,6 +1327,7 @@ namespace SSAFYPlayTime
             {
                 return;
             }
+            _localSelectedCharacterIndex = normalizedIndex;
             var localPlayerId = _runner.LocalPlayer.PlayerId;
             _selectedCharacterIndexByPlayerId[localPlayerId] = normalizedIndex;
 
