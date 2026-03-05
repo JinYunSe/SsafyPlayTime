@@ -11,10 +11,10 @@ public sealed class NetworkPlayer : MonoBehaviour
 
     [Header("Config")]
     [SerializeField] private PlayerMotorConfig config;
+    [SerializeField] private RuntimeAnimatorController fallbackAnimatorController;
 
     private readonly GroundProbe _groundProbe = new();
     private readonly PlayerMotorStateMachine _stateMachine = new();
-
     private Vector2 _moveInput;
     private bool _jumpPressed;
     private bool _isGrounded;
@@ -23,6 +23,8 @@ public sealed class NetworkPlayer : MonoBehaviour
     {
         if (syncPhysicsObjects == null || syncPhysicsObjects.Length == 0)
             syncPhysicsObjects = GetComponentsInChildren<SyncPhysicsObject>(true);
+
+        EnsureAnimatorBinding();
     }
 
     private void Update()
@@ -75,8 +77,32 @@ public sealed class NetworkPlayer : MonoBehaviour
             animator.SetFloat("movementSpeed", Mathf.Abs(forwardVelocity) * 0.4f);
             animator.SetInteger("MotorState", (int)_stateMachine.CurrentState);
         }
-
         for (var i = 0; i < syncPhysicsObjects.Length; i++)
+        {
             syncPhysicsObjects[i].UpdateJointFromAnimation();
+        }
+    }
+
+    private void EnsureAnimatorBinding()
+    {
+        if (animator == null) {
+            animator = GetComponentInChildren<Animator>(true);
+        }
+
+        if (animator == null) {
+            // Last-resort fallback so character does not remain in bind pose.
+            animator = gameObject.AddComponent<Animator>();
+        }
+
+        if (animator.runtimeAnimatorController == null && fallbackAnimatorController != null) {
+            animator.runtimeAnimatorController = fallbackAnimatorController;
+        }
+
+        animator.applyRootMotion = false;
+        animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+        animator.updateMode = AnimatorUpdateMode.Normal;
+        animator.enabled = true;
+        animator.Rebind();
+        animator.Update(0f);
     }
 }
