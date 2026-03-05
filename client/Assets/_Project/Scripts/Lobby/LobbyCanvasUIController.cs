@@ -36,10 +36,10 @@ namespace SSAFYPlayTime
 
         private enum CharacterKind
         {
-            Ghost = 0,
-            Glasses = 1,
-            Green = 2,
-            Ssaty = 3
+            AiJi = 0,
+            Pit = 1,
+            SeuTati = 2,
+            WaiJeu = 3
         }
 
         private const string PrivateKey = "isPrivate";
@@ -97,15 +97,15 @@ namespace SSAFYPlayTime
         [SerializeField] private TMP_Text playerTwoText;
         [SerializeField] private TMP_Text playerThreeText;
         [SerializeField] private TMP_Text playerFourText;
-        [SerializeField] private GameObject ghostCharacterRoot;
-        [SerializeField] private GameObject glassesCharacterRoot;
-        [SerializeField] private GameObject greenCharacterRoot;
-        [SerializeField] private GameObject ssatyCharacterRoot;
+        [SerializeField] private GameObject aiJiCharacterRoot;
+        [SerializeField] private GameObject pitCharacterRoot;
+        [SerializeField] private GameObject seuTatiCharacterRoot;
+        [SerializeField] private GameObject waiJeuCharacterRoot;
         [SerializeField] private GameObject characterSelectionPanel;
-        [SerializeField] private Button selectGhostCharacterButton;
-        [SerializeField] private Button selectGlassesCharacterButton;
-        [SerializeField] private Button selectGreenCharacterButton;
-        [SerializeField] private Button selectSsatyCharacterButton;
+        [SerializeField] private Button selectAiJiCharacterButton;
+        [SerializeField] private Button selectPitCharacterButton;
+        [SerializeField] private Button selectSeuTatiCharacterButton;
+        [SerializeField] private Button selectWaiJeuCharacterButton;
         [SerializeField] private bool lockPlayerSlotLayoutToViewport = true;
         [SerializeField] private float playerSlotViewportY = 0.3f;
         [SerializeField] private float playerSlotVerticalPixelOffset = 0f;
@@ -122,7 +122,8 @@ namespace SSAFYPlayTime
         [SerializeField] private float nicknameFontSizeMax = 64f;
         [SerializeField] private float characterVerticalOffset = 20f;
         [SerializeField] private float characterExtraVerticalOffset = 20f;
-        [SerializeField] private float ghostCharacterVerticalOffsetAdjustment = -18f;
+        [SerializeField] private float seuTatiCharacterVerticalOffsetAdjustment = -18f;
+        [SerializeField] private float seuTatiCharacterWorldYAdjustment = -0.73f;
         [SerializeField] private Transform characterRuntimeRoot;
         [SerializeField] private Camera characterPlacementCamera;
         [SerializeField] private float characterWorldDepth = 8f;
@@ -135,6 +136,9 @@ namespace SSAFYPlayTime
         [SerializeField] private Button leaveRoomButton;
         [SerializeField] private Button startGameButton;
         [SerializeField] private string gameplaySceneName = string.Empty;
+
+        [Header("Character Preview (optional)")]
+        [SerializeField] private CharacterPreviewController characterPreview;
 
         [Header("UI Text (Inspector)")]
         [SerializeField] private string statusRefreshingRooms = "방 목록을 새로고침 중입니다...";
@@ -203,6 +207,7 @@ namespace SSAFYPlayTime
         private readonly Dictionary<Transform, Vector3> _characterBaseLocalScales = new();
         private readonly Dictionary<Transform, float> _characterBaseBoundsHeights = new();
         private readonly Dictionary<Transform, int> _characterOptionIndexByTransform = new();
+        private readonly Dictionary<Transform, float> _characterPrePlacedWorldY = new();
         private bool _characterSlotsInitialized;
 
         private void Start()
@@ -216,6 +221,10 @@ namespace SSAFYPlayTime
             NormalizeRoomListBindings();
             BindEvents();
             InitializeCharacterSlotsIfNeeded();
+            if (characterPreview != null)
+            {
+                characterPreview.Initialize(GetNameSlots());
+            }
             ShowNicknamePanel();
         }
 
@@ -233,7 +242,7 @@ namespace SSAFYPlayTime
             nicknameFontSizeMax = 64f;
             characterVerticalOffset = 20f;
             characterExtraVerticalOffset = 20f;
-            ghostCharacterVerticalOffsetAdjustment = -18f;
+            seuTatiCharacterVerticalOffsetAdjustment = -18f;
             characterScreenHeightMultiplier = 2.5f;
         }
 
@@ -251,6 +260,7 @@ namespace SSAFYPlayTime
             {
                 LayoutNameSlotsForCurrentViewport();
                 AlignAllCharacterCandidatesToNameSlots();
+                characterPreview?.UpdateFrame();
             }
         }
 
@@ -303,24 +313,29 @@ namespace SSAFYPlayTime
                 startGameButton.onClick.AddListener(OnStartGameClicked);
             }
 
-            if (selectGhostCharacterButton != null)
+            if (selectAiJiCharacterButton != null)
             {
-                selectGhostCharacterButton.onClick.AddListener(OnSelectGhostCharacter);
+                selectAiJiCharacterButton.onClick.AddListener(OnSelectAiJiCharacter);
             }
 
-            if (selectGlassesCharacterButton != null)
+            if (selectPitCharacterButton != null)
             {
-                selectGlassesCharacterButton.onClick.AddListener(OnSelectGlassesCharacter);
+                selectPitCharacterButton.onClick.AddListener(OnSelectPitCharacter);
             }
 
-            if (selectGreenCharacterButton != null)
+            if (selectSeuTatiCharacterButton != null)
             {
-                selectGreenCharacterButton.onClick.AddListener(OnSelectGreenCharacter);
+                selectSeuTatiCharacterButton.onClick.AddListener(OnSelectSeuTatiCharacter);
             }
 
-            if (selectSsatyCharacterButton != null)
+            if (selectWaiJeuCharacterButton != null)
             {
-                selectSsatyCharacterButton.onClick.AddListener(OnSelectSsatyCharacter);
+                selectWaiJeuCharacterButton.onClick.AddListener(OnSelectWaiJeuCharacter);
+            }
+
+            if (characterPreview != null)
+            {
+                characterPreview.CharacterSelected += SetLocalPlayerSelectedCharacter;
             }
         }
 
@@ -854,23 +869,38 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            var templates = new[] { ghostCharacterRoot, glassesCharacterRoot, greenCharacterRoot, ssatyCharacterRoot };
+            var templates = new[] { aiJiCharacterRoot, pitCharacterRoot, seuTatiCharacterRoot, waiJeuCharacterRoot };
             var nameSlots = GetNameSlots();
             if (templates.Any(t => t == null) || nameSlots.Any(t => t == null))
             {
                 return;
             }
 
+            var runtimeRoot = ResolveCharacterRuntimeRoot();
             for (var slot = 0; slot < PlayerSlotCount; slot++)
             {
                 for (var option = 0; option < CharacterOptionCount; option++)
                 {
                     var template = templates[option];
-                    var clone = Instantiate(template, ResolveCharacterRuntimeRoot(), true);
-                    clone.name = $"{template.name}_Slot{slot + 1}";
-                    ConfigureCharacterPreviewClone(clone);
-                    clone.SetActive(false);
-                    var cloneTransform = clone.transform;
+                    var prePlacedName = $"{template.name}_Slot{slot + 1}";
+                    var prePlaced = runtimeRoot.Find(prePlacedName);
+
+                    Transform cloneTransform;
+                    if (prePlaced != null)
+                    {
+                        cloneTransform = prePlaced;
+                        ConfigureCharacterPreviewClone(cloneTransform.gameObject);
+                        _characterPrePlacedWorldY[cloneTransform] = cloneTransform.position.y;
+                    }
+                    else
+                    {
+                        var clone = Instantiate(template, runtimeRoot, true);
+                        clone.name = prePlacedName;
+                        ConfigureCharacterPreviewClone(clone);
+                        cloneTransform = clone.transform;
+                    }
+
+                    cloneTransform.gameObject.SetActive(false);
                     _slotCharacterRoots[slot, option] = cloneTransform;
                     _characterBaseLocalScales[cloneTransform] = cloneTransform.localScale;
                     _characterBaseBoundsHeights[cloneTransform] = CalculateCombinedBoundsHeight(cloneTransform);
@@ -958,7 +988,12 @@ namespace SSAFYPlayTime
             }
 
             var targetWorld = worldCam.ScreenToWorldPoint(new Vector3(screenPoint.x, screenPoint.y, depth));
-            characterSlot.position = targetWorld + characterWorldOffset;
+            var finalPos = targetWorld + characterWorldOffset;
+            if (_characterPrePlacedWorldY.TryGetValue(characterSlot, out var lockedY))
+            {
+                finalPos.y = lockedY + GetCharacterPrePlacedWorldYAdjustment(characterSlot);
+            }
+            characterSlot.position = finalPos;
 
             if (keepCharacterScreenSize)
             {
@@ -1094,9 +1129,20 @@ namespace SSAFYPlayTime
             }
 
             if (_characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) &&
-                option == (int)CharacterKind.Ghost)
+                option == (int)CharacterKind.SeuTati)
             {
-                return ghostCharacterVerticalOffsetAdjustment;
+                return seuTatiCharacterVerticalOffsetAdjustment;
+            }
+
+            return 0f;
+        }
+
+        private float GetCharacterPrePlacedWorldYAdjustment(Transform characterSlot)
+        {
+            if (_characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) &&
+                option == (int)CharacterKind.SeuTati)
+            {
+                return seuTatiCharacterWorldYAdjustment;
             }
 
             return 0f;
@@ -1224,6 +1270,23 @@ namespace SSAFYPlayTime
             return Mathf.Max(0.001f, bounds.size.y);
         }
 
+        private void HideAllCharacterSlots()
+        {
+            for (var slot = 0; slot < PlayerSlotCount; slot++)
+            {
+                for (var option = 0; option < CharacterOptionCount; option++)
+                {
+                    var root = _slotCharacterRoots[slot, option];
+                    if (root != null)
+                    {
+                        root.gameObject.SetActive(false);
+                    }
+                }
+            }
+
+            characterPreview?.ClearAllSlots();
+        }
+
         private TMP_Text[] GetNameSlots()
         {
             return new[] { playerOneText, playerTwoText, playerThreeText, playerFourText };
@@ -1240,10 +1303,10 @@ namespace SSAFYPlayTime
             ApplySelectedCharacterForSlot(slotIndex, true);
         }
 
-        public void OnSelectGhostCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Ghost);
-        public void OnSelectGlassesCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Glasses);
-        public void OnSelectGreenCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Green);
-        public void OnSelectSsatyCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Ssaty);
+        public void OnSelectAiJiCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.AiJi);
+        public void OnSelectPitCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Pit);
+        public void OnSelectSeuTatiCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.SeuTati);
+        public void OnSelectWaiJeuCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.WaiJeu);
         public void SetLocalSelectedCharacterByName(string characterName) =>
             SetLocalPlayerSelectedCharacter(CharacterNameToIndex(characterName));
 
@@ -1386,24 +1449,24 @@ namespace SSAFYPlayTime
 
         private static int CharacterNameToIndex(string characterName)
         {
-            if (string.Equals(characterName, "GhostCharacter", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(characterName, "AiJiCharacter", StringComparison.OrdinalIgnoreCase))
             {
-                return (int)CharacterKind.Ghost;
+                return (int)CharacterKind.AiJi;
             }
 
-            if (string.Equals(characterName, "GlassesCharacter", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(characterName, "PitCharacter", StringComparison.OrdinalIgnoreCase))
             {
-                return (int)CharacterKind.Glasses;
+                return (int)CharacterKind.Pit;
             }
 
-            if (string.Equals(characterName, "GreenCharacter", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(characterName, "SeuTatiCharacter", StringComparison.OrdinalIgnoreCase))
             {
-                return (int)CharacterKind.Green;
+                return (int)CharacterKind.SeuTati;
             }
 
-            if (string.Equals(characterName, "SsatyCharacter", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(characterName, "WaiJeuCharacter", StringComparison.OrdinalIgnoreCase))
             {
-                return (int)CharacterKind.Ssaty;
+                return (int)CharacterKind.WaiJeu;
             }
 
             return -1;
@@ -1413,10 +1476,10 @@ namespace SSAFYPlayTime
         {
             return SanitizeCharacterIndexOrNone(characterIndex) switch
             {
-                (int)CharacterKind.Ghost => ghostCharacterRoot,
-                (int)CharacterKind.Glasses => glassesCharacterRoot,
-                (int)CharacterKind.Green => greenCharacterRoot,
-                (int)CharacterKind.Ssaty => ssatyCharacterRoot,
+                (int)CharacterKind.AiJi => aiJiCharacterRoot,
+                (int)CharacterKind.Pit => pitCharacterRoot,
+                (int)CharacterKind.SeuTati => seuTatiCharacterRoot,
+                (int)CharacterKind.WaiJeu => waiJeuCharacterRoot,
                 _ => null
             };
         }
@@ -1429,6 +1492,7 @@ namespace SSAFYPlayTime
             createRoomModal.SetActive(false);
             passwordModal.SetActive(false);
             SetNicknameValidation(string.Empty);
+            HideAllCharacterSlots();
             RefreshCharacterSelectionUiState();
         }
 
@@ -1439,6 +1503,7 @@ namespace SSAFYPlayTime
             roomPanel.SetActive(false);
             passwordModal.SetActive(false);
             lobbyHeaderText.text = string.Format(nicknameHeaderFormat, _nickname);
+            HideAllCharacterSlots();
             RefreshCharacterSelectionUiState();
         }
 
@@ -1992,37 +2057,37 @@ namespace SSAFYPlayTime
                 roomItemTemplate = FindChildByNames("RoomItemTemplate");
             }
 
-            if (ghostCharacterRoot == null) ghostCharacterRoot = FindChildByNames("GhostCharacter");
-            if (glassesCharacterRoot == null) glassesCharacterRoot = FindChildByNames("GlassesCharacter");
-            if (greenCharacterRoot == null) greenCharacterRoot = FindChildByNames("GreenCharacter");
-            if (ssatyCharacterRoot == null) ssatyCharacterRoot = FindChildByNames("SsatyCharacter");
+            if (aiJiCharacterRoot == null) aiJiCharacterRoot = FindChildByNames("AiJiCharacter");
+            if (pitCharacterRoot == null) pitCharacterRoot = FindChildByNames("PitCharacter");
+            if (seuTatiCharacterRoot == null) seuTatiCharacterRoot = FindChildByNames("SeuTatiCharacter");
+            if (waiJeuCharacterRoot == null) waiJeuCharacterRoot = FindChildByNames("WaiJeuCharacter");
             if (characterRuntimeRoot == null) characterRuntimeRoot = FindChildByNames("LobbyCharacterRuntimeRoot")?.transform;
             if (characterSelectionPanel == null) characterSelectionPanel = FindChildByNames("CharacterSelectionPanel");
-            if (selectGhostCharacterButton == null) selectGhostCharacterButton = FindChildByNames("GhostCharacterUIButton", "GhostCharacterButton", "SelectGhostButton", "GhostSelectButton")?.GetComponent<Button>();
-            if (selectGlassesCharacterButton == null) selectGlassesCharacterButton = FindChildByNames("GlassesCharacterUIButton", "GlassesCharacterButton", "SelectGlassesButton", "GlassesSelectButton")?.GetComponent<Button>();
-            if (selectGreenCharacterButton == null) selectGreenCharacterButton = FindChildByNames("GreenCharacterUIButton", "GreenCharacterButton", "SelectGreenButton", "GreenSelectButton")?.GetComponent<Button>();
-            if (selectSsatyCharacterButton == null) selectSsatyCharacterButton = FindChildByNames("SsatyCharacterUIButton", "SsatyCharacterButton", "SelectSsatyButton", "SsatySelectButton")?.GetComponent<Button>();
+            if (selectAiJiCharacterButton == null) selectAiJiCharacterButton = FindChildByNames("AiJiCharacterUIButton", "AiJiCharacterButton", "SelectAiJiButton", "AiJiSelectButton")?.GetComponent<Button>();
+            if (selectPitCharacterButton == null) selectPitCharacterButton = FindChildByNames("PitCharacterUIButton", "PitCharacterButton", "SelectPitButton", "PitSelectButton")?.GetComponent<Button>();
+            if (selectSeuTatiCharacterButton == null) selectSeuTatiCharacterButton = FindChildByNames("SeuTatiCharacterUIButton", "SeuTatiCharacterButton", "SelectSeuTatiButton", "SeuTatiSelectButton")?.GetComponent<Button>();
+            if (selectWaiJeuCharacterButton == null) selectWaiJeuCharacterButton = FindChildByNames("WaiJeuCharacterUIButton", "WaiJeuCharacterButton", "SelectWaiJeuButton", "WaiJeuSelectButton")?.GetComponent<Button>();
         }
 
         private void EnsureCharacterSelectionUi()
         {
             if (IsMissingReference(characterSelectionPanel)) characterSelectionPanel = null;
-            if (IsMissingReference(selectGhostCharacterButton)) selectGhostCharacterButton = null;
-            if (IsMissingReference(selectGlassesCharacterButton)) selectGlassesCharacterButton = null;
-            if (IsMissingReference(selectGreenCharacterButton)) selectGreenCharacterButton = null;
-            if (IsMissingReference(selectSsatyCharacterButton)) selectSsatyCharacterButton = null;
+            if (IsMissingReference(selectAiJiCharacterButton)) selectAiJiCharacterButton = null;
+            if (IsMissingReference(selectPitCharacterButton)) selectPitCharacterButton = null;
+            if (IsMissingReference(selectSeuTatiCharacterButton)) selectSeuTatiCharacterButton = null;
+            if (IsMissingReference(selectWaiJeuCharacterButton)) selectWaiJeuCharacterButton = null;
 
             if (characterSelectionPanel == null) characterSelectionPanel = FindChildByNames("CharacterSelectionPanel");
-            if (selectGhostCharacterButton == null) selectGhostCharacterButton = FindChildByNames("GhostCharacterUIButton", "GhostCharacterButton", "SelectGhostButton", "GhostSelectButton")?.GetComponent<Button>();
-            if (selectGlassesCharacterButton == null) selectGlassesCharacterButton = FindChildByNames("GlassesCharacterUIButton", "GlassesCharacterButton", "SelectGlassesButton", "GlassesSelectButton")?.GetComponent<Button>();
-            if (selectGreenCharacterButton == null) selectGreenCharacterButton = FindChildByNames("GreenCharacterUIButton", "GreenCharacterButton", "SelectGreenButton", "GreenSelectButton")?.GetComponent<Button>();
-            if (selectSsatyCharacterButton == null) selectSsatyCharacterButton = FindChildByNames("SsatyCharacterUIButton", "SsatyCharacterButton", "SelectSsatyButton", "SsatySelectButton")?.GetComponent<Button>();
+            if (selectAiJiCharacterButton == null) selectAiJiCharacterButton = FindChildByNames("AiJiCharacterUIButton", "AiJiCharacterButton", "SelectAiJiButton", "AiJiSelectButton")?.GetComponent<Button>();
+            if (selectPitCharacterButton == null) selectPitCharacterButton = FindChildByNames("PitCharacterUIButton", "PitCharacterButton", "SelectPitButton", "PitSelectButton")?.GetComponent<Button>();
+            if (selectSeuTatiCharacterButton == null) selectSeuTatiCharacterButton = FindChildByNames("SeuTatiCharacterUIButton", "SeuTatiCharacterButton", "SelectSeuTatiButton", "SeuTatiSelectButton")?.GetComponent<Button>();
+            if (selectWaiJeuCharacterButton == null) selectWaiJeuCharacterButton = FindChildByNames("WaiJeuCharacterUIButton", "WaiJeuCharacterButton", "SelectWaiJeuButton", "WaiJeuSelectButton")?.GetComponent<Button>();
 
             if (characterSelectionPanel == null ||
-                selectGhostCharacterButton == null ||
-                selectGlassesCharacterButton == null ||
-                selectGreenCharacterButton == null ||
-                selectSsatyCharacterButton == null)
+                selectAiJiCharacterButton == null ||
+                selectPitCharacterButton == null ||
+                selectSeuTatiCharacterButton == null ||
+                selectWaiJeuCharacterButton == null)
             {
                 Debug.LogWarning("[Lobby] Character selection UI is missing in hierarchy. Please add CharacterSelectionPanel with 4 select buttons.");
             }
@@ -2039,29 +2104,48 @@ namespace SSAFYPlayTime
                             _runner.IsRunning &&
                             _runner.LocalPlayer.IsRealPlayer;
             var localPlayerId = canSelect ? _runner.LocalPlayer.PlayerId : -1;
-            var selected = canSelect && _selectedCharacterIndexByPlayerId.TryGetValue(localPlayerId, out var current)
+            var localSelected = canSelect && _selectedCharacterIndexByPlayerId.TryGetValue(localPlayerId, out var current)
                 ? SanitizeCharacterIndexOrNone(current)
                 : -1;
 
-            if (selectGhostCharacterButton != null)
+            // 다른 플레이어가 이미 선택한 캐릭터 인덱스 수집 (스냅샷으로 순회 중 변경 방지)
+            var takenByOthers = new System.Collections.Generic.HashSet<int>();
+            if (canSelect)
             {
-                TrySetButtonInteractable(selectGhostCharacterButton, canSelect && selected != (int)CharacterKind.Ghost);
+                var snapshot = new System.Collections.Generic.Dictionary<int, int>(_selectedCharacterIndexByPlayerId);
+                foreach (var kvp in snapshot)
+                {
+                    if (kvp.Key == localPlayerId) continue;
+                    var idx = SanitizeCharacterIndexOrNone(kvp.Value);
+                    if (idx >= 0) takenByOthers.Add(idx);
+                }
             }
 
-            if (selectGlassesCharacterButton != null)
+            if (selectAiJiCharacterButton != null)
             {
-                TrySetButtonInteractable(selectGlassesCharacterButton, canSelect && selected != (int)CharacterKind.Glasses);
+                TrySetButtonInteractable(selectAiJiCharacterButton,
+                    canSelect && localSelected != (int)CharacterKind.AiJi && !takenByOthers.Contains((int)CharacterKind.AiJi));
             }
 
-            if (selectGreenCharacterButton != null)
+            if (selectPitCharacterButton != null)
             {
-                TrySetButtonInteractable(selectGreenCharacterButton, canSelect && selected != (int)CharacterKind.Green);
+                TrySetButtonInteractable(selectPitCharacterButton,
+                    canSelect && localSelected != (int)CharacterKind.Pit && !takenByOthers.Contains((int)CharacterKind.Pit));
             }
 
-            if (selectSsatyCharacterButton != null)
+            if (selectSeuTatiCharacterButton != null)
             {
-                TrySetButtonInteractable(selectSsatyCharacterButton, canSelect && selected != (int)CharacterKind.Ssaty);
+                TrySetButtonInteractable(selectSeuTatiCharacterButton,
+                    canSelect && localSelected != (int)CharacterKind.SeuTati && !takenByOthers.Contains((int)CharacterKind.SeuTati));
             }
+
+            if (selectWaiJeuCharacterButton != null)
+            {
+                TrySetButtonInteractable(selectWaiJeuCharacterButton,
+                    canSelect && localSelected != (int)CharacterKind.WaiJeu && !takenByOthers.Contains((int)CharacterKind.WaiJeu));
+            }
+
+            characterPreview?.RefreshSelectionUiState(canSelect, localSelected, takenByOthers);
         }
 
         private static bool IsMissingReference(UnityEngine.Object target)
@@ -2271,190 +2355,9 @@ namespace SSAFYPlayTime
             }
         }
 
-        void INetworkRunnerCallbacks.OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList)
-        {
-            _isInLobby = true;
-            _lastSessionListUpdatedAtUtc = DateTime.UtcNow;
-            _roomSnapshots.Clear();
-            foreach (var session in sessionList)
-            {
-                if (!session.IsValid || !session.IsVisible)
-                {
-                    continue;
-                }
-
-                var snapshot = BuildSnapshot(session);
-                if (string.IsNullOrWhiteSpace(snapshot.Name))
-                {
-                    continue;
-                }
-
-                _roomSnapshots.Add(snapshot);
-            }
-
-            if (_isNicknameConfirmed && lobbyPanel.activeSelf)
-            {
-                RefreshRoomList();
-            }
-
-            SetLobbyStatus(string.Format(statusRoomsUpdatedFormat, _roomSnapshots.Count));
-            LogRoomSnapshotSummary();
-        }
-
-        void INetworkRunnerCallbacks.OnPlayerJoined(NetworkRunner runner, PlayerRef player)
-        {
-            if (runner != _runner)
-            {
-                return;
-            }
-
-            if (runner.IsServer)
-            {
-                TryRegisterParticipantFromToken(runner, player);
-
-                if (player == runner.LocalPlayer && !_roomParticipantsByPlayerId.ContainsKey(player.PlayerId))
-                {
-                    RegisterParticipant(player, _nickname);
-                }
-
-                if (_currentOwnerPlayerId <= 0 && runner.LocalPlayer.IsRealPlayer)
-                {
-                    _currentOwnerPlayerId = runner.LocalPlayer.PlayerId;
-                    _currentRoomOwner = _nickname;
-                    UpdateOwnerSessionProperty();
-                }
-
-                BroadcastPlayerRoster();
-            }
-            else if (player == runner.LocalPlayer)
-            {
-                RegisterParticipant(player, _nickname);
-            }
-
-            if (runner.IsServer && IsActiveGameplayScene())
-            {
-                TrySpawnGameplayNetworkCharacter(player);
-            }
-
-            if (roomPanel.activeSelf)
-            {
-                UpdateRoomPanel();
-            }
-        }
-
-        void INetworkRunnerCallbacks.OnPlayerLeft(NetworkRunner runner, PlayerRef player)
-        {
-            if (runner != _runner)
-            {
-                return;
-            }
-
-            if (runner.IsServer && _spawnedGameplayNetworkCharacters.TryGetValue(player.PlayerId, out var spawned) && spawned != null)
-            {
-                try
-                {
-                    runner.Despawn(spawned);
-                }
-                catch (Exception e)
-                {
-                    Debug.LogWarning($"[Lobby] Failed to despawn player character. player={player.PlayerId}, error={e.Message}");
-                }
-            }
-            _spawnedGameplayNetworkCharacters.Remove(player.PlayerId);
-
-            if (player.IsRealPlayer)
-            {
-                _roomParticipantsByPlayerId.Remove(player.PlayerId);
-                _selectedCharacterIndexByPlayerId.Remove(player.PlayerId);
-            }
-
-            if (runner.IsServer)
-            {
-                RecalculateOwnerAfterLeave();
-                BroadcastPlayerRoster();
-            }
-
-            if (roomPanel.activeSelf)
-            {
-                UpdateRoomPanel();
-            }
-        }
-
-        void INetworkRunnerCallbacks.OnShutdown(NetworkRunner runner, ShutdownReason shutdownReason)
-        {
-            if (runner != _runner)
-            {
-                Debug.Log("[Lobby] Ignored shutdown callback from stale runner.");
-                return;
-            }
-
-            _isInLobby = false;
-            if (lobbyPanel.activeSelf)
-            {
-                SetLobbyStatus(string.Format(statusDisconnectedFormat, shutdownReason));
-            }
-            Debug.Log($"[Lobby] Runner shutdown: reason={shutdownReason}");
-
-            if (_isShuttingDownRunner || _isProcessing)
-            {
-                Debug.Log("[Lobby] Shutdown in progress, skip recovery.");
-                return;
-            }
-
-        }
-
-        private void LogRoomSnapshotSummary()
-        {
-            var summary = _roomSnapshots.Count == 0
-                ? "-"
-                : string.Join(", ", _roomSnapshots.Select(r => $"{r.Name}({r.PlayerCount}/{MaxPlayers})"));
-            Debug.Log($"[Lobby] Session list updated: count={_roomSnapshots.Count}, rooms={summary}, updatedAtUtc={_lastSessionListUpdatedAtUtc:O}");
-        }
-
-        private static string SanitizeNameToken(string value)
-        {
-            if (string.IsNullOrEmpty(value))
-            {
-                return string.Empty;
-            }
-
-            var chars = value
-                .Where(c => char.IsLetterOrDigit(c) || char.IsWhiteSpace(c) || c == '.' || c == '_' || c == '-')
-                .ToArray();
-            return new string(chars).Trim();
-        }
-
-        private static bool IsWithinNameLengthLimit(string value)
-        {
-            if (string.IsNullOrEmpty(value))
-            {
-                return false;
-            }
-
-            var maxLength = ContainsHangul(value) ? 8 : 16;
-            return value.Length <= maxLength;
-        }
-
-        private static bool ContainsHangul(string value)
-        {
-            if (string.IsNullOrEmpty(value))
-            {
-                return false;
-            }
-
-            for (var i = 0; i < value.Length; i++)
-            {
-                var c = value[i];
-                if ((c >= '\u1100' && c <= '\u11FF') ||
-                    (c >= '\u3130' && c <= '\u318F') ||
-                    (c >= '\uAC00' && c <= '\uD7AF'))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
+        private static string SanitizeNameToken(string value) => LobbyInputValidator.SanitizeNameToken(value);
+        private static bool IsWithinNameLengthLimit(string value) => LobbyInputValidator.IsWithinNameLengthLimit(value);
+        private static bool ContainsHangul(string value) => LobbyInputValidator.ContainsHangul(value);
 
         private static void EnforceNameInputLimit(TMP_InputField input)
         {
@@ -2499,31 +2402,11 @@ namespace SSAFYPlayTime
 
         private static char ValidateNumericPasswordChar(string text, int charIndex, char addedChar)
         {
-            return IsNumericPasswordChar(addedChar) ? addedChar : '\0';
+            return LobbyInputValidator.IsNumericPasswordChar(addedChar) ? addedChar : '\0';
         }
 
-        private static bool IsNumericPassword(string value)
-        {
-            if (value == null)
-            {
-                return false;
-            }
-
-            for (var i = 0; i < value.Length; i++)
-            {
-                if (!IsNumericPasswordChar(value[i]))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        private static bool IsNumericPasswordChar(char c)
-        {
-            return c >= '0' && c <= '9';
-        }
+        private static bool IsNumericPassword(string value) => LobbyInputValidator.IsNumericPassword(value);
+        private static bool IsNumericPasswordChar(char c) => LobbyInputValidator.IsNumericPasswordChar(c);
 
         private static void ConfigureNumericPasswordInput(TMP_InputField input)
         {
@@ -2557,203 +2440,7 @@ namespace SSAFYPlayTime
             input.selectionFocusPosition = filtered.Length;
         }
 
-        private static string FilterNumericPassword(string value)
-        {
-            if (string.IsNullOrEmpty(value))
-            {
-                return string.Empty;
-            }
-
-            var chars = value.Where(IsNumericPasswordChar).ToArray();
-            return new string(chars);
-        }
-
-        void INetworkRunnerCallbacks.OnConnectedToServer(NetworkRunner runner) { }
-        void INetworkRunnerCallbacks.OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason)
-        {
-            if (runner != _runner)
-            {
-                Debug.Log("[Lobby] Ignored disconnect callback from stale runner.");
-                return;
-            }
-
-            _isInLobby = false;
-
-            if (_isShuttingDownRunner || _isProcessing)
-            {
-                Debug.Log("[Lobby] Shutdown in progress, skip disconnect recovery.");
-                return;
-            }
-
-        }
-        void INetworkRunnerCallbacks.OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token)
-        {
-            if (runner != _runner || !runner.IsServer)
-            {
-                return;
-            }
-
-            var nickname = DecodeConnectionToken(token);
-            if (!string.IsNullOrEmpty(nickname))
-            {
-                Debug.Log($"[Lobby] Connect request from {request.RemoteAddress}: {PlayerRosterLabel}={nickname}");
-            }
-        }
-        void INetworkRunnerCallbacks.OnConnectFailed(NetworkRunner runner, NetAddress remoteAddress, NetConnectFailedReason reason) { }
-        void INetworkRunnerCallbacks.OnUserSimulationMessage(NetworkRunner runner, SimulationMessagePtr message) { }
-        void INetworkRunnerCallbacks.OnCustomAuthenticationResponse(NetworkRunner runner, Dictionary<string, object> data) { }
-        async void INetworkRunnerCallbacks.OnHostMigration(NetworkRunner runner, HostMigrationToken hostMigrationToken)
-        {
-            if (runner != _runner)
-            {
-                return;
-            }
-
-            if (_isProcessing)
-            {
-                return;
-            }
-
-            _isProcessing = true;
-            try
-            {
-                Debug.Log("[Lobby] Host migration started.");
-
-                await ShutdownRunnerAsync();
-
-                if (!TryCreateRunner(out var newRunner))
-                {
-                    SetLobbyStatus(statusHostMigrationInitFailed);
-                    return;
-                }
-
-                _runner = newRunner;
-                var appSettings = GetOrCreatePhotonSettings();
-                var result = await _runner.StartGame(new StartGameArgs
-                {
-                    GameMode = hostMigrationToken.GameMode,
-                    SessionName = _currentRoomName,
-                    SceneManager = GetOrAddSceneManager(),
-                    CustomLobbyName = SharedLobbyName,
-                    CustomPhotonAppSettings = appSettings,
-                    HostMigrationToken = hostMigrationToken
-                });
-
-                if (!result.Ok)
-                {
-                    SetLobbyStatus(string.Format(statusHostMigrationFailedFormat, result.ShutdownReason));
-                    Debug.LogWarning($"[Lobby] Host migration failed: {result.ShutdownReason}");
-                    return;
-                }
-
-                if (_runner.IsServer && _runner.LocalPlayer.IsRealPlayer)
-                {
-                    RegisterParticipant(_runner.LocalPlayer, _nickname);
-                    _currentOwnerPlayerId = _runner.LocalPlayer.PlayerId;
-                    _currentRoomOwner = _nickname;
-                    UpdateOwnerSessionProperty();
-                    BroadcastPlayerRoster();
-                }
-
-                Debug.Log("[Lobby] Host migration completed.");
-                ShowRoomPanel();
-                UpdateRoomPanel();
-            }
-            finally
-            {
-                _isProcessing = false;
-            }
-        }
-        void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input) { }
-        void INetworkRunnerCallbacks.OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
-        void INetworkRunnerCallbacks.OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, ArraySegment<byte> data)
-        {
-            if (runner != _runner)
-            {
-                return;
-            }
-
-            string payload;
-            try
-            {
-                payload = data.Array == null
-                    ? string.Empty
-                    : Encoding.UTF8.GetString(data.Array, data.Offset, data.Count);
-            }
-            catch
-            {
-                payload = string.Empty;
-            }
-
-            if (key == PlayerRosterReliableKey)
-            {
-                ApplyRosterPayload(payload);
-
-                if (roomPanel.activeSelf)
-                {
-                    UpdateRoomPanel();
-                }
-                return;
-            }
-
-            if (key == CharacterSelectionReliableKey && _runner != null && _runner.IsRunning && _runner.IsServer)
-            {
-                if (player.IsRealPlayer && int.TryParse(payload, out var selected))
-                {
-                    var normalized = SanitizeCharacterIndexOrNone(selected);
-                    if (normalized >= 0)
-                    {
-                        _selectedCharacterIndexByPlayerId[player.PlayerId] = normalized;
-                        if (_roomParticipantsByPlayerId.TryGetValue(player.PlayerId, out var presence) && presence != null)
-                        {
-                            presence.CharacterIndex = normalized;
-                        }
-
-                        BroadcastPlayerRoster();
-                    }
-                }
-
-                if (roomPanel.activeSelf)
-                {
-                    UpdateRoomPanel();
-                }
-            }
-        }
-        void INetworkRunnerCallbacks.OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
-        void INetworkRunnerCallbacks.OnSceneLoadStart(NetworkRunner runner)
-        {
-            if (runner != _runner)
-            {
-                return;
-            }
-
-            _spawnedGameplayNetworkCharacters.Clear();
-        }
-
-        void INetworkRunnerCallbacks.OnSceneLoadDone(NetworkRunner runner)
-        {
-            if (runner != _runner)
-            {
-                return;
-            }
-
-            if (IsActiveGameplayScene())
-            {
-                if (nicknamePanel != null) nicknamePanel.SetActive(false);
-                if (lobbyPanel != null) lobbyPanel.SetActive(false);
-                if (roomPanel != null) roomPanel.SetActive(false);
-                if (createRoomModal != null) createRoomModal.SetActive(false);
-                if (passwordModal != null) passwordModal.SetActive(false);
-
-                if (runner.IsServer)
-                {
-                    TrySpawnGameplayNetworkCharactersForAllPlayers();
-                }
-            }
-        }
-        void INetworkRunnerCallbacks.OnObjectExitAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
-        void INetworkRunnerCallbacks.OnObjectEnterAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
-
+        private static string FilterNumericPassword(string value) => LobbyInputValidator.FilterNumericPassword(value);
     }
 }
 
