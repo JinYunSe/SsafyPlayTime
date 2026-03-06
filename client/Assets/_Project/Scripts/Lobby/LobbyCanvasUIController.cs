@@ -215,12 +215,13 @@ namespace SSAFYPlayTime
         private readonly Dictionary<Transform, float> _characterPrePlacedWorldY = new();
         private bool _characterSlotsInitialized;
 
+        // MonoBehaviour 초기화. 패널·이벤트·캐릭터 슬롯을 순서대로 준비하고 닉네임 입력 화면을 표시한다.
+        // 모든 UI 참조는 Inspector에서 SerializeField로 직접 할당해야 한다.
         private void Start()
         {
             EnsurePersistentAcrossScenes();
             RuntimeLogOverlay.EnsureInstance();
             ApplyRuntimeLayoutOverrides();
-            AutoBindLobbyRefsIfMissing();
             EnsureCharacterSelectionUi();
             NormalizeCanvasRoot();
             NormalizeRoomListBindings();
@@ -233,6 +234,8 @@ namespace SSAFYPlayTime
             ShowNicknamePanel();
         }
 
+        // 런타임에서 레이아웃 파라미터를 강제로 덮어쓴다.
+        // 인스펙터에 직렬화된 값이 빌드 환경마다 달라질 수 있으므로 코드에서 고정값으로 재지정한다.
         private void ApplyRuntimeLayoutOverrides()
         {
             // Scene-serialized inspector values can override code defaults.
@@ -251,6 +254,7 @@ namespace SSAFYPlayTime
             characterScreenHeightMultiplier = 2.5f;
         }
 
+        // 매 프레임 호스트 F5 게임 시작 단축키 처리 및 캐릭터 배치·정렬을 갱신한다.
         private void Update()
         {
             if (roomPanel != null && roomPanel.activeSelf && _runner != null && _runner.IsRunning && _runner.IsServer)
@@ -270,11 +274,13 @@ namespace SSAFYPlayTime
         }
 
 
+        // 오브젝트 파괴 시 NetworkRunner를 안전하게 종료한다.
         private async void OnDestroy()
         {
             await ShutdownRunnerAsync();
         }
 
+        // 버튼·토글·입력 필드에 리스너를 등록한다. Start()에서 한 번만 호출된다.
         private void BindEvents()
         {
             nicknameConfirmButton.onClick.AddListener(OnNicknameConfirmed);
@@ -344,6 +350,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 방 목록 새로고침 버튼 클릭 처리. 로비 러너를 재연결하고 방 목록을 갱신한다.
         private async void OnRefreshRoomsClicked()
         {
             if (!_isNicknameConfirmed)
@@ -362,6 +369,7 @@ namespace SSAFYPlayTime
             Debug.Log("[Lobby] Room list refresh completed via lobby reconnect.");
         }
 
+        // 닉네임 확인 버튼 클릭 처리. 유효성 검사 후 로비에 연결하고 방 목록을 표시한다.
         private async void OnNicknameConfirmed()
         {
             var entered = (nicknameInput.text ?? string.Empty).Trim();
@@ -401,6 +409,7 @@ namespace SSAFYPlayTime
             RefreshRoomList();
         }
 
+        // 방 만들기 모달을 초기 상태로 리셋하고 표시한다.
         private void OpenCreateRoomModal()
         {
             createRoomNameInput.text = string.Empty;
@@ -411,6 +420,7 @@ namespace SSAFYPlayTime
             OnPrivateToggleChanged(false);
         }
 
+        // 방 만들기 확인 버튼 클릭 처리. 유효성 검사 후 Host 모드로 Fusion 세션을 생성한다.
         private async void OnCreateRoomConfirmed()
         {
             if (_isProcessing)
@@ -519,11 +529,13 @@ namespace SSAFYPlayTime
             UpdateRoomPanel();
         }
 
+        // 비공개 토글 상태 변경 시 비밀번호 입력 필드의 표시 여부를 갱신한다.
         private void OnPrivateToggleChanged(bool isPrivate)
         {
             createPasswordInput.gameObject.SetActive(isPrivate);
         }
 
+        // _roomSnapshots 기준으로 방 목록 UI를 재구성한다. 기존 아이템을 제거하고 새로 생성한다.
         private void RefreshRoomList()
         {
             if (!_isNicknameConfirmed)
@@ -581,6 +593,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 방 목록에서 방 클릭 시 처리. 비공개 방이면 비밀번호 모달을 띄우고, 공개 방이면 즉시 입장한다.
         private async void OnRoomSelected(string roomName)
         {
             var selected = _roomSnapshots.FirstOrDefault(r => string.Equals(r.Name, roomName, StringComparison.Ordinal));
@@ -603,6 +616,7 @@ namespace SSAFYPlayTime
             await JoinRoomAsync(selected);
         }
 
+        // 비밀번호 모달 확인 버튼 클릭 처리. 비밀번호가 일치하면 방에 입장한다.
         private async void OnPasswordConfirmed()
         {
             if (string.IsNullOrEmpty(_pendingPrivateRoomName))
@@ -630,6 +644,7 @@ namespace SSAFYPlayTime
             await JoinRoomAsync(selected);
         }
 
+        // Client 모드로 Fusion 세션에 입장한다. 입장 성공 시 방 패널을 표시한다.
         private async Task JoinRoomAsync(RoomSnapshot room)
         {
             if (_isProcessing)
@@ -685,6 +700,7 @@ namespace SSAFYPlayTime
             UpdateRoomPanel();
         }
 
+        // 게임 시작 버튼(또는 F5) 클릭 처리. 호스트만 허용하며 세션 상태와 인원 수를 검증 후 씬을 로드한다.
         private void OnStartGameClicked()
         {
             if (_runner == null || !_runner.IsRunning)
@@ -750,6 +766,8 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 요청한 씬 이름을 Build Settings에서 파일 이름 기준으로 검색해 실제 씬 이름을 반환한다.
+        // 파일 경로 또는 씬 이름 부분 일치 순서로 탐색한다.
         private static bool TryResolveGameplaySceneName(string requestedSceneName, out string resolvedSceneName)
         {
             resolvedSceneName = string.Empty;
@@ -792,6 +810,7 @@ namespace SSAFYPlayTime
             return false;
         }
 
+        // 방 나가기 버튼 클릭 처리. 러너를 종료하고 로비 패널로 복귀해 방 목록을 다시 불러온다.
         private async void OnLeaveRoomClicked()
         {
             _currentRoomName = string.Empty;
@@ -805,6 +824,7 @@ namespace SSAFYPlayTime
             RefreshRoomList();
         }
 
+        // 현재 방 이름·공개 여부·플레이어 슬롯·게임 시작 버튼 활성 상태를 갱신한다.
         private void UpdateRoomPanel()
         {
             if (string.IsNullOrEmpty(_currentRoomName))
@@ -828,6 +848,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 참가자 목록을 PlayerId 오름차순으로 정렬해 플레이어 슬롯 텍스트와 캐릭터 표시를 갱신한다.
         private void UpdatePlayerSlots()
         {
             var slotTexts = new[] { playerOneText, playerTwoText, playerThreeText, playerFourText };
@@ -867,6 +888,8 @@ namespace SSAFYPlayTime
             RefreshCharacterSelectionUiState();
         }
 
+        // 슬롯×캐릭터 조합의 프리뷰 오브젝트를 생성하거나 씬에 미리 배치된 오브젝트를 재사용해 초기화한다.
+        // 이미 초기화됐으면 즉시 반환한다.
         private void InitializeCharacterSlotsIfNeeded()
         {
             if (_characterSlotsInitialized)
@@ -925,6 +948,7 @@ namespace SSAFYPlayTime
             AlignAllCharacterCandidatesToNameSlots();
         }
 
+        // 모든 슬롯의 캐릭터 오브젝트를 해당 슬롯의 이름 텍스트 위치에 정렬한다.
         private void AlignAllCharacterCandidatesToNameSlots()
         {
             InitializeCharacterSlotsIfNeeded();
@@ -944,6 +968,8 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 캐릭터 슬롯 하나를 이름 슬롯 텍스트 위치 기준으로 배치한다.
+        // UI 공간(RectTransform)과 월드 공간 오브젝트 두 가지 경우를 모두 처리한다.
         private void AlignCharacterSlot(Transform characterSlot, TMP_Text nameSlot)
         {
             if (characterSlot == null || nameSlot == null || nameSlot.transform is not RectTransform nameRect)
@@ -1006,6 +1032,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 현재 뷰포트 크기를 기준으로 4개 플레이어 이름 슬롯의 위치와 크기를 매 프레임 갱신한다.
         private void LayoutNameSlotsForCurrentViewport()
         {
             if (!lockPlayerSlotLayoutToViewport)
@@ -1078,6 +1105,7 @@ namespace SSAFYPlayTime
             return nameRect.TransformPoint(nameRect.rect.center);
         }
 
+        // 캐릭터 배치에 사용할 카메라를 반환한다. 인스펙터 지정 → Camera.main → 씬 탐색 순으로 폴백한다.
         private Camera ResolveCharacterPlacementCamera()
         {
             if (characterPlacementCamera != null)
@@ -1093,6 +1121,7 @@ namespace SSAFYPlayTime
             return FindObjectOfType<Camera>();
         }
 
+        // UI 좌표 변환에 사용할 카메라를 반환한다. ScreenSpaceOverlay 캔버스는 null을 반환한다.
         private Camera ResolveUiCamera()
         {
             var canvas = GetComponentInParent<Canvas>();
@@ -1109,6 +1138,8 @@ namespace SSAFYPlayTime
             return canvas.worldCamera != null ? canvas.worldCamera : ResolveCharacterPlacementCamera();
         }
 
+        // 캐릭터 프리뷰 클론의 부모가 될 런타임 루트 Transform을 반환한다.
+        // 인스펙터 미설정 시 씬에서 "LobbyCharacterRuntimeRoot"를 찾거나 새로 생성한다.
         private Transform ResolveCharacterRuntimeRoot()
         {
             if (characterRuntimeRoot != null)
@@ -1126,6 +1157,7 @@ namespace SSAFYPlayTime
             return characterRuntimeRoot;
         }
 
+        // 캐릭터별 추가 수직 오프셋을 반환한다. 스티의 경우 별도 조정값을 적용한다.
         private float GetCharacterSpecificVerticalOffset(Transform characterSlot)
         {
             if (characterSlot == null)
@@ -1142,6 +1174,7 @@ namespace SSAFYPlayTime
             return 0f;
         }
 
+        // 미리 배치된 캐릭터의 월드 Y 보정값을 반환한다. 스티의 경우 별도 조정값을 적용한다.
         private float GetCharacterPrePlacedWorldYAdjustment(Transform characterSlot)
         {
             if (_characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) &&
@@ -1213,6 +1246,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 캐릭터가 화면에서 일정 픽셀 높이를 유지하도록 localScale을 조정한다.
         private void ApplyCharacterScreenHeightScale(Transform characterRoot, Camera worldCam)
         {
             if (characterRoot == null || worldCam == null)
@@ -1248,6 +1282,7 @@ namespace SSAFYPlayTime
             characterRoot.localScale = baseLocalScale * scaleRatio;
         }
 
+        // root 하위의 모든 Renderer 바운딩박스를 합산해 전체 높이(Y)를 반환한다.
         private static float CalculateCombinedBoundsHeight(Transform root)
         {
             if (root == null)
@@ -1275,6 +1310,7 @@ namespace SSAFYPlayTime
             return Mathf.Max(0.001f, bounds.size.y);
         }
 
+        // 모든 슬롯의 캐릭터 오브젝트를 비활성화하고 CharacterPreview도 초기화한다.
         private void HideAllCharacterSlots()
         {
             for (var slot = 0; slot < PlayerSlotCount; slot++)
@@ -1292,11 +1328,13 @@ namespace SSAFYPlayTime
             characterPreview?.ClearAllSlots();
         }
 
+        // 4개 플레이어 이름 슬롯 텍스트를 배열로 반환한다.
         private TMP_Text[] GetNameSlots()
         {
             return new[] { playerOneText, playerTwoText, playerThreeText, playerFourText };
         }
 
+        // 외부에서 슬롯 인덱스와 캐릭터 이름으로 해당 슬롯의 선택 캐릭터를 설정한다.
         public void SetSelectedCharacterForSlot(int slotIndex, string characterName)
         {
             if (slotIndex < 0 || slotIndex >= PlayerSlotCount)
@@ -1315,6 +1353,8 @@ namespace SSAFYPlayTime
         public void SetLocalSelectedCharacterByName(string characterName) =>
             SetLocalPlayerSelectedCharacter(CharacterNameToIndex(characterName));
 
+        // 로컬 플레이어의 캐릭터 선택을 업데이트하고 서버(방장)에 전파한다.
+        // 서버면 BroadcastPlayerRoster, 클라이언트면 SendCharacterSelectionToHost를 호출한다.
         private void SetLocalPlayerSelectedCharacter(int characterIndex)
         {
             if (_runner == null || !_runner.IsRunning || !_runner.LocalPlayer.IsRealPlayer)
@@ -1349,6 +1389,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 특정 PlayerId의 캐릭터 선택을 해당 슬롯에 즉시 반영한다.
         private void ApplyCharacterSelectionToVisibleSlot(int playerId, int characterIndex)
         {
             for (var slot = 0; slot < _playerIdBySlot.Length; slot++)
@@ -1364,6 +1405,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 클라이언트가 자신의 캐릭터 선택 인덱스를 호스트(방장)에게 ReliableData로 전송한다.
         private void SendCharacterSelectionToHost(int characterIndex)
         {
             if (_runner == null || !_runner.IsRunning || _runner.IsServer)
@@ -1387,6 +1429,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 현재 방장의 PlayerRef를 찾아 반환한다. 먼저 저장된 PlayerId로 탐색하고 실패 시 가장 낮은 ID로 폴백한다.
         private bool TryResolveOwnerPlayerRef(out PlayerRef ownerPlayer)
         {
             ownerPlayer = PlayerRef.None;
@@ -1426,11 +1469,13 @@ namespace SSAFYPlayTime
             return false;
         }
 
+        // 캐릭터 인덱스가 유효 범위(0~CharacterOptionCount-1)인지 확인하고, 범위 밖이면 -1을 반환한다.
         private static int SanitizeCharacterIndexOrNone(int rawIndex)
         {
             return rawIndex >= 0 && rawIndex < CharacterOptionCount ? rawIndex : -1;
         }
 
+        // 슬롯의 선택 캐릭터에 해당하는 오브젝트만 활성화하고 나머지는 비활성화한다.
         private void ApplySelectedCharacterForSlot(int slotIndex, bool slotHasPlayer)
         {
             InitializeCharacterSlotsIfNeeded();
@@ -1453,6 +1498,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 캐릭터 이름 문자열을 CharacterKind 인덱스로 변환한다. 매칭 실패 시 -1을 반환한다.
         private static int CharacterNameToIndex(string characterName)
         {
             if (string.Equals(characterName, "AiJiCharacter", StringComparison.OrdinalIgnoreCase))
@@ -1478,6 +1524,7 @@ namespace SSAFYPlayTime
             return -1;
         }
 
+        // 인덱스에 해당하는 로비 프리뷰용 캐릭터 템플릿 GameObject를 반환한다.
         private GameObject GetCharacterTemplateByIndex(int characterIndex)
         {
             return SanitizeCharacterIndexOrNone(characterIndex) switch
@@ -1490,6 +1537,7 @@ namespace SSAFYPlayTime
             };
         }
 
+        // 닉네임 입력 패널만 활성화하고 나머지 패널·슬롯을 모두 숨긴다.
         private void ShowNicknamePanel()
         {
             nicknamePanel.SetActive(true);
@@ -1502,6 +1550,7 @@ namespace SSAFYPlayTime
             RefreshCharacterSelectionUiState();
         }
 
+        // 로비 패널(방 목록)을 활성화하고 닉네임·방 패널을 숨긴다.
         private void ShowLobbyPanel()
         {
             nicknamePanel.SetActive(false);
@@ -1513,6 +1562,7 @@ namespace SSAFYPlayTime
             RefreshCharacterSelectionUiState();
         }
 
+        // 방 대기 패널을 활성화하고 닉네임·로비 패널을 숨긴다.
         private void ShowRoomPanel()
         {
             nicknamePanel.SetActive(false);
@@ -1525,6 +1575,8 @@ namespace SSAFYPlayTime
             RefreshCharacterSelectionUiState();
         }
 
+        // 로비 세션 탐색용 러너가 실행 중이 아니면 새로 생성해 SharedLobbyName에 연결한다.
+        // 이미 연결된 경우 forceReconnect가 false면 즉시 true를 반환한다.
         private async Task<bool> EnsureLobbyRunnerAsync(bool forceReconnect = false)
         {
             await _runnerLock.WaitAsync();
@@ -1576,6 +1628,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // _runnerLock을 획득한 뒤 내부 종료 로직을 호출한다. 외부에서 호출하는 퍼블릭 진입점.
         private async Task ShutdownRunnerAsync()
         {
             await _runnerLock.WaitAsync();
@@ -1589,6 +1642,8 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 러너를 실제로 종료하고 관련 상태(스냅샷·참가자·캐릭터 목록 등)를 초기화한다.
+        // _runnerLock이 이미 획득된 상태에서만 호출해야 한다.
         private async Task ShutdownRunnerInternalAsync()
         {
             if (_runner == null)
@@ -1633,6 +1688,7 @@ namespace SSAFYPlayTime
             _currentOwnerPlayerId = -1;
         }
 
+        // 새 GameObject에 NetworkRunner를 추가하고 콜백을 등록한다. 성공 시 true를 반환한다.
         private bool TryCreateRunner(out NetworkRunner runner)
         {
             _runnerObject = new GameObject("LobbyNetworkRunner");
@@ -1651,6 +1707,7 @@ namespace SSAFYPlayTime
             return true;
         }
 
+        // PhotonAppSettings에서 앱 설정을 복사하고 AppVersion·FixedRegion 기본값을 보장한다.
         private FusionAppSettings GetOrCreatePhotonSettings()
         {
             FusionAppSettings settings;
@@ -1676,6 +1733,7 @@ namespace SSAFYPlayTime
             return settings;
         }
 
+        // 닉네임을 UTF-8 바이트 배열로 인코딩해 Fusion 연결 토큰으로 반환한다.
         private static byte[] BuildConnectionToken(string nickname)
         {
             var safeName = SanitizeNameToken(nickname);
@@ -1687,6 +1745,7 @@ namespace SSAFYPlayTime
             return Encoding.UTF8.GetBytes(safeName);
         }
 
+        // Fusion 연결 토큰(UTF-8 바이트)을 닉네임 문자열로 디코딩한다. 실패 시 빈 문자열을 반환한다.
         private static string DecodeConnectionToken(byte[] token)
         {
             if (token == null || token.Length == 0)
@@ -1704,6 +1763,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 플레이어를 _roomParticipantsByPlayerId에 등록하고 이전에 선택한 캐릭터 인덱스를 유지한다.
         private void RegisterParticipant(PlayerRef player, string nickname)
         {
             if (!player.IsRealPlayer)
@@ -1729,6 +1789,8 @@ namespace SSAFYPlayTime
             };
         }
 
+        // 연결 토큰에서 닉네임을 추출해 플레이어를 등록한다.
+        // 토큰이 없는 로컬 플레이어는 _nickname으로 폴백한다.
         private void TryRegisterParticipantFromToken(NetworkRunner runner, PlayerRef player)
         {
             if (runner == null || !runner.IsRunning || !player.IsRealPlayer)
@@ -1745,6 +1807,8 @@ namespace SSAFYPlayTime
             RegisterParticipant(player, nickname);
         }
 
+        // 현재 참가자 목록과 방장 PlayerId를 직렬화해 ReliableData 전송용 문자열을 생성한다.
+        // 포맷: "{ownerPlayerId};{id}={nickname}^{charIdx}|..."
         private string BuildRosterPayload()
         {
             var entries = _roomParticipantsByPlayerId.Values
@@ -1754,6 +1818,7 @@ namespace SSAFYPlayTime
             return $"{_currentOwnerPlayerId};{string.Join("|", entries)}";
         }
 
+        // BuildRosterPayload가 생성한 문자열을 파싱해 _roomParticipantsByPlayerId와 _selectedCharacterIndexByPlayerId를 갱신한다.
         private void ApplyRosterPayload(string payload)
         {
             _roomParticipantsByPlayerId.Clear();
@@ -1835,6 +1900,7 @@ namespace SSAFYPlayTime
             SyncCurrentRoomOwnerFromRoster();
         }
 
+        // 서버에서 모든 플레이어에게 최신 참가자 Roster를 ReliableData로 전송한다.
         private void BroadcastPlayerRoster()
         {
             if (_runner == null || !_runner.IsRunning || !_runner.IsServer)
@@ -1858,6 +1924,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // _currentOwnerPlayerId 기준으로 _currentRoomOwner 닉네임을 참가자 목록과 동기화한다.
         private void SyncCurrentRoomOwnerFromRoster()
         {
             if (_currentOwnerPlayerId > 0 &&
@@ -1879,6 +1946,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 세션 커스텀 프로퍼티에 현재 방장 닉네임을 기록해 로비 세션 목록에 반영한다.
         private void UpdateOwnerSessionProperty()
         {
             if (_runner == null || !_runner.IsRunning || !_runner.IsServer || !_runner.SessionInfo.IsValid)
@@ -1899,6 +1967,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 방장이 퇴장했을 때 남은 플레이어 중 PlayerId가 가장 낮은 플레이어를 새 방장으로 지정한다.
         private void RecalculateOwnerAfterLeave()
         {
             if (_runner == null || !_runner.IsRunning || !_runner.IsServer)
@@ -1939,6 +2008,7 @@ namespace SSAFYPlayTime
             UpdateOwnerSessionProperty();
         }
 
+        // 로비 상태 텍스트를 갱신한다.
         private void SetLobbyStatus(string message)
         {
             if (lobbyStatusText != null)
@@ -1947,6 +2017,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 방 만들기 모달의 유효성 검사 메시지를 갱신한다.
         private void SetCreateValidation(string message)
         {
             if (createValidationText != null)
@@ -1955,6 +2026,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 닉네임 입력 패널의 유효성 검사 메시지를 갱신한다.
         private void SetNicknameValidation(string message)
         {
             if (nicknameValidationText != null)
@@ -1963,6 +2035,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 현재 방 목록의 방장 닉네임과 비교해 중복 여부를 반환한다.
         private bool IsNicknameAlreadyUsed(string nickname)
         {
             if (string.IsNullOrWhiteSpace(nickname))
@@ -1975,6 +2048,7 @@ namespace SSAFYPlayTime
                 string.Equals(r.OwnerNickname, nickname, StringComparison.OrdinalIgnoreCase));
         }
 
+        // 현재 방 목록에 동일한 이름의 방이 이미 존재하는지 확인한다.
         private bool IsRoomNameAlreadyUsed(string roomName)
         {
             if (string.IsNullOrWhiteSpace(roomName))
@@ -1987,6 +2061,7 @@ namespace SSAFYPlayTime
                 string.Equals(r.Name, roomName, StringComparison.OrdinalIgnoreCase));
         }
 
+        // 초기 세션 목록이 수신될 때까지 최대 2초간 대기한다. 닉네임 중복 검사 전에 호출한다.
         private async Task WaitForInitialSessionListAsync()
         {
             if (_lastSessionListUpdatedAtUtc != DateTime.MinValue)
@@ -2006,6 +2081,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 캔버스 루트 RectTransform의 스케일과 앵커가 비정상이면 화면 전체를 채우도록 초기화한다.
         private void NormalizeCanvasRoot()
         {
             if (transform is not RectTransform root)
@@ -2028,6 +2104,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // roomItemTemplate이 roomListContent의 자식이 아닌 경우 이동해 계층을 정규화한다.
         private void NormalizeRoomListBindings()
         {
             if (roomListContent == null || roomItemTemplate == null)
@@ -2041,64 +2118,22 @@ namespace SSAFYPlayTime
             }
         }
 
-        private void AutoBindLobbyRefsIfMissing()
-        {
-            if (lobbyPanel == null) lobbyPanel = FindChildByNames("LobbyPanel");
-            if (roomPanel == null) roomPanel = FindChildByNames("RoomPanel");
-            if (nicknamePanel == null) nicknamePanel = FindChildByNames("NicknamePanel");
-            if (createRoomModal == null) createRoomModal = FindChildByNames("CreateRoomModal");
-            if (passwordModal == null) passwordModal = FindChildByNames("PasswordModal");
-
-            if (roomListContent == null)
-            {
-                var listContainer = FindChildByNames("RoomListContainer");
-                if (listContainer != null)
-                {
-                    roomListContent = listContainer.transform;
-                }
-            }
-
-            if (roomItemTemplate == null)
-            {
-                roomItemTemplate = FindChildByNames("RoomItemTemplate");
-            }
-
-            if (aiJiCharacterRoot == null) aiJiCharacterRoot = FindChildByNames("AiJiCharacter");
-            if (pitCharacterRoot == null) pitCharacterRoot = FindChildByNames("PitCharacter");
-            if (seuTatiCharacterRoot == null) seuTatiCharacterRoot = FindChildByNames("SeuTatiCharacter");
-            if (waiJeuCharacterRoot == null) waiJeuCharacterRoot = FindChildByNames("WaiJeuCharacter");
-            if (characterRuntimeRoot == null) characterRuntimeRoot = FindChildByNames("LobbyCharacterRuntimeRoot")?.transform;
-            if (characterSelectionPanel == null) characterSelectionPanel = FindChildByNames("CharacterSelectionPanel");
-            if (selectAiJiCharacterButton == null) selectAiJiCharacterButton = FindChildByNames("AiJiCharacterUIButton", "AiJiCharacterButton", "SelectAiJiButton", "AiJiSelectButton")?.GetComponent<Button>();
-            if (selectPitCharacterButton == null) selectPitCharacterButton = FindChildByNames("PitCharacterUIButton", "PitCharacterButton", "SelectPitButton", "PitSelectButton")?.GetComponent<Button>();
-            if (selectSeuTatiCharacterButton == null) selectSeuTatiCharacterButton = FindChildByNames("SeuTatiCharacterUIButton", "SeuTatiCharacterButton", "SelectSeuTatiButton", "SeuTatiSelectButton")?.GetComponent<Button>();
-            if (selectWaiJeuCharacterButton == null) selectWaiJeuCharacterButton = FindChildByNames("WaiJeuCharacterUIButton", "WaiJeuCharacterButton", "SelectWaiJeuButton", "WaiJeuSelectButton")?.GetComponent<Button>();
-        }
-
+        // 캐릭터 선택 UI 참조가 Inspector에서 올바르게 할당됐는지 확인한다.
+        // 누락된 참조가 있으면 경고 로그를 출력한다.
         private void EnsureCharacterSelectionUi()
         {
-            if (IsMissingReference(characterSelectionPanel)) characterSelectionPanel = null;
-            if (IsMissingReference(selectAiJiCharacterButton)) selectAiJiCharacterButton = null;
-            if (IsMissingReference(selectPitCharacterButton)) selectPitCharacterButton = null;
-            if (IsMissingReference(selectSeuTatiCharacterButton)) selectSeuTatiCharacterButton = null;
-            if (IsMissingReference(selectWaiJeuCharacterButton)) selectWaiJeuCharacterButton = null;
-
-            if (characterSelectionPanel == null) characterSelectionPanel = FindChildByNames("CharacterSelectionPanel");
-            if (selectAiJiCharacterButton == null) selectAiJiCharacterButton = FindChildByNames("AiJiCharacterUIButton", "AiJiCharacterButton", "SelectAiJiButton", "AiJiSelectButton")?.GetComponent<Button>();
-            if (selectPitCharacterButton == null) selectPitCharacterButton = FindChildByNames("PitCharacterUIButton", "PitCharacterButton", "SelectPitButton", "PitSelectButton")?.GetComponent<Button>();
-            if (selectSeuTatiCharacterButton == null) selectSeuTatiCharacterButton = FindChildByNames("SeuTatiCharacterUIButton", "SeuTatiCharacterButton", "SelectSeuTatiButton", "SeuTatiSelectButton")?.GetComponent<Button>();
-            if (selectWaiJeuCharacterButton == null) selectWaiJeuCharacterButton = FindChildByNames("WaiJeuCharacterUIButton", "WaiJeuCharacterButton", "SelectWaiJeuButton", "WaiJeuSelectButton")?.GetComponent<Button>();
-
             if (characterSelectionPanel == null ||
                 selectAiJiCharacterButton == null ||
                 selectPitCharacterButton == null ||
                 selectSeuTatiCharacterButton == null ||
                 selectWaiJeuCharacterButton == null)
             {
-                Debug.LogWarning("[Lobby] Character selection UI is missing in hierarchy. Please add CharacterSelectionPanel with 4 select buttons.");
+                Debug.LogWarning("[Lobby] 캐릭터 선택 UI 참조가 Inspector에 할당되지 않았습니다. CharacterSelectionPanel과 4개의 선택 버튼을 Inspector에서 연결해 주세요.");
             }
         }
 
+        // 캐릭터 선택 버튼의 활성·비활성 상태를 갱신한다.
+        // 본인이 선택한 캐릭터와 다른 플레이어가 선택한 캐릭터의 버튼은 비활성화한다.
         private void RefreshCharacterSelectionUiState()
         {
             EnsureCharacterSelectionUi();
@@ -2154,11 +2189,7 @@ namespace SSAFYPlayTime
             characterPreview?.RefreshSelectionUiState(canSelect, localSelected, takenByOthers);
         }
 
-        private static bool IsMissingReference(UnityEngine.Object target)
-        {
-            return target == null;
-        }
-
+        // MissingReferenceException을 무시하고 안전하게 GameObject의 활성 상태를 변경한다.
         private static void TrySetGameObjectActive(GameObject target, bool active)
         {
             if (target == null)
@@ -2175,6 +2206,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // MissingReferenceException을 무시하고 안전하게 버튼의 interactable 상태를 변경한다.
         private static void TrySetButtonInteractable(Button target, bool interactable)
         {
             if (target == null)
@@ -2191,59 +2223,14 @@ namespace SSAFYPlayTime
             }
         }
 
-        private GameObject FindChildByNames(params string[] names)
-        {
-            if (names == null || names.Length == 0)
-            {
-                return null;
-            }
-
-            var transforms = GetComponentsInChildren<Transform>(true);
-            foreach (var t in transforms)
-            {
-                if (t == null)
-                {
-                    continue;
-                }
-
-                for (var i = 0; i < names.Length; i++)
-                {
-                    var name = names[i];
-                    if (string.IsNullOrWhiteSpace(name))
-                    {
-                        continue;
-                    }
-
-                    if (string.Equals(t.name, name, StringComparison.Ordinal))
-                    {
-                        return t.gameObject;
-                    }
-                }
-            }
-
-            for (var i = 0; i < names.Length; i++)
-            {
-                var name = names[i];
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    continue;
-                }
-
-                var global = GameObject.Find(name);
-                if (global != null)
-                {
-                    return global;
-                }
-            }
-
-            return null;
-        }
-
+        // 씬 전환에 필요한 NetworkSceneManagerDefault를 가져오거나 없으면 추가한다.
         private NetworkSceneManagerDefault GetOrAddSceneManager()
         {
             return GetComponent<NetworkSceneManagerDefault>() ?? gameObject.AddComponent<NetworkSceneManagerDefault>();
         }
 
+        // Fusion SessionInfo로부터 UI 표시용 RoomSnapshot을 생성한다.
+        // started 플래그가 true면 이름을 비워 로비 목록에서 제외한다.
         private static RoomSnapshot BuildSnapshot(SessionInfo session)
         {
             var started = ReadBool(session, StartedKey);
@@ -2273,6 +2260,7 @@ namespace SSAFYPlayTime
             return snapshot;
         }
 
+        // 세션 프로퍼티에서 bool 값을 읽는다. bool/int/string 타입을 모두 처리한다.
         private static bool ReadBool(SessionInfo session, string key)
         {
             if (session.Properties == null || !session.Properties.TryGetValue(key, out var value))
@@ -2305,6 +2293,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 세션 프로퍼티에서 string 값을 읽는다. int/bool 타입도 문자열로 변환해 반환한다.
         private static string ReadString(SessionInfo session, string key)
         {
             if (session.Properties == null || !session.Properties.TryGetValue(key, out var value))
@@ -2337,6 +2326,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 세션 MaxPlayers 값을 읽는다. 예외 발생 시 상수 MaxPlayers를 반환한다.
         private static int ReadMaxPlayers(SessionInfo session)
         {
             try
@@ -2349,6 +2339,7 @@ namespace SSAFYPlayTime
             }
         }
 
+        // 세션 IsOpen 값을 읽는다. 예외 발생 시 true(입장 가능)로 폴백한다.
         private static bool ReadIsOpen(SessionInfo session)
         {
             try
@@ -2365,6 +2356,7 @@ namespace SSAFYPlayTime
         private static bool IsWithinNameLengthLimit(string value) => LobbyInputValidator.IsWithinNameLengthLimit(value);
         private static bool ContainsHangul(string value) => LobbyInputValidator.ContainsHangul(value);
 
+        // 입력 필드의 텍스트가 허용 문자 및 길이 제한을 벗어난 경우 정규화된 값으로 교체한다.
         private static void EnforceNameInputLimit(TMP_InputField input)
         {
             if (input == null)
@@ -2385,6 +2377,7 @@ namespace SSAFYPlayTime
             input.selectionFocusPosition = normalized.Length;
         }
 
+        // 허용 문자(영문·숫자·공백·., _-)만 남기고 한글 포함 시 8자, 아니면 16자로 자른다.
         private static string NormalizeNameInput(string value)
         {
             if (string.IsNullOrEmpty(value))
@@ -2406,6 +2399,7 @@ namespace SSAFYPlayTime
             return filtered.Substring(0, maxLength);
         }
 
+        // TMP_InputField.onValidateInput 콜백. 숫자가 아닌 문자는 '\0'으로 차단한다.
         private static char ValidateNumericPasswordChar(string text, int charIndex, char addedChar)
         {
             return LobbyInputValidator.IsNumericPasswordChar(addedChar) ? addedChar : '\0';
@@ -2414,6 +2408,7 @@ namespace SSAFYPlayTime
         private static bool IsNumericPassword(string value) => LobbyInputValidator.IsNumericPassword(value);
         private static bool IsNumericPasswordChar(char c) => LobbyInputValidator.IsNumericPasswordChar(c);
 
+        // 비밀번호 입력 필드를 숫자 전용 키패드·단일 라인으로 설정한다.
         private static void ConfigureNumericPasswordInput(TMP_InputField input)
         {
             if (input == null)
@@ -2426,6 +2421,7 @@ namespace SSAFYPlayTime
             input.lineType = TMP_InputField.LineType.SingleLine;
         }
 
+        // 비밀번호 입력 필드에서 숫자 외 문자가 포함된 경우 필터링해 교체한다.
         private static void EnforceNumericPasswordInput(TMP_InputField input)
         {
             if (input == null)
