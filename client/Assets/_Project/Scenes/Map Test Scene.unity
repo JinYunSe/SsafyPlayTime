@@ -1650,7 +1650,7 @@ PrefabInstance:
     - target: {fileID: 1956676462428397128, guid: 6eca31580e4c07c4aba3c9143a9c442a,
         type: 3}
       propertyPath: m_Name
-      value: SsatyCharacter_Fixed
+      value: SsatyCharacter
       objectReference: {fileID: 0}
     - target: {fileID: 2041266976590487708, guid: 6eca31580e4c07c4aba3c9143a9c442a,
         type: 3}
