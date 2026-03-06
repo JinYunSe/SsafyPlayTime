@@ -217,11 +217,29 @@ namespace SSAFYPlayTime
                     ? SanitizeCharacterIndexOrNone(sc)
                     : -1;
 
+                // 모든 플레이어의 캐릭터 선택을 캡처한다.
+                // ShutdownRunnerAsync가 dict를 Clear하므로 shutdown 전에 전체를 저장해야
+                // 방장 이전 후 각 플레이어가 선택했던 캐릭터가 유지된다.
+                var savedAllCharacterIndices = _selectedCharacterIndexByPlayerId
+                    .Where(kvp => SanitizeCharacterIndexOrNone(kvp.Value) >= 0)
+                    .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+
                 if (priorityIndex > 0)
                 {
                     // 낮은 ID 플레이어가 먼저 StartGame 을 호출하도록 대기
                     await Task.Delay(priorityIndex * 350);
                 }
+
+                // GameScene에서 마이그레이션 발생 시 ShutdownRunnerAsync 전에 위치를 캡처한다.
+                // NetworkObject가 아직 살아있는 상태에서 읽어야 정확한 위치를 얻을 수 있다.
+                if (IsActiveGameplayScene())
+                {
+                    _isMigrating = true;
+                    CaptureCharacterStatesForMigration();
+                }
+
+                // StartGame 후 새 PlayerId를 알 수 있으므로 로컬 플레이어의 구 PlayerId를 미리 저장한다.
+                var localOldPlayerId = runner.LocalPlayer.PlayerId;
 
                 await ShutdownRunnerAsync();
 
@@ -252,12 +270,19 @@ namespace SSAFYPlayTime
                     return;
                 }
 
-                // 재연결 후, RegisterParticipant 호출 전에 dict 를 복원해 둠.
-                // → 서버: RegisterParticipant 가 저장된 인덱스를 읽어 roster 에 포함시킴.
+                // 재연결 후, RegisterParticipant 호출 전에 모든 플레이어의 캐릭터 선택을 복원한다.
+                // → 서버: RegisterParticipant 가 복원된 인덱스를 읽어 roster 에 올바르게 포함시킴.
                 // → 클라이언트: OnPlayerJoined 타이밍과 무관하게 dict 에 값이 있어 RegisterParticipant 가 읽어감.
-                if (savedCharacterIndex >= 0 && _runner.LocalPlayer.IsRealPlayer)
+                foreach (var kvp in savedAllCharacterIndices)
                 {
-                    _selectedCharacterIndexByPlayerId[_runner.LocalPlayer.PlayerId] = savedCharacterIndex;
+                    _selectedCharacterIndexByPlayerId[kvp.Key] = kvp.Value;
+                }
+
+                // 새 방장의 PlayerId가 바뀐 경우 위치·캐릭터 선택 테이블의 키를 새 PlayerId로 교체한다.
+                // 닉네임을 사용하지 않으므로 닉네임 중복에 완전히 안전하다.
+                if (IsActiveGameplayScene())
+                {
+                    RemapMigrationEntry(localOldPlayerId, _runner.LocalPlayer.PlayerId);
                 }
 
                 if (_runner.IsServer && _runner.LocalPlayer.IsRealPlayer)
@@ -270,30 +295,115 @@ namespace SSAFYPlayTime
                 }
 
                 Debug.Log("[Lobby] Host migration completed.");
-                ShowRoomPanel();
-                UpdateRoomPanel();
 
-                // 클라이언트는 새 방장에게 캐릭터 선택을 재전송해야 roster 에 반영됨.
-                // 서버는 이미 RegisterParticipant + BroadcastPlayerRoster 로 처리됨.
-                if (!_runner.IsServer && savedCharacterIndex >= 0 && _runner.LocalPlayer.IsRealPlayer)
+                if (IsActiveGameplayScene())
                 {
-                    SetLocalPlayerSelectedCharacter(savedCharacterIndex);
+                    // ── GameScene 방장 이전 처리 ──────────────────────────────────────
+                    // StartGame 완료 이후에는 OnSceneLoadStart가 재발동하지 않으므로
+                    // 마이그레이션 데이터 보호가 더 이상 필요하지 않다.
+                    // 여기서 해제해야 TrySpawnGameplayNetworkCharacter의 _isMigrating 가드를 통과할 수 있다.
+                    _isMigrating = false;
+
+                    // 서버(새 방장): TrySpawnGameplayNetworkCharactersForAllPlayers()로 자신을 먼저 스폰한다.
+                    // 다른 클라이언트는 아직 재접속 전이므로 여기서는 스폰하지 않는다.
+                    if (_runner.IsServer)
+                    {
+                        TrySpawnGameplayNetworkCharactersForAllPlayers();
+                    }
+
+                    // 모든 플레이어(서버·클라이언트 공통)가 자신의 캐릭터 선택을 재전송한다.
+                    // PlayerId가 바뀌더라도 각자가 직접 알리므로 새 방장이 항상 올바른 데이터를 갖는다.
+                    // - 서버(새 방장): SetLocalPlayerSelectedCharacter → BroadcastPlayerRoster
+                    // - 클라이언트: SetLocalPlayerSelectedCharacter → SendCharacterSelectionToHost
+                    //   → 새 방장의 OnReliableDataReceived에서 수신 후 TrySpawnGameplayNetworkCharacter 호출
+                    // 연쇄 마이그레이션도 동일한 흐름으로 처리된다.
+                    // _localSelectedCharacterIndex가 미설정(-1)인 경우 savedCharacterIndex → AiJi 순으로 폴백해
+                    // 항상 유효한 캐릭터를 전송함으로써 스폰 누락을 방지한다.
+                    if (_runner.LocalPlayer.IsRealPlayer)
+                    {
+                        var charToSend = _localSelectedCharacterIndex >= 0
+                            ? _localSelectedCharacterIndex
+                            : savedCharacterIndex >= 0
+                                ? savedCharacterIndex
+                                : (int)CharacterKind.AiJi;
+                        SetLocalPlayerSelectedCharacter(charToSend);
+                    }
+                }
+                else
+                {
+                    // ── LauncherScene(로비) 방장 이전 처리 ───────────────────────────
+                    // 기존 방 패널로 복귀해 대기 상태를 유지한다.
+                    ShowRoomPanel();
+                    UpdateRoomPanel();
+
+                    // 클라이언트는 새 방장에게 캐릭터 선택을 재전송해야 roster 에 반영됨.
+                    // 서버는 이미 RegisterParticipant + BroadcastPlayerRoster 로 처리됨.
+                    // savedAllCharacterIndices 에서 로컬 플레이어 인덱스를 읽어 재전송한다.
+                    if (!_runner.IsServer && _runner.LocalPlayer.IsRealPlayer)
+                    {
+                        var localIndex = savedAllCharacterIndices.TryGetValue(_runner.LocalPlayer.PlayerId, out var li)
+                            ? li
+                            : savedCharacterIndex;
+                        if (localIndex >= 0)
+                        {
+                            SetLocalPlayerSelectedCharacter(localIndex);
+                        }
+                    }
                 }
             }
             finally
             {
                 _isProcessing = false;
+                _isMigrating = false;
+                // 마이그레이션 중 수신됐으나 _isMigrating 가드로 보류된 캐릭터 선택을 처리한다.
+                FlushPendingMigrationSpawns();
             }
         }
 
+        // ─── 좌클릭 꾹 vs 연타 판별용 필드 ───
+        private bool _netLeftMouseDown;
+        private float _netLeftMouseDownTime;
+        private bool _netLeftMouseConsumedAsGrab;
+        private const float NET_GRAB_HOLD_THRESHOLD = 0.15f;
+
         // 매 네트워크 틱마다 로컬 플레이어의 입력을 수집해 Fusion에 전달한다.
-        // 서버의 FixedUpdateNetwork에서 GetInput<PlayerNetworkInput>()으로 꺼내 사용된다.
+        // 좌클릭 꾹(0.15초 이상) = GrabHold, 좌클릭 짧게 = Punch
         void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input)
         {
+            // 좌클릭 상태 추적
+            if (Input.GetMouseButtonDown(0))
+            {
+                _netLeftMouseDown = true;
+                _netLeftMouseDownTime = Time.time;
+                _netLeftMouseConsumedAsGrab = false;
+            }
+
+            if (Input.GetMouseButton(0) && _netLeftMouseDown)
+            {
+                if (Time.time - _netLeftMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
+                    _netLeftMouseConsumedAsGrab = true;
+            }
+
+            bool isPunch = false;
+            if (Input.GetMouseButtonUp(0))
+            {
+                if (!_netLeftMouseConsumedAsGrab)
+                    isPunch = true;
+                _netLeftMouseDown = false;
+            }
+
+            bool isGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
+
             input.Set(new PlayerNetworkInput
             {
                 Move = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical")),
-                Jump = Input.GetKey(KeyCode.Space)
+                Jump = Input.GetKey(KeyCode.Space),
+                Punch = isPunch,
+                Drop = Input.GetKeyDown(KeyCode.F),
+                Throw = Input.GetMouseButtonDown(1),
+                GrabHold = isGrabHold,
+                Headbutt = Input.GetMouseButtonDown(2),
+                Sprint = Input.GetKey(KeyCode.LeftShift)
             });
         }
         void INetworkRunnerCallbacks.OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
@@ -342,6 +452,23 @@ namespace SSAFYPlayTime
                         }
 
                         BroadcastPlayerRoster();
+
+                        // GameScene에서는 클라이언트가 재접속 후 캐릭터 선택을 재전송하므로
+                        // 수신 즉시 스폰을 시도한다.
+                        // 마이그레이션 진행 중(_isMigrating)이면 TrySpawnGameplayNetworkCharacter가
+                        // 가드로 막히므로 버퍼에 보관했다가 마이그레이션 완료 후 일괄 처리한다.
+                        if (IsActiveGameplayScene())
+                        {
+                            if (_isMigrating)
+                            {
+                                _pendingCharacterSelectionsWhileMigrating[player] = normalized;
+                                Debug.Log($"[Lobby] Buffered character selection during migration. player={player.PlayerId}, charIdx={normalized}");
+                            }
+                            else
+                            {
+                                TrySpawnGameplayNetworkCharacter(player);
+                            }
+                        }
                     }
                 }
 
@@ -364,6 +491,14 @@ namespace SSAFYPlayTime
 
             _spawnedGameplayNetworkCharacters.Clear();
             _cachedSpawnPointGroup = null;
+
+            // 마이그레이션 중에는 캡처해둔 위치 테이블을 지우지 않는다.
+            // StartGame(HostMigrationToken) 과정에서 OnSceneLoadStart 가 발동할 수 있으나
+            // 이 데이터는 재스폰에 반드시 필요하므로 _isMigrating 플래그로 보호한다.
+            if (!_isMigrating)
+            {
+                _migratedPositionsByOldPlayerId.Clear();
+            }
         }
 
         // 씬 전환이 완료됐을 때 호출. GameScene이면 로비 UI를 숨기고 서버에서 캐릭터를 스폰한다.
