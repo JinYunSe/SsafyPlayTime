@@ -12,7 +12,7 @@ namespace SSAFYPlayTime.Editor
 
         private static readonly string[] CharacterPrefabPaths =
         {
-            "Assets/_Project/Prefabs/Characters/AiJiCharacter.prefab",
+            "Assets/_Project/Prefabs/Characters/SsatyCharacter.prefab",
             "Assets/_Project/Prefabs/Characters/PitCharacter.prefab",
             "Assets/_Project/Prefabs/Characters/SeuTatiCharacter.prefab",
             "Assets/_Project/Prefabs/Characters/WaiJeuCharacter.prefab"

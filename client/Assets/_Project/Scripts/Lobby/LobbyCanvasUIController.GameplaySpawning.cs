@@ -4,6 +4,7 @@ using System.Linq;
 using Fusion;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.Serialization;
 
 namespace SSAFYPlayTime
 {
@@ -13,7 +14,8 @@ namespace SSAFYPlayTime
     {
         [Header("Gameplay Spawning")]
         // 각 캐릭터 종류별 게임플레이용 프리팹 (NetworkObject 포함)
-        [SerializeField] private GameObject aiJiGameplayCharacterPrefab;
+        [FormerlySerializedAs("aiJiGameplayCharacterPrefab")]
+        [SerializeField] private GameObject ssatyGameplayCharacterPrefab;
         [SerializeField] private GameObject pitGameplayCharacterPrefab;
         [SerializeField] private GameObject seuTatiGameplayCharacterPrefab;
         [SerializeField] private GameObject waiJeuGameplayCharacterPrefab;
@@ -69,7 +71,7 @@ namespace SSAFYPlayTime
         {
             return SanitizeCharacterIndexOrNone(characterIndex) switch
             {
-                (int)CharacterKind.AiJi => aiJiGameplayCharacterPrefab,
+                (int)CharacterKind.Ssaty => ssatyGameplayCharacterPrefab,
                 (int)CharacterKind.Pit => pitGameplayCharacterPrefab,
                 (int)CharacterKind.SeuTati => seuTatiGameplayCharacterPrefab,
                 (int)CharacterKind.WaiJeu => waiJeuGameplayCharacterPrefab,
@@ -170,9 +172,10 @@ namespace SSAFYPlayTime
             var selectedCharacter = _selectedCharacterIndexByPlayerId.TryGetValue(player.PlayerId, out var selected)
                 ? SanitizeCharacterIndexOrNone(selected)
                 : -1;
+            // 캐릭터를 선택하지 않은 플레이어는 기본 캐릭터(Ssaty)로 스폰한다.
             if (selectedCharacter < 0)
             {
-                selectedCharacter = (int)CharacterKind.AiJi;
+                selectedCharacter = (int)CharacterKind.Ssaty;
             }
 
             var prefab = GetGameplayCharacterPrefabByIndex(selectedCharacter);
@@ -182,6 +185,7 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            // Fusion이 네트워크로 스폰하려면 프리팹에 NetworkObject 컴포넌트가 반드시 있어야 한다.
             if (prefab.GetComponent<NetworkObject>() == null)
             {
                 Debug.LogError($"[Lobby] {prefab.name} prefab is missing NetworkObject component. Add NetworkObject to character prefab for network spawn.");
