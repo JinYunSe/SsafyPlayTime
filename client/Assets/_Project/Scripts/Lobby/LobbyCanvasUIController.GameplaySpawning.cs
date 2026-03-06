@@ -25,6 +25,7 @@ namespace SSAFYPlayTime
 
         // 스폰된 캐릭터 NetworkObject를 PlayerId 키로 관리 (퇴장 시 Despawn에 사용)
         private readonly Dictionary<int, NetworkObject> _spawnedGameplayNetworkCharacters = new();
+        private readonly Dictionary<int, int> _spawnedCharacterIndexByPlayerId = new();
 
         // 씬에서 찾아둔 SpawnPointGroup 캐시 (OnSceneLoadStart 시 null 초기화)
         private SpawnPointGroup _cachedSpawnPointGroup;
@@ -164,11 +165,6 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            if (_spawnedGameplayNetworkCharacters.ContainsKey(player.PlayerId))
-            {
-                return;
-            }
-
             var selectedCharacter = _selectedCharacterIndexByPlayerId.TryGetValue(player.PlayerId, out var selected)
                 ? SanitizeCharacterIndexOrNone(selected)
                 : -1;
@@ -176,6 +172,31 @@ namespace SSAFYPlayTime
             if (selectedCharacter < 0)
             {
                 selectedCharacter = (int)CharacterKind.Ssaty;
+            }
+
+            if (_spawnedGameplayNetworkCharacters.TryGetValue(player.PlayerId, out var existingSpawned))
+            {
+                if (_spawnedCharacterIndexByPlayerId.TryGetValue(player.PlayerId, out var existingCharacterIndex) &&
+                    existingCharacterIndex == selectedCharacter)
+                {
+                    return;
+                }
+
+                if (existingSpawned != null)
+                {
+                    try
+                    {
+                        _runner.Despawn(existingSpawned);
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogWarning($"[Lobby] Failed to replace character spawn. player={player.PlayerId}, error={e.Message}");
+                        return;
+                    }
+                }
+
+                _spawnedGameplayNetworkCharacters.Remove(player.PlayerId);
+                _spawnedCharacterIndexByPlayerId.Remove(player.PlayerId);
             }
 
             var prefab = GetGameplayCharacterPrefabByIndex(selectedCharacter);
@@ -227,6 +248,7 @@ namespace SSAFYPlayTime
                 }
 
                 _spawnedGameplayNetworkCharacters[player.PlayerId] = spawned;
+                _spawnedCharacterIndexByPlayerId[player.PlayerId] = selectedCharacter;
                 Debug.Log($"[Lobby] Spawned network character. player={player.PlayerId}, prefab={prefab.name}");
             }
             catch (Exception e)
