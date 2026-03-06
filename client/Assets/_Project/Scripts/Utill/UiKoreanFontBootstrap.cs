@@ -1,4 +1,4 @@
-﻿using TMPro;
+using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -67,7 +67,7 @@ namespace SSAFYPlayTime
 
                 if (tmp.font != fallback)
                 {
-                    tmp.font = fallback;
+                    //tmp.font = fallback;
                 }
             }
         }
