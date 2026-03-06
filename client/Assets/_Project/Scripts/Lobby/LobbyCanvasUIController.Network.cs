@@ -74,6 +74,11 @@ namespace SSAFYPlayTime
                 RegisterParticipant(player, _nickname);
             }
 
+            if (runner.IsServer && IsActiveGameplayScene())
+            {
+                TrySpawnGameplayNetworkCharacter(player);
+            }
+
             if (roomPanel.activeSelf)
             {
                 UpdateRoomPanel();
@@ -355,14 +360,50 @@ namespace SSAFYPlayTime
             }
         }
 
+        // ─── 좌클릭 꾹 vs 연타 판별용 필드 ───
+        private bool _netLeftMouseDown;
+        private float _netLeftMouseDownTime;
+        private bool _netLeftMouseConsumedAsGrab;
+        private const float NET_GRAB_HOLD_THRESHOLD = 0.15f;
+
         // 매 네트워크 틱마다 로컬 플레이어의 입력을 수집해 Fusion에 전달한다.
-        // 서버의 FixedUpdateNetwork에서 GetInput<PlayerNetworkInput>()으로 꺼내 사용된다.
+        // 좌클릭 꾹(0.15초 이상) = GrabHold, 좌클릭 짧게 = Punch
         void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input)
         {
+            // 좌클릭 상태 추적
+            if (Input.GetMouseButtonDown(0))
+            {
+                _netLeftMouseDown = true;
+                _netLeftMouseDownTime = Time.time;
+                _netLeftMouseConsumedAsGrab = false;
+            }
+
+            if (Input.GetMouseButton(0) && _netLeftMouseDown)
+            {
+                if (Time.time - _netLeftMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
+                    _netLeftMouseConsumedAsGrab = true;
+            }
+
+            bool isPunch = false;
+            if (Input.GetMouseButtonUp(0))
+            {
+                if (!_netLeftMouseConsumedAsGrab)
+                    isPunch = true;
+                _netLeftMouseDown = false;
+            }
+
+            bool isGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
+
             input.Set(new PlayerNetworkInput
             {
                 Move = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical")),
-                Jump = Input.GetKey(KeyCode.Space)
+                Jump = Input.GetKey(KeyCode.Space),
+                Punch = isPunch,
+                Drop = Input.GetKeyDown(KeyCode.F),
+                Throw = Input.GetMouseButtonDown(1),
+                GrabHold = isGrabHold,
+                Headbutt = Input.GetMouseButtonDown(2),
+                Sprint = Input.GetKey(KeyCode.LeftShift)
             });
         }
         void INetworkRunnerCallbacks.OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
