@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: PhotonAppSettings
   m_EditorClassIdentifier: 
   AppSettings:
-    AppIdFusion: 7481e9c8-0252-40a9-99e8-b5fa8281e2d7
+    AppIdFusion: c1b82806-ebed-4912-9ed1-cbd8af78e727
     AppIdChat: 
     AppIdVoice: 
     AppVersion: ssafy-playtime-v1
