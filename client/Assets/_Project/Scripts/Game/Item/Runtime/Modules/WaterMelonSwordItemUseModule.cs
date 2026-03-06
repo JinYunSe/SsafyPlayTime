@@ -9,7 +9,12 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         public override ItemUseModuleResult TryUse(in ItemUseModuleContext context)
         {
-            // 수박검 전투 상세 로직은 별도 전투 시스템에서 처리한다.
+            if (context.Definition == null)
+            {
+                return ItemUseModuleResult.Failed("Definition missing for watermelon sword item.");
+            }
+
+            context.Controller.UseWatermelonSword(context.Definition);
             return ItemUseModuleResult.SuccessWithoutConsume();
         }
     }

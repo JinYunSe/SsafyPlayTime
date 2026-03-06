@@ -35,6 +35,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         public event Action<string, float> FlamethrowerStarted;
         public event Action<FlamethrowerTickRequest> FlamethrowerTicked;
         public event Action<string> FlamethrowerStopped;
+        public event Action<MeleeSwingRequest> MeleeSwingRequested;
         public event Action<ItemBuffMask, ItemBuffRuntimeState> BuffStateChanged;
 
         public bool IsReady => _controller != null;

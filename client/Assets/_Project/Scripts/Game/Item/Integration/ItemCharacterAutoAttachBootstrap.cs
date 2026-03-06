@@ -208,6 +208,15 @@ namespace SSAFYPlayTime.Gameplay.Items
             heldPresenter.SetRuntimeHost(host);
             heldPresenter.SetCharacterRoot(characterRootObject.transform);
 
+            var meleeSwingHandler = characterRootObject.GetComponent<ItemCharacterMeleeSwingHandler>();
+            if (meleeSwingHandler == null)
+            {
+                meleeSwingHandler = characterRootObject.AddComponent<ItemCharacterMeleeSwingHandler>();
+            }
+            meleeSwingHandler.SetRuntimeHost(host);
+            meleeSwingHandler.SetHeldItemPresenter(heldPresenter);
+            meleeSwingHandler.SetOwnerRoot(characterRootObject.transform);
+
             var buffApplier = characterRootObject.GetComponent<ItemCharacterBuffApplier>();
             if (buffApplier == null)
             {

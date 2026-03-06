@@ -17,6 +17,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         void OnFlamethrowerStart(string itemId, float endAtSec);
         void OnFlamethrowerTick(in FlamethrowerTickRequest request);
         void OnFlamethrowerStop(string itemId);
+        void OnMeleeSwingRequested(in MeleeSwingRequest request);
 
         void OnBuffStateChanged(ItemBuffMask activeBuffMask, in ItemBuffRuntimeState buffState);
     }

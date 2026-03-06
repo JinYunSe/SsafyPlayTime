@@ -85,6 +85,22 @@ namespace SSAFYPlayTime.Gameplay.Items
             _bridge.OnFlamethrowerStart(def.Master.ItemId, _equipmentEndAt);
         }
 
+        internal void UseWatermelonSword(ItemDefinition def)
+        {
+            if (def == null)
+            {
+                return;
+            }
+
+            // 수박검 근접 타격은 현재 고정 피해(체력/스턴 각 5) 정책으로 요청한다.
+            var request = new MeleeSwingRequest(
+                def.Master.ItemId,
+                DefaultWatermelonSwordActiveDuration,
+                DefaultWatermelonSwordHealthDamage,
+                DefaultWatermelonSwordStunDamage);
+            _bridge.OnMeleeSwingRequested(request);
+        }
+
         private void TickFlamethrower(float now, Vector3 ownerPosition, Vector3 ownerForward)
         {
             if (!_isFlamethrowerActive)

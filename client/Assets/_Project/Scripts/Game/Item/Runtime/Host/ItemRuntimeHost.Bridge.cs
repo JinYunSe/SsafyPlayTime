@@ -50,6 +50,11 @@ namespace SSAFYPlayTime.Gameplay.Items
             FlamethrowerStopped?.Invoke(itemId);
         }
 
+        void IItemRuntimeBridge.OnMeleeSwingRequested(in MeleeSwingRequest request)
+        {
+            MeleeSwingRequested?.Invoke(request);
+        }
+
         void IItemRuntimeBridge.OnBuffStateChanged(ItemBuffMask activeBuffMask, in ItemBuffRuntimeState buffState)
         {
             BuffStateChanged?.Invoke(activeBuffMask, buffState);
