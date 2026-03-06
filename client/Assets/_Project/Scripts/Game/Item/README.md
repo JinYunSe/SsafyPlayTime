@@ -43,6 +43,8 @@
 - `ItemCharacterAutoAttachBootstrap.cs`: 캐릭터 프리팹 수정 없이 아이템 컴포넌트 자동 결합
 - `ItemCharacterUseInteractor.cs`: 캐릭터 입력 기반 아이템 사용 호출
 - `ItemCharacterHeldItemPresenter.cs`: 보유 아이템 손 장착 시각화
+- `ItemCharacterMeleeSwingHandler.cs`: 장착 무기(수박검) 근접 타격 콜라이더 생성/피해 처리
+- `ItemMeleeDamageHitbox.cs`: 근접 타격 트리거 이벤트 전달 컴포넌트
 - `ItemCharacterBuffApplier.cs`: 버프 상태를 캐릭터 시각/배율 정보로 변환
 - `ItemFieldInteractionService.cs`: 실게임 적용용 필드 스폰/획득/사용 서비스 API
 

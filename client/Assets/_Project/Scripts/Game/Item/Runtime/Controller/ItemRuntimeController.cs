@@ -10,6 +10,9 @@ namespace SSAFYPlayTime.Gameplay.Items
     {
         private const float DefaultFlamethrowerRadius = 1.2f;
         private const float DefaultFlamethrowerTickInterval = 0.2f;
+        private const float DefaultWatermelonSwordActiveDuration = 0.22f;
+        private const float DefaultWatermelonSwordHealthDamage = 5f;
+        private const float DefaultWatermelonSwordStunDamage = 5f;
 
         private readonly ItemCatalog _catalog;
         private readonly IItemRuntimeBridge _bridge;
