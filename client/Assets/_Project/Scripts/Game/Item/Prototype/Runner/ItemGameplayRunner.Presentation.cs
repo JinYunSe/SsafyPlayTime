@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using Fusion;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -43,78 +42,6 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             PlayOneShotSfx(clip, worldPosition, volume, row.Spatial);
-        }
-
-        private void OnVfxRequested(string vfxId, Vector3 worldPosition)
-        {
-            if (!enableRuntimePresentation)
-            {
-                return;
-            }
-
-            if (!TryGetVfxRow(vfxId, out var row))
-            {
-                return;
-            }
-
-            var prefab = LoadVfxPrefabFromAssetKey(row.AssetKey);
-            if (prefab == null)
-            {
-                return;
-            }
-
-            var instance = Instantiate(prefab);
-            instance.transform.position = worldPosition;
-            instance.transform.rotation = Quaternion.LookRotation(GetTargetForward(), Vector3.up);
-            instance.transform.localScale = Vector3.one * Mathf.Max(0.01f, row.Scale);
-
-            if (row.LifetimeSec > 0f)
-            {
-                Destroy(instance, row.LifetimeSec);
-            }
-
-            DisableUnsupportedGrabPassRenderers(instance);
-        }
-
-        private bool CanRunItemInput()
-        {
-            if (!hostAuthorityOnlyWhenRunnerExists)
-            {
-                return true;
-            }
-
-            if (!TryGetRunner(out var runner))
-            {
-                return true;
-            }
-
-            return runner.IsServer;
-        }
-
-        private bool TryGetRunner(out NetworkRunner runner)
-        {
-            if (_runnerCache != null && _runnerCache.IsRunning)
-            {
-                runner = _runnerCache;
-                return true;
-            }
-
-            if (Time.unscaledTime < _nextRunnerLookupTime)
-            {
-                runner = null;
-                return false;
-            }
-
-            _nextRunnerLookupTime = Time.unscaledTime + RunnerLookupIntervalSec;
-            _runnerCache = FindObjectOfType<NetworkRunner>();
-            if (_runnerCache != null && _runnerCache.IsRunning)
-            {
-                runner = _runnerCache;
-                return true;
-            }
-
-            runner = null;
-            return false;
         }
 
         private bool LoadPresentationTablesIfNeeded()

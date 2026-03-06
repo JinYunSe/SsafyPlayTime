@@ -25,11 +25,6 @@ namespace SSAFYPlayTime.Gameplay.Items
             SfxRequested?.Invoke(sfxId, worldPosition, loop);
         }
 
-        void IItemRuntimeBridge.OnSpawnVfx(string vfxId, Vector3 worldPosition)
-        {
-            VfxRequested?.Invoke(vfxId, worldPosition);
-        }
-
         void IItemRuntimeBridge.OnBlackholeRequested(in BlackholeSkillRequest request)
         {
             BlackholeRequested?.Invoke(request);
