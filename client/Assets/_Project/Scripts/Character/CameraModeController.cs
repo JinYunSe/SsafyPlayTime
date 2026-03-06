@@ -1,7 +1,5 @@
 using System.Linq;
 
-using UnityEditor.Rendering;
-
 using UnityEngine;
 
 public class CameraModeController : MonoBehaviour
