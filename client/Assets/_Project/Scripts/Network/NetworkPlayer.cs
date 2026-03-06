@@ -70,12 +70,6 @@ var inputMagnitude = 0f;
         
         if (GetInput(out PlayerNetworkInput input))
         {
-            var desired = Quaternion.LookRotation(new Vector3(-_moveInput.x, 0f, _moveInput.y), transform.up);
-            mainJoint.targetRotation = Quaternion.RotateTowards(
-                mainJoint.targetRotation,
-                desired,
-                Time.fixedDeltaTime * config.rotateSpeedDeg);
-            
             inputMagnitude = input.Move.magnitude;
             var forwardVelocity = Vector3.Dot(transform.forward, rigidbody3D.velocity);
             
