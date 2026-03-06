@@ -80,6 +80,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             fieldDrop.SetItemId(definition.Master.ItemId);
             EnsureCollider(instance);
+            EnsureDynamicRigidbody(instance);
             return fieldDrop;
         }
 
@@ -287,6 +288,30 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             target.AddComponent<SphereCollider>();
+        }
+
+        private static void EnsureDynamicRigidbody(GameObject target)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            var body = target.GetComponent<Rigidbody>();
+            if (body == null)
+            {
+                body = target.AddComponent<Rigidbody>();
+                // 필드 스폰 아이템은 기본적으로 물리 반응이 가능하도록 구성한다.
+                body.mass = 1f;
+                body.drag = 0f;
+                body.angularDrag = 0.05f;
+                body.interpolation = RigidbodyInterpolation.Interpolate;
+                body.collisionDetectionMode = CollisionDetectionMode.Continuous;
+            }
+
+            body.useGravity = true;
+            body.isKinematic = false;
+            body.WakeUp();
         }
 
         private static void ApplyScaleMultiplier(GameObject target, float multiplier)

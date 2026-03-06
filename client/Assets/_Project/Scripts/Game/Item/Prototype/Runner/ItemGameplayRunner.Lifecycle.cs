@@ -78,6 +78,33 @@ namespace SSAFYPlayTime.Gameplay.Items
         }
 
         // 입력 처리 전 런타임이 준비되어 있는지 확인한다.
+        public void SetRuntimeHost(ItemRuntimeHost runtimeHost)
+        {
+            if (runtimeHost == null || itemRuntimeHost == runtimeHost)
+            {
+                return;
+            }
+
+            // 호스트 교체 시 중복 이벤트 구독을 방지한다.
+            UnbindRuntimeEvents();
+            itemRuntimeHost = runtimeHost;
+
+            if (targetRoot == null)
+            {
+                targetRoot = itemRuntimeHost.OwnerTransform != null
+                    ? itemRuntimeHost.OwnerTransform
+                    : itemRuntimeHost.transform;
+            }
+
+            itemRuntimeHost.SetOwnerTransform(targetRoot);
+            BindRuntimeEvents();
+
+            if (!itemRuntimeHost.IsReady && !itemRuntimeHost.Initialize())
+            {
+                LogStatus($"ItemRuntimeHost init failed: {itemRuntimeHost.LastError}");
+            }
+        }
+
         private bool EnsureRuntimeReady()
         {
             if (itemRuntimeHost == null)

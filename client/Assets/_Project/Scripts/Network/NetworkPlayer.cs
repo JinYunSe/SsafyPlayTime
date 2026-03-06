@@ -1,5 +1,6 @@
 using Fusion;
 using SSAFYPlayTime.Character;
+using SSAFYPlayTime.Gameplay.Items;
 using UnityEngine;
 
 // Fusion NetworkBehaviour 기반의 캐릭터 컨트롤러.
@@ -7,7 +8,7 @@ using UnityEngine;
 //
 // [전투 시스템]
 // - stunDamage 누적 → 임계값(30) 초과 → 기절 → 가중치 기반 자동 회복
-// - 좌클릭 짧게=펀치, 좌클릭 꾹=그랩, 우클릭=던지기/어퍼컷
+// - 좌클릭 짧게=아이템 사용(보유 시)/펀치, 좌클릭 꾹=그랩(아이템이면 즉시 습득), 우클릭=던지기
 // - 부위별/상태별 배율, 그로기 시스템
 public sealed class NetworkPlayer : NetworkBehaviour
 {
@@ -52,6 +53,9 @@ public sealed class NetworkPlayer : NetworkBehaviour
 
     private bool _isGrounded;
     private HandGrabHandler[] _handGrabHandlers;
+    private ItemRuntimeHost _itemRuntimeHost;
+    private ItemCharacterUseInteractor _itemUseInteractor;
+    private ItemCharacterHeldItemPresenter _heldItemPresenter;
 
     private bool _isActiveRagdoll = true;
     public bool IsActiveRagdoll => _isActiveRagdoll;
@@ -69,11 +73,13 @@ public sealed class NetworkPlayer : NetworkBehaviour
     private bool _leftMouseDown;
     private float _leftMouseDownTime;
     private bool _leftMouseConsumedAsGrab;
+    private bool _leftClickUseTriggered;
     private const float GRAB_HOLD_THRESHOLD = 0.15f;
 
     // 로컬 트리거
     private bool _dropTriggered;
     private bool _throwTriggered;
+    private float _nextRuntimeIntegrationRefreshTime;
 
     // 기절 애니메이션 해시
     private static readonly int H_MovementSpeed = Animator.StringToHash("movementSpeed");
@@ -114,6 +120,7 @@ public sealed class NetworkPlayer : NetworkBehaviour
             syncPhysicsObjects = GetComponentsInChildren<SyncPhysicsObject>(true);
 
         _handGrabHandlers = GetComponentsInChildren<HandGrabHandler>(true);
+        EnsureItemRuntimeIntegration();
 
         if (holdPoint == null)
         {
@@ -130,6 +137,156 @@ public sealed class NetworkPlayer : NetworkBehaviour
             _startSlerpPositionSpring = mainJoint.slerpDrive.positionSpring;
 
         EnsureAnimatorBinding();
+    }
+
+    private void EnsureItemRuntimeIntegration()
+    {
+        var runtimeHost = ResolveItemRuntimeHostForCharacter();
+        if (runtimeHost == null)
+        {
+            // 씬에 공유 호스트가 전혀 없을 때만 로컬 호스트를 생성한다.
+            runtimeHost = gameObject.AddComponent<ItemRuntimeHost>();
+        }
+
+        // 로컬 입력 권한 캐릭터(또는 샌드박스)만 소유자 트랜스폼을 갱신한다.
+        if (Runner == null || HasInputAuthority)
+            runtimeHost.SetOwnerTransform(transform);
+
+        _itemRuntimeHost = runtimeHost;
+
+        if (_handGrabHandlers != null)
+        {
+            foreach (var handler in _handGrabHandlers)
+            {
+                if (handler != null)
+                    handler.SetItemRuntimeHost(_itemRuntimeHost);
+            }
+        }
+
+        _itemUseInteractor = GetComponent<ItemCharacterUseInteractor>();
+        if (_itemUseInteractor == null)
+        {
+            // 좌클릭 사용 입력이 항상 런타임 호스트로 연결되도록 인터랙터를 보장한다.
+            _itemUseInteractor = gameObject.AddComponent<ItemCharacterUseInteractor>();
+        }
+
+        _itemUseInteractor.SetRuntimeHost(runtimeHost);
+        _itemUseInteractor.SetOwnerRoot(transform);
+        _itemUseInteractor.SetUseItemKey(KeyCode.Mouse0);
+        _itemUseInteractor.SetUseLegacyInput(false);
+
+        _heldItemPresenter = GetComponent<ItemCharacterHeldItemPresenter>();
+        if (_heldItemPresenter == null)
+        {
+            // 손에 든 아이템 시각화가 누락되지 않도록 프리젠터를 보장한다.
+            _heldItemPresenter = gameObject.AddComponent<ItemCharacterHeldItemPresenter>();
+        }
+        _heldItemPresenter.SetRuntimeHost(runtimeHost);
+        _heldItemPresenter.SetCharacterRoot(transform);
+
+        // 사용/드롭 이벤트를 처리하는 씬 시스템이 같은 런타임 호스트를 바라보도록 맞춘다.
+        if (Runner == null || HasInputAuthority)
+            SynchronizeRuntimeHostForSceneSystems(runtimeHost);
+    }
+
+    private ItemRuntimeHost ResolveItemRuntimeHostForCharacter()
+    {
+        var root = transform.root;
+        var hosts = FindObjectsOfType<ItemRuntimeHost>(true);
+        var hostCount = 0;
+        ItemRuntimeHost localHost = null;
+        ItemRuntimeHost gameplayRunnerHost = null;
+        ItemRuntimeHost fieldDropSpawnerHost = null;
+        ItemRuntimeHost ownerMatchedHost = null;
+        var ownerMatchedScore = int.MinValue;
+        ItemRuntimeHost singleFallback = null;
+        for (var i = 0; i < hosts.Length; i++)
+        {
+            var host = hosts[i];
+            if (host == null)
+                continue;
+
+            hostCount++;
+            if (singleFallback == null)
+                singleFallback = host;
+            if (host.gameObject == gameObject)
+                localHost = host;
+            if (gameplayRunnerHost == null && host.GetComponent<ItemGameplayRunner>() != null)
+                gameplayRunnerHost = host;
+            if (fieldDropSpawnerHost == null && host.GetComponent<ItemFieldDropSpawner>() != null)
+                fieldDropSpawnerHost = host;
+
+            var owner = host.OwnerTransform;
+            if (owner == root || (owner != null && owner.root == root))
+            {
+                var score = 0;
+                if (host.GetComponent<ItemGameplayRunner>() != null) score += 100;
+                if (host.GetComponent<ItemFieldDropSpawner>() != null) score += 80;
+                if (host.GetComponent<ItemFieldInteractionService>() != null) score += 50;
+                if (host.gameObject == gameObject) score += 10;
+
+                if (score > ownerMatchedScore)
+                {
+                    ownerMatchedScore = score;
+                    ownerMatchedHost = host;
+                }
+            }
+        }
+
+        if (ownerMatchedHost != null)
+            return ownerMatchedHost;
+        if (gameplayRunnerHost != null)
+            return gameplayRunnerHost;
+        if (fieldDropSpawnerHost != null)
+            return fieldDropSpawnerHost;
+        if (localHost != null)
+            return localHost;
+
+        return hostCount == 1 ? singleFallback : null;
+    }
+
+    private void RefreshRuntimeIntegrationIfNeeded()
+    {
+        var now = Time.unscaledTime;
+        if (now < _nextRuntimeIntegrationRefreshTime)
+            return;
+
+        _nextRuntimeIntegrationRefreshTime = now + 1f;
+        var resolved = ResolveItemRuntimeHostForCharacter();
+        if (resolved == null)
+            return;
+
+        if (_itemRuntimeHost != resolved)
+            EnsureItemRuntimeIntegration();
+    }
+
+    private void SynchronizeRuntimeHostForSceneSystems(ItemRuntimeHost runtimeHost)
+    {
+        if (runtimeHost == null)
+            return;
+
+        var spawners = FindObjectsOfType<ItemFieldDropSpawner>(true);
+        for (var i = 0; i < spawners.Length; i++)
+        {
+            var spawner = spawners[i];
+            if (spawner == null)
+                continue;
+
+            // 이미 연결된 스포너는 유지하고, 비연결 상태만 현재 호스트로 보강한다.
+            if (spawner.RuntimeHost == null)
+                spawner.SetRuntimeHost(runtimeHost);
+        }
+
+        // ItemScene 테스트 러너가 존재하면 동일 호스트로 이벤트를 받게 맞춘다.
+        var runners = FindObjectsOfType<ItemGameplayRunner>(true);
+        for (var i = 0; i < runners.Length; i++)
+        {
+            var runner = runners[i];
+            if (runner == null)
+                continue;
+
+            runner.SetRuntimeHost(runtimeHost);
+        }
     }
 
     private void Update()
@@ -157,22 +314,27 @@ public sealed class NetworkPlayer : NetworkBehaviour
         }
 
         if (Input.GetMouseButtonUp(0))
+        {
+            // 좌클릭 짧게 클릭은 아이템 사용 입력으로 래치하고, 홀드 클릭은 잡기로만 처리한다.
+            if (!_leftMouseConsumedAsGrab && Time.time - _leftMouseDownTime < GRAB_HOLD_THRESHOLD)
+                _leftClickUseTriggered = true;
+
             _leftMouseDown = false;
+        }
 
         if (Input.GetKeyDown(KeyCode.F)) _dropTriggered = true;
         if (Input.GetMouseButtonDown(1)) _throwTriggered = true;
+
+        // 씬 초기화 순서로 호스트가 늦게 생성되는 경우를 대비해 주기적으로 재연결한다.
+        RefreshRuntimeIntegrationIfNeeded();
     }
 
     private void FixedUpdate()
     {
         if (Runner != null) return;
 
-        bool punchTrigger = false;
-        if (Input.GetMouseButtonUp(0) && !_leftMouseConsumedAsGrab
-            && Time.time - _leftMouseDownTime < GRAB_HOLD_THRESHOLD)
-        {
-            punchTrigger = true;
-        }
+        // 좌클릭 짧게 클릭으로 아이템 사용(기존 Punch 비트 재사용)을 처리한다.
+        bool punchTrigger = _leftClickUseTriggered;
 
         PlayerNetworkInput input = new PlayerNetworkInput
         {
@@ -188,6 +350,7 @@ public sealed class NetworkPlayer : NetworkBehaviour
 
         DoPhysicsStep(input, Time.fixedDeltaTime);
         _sandboxJump = false;
+        _leftClickUseTriggered = false;
     }
 
     public override void FixedUpdateNetwork()
@@ -484,10 +647,10 @@ public sealed class NetworkPlayer : NetworkBehaviour
         foreach (var handler in _handGrabHandlers)
             if (handler.IsHolding) anyHolding = true;
 
-        // 펀치: 좌클릭 짧게 + 잡고 있지 않음 + 그랩 모드 아님
-        if (punch && !anyHolding && !_isGrabActive)
+        // 좌클릭 짧게 클릭 입력: 보유 아이템 사용 우선, 실패 시 빈손에서만 펀치
+        if (punch && !_isGrabActive)
         {
-            if (animator != null)
+            if (!TryUseHeldItemByPrimaryClick() && !anyHolding && animator != null)
                 animator.SetTrigger(H_Punch);
         }
 
@@ -506,7 +669,20 @@ public sealed class NetworkPlayer : NetworkBehaviour
 
         if (drop)
         {
-            foreach (var handler in _handGrabHandlers) handler.Drop();
+            bool droppedPhysicsHold = false;
+            foreach (var handler in _handGrabHandlers)
+            {
+                if (handler != null && handler.IsHolding)
+                {
+                    handler.Drop();
+                    droppedPhysicsHold = true;
+                    break;
+                }
+            }
+
+            // 물리 그랩이 없으면 보유 아이템 드롭을 시도한다.
+            if (!droppedPhysicsHold)
+                TryDropHeldItemByKey();
         }
 
         if (@throw)
@@ -528,6 +704,126 @@ public sealed class NetworkPlayer : NetworkBehaviour
 
         if (animator != null)
             animator.SetBool(H_IsGrabbing, anyHolding);
+    }
+
+    private bool TryUseHeldItemByPrimaryClick()
+    {
+        var runtimeHost = ResolveItemRuntimeHostForCharacter();
+
+        if (_itemUseInteractor == null)
+            _itemUseInteractor = GetComponent<ItemCharacterUseInteractor>();
+
+        if (_itemUseInteractor != null)
+        {
+            if (runtimeHost != null)
+                _itemUseInteractor.SetRuntimeHost(runtimeHost);
+
+            if (string.IsNullOrWhiteSpace(_itemUseInteractor.HeldItemId))
+                return false;
+
+            return _itemUseInteractor.TryUseHeldItem(out _);
+        }
+
+        if (runtimeHost == null)
+            return false;
+
+        if (!runtimeHost.IsReady && !runtimeHost.Initialize())
+            return false;
+
+        if (string.IsNullOrWhiteSpace(runtimeHost.HeldItemId))
+            return false;
+
+        var targetPosition = transform.position + transform.forward * 6f;
+        return runtimeHost.TryUseHeldItem(targetPosition, out _);
+    }
+
+    private bool TryDropHeldItemByKey()
+    {
+        var runtimeHost = ResolveItemRuntimeHostForCharacter();
+        if (runtimeHost == null)
+            return false;
+
+        if (!runtimeHost.IsReady && !runtimeHost.Initialize())
+            return false;
+
+        if (string.IsNullOrWhiteSpace(runtimeHost.HeldItemId))
+            return false;
+
+        var droppedItemId = runtimeHost.HeldItemId;
+        var beforeDropCount = CountFieldDropsByItemId(droppedItemId);
+        if (!runtimeHost.TryDropHeldItem(out _))
+            return false;
+
+        EnsureFieldDropSpawnFallback(droppedItemId, runtimeHost, beforeDropCount);
+        return true;
+    }
+
+    private void EnsureFieldDropSpawnFallback(string droppedItemId, ItemRuntimeHost runtimeHost, int beforeDropCount)
+    {
+        if (string.IsNullOrWhiteSpace(droppedItemId))
+            return;
+
+        // 정상 드롭 이벤트로 이미 필드 아이템이 생성되었으면 폴백 스폰을 생략한다.
+        var afterDropCount = CountFieldDropsByItemId(droppedItemId);
+        if (afterDropCount > beforeDropCount)
+            return;
+
+        var spawners = FindObjectsOfType<ItemFieldDropSpawner>(true);
+        ItemFieldDropSpawner boundSpawner = null;
+        ItemFieldDropSpawner fallbackSpawner = null;
+
+        for (var i = 0; i < spawners.Length; i++)
+        {
+            var spawner = spawners[i];
+            if (spawner == null)
+                continue;
+
+            if (fallbackSpawner == null && spawner.RuntimeHost == null)
+                fallbackSpawner = spawner;
+
+            if (spawner.RuntimeHost == runtimeHost)
+            {
+                boundSpawner = spawner;
+            }
+        }
+
+        if (boundSpawner != null)
+            fallbackSpawner = boundSpawner;
+        else if (fallbackSpawner == null)
+        {
+            // 드롭 스포너가 없으면 런타임 호스트 오브젝트에 폴백 스포너를 생성한다.
+            var spawnRoot = runtimeHost != null ? runtimeHost.gameObject : gameObject;
+            fallbackSpawner = spawnRoot.GetComponent<ItemFieldDropSpawner>();
+            if (fallbackSpawner == null)
+                fallbackSpawner = spawnRoot.AddComponent<ItemFieldDropSpawner>();
+        }
+
+        fallbackSpawner.SetRuntimeHost(runtimeHost);
+        var spawnPosition = transform.position + transform.forward * 0.9f + Vector3.up * 0.4f;
+        if (!fallbackSpawner.TrySpawnItem(droppedItemId, spawnPosition, out _))
+        {
+            Debug.LogWarning($"[NetworkPlayer] 드롭 폴백 스폰 실패: {droppedItemId}", this);
+        }
+    }
+
+    private static int CountFieldDropsByItemId(string itemId)
+    {
+        if (string.IsNullOrWhiteSpace(itemId))
+            return 0;
+
+        var drops = FindObjectsOfType<ItemFieldDrop>(true);
+        var count = 0;
+        for (var i = 0; i < drops.Length; i++)
+        {
+            var drop = drops[i];
+            if (drop == null || drop.IsPickedUp)
+                continue;
+
+            if (string.Equals(drop.ItemId, itemId, System.StringComparison.Ordinal))
+                count++;
+        }
+
+        return count;
     }
 
     public override void Render()

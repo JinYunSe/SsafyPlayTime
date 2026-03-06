@@ -33,9 +33,12 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private bool useDefaultWatermelonSwordPose = true;
         [SerializeField] private Vector3 watermelonSwordLocalPositionOffset = new Vector3(0f, 0f, 0f);
         [SerializeField] private Vector3 watermelonSwordLocalEulerOffset = new Vector3(0f, 90f, 90f);
+        [SerializeField] private Vector3 watermelonSwordAdditionalEulerOffset = new Vector3(0f, 180f, 0f);
         [SerializeField] private Vector3 watermelonSwordLocalScale = Vector3.one * 0.3f;
+        [SerializeField] private float watermelonSwordHeldScaleMultiplier = 2.5f;
         [SerializeField] private bool watermelonSwordAutoGripSnap = true;
         [SerializeField] private bool watermelonSwordUseMaxOnPrimaryAxis;
+        [SerializeField] private bool watermelonSwordFlipGripDirection;
         [SerializeField] private Vector3 watermelonSwordGripFineTune = new Vector3(0f, 0.02f, 0f);
 
         [Header("디버그")]
@@ -142,6 +145,9 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             _spawnedHeldVisual = Instantiate(prefab, handAnchor);
             _spawnedHeldVisual.name = $"HeldItem_{heldItemId}";
+            var isWatermelonSword = string.Equals(heldItemId, ItemIds.WaterMelonSword, StringComparison.Ordinal);
+            // 수박칼은 조건과 무관하게 Lit 셰이더로 강제 교체해 마젠타를 방지한다.
+            ApplyUrpMaterialFallbackForHeldVisual(_spawnedHeldVisual, isWatermelonSword);
             ApplyPose(heldItemId, _spawnedHeldVisual.transform);
             DisablePhysicsForHeldVisual(_spawnedHeldVisual);
             DebugLog($"Held visual attached: {heldItemId}");
@@ -168,8 +174,9 @@ namespace SSAFYPlayTime.Gameplay.Items
                      string.Equals(heldItemId, ItemIds.WaterMelonSword, StringComparison.Ordinal))
             {
                 position = watermelonSwordLocalPositionOffset;
-                euler = watermelonSwordLocalEulerOffset;
-                scale = watermelonSwordLocalScale;
+                // 역수로 보이지 않도록 기본 오일러에 보정 회전을 더한다.
+                euler = watermelonSwordLocalEulerOffset + watermelonSwordAdditionalEulerOffset;
+                scale = watermelonSwordLocalScale * Mathf.Max(0.01f, watermelonSwordHeldScaleMultiplier);
             }
 
             if (watermelonSwordAutoGripSnap &&
@@ -233,17 +240,24 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             var gripLocalPoint = localBounds.center;
+            var useMaxOnPrimaryAxis = watermelonSwordUseMaxOnPrimaryAxis;
+            if (watermelonSwordFlipGripDirection)
+            {
+                // 칼끝을 잡는 문제가 있을 때 반대 축 끝점을 사용해 손잡이 쪽으로 보정한다.
+                useMaxOnPrimaryAxis = !useMaxOnPrimaryAxis;
+            }
+
             if (primaryAxis == 0)
             {
-                gripLocalPoint.x = watermelonSwordUseMaxOnPrimaryAxis ? localBounds.max.x : localBounds.min.x;
+                gripLocalPoint.x = useMaxOnPrimaryAxis ? localBounds.max.x : localBounds.min.x;
             }
             else if (primaryAxis == 1)
             {
-                gripLocalPoint.y = watermelonSwordUseMaxOnPrimaryAxis ? localBounds.max.y : localBounds.min.y;
+                gripLocalPoint.y = useMaxOnPrimaryAxis ? localBounds.max.y : localBounds.min.y;
             }
             else
             {
-                gripLocalPoint.z = watermelonSwordUseMaxOnPrimaryAxis ? localBounds.max.z : localBounds.min.z;
+                gripLocalPoint.z = useMaxOnPrimaryAxis ? localBounds.max.z : localBounds.min.z;
             }
 
             var scaledGrip = Vector3.Scale(gripLocalPoint, targetScale);
@@ -334,6 +348,125 @@ namespace SSAFYPlayTime.Gameplay.Items
                 body.velocity = Vector3.zero;
                 body.angularVelocity = Vector3.zero;
             }
+        }
+
+        private static void ApplyUrpMaterialFallbackForHeldVisual(GameObject root, bool forceLitOverride)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            var renderers = root.GetComponentsInChildren<Renderer>(true);
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                var renderer = renderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                var materials = renderer.materials;
+                var replaced = false;
+                for (var m = 0; m < materials.Length; m++)
+                {
+                    var source = materials[m];
+                    if (source == null)
+                    {
+                        continue;
+                    }
+
+                    if (!forceLitOverride && !NeedsUrpFallback(source))
+                    {
+                        continue;
+                    }
+
+                    var fallbackShader =
+                        Shader.Find("Universal Render Pipeline/Lit") ??
+                        Shader.Find("Universal Render Pipeline/Simple Lit") ??
+                        Shader.Find("Standard");
+                    if (fallbackShader == null)
+                    {
+                        continue;
+                    }
+
+                    var fallback = new Material(fallbackShader)
+                    {
+                        name = $"{source.name}_HeldFallback"
+                    };
+
+                    var sourceTexture = source.HasProperty("_BaseMap")
+                        ? source.GetTexture("_BaseMap")
+                        : source.HasProperty("_MainTex")
+                            ? source.GetTexture("_MainTex")
+                            : null;
+                    if (sourceTexture != null)
+                    {
+                        if (fallback.HasProperty("_BaseMap"))
+                        {
+                            fallback.SetTexture("_BaseMap", sourceTexture);
+                        }
+                        else if (fallback.HasProperty("_MainTex"))
+                        {
+                            fallback.SetTexture("_MainTex", sourceTexture);
+                        }
+                    }
+
+                    var sourceColor = source.HasProperty("_BaseColor")
+                        ? source.GetColor("_BaseColor")
+                        : source.HasProperty("_Color")
+                            ? source.GetColor("_Color")
+                            : Color.white;
+                    if (fallback.HasProperty("_BaseColor"))
+                    {
+                        fallback.SetColor("_BaseColor", sourceColor);
+                    }
+                    if (fallback.HasProperty("_Color"))
+                    {
+                        fallback.SetColor("_Color", sourceColor);
+                    }
+
+                    materials[m] = fallback;
+                    replaced = true;
+                }
+
+                if (replaced)
+                {
+                    renderer.materials = materials;
+                }
+            }
+        }
+
+        private static bool NeedsUrpFallback(Material source)
+        {
+            if (source == null)
+            {
+                return false;
+            }
+
+            var shader = source.shader;
+            if (shader == null)
+            {
+                return true;
+            }
+
+            if (!shader.isSupported)
+            {
+                return true;
+            }
+
+            var shaderName = shader.name ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(shaderName))
+            {
+                return true;
+            }
+
+            if (shaderName.IndexOf("Hidden/InternalErrorShader", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private void ClearHeldVisual()

@@ -37,6 +37,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private ItemFieldDropFactory _dropFactory;
 
         public event Action<ItemFieldDrop> FieldDropSpawned;
+        public ItemRuntimeHost RuntimeHost => itemRuntimeHost;
 
         private void Awake()
         {
