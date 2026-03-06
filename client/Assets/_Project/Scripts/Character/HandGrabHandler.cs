@@ -1,9 +1,11 @@
 using UnityEngine;
+using SSAFYPlayTime.Gameplay.Items;
 
 /// <summary>
 /// 멀티플레이 대응 그랩 핸들러.
 /// 
 /// 좌클릭 꾹 = 그랩 모드
+///   - 필드 아이템을 잡으면 물리 고정 대신 즉시 습득 처리
 ///   - OnCollisionEnter에서 FixedJoint 생성 (물체 or 다른 플레이어)
 ///   - 다른 플레이어가 active ragdoll → 붙잡아서 이동 방해
 ///   - 다른 플레이어가 기절 → 아이템처럼 들고 다니다가 던지기 가능
@@ -23,6 +25,7 @@ public class HandGrabHandler : MonoBehaviour
 
     // 상위 NetworkPlayer 참조
     NetworkPlayer networkPlayer;
+    ItemRuntimeHost itemRuntimeHost;
 
     // 홀드 포인트 (인터페이스 호환)
     Transform _holdPoint;
@@ -52,6 +55,14 @@ public class HandGrabHandler : MonoBehaviour
     public void SetHoldPoint(Transform point)
     {
         _holdPoint = point;
+    }
+
+    /// <summary>
+    /// NetworkPlayer가 선택한 런타임 호스트를 공유받는다.
+    /// </summary>
+    public void SetItemRuntimeHost(ItemRuntimeHost runtimeHost)
+    {
+        itemRuntimeHost = runtimeHost;
     }
 
     /// <summary>
@@ -144,6 +155,13 @@ public class HandGrabHandler : MonoBehaviour
 
         if (bestTarget != null)
         {
+            // 필드 아이템은 항상 습득 경로만 사용하고 물리 그랩으로 폴백하지 않는다.
+            if (IsFieldItemRigidbody(bestTarget))
+            {
+                TryPickupFieldItem(bestTarget);
+                return;
+            }
+
             AttachGrab(bestTarget, transform.position);
         }
     }
@@ -226,12 +244,124 @@ public class HandGrabHandler : MonoBehaviour
         if (!collision.collider.TryGetComponent(out Rigidbody otherRb))
             return false;
 
+        // 필드 아이템은 항상 습득 경로만 사용하고 물리 그랩으로 폴백하지 않는다.
+        if (IsFieldItemRigidbody(otherRb))
+        {
+            TryPickupFieldItem(otherRb);
+            return true;
+        }
+
         Vector3 anchorPoint = collision.contactCount > 0
             ? collision.GetContact(0).point
             : transform.position;
 
         AttachGrab(otherRb, anchorPoint);
         return true;
+    }
+
+    private bool TryPickupFieldItem(Rigidbody targetRb)
+    {
+        if (targetRb == null)
+            return false;
+
+        var fieldDrop = targetRb.GetComponentInParent<ItemFieldDrop>();
+        if (fieldDrop == null || !fieldDrop.CanBePickedUp())
+            return false;
+
+        if (itemRuntimeHost == null)
+            itemRuntimeHost = ResolveItemRuntimeHostForCharacter();
+
+        if (itemRuntimeHost == null)
+        {
+            Debug.Log("[HandGrabHandler] 아이템 런타임 호스트를 찾지 못했습니다.", this);
+            return false;
+        }
+
+        if (itemRuntimeHost.transform == transform.root && itemRuntimeHost.OwnerTransform == null)
+            itemRuntimeHost.SetOwnerTransform(transform.root);
+
+        if (!itemRuntimeHost.IsReady && !itemRuntimeHost.Initialize())
+        {
+            Debug.Log($"[HandGrabHandler] 아이템 런타임 초기화 실패: {itemRuntimeHost.LastError}", this);
+            return false;
+        }
+
+        if (!itemRuntimeHost.TryPickup(fieldDrop.ItemId, out var reason))
+        {
+            // 이미 보유 중이면 이 대상은 소비한 것으로 간주해 물리 그랩 폴백을 막는다.
+            if (!string.IsNullOrWhiteSpace(reason) &&
+                reason.StartsWith("Already holding an item", System.StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(reason))
+                Debug.Log($"[HandGrabHandler] 아이템 습득 실패: {reason}", this);
+            return false;
+        }
+
+        fieldDrop.MarkPickedUp();
+
+        if (animator != null)
+        {
+            animator.SetBool("isCarrying", false);
+            animator.SetBool("isGrabbing", false);
+        }
+
+        return true;
+    }
+
+    private static bool IsFieldItemRigidbody(Rigidbody targetRb)
+    {
+        if (targetRb == null)
+            return false;
+
+        return targetRb.GetComponentInParent<ItemFieldDrop>() != null;
+    }
+
+    private ItemRuntimeHost ResolveItemRuntimeHostForCharacter()
+    {
+        if (itemRuntimeHost != null)
+            return itemRuntimeHost;
+
+        var root = transform.root;
+        var direct = root.GetComponent<ItemRuntimeHost>();
+        if (IsHostForCharacter(direct, root))
+            return direct;
+
+        var hosts = FindObjectsOfType<ItemRuntimeHost>(true);
+        var hostCount = 0;
+        ItemRuntimeHost singleFallback = direct;
+        for (var i = 0; i < hosts.Length; i++)
+        {
+            var host = hosts[i];
+            if (host == null)
+                continue;
+
+            hostCount++;
+            if (singleFallback == null)
+                singleFallback = host;
+
+            if (IsHostForCharacter(host, root))
+                return host;
+        }
+
+        if (direct != null)
+            return direct;
+
+        return hostCount == 1 ? singleFallback : null;
+    }
+
+    private static bool IsHostForCharacter(ItemRuntimeHost host, Transform characterRoot)
+    {
+        if (host == null || characterRoot == null)
+            return false;
+
+        var owner = host.OwnerTransform;
+        if (owner == null)
+            return host.transform == characterRoot;
+
+        return owner == characterRoot || owner.root == characterRoot;
     }
 
     private void AttachGrab(Rigidbody targetRb, Vector3 worldAnchorPoint)

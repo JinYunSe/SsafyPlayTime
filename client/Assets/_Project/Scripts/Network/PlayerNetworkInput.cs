@@ -12,7 +12,7 @@ public struct PlayerNetworkInput : INetworkInput
     // 점프 키(Space)
     public NetworkBool Jump;
 
-    // 좌클릭 짧게 = 펀치
+    // Q = 보유 아이템 사용 시도(없으면 펀치)
     public NetworkBool Punch;
 
     // F키 = 무기 떨구기 / 내려놓기

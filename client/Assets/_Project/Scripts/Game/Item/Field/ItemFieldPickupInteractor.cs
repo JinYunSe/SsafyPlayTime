@@ -4,7 +4,8 @@ using UnityEngine;
 namespace SSAFYPlayTime.Gameplay.Items
 {
     /// <summary>
-    /// 플레이어 근처 필드 아이템을 우클릭으로 획득한다.
+    /// 필드 아이템의 근접 획득 API를 제공한다.
+    /// 입력 기반 획득은 제거하고 외부 호출만 지원한다.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class ItemFieldPickupInteractor : MonoBehaviour
@@ -14,8 +15,8 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private Transform interactorRoot;
 
         [Header("입력")]
-        [SerializeField] private bool useLegacyInput = true;
-        [SerializeField] private KeyCode pickupKey = KeyCode.Mouse1;
+        [SerializeField] private bool useLegacyInput = false;
+        [SerializeField] private KeyCode pickupKey = KeyCode.None;
 
         [Header("판정")]
         [SerializeField] private float pickupRadius = 2.2f;
@@ -36,17 +37,8 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private void Update()
         {
-            if (!useLegacyInput)
-            {
-                return;
-            }
-
-            if (!Input.GetKeyDown(pickupKey))
-            {
-                return;
-            }
-
-            TryPickupNearest(out _, out _);
+            // 필드 아이템 습득은 좌클릭 홀드 그랩 흐름으로 통합한다.
+            // 키 입력 기반(기존 우클릭) 픽업은 완전히 비활성화한다.
         }
 
         private void ResolveReferences()

@@ -367,9 +367,11 @@ namespace SSAFYPlayTime
         private const float NET_GRAB_HOLD_THRESHOLD = 0.15f;
 
         // 매 네트워크 틱마다 로컬 플레이어의 입력을 수집해 Fusion에 전달한다.
-        // 좌클릭 꾹(0.15초 이상) = GrabHold, 좌클릭 짧게 = Punch
+        // 좌클릭 짧게 떼기 = 아이템 사용(Punch 비트 재사용), 좌클릭 꾹(0.15초 이상) = GrabHold
         void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input)
         {
+            bool isPunch = false;
+
             // 좌클릭 상태 추적
             if (Input.GetMouseButtonDown(0))
             {
@@ -384,11 +386,13 @@ namespace SSAFYPlayTime
                     _netLeftMouseConsumedAsGrab = true;
             }
 
-            bool isPunch = false;
             if (Input.GetMouseButtonUp(0))
             {
-                if (!_netLeftMouseConsumedAsGrab)
+                if (!_netLeftMouseConsumedAsGrab && Time.time - _netLeftMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
+                {
                     isPunch = true;
+                }
+
                 _netLeftMouseDown = false;
             }
 
