@@ -10,6 +10,7 @@ using Fusion.Photon.Realtime;
 using Fusion.Sockets;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 
 namespace SSAFYPlayTime
@@ -36,7 +37,7 @@ namespace SSAFYPlayTime
 
         private enum CharacterKind
         {
-            AiJi = 0,
+            Ssaty = 0,
             Pit = 1,
             SeuTati = 2,
             WaiJeu = 3
@@ -50,6 +51,10 @@ namespace SSAFYPlayTime
         private const int MaxPlayers = 4;
         private const string FallbackAppVersion = "ssafy-playtime-v1";
         private const string SharedLobbyName = "ssafy-main-lobby";
+        // Fusion ReliableData 채널 식별자. 두 키 모두 "SSAF"·"PLAY" ASCII 코드를 공유하며
+        // 세 번째 인자(1 또는 2)로 채널을 구분한다.
+        // PlayerRosterReliableKey  : 방장→모든 클라이언트 참가자 목록 동기화
+        // CharacterSelectionReliableKey : 클라이언트→방장 캐릭터 선택 전달
         private static readonly ReliableKey PlayerRosterReliableKey =
             ReliableKey.FromInts(unchecked((int)0x53534146), unchecked((int)0x504C4159), 1, 0);
         private static readonly ReliableKey CharacterSelectionReliableKey =
@@ -97,12 +102,14 @@ namespace SSAFYPlayTime
         [SerializeField] private TMP_Text playerTwoText;
         [SerializeField] private TMP_Text playerThreeText;
         [SerializeField] private TMP_Text playerFourText;
-        [SerializeField] private GameObject aiJiCharacterRoot;
+        [FormerlySerializedAs("aiJiCharacterRoot")]
+        [SerializeField] private GameObject ssatyCharacterRoot;
         [SerializeField] private GameObject pitCharacterRoot;
         [SerializeField] private GameObject seuTatiCharacterRoot;
         [SerializeField] private GameObject waiJeuCharacterRoot;
         [SerializeField] private GameObject characterSelectionPanel;
-        [SerializeField] private Button selectAiJiCharacterButton;
+        [FormerlySerializedAs("selectAiJiCharacterButton")]
+        [SerializeField] private Button selectSsatyCharacterButton;
         [SerializeField] private Button selectPitCharacterButton;
         [SerializeField] private Button selectSeuTatiCharacterButton;
         [SerializeField] private Button selectWaiJeuCharacterButton;
@@ -198,6 +205,8 @@ namespace SSAFYPlayTime
         private bool _isInLobby;
         private bool _isShuttingDownRunner;
         private DateTime _lastSessionListUpdatedAtUtc = DateTime.MinValue;
+        // async 메서드 간 NetworkRunner 생성/종료 순서를 보장하는 뮤텍스.
+        // SemaphoreSlim(1, 1) : 최대 1개의 코루틴만 동시에 러너를 조작할 수 있도록 제한한다.
         private readonly SemaphoreSlim _runnerLock = new(1, 1);
         private readonly Dictionary<int, ParticipantPresence> _roomParticipantsByPlayerId = new();
         private readonly Transform[,] _slotCharacterRoots = new Transform[PlayerSlotCount, CharacterOptionCount];
@@ -324,9 +333,9 @@ namespace SSAFYPlayTime
                 startGameButton.onClick.AddListener(OnStartGameClicked);
             }
 
-            if (selectAiJiCharacterButton != null)
+            if (selectSsatyCharacterButton != null)
             {
-                selectAiJiCharacterButton.onClick.AddListener(OnSelectAiJiCharacter);
+                selectSsatyCharacterButton.onClick.AddListener(OnSelectSsatyCharacter);
             }
 
             if (selectPitCharacterButton != null)
@@ -477,6 +486,9 @@ namespace SSAFYPlayTime
             sessionProperties[StartedKey] = false;
 
             _isProcessing = true;
+            // 로비 탐색용 러너가 살아있으면 먼저 종료한다.
+            // Fusion은 하나의 NetworkRunner만 동시에 실행할 수 있으므로
+            // Host 모드 세션을 시작하기 전에 기존 Lobby 러너를 반드시 제거해야 한다.
             await ShutdownRunnerAsync();
 
             if (!TryCreateRunner(out var runner))
@@ -549,6 +561,8 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            // 역순으로 순회해야 자식 제거 시 인덱스가 흐트러지지 않는다.
+            // roomItemTemplate은 재사용하므로 제거 대상에서 제외한다.
             for (var i = roomListContent.childCount - 1; i >= 0; i--)
             {
                 var child = roomListContent.GetChild(i).gameObject;
@@ -565,6 +579,7 @@ namespace SSAFYPlayTime
             }
 
             SetLobbyStatus(statusSelectRoom);
+            // 인원이 많은 방을 상단에 표시하고, 인원이 같으면 방 이름 오름차순으로 정렬한다.
             foreach (var room in _roomSnapshots.OrderByDescending(r => r.PlayerCount).ThenBy(r => r.Name))
             {
                 var row = Instantiate(roomItemTemplate, roomListContent);
@@ -873,6 +888,7 @@ namespace SSAFYPlayTime
                     _playerIdBySlot[i] = participant.PlayerId;
                     _selectedCharacterIndexBySlot[i] = SanitizeCharacterIndexOrNone(participant.CharacterIndex);
                     ApplySelectedCharacterForSlot(i, true);
+                    characterPreview?.UpdateSlot(i, participant.PlayerId, participant.CharacterIndex, true);
                 }
                 else
                 {
@@ -880,6 +896,7 @@ namespace SSAFYPlayTime
                     _playerIdBySlot[i] = -1;
                     _selectedCharacterIndexBySlot[i] = -1;
                     ApplySelectedCharacterForSlot(i, false);
+                    characterPreview?.UpdateSlot(i, -1, -1, false);
                 }
             }
 
@@ -897,7 +914,7 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            var templates = new[] { aiJiCharacterRoot, pitCharacterRoot, seuTatiCharacterRoot, waiJeuCharacterRoot };
+            var templates = new[] { ssatyCharacterRoot, pitCharacterRoot, seuTatiCharacterRoot, waiJeuCharacterRoot };
             var nameSlots = GetNameSlots();
             if (templates.Any(t => t == null) || nameSlots.Any(t => t == null))
             {
@@ -905,23 +922,28 @@ namespace SSAFYPlayTime
             }
 
             var runtimeRoot = ResolveCharacterRuntimeRoot();
+            // slot(플레이어 슬롯 0~3) × option(캐릭터 종류 0~3) 조합의 2차원 배열을 구성한다.
             for (var slot = 0; slot < PlayerSlotCount; slot++)
             {
                 for (var option = 0; option < CharacterOptionCount; option++)
                 {
                     var template = templates[option];
+                    // 씬에 미리 배치된 오브젝트가 있으면 Instantiate 없이 재사용한다.
+                    // 이름 규칙: "{템플릿명}_Slot{슬롯번호}" (예: "SsatyCharacter_Slot1")
                     var prePlacedName = $"{template.name}_Slot{slot + 1}";
                     var prePlaced = runtimeRoot.Find(prePlacedName);
 
                     Transform cloneTransform;
                     if (prePlaced != null)
                     {
+                        // 씬에 미리 배치된 오브젝트 재사용 — 월드 Y 좌표를 고정 기준으로 저장
                         cloneTransform = prePlaced;
                         ConfigureCharacterPreviewClone(cloneTransform.gameObject);
                         _characterPrePlacedWorldY[cloneTransform] = cloneTransform.position.y;
                     }
                     else
                     {
+                        // 미리 배치된 오브젝트가 없으면 런타임에 템플릿을 복제해 생성
                         var clone = Instantiate(template, runtimeRoot, true);
                         clone.name = prePlacedName;
                         ConfigureCharacterPreviewClone(clone);
@@ -1011,6 +1033,8 @@ namespace SSAFYPlayTime
             var depth = characterWorldDepth;
             if (depth <= 0f)
             {
+                // Inspector에서 depth가 설정되지 않은 경우 현재 캐릭터 위치의 카메라 기준 깊이를 사용한다.
+                // 카메라 뒤쪽(음수)이면 기본값 8f로 폴백한다.
                 depth = Vector3.Dot(characterSlot.position - worldCam.transform.position, worldCam.transform.forward);
                 if (depth <= 0f)
                 {
@@ -1346,7 +1370,7 @@ namespace SSAFYPlayTime
             ApplySelectedCharacterForSlot(slotIndex, true);
         }
 
-        public void OnSelectAiJiCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.AiJi);
+        public void OnSelectSsatyCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Ssaty);
         public void OnSelectPitCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Pit);
         public void OnSelectSeuTatiCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.SeuTati);
         public void OnSelectWaiJeuCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.WaiJeu);
@@ -1401,6 +1425,7 @@ namespace SSAFYPlayTime
 
                 _selectedCharacterIndexBySlot[slot] = SanitizeCharacterIndexOrNone(characterIndex);
                 ApplySelectedCharacterForSlot(slot, true);
+                characterPreview?.ApplySelectionForPlayer(playerId, characterIndex);
                 break;
             }
         }
@@ -1501,9 +1526,9 @@ namespace SSAFYPlayTime
         // 캐릭터 이름 문자열을 CharacterKind 인덱스로 변환한다. 매칭 실패 시 -1을 반환한다.
         private static int CharacterNameToIndex(string characterName)
         {
-            if (string.Equals(characterName, "AiJiCharacter", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(characterName, "SsatyCharacter", StringComparison.OrdinalIgnoreCase))
             {
-                return (int)CharacterKind.AiJi;
+                return (int)CharacterKind.Ssaty;
             }
 
             if (string.Equals(characterName, "PitCharacter", StringComparison.OrdinalIgnoreCase))
@@ -1529,7 +1554,7 @@ namespace SSAFYPlayTime
         {
             return SanitizeCharacterIndexOrNone(characterIndex) switch
             {
-                (int)CharacterKind.AiJi => aiJiCharacterRoot,
+                (int)CharacterKind.Ssaty => ssatyCharacterRoot,
                 (int)CharacterKind.Pit => pitCharacterRoot,
                 (int)CharacterKind.SeuTati => seuTatiCharacterRoot,
                 (int)CharacterKind.WaiJeu => waiJeuCharacterRoot,
@@ -1579,9 +1604,11 @@ namespace SSAFYPlayTime
         // 이미 연결된 경우 forceReconnect가 false면 즉시 true를 반환한다.
         private async Task<bool> EnsureLobbyRunnerAsync(bool forceReconnect = false)
         {
+            // 여러 async 호출이 동시에 러너를 생성/종료하지 않도록 뮤텍스를 획득한다.
             await _runnerLock.WaitAsync();
             try
             {
+                // 이미 로비에 연결된 러너가 있으면 재생성 없이 즉시 반환한다.
                 if (!forceReconnect && _runner != null && _runner.IsRunning && _isInLobby)
                 {
                     return true;
@@ -1831,6 +1858,8 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            // 포맷 예시: "3;1=Alice^0|2=Bob^2|3=Charlie^1"
+            // ';' 앞은 방장 PlayerId, 뒤는 '|' 구분 참가자 목록
             var separatorIndex = payload.IndexOf(';');
             if (separatorIndex >= 0)
             {
@@ -1846,6 +1875,7 @@ namespace SSAFYPlayTime
                 _currentOwnerPlayerId = -1;
             }
 
+            // 각 참가자 항목: "{PlayerId}={Nickname}^{CharacterIndex}"
             var entries = payload.Split('|');
             for (var i = 0; i < entries.Length; i++)
             {
@@ -1855,6 +1885,7 @@ namespace SSAFYPlayTime
                     continue;
                 }
 
+                // '=' 기준으로 PlayerId와 나머지(닉네임^캐릭터인덱스)를 분리
                 var idSeparator = entry.IndexOf('=');
                 if (idSeparator <= 0 || idSeparator >= entry.Length - 1)
                 {
@@ -1869,6 +1900,7 @@ namespace SSAFYPlayTime
                 var rawValue = entry.Substring(idSeparator + 1);
                 var characterIndex = -1;
                 var nicknameToken = rawValue;
+                // '^' 기준으로 닉네임과 캐릭터 인덱스를 분리
                 var charSeparator = rawValue.IndexOf('^');
                 if (charSeparator >= 0)
                 {
@@ -2123,7 +2155,7 @@ namespace SSAFYPlayTime
         private void EnsureCharacterSelectionUi()
         {
             if (characterSelectionPanel == null ||
-                selectAiJiCharacterButton == null ||
+                selectSsatyCharacterButton == null ||
                 selectPitCharacterButton == null ||
                 selectSeuTatiCharacterButton == null ||
                 selectWaiJeuCharacterButton == null)
@@ -2162,10 +2194,10 @@ namespace SSAFYPlayTime
                 }
             }
 
-            if (selectAiJiCharacterButton != null)
+            if (selectSsatyCharacterButton != null)
             {
-                TrySetButtonInteractable(selectAiJiCharacterButton,
-                    canSelect && localSelected != (int)CharacterKind.AiJi && !takenByOthers.Contains((int)CharacterKind.AiJi));
+                TrySetButtonInteractable(selectSsatyCharacterButton,
+                    canSelect && localSelected != (int)CharacterKind.Ssaty && !takenByOthers.Contains((int)CharacterKind.Ssaty));
             }
 
             if (selectPitCharacterButton != null)
