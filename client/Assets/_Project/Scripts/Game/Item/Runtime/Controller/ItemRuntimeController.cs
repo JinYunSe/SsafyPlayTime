@@ -13,6 +13,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private readonly ItemCatalog _catalog;
         private readonly IItemRuntimeBridge _bridge;
+        private readonly ItemUseModuleRegistry _useModuleRegistry;
 
         private string _heldItemId = string.Empty;
         private bool _isFlamethrowerActive;
@@ -25,10 +26,11 @@ namespace SSAFYPlayTime.Gameplay.Items
         private float _superArmorEndAt;
         private float _invisibilityEndAt;
 
-        public ItemRuntimeController(ItemCatalog catalog, IItemRuntimeBridge bridge)
+        public ItemRuntimeController(ItemCatalog catalog, IItemRuntimeBridge bridge, ItemUseModuleRegistry useModuleRegistry = null)
         {
             _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
             _bridge = bridge ?? throw new ArgumentNullException(nameof(bridge));
+            _useModuleRegistry = useModuleRegistry ?? ItemUseModuleRegistry.CreateDefault();
         }
 
         public string HeldItemId => _heldItemId;
