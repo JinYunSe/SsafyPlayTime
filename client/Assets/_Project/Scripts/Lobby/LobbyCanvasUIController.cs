@@ -507,6 +507,7 @@ namespace SSAFYPlayTime
                 {
                     GameMode = GameMode.Host,
                     SessionName = roomName,
+                    SceneManager = GetOrAddSceneManager(),
                     PlayerCount = MaxPlayers,
                     SessionProperties = sessionProperties,
                     IsVisible = true,
@@ -1712,6 +1713,7 @@ namespace SSAFYPlayTime
             _roomParticipantsByPlayerId.Clear();
             _selectedCharacterIndexByPlayerId.Clear();
             _spawnedGameplayNetworkCharacters.Clear();
+            _spawnedCharacterIndexByPlayerId.Clear();
             _currentOwnerPlayerId = -1;
         }
 

@@ -111,6 +111,7 @@ namespace SSAFYPlayTime
                 }
             }
             _spawnedGameplayNetworkCharacters.Remove(player.PlayerId);
+            _spawnedCharacterIndexByPlayerId.Remove(player.PlayerId);
 
             if (player.IsRealPlayer)
             {
@@ -231,6 +232,9 @@ namespace SSAFYPlayTime
                 var savedAllCharacterIndices = _selectedCharacterIndexByPlayerId
                     .Where(kvp => SanitizeCharacterIndexOrNone(kvp.Value) >= 0)
                     .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+                var savedNicknamesByOldPlayerId = _roomParticipantsByPlayerId.Values
+                    .Where(p => p != null && p.PlayerId > 0 && !string.IsNullOrWhiteSpace(p.Nickname))
+                    .ToDictionary(p => p.PlayerId, p => SanitizeNameToken(p.Nickname));
 
                 if (priorityIndex > 0)
                 {
@@ -285,6 +289,8 @@ namespace SSAFYPlayTime
                 {
                     _selectedCharacterIndexByPlayerId[kvp.Key] = kvp.Value;
                 }
+
+                RemapMigrationEntriesByNickname(_runner, savedNicknamesByOldPlayerId);
 
                 // 새 방장의 PlayerId가 바뀐 경우 위치·캐릭터 선택 테이블의 키를 새 PlayerId로 교체한다.
                 // 닉네임을 사용하지 않으므로 닉네임 중복에 완전히 안전하다.
@@ -369,6 +375,55 @@ namespace SSAFYPlayTime
         }
 
         // ─── 좌클릭 꾹 vs 연타 판별용 필드 ───
+        private void RemapMigrationEntriesByNickname(NetworkRunner runner, Dictionary<int, string> oldNicknamesByPlayerId)
+        {
+            if (runner == null || oldNicknamesByPlayerId == null || oldNicknamesByPlayerId.Count == 0)
+            {
+                return;
+            }
+
+            var newPlayerIdByNickname = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var active in runner.ActivePlayers.Where(p => p.IsRealPlayer).OrderBy(p => p.PlayerId))
+            {
+                var nickname = DecodeConnectionToken(runner.GetPlayerConnectionToken(active));
+                if (string.IsNullOrWhiteSpace(nickname) && active == runner.LocalPlayer)
+                {
+                    nickname = _nickname;
+                }
+
+                nickname = SanitizeNameToken(nickname);
+                if (string.IsNullOrWhiteSpace(nickname))
+                {
+                    continue;
+                }
+
+                if (!newPlayerIdByNickname.ContainsKey(nickname))
+                {
+                    newPlayerIdByNickname[nickname] = active.PlayerId;
+                }
+            }
+
+            foreach (var kvp in oldNicknamesByPlayerId)
+            {
+                var oldPlayerId = kvp.Key;
+                var nickname = kvp.Value;
+                if (oldPlayerId <= 0 || string.IsNullOrWhiteSpace(nickname))
+                {
+                    continue;
+                }
+
+                if (!newPlayerIdByNickname.TryGetValue(nickname, out var newPlayerId))
+                {
+                    continue;
+                }
+
+                if (oldPlayerId != newPlayerId)
+                {
+                    RemapMigrationEntry(oldPlayerId, newPlayerId);
+                }
+            }
+        }
+
         private bool _netLeftMouseDown;
         private float _netLeftMouseDownTime;
         private bool _netLeftMouseConsumedAsGrab;
@@ -501,6 +556,7 @@ namespace SSAFYPlayTime
             }
 
             _spawnedGameplayNetworkCharacters.Clear();
+            _spawnedCharacterIndexByPlayerId.Clear();
             _cachedSpawnPointGroup = null;
 
             // 마이그레이션 중에는 캡처해둔 위치 테이블을 지우지 않는다.
