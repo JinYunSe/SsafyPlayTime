@@ -66,15 +66,23 @@ public sealed class NetworkPlayer : NetworkBehaviour
         if (!_isGrounded)
             rigidbody3D.AddForce(Vector3.down * config.extraGravity, ForceMode.Acceleration);
 
-        var inputMagnitude = 0f;
+var inputMagnitude = 0f;
+        
         if (GetInput(out PlayerNetworkInput input))
         {
+            var desired = Quaternion.LookRotation(new Vector3(-_moveInput.x, 0f, _moveInput.y), transform.up);
+            mainJoint.targetRotation = Quaternion.RotateTowards(
+                mainJoint.targetRotation,
+                desired,
+                Time.fixedDeltaTime * config.rotateSpeedDeg);
+            
             inputMagnitude = input.Move.magnitude;
             var forwardVelocity = Vector3.Dot(transform.forward, rigidbody3D.velocity);
-
+            
             // 이동 입력이 있으면 목표 방향으로 회전하고 전진 힘을 가한다
             if (inputMagnitude > 0.001f)
             {
+                // 앞서 작성하시던 이동 힘(AddForce) 부여 로직이 이곳에 들어갑니다.
                 var desired = Quaternion.LookRotation(new Vector3(input.Move.x, 0f, -input.Move.y), transform.up);
                 mainJoint.targetRotation = Quaternion.RotateTowards(
                     mainJoint.targetRotation,

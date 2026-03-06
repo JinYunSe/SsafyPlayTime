@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+
 using UnityEngine;
 
 // 데스존(낙사 구역) 콜라이더 안에 플레이어가 머무르면
