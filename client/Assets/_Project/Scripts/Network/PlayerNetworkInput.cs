@@ -9,6 +9,24 @@ public struct PlayerNetworkInput : INetworkInput
     // WASD / 조이스틱 이동 입력 (-1 ~ 1 범위의 X, Y 축)
     public Vector2 Move;
 
-    // 점프 키(Space) 입력 여부. Space를 누르고 있는 동안 true
+    // 점프 키(Space)
     public NetworkBool Jump;
+
+    // 좌클릭 짧게 = 펀치
+    public NetworkBool Punch;
+
+    // F키 = 무기 떨구기 / 내려놓기
+    public NetworkBool Drop;
+
+    // 우클릭 클릭 = 던지기 / 어퍼컷
+    public NetworkBool Throw;
+
+    // 좌클릭 꾹 = 그랩 홀드
+    public NetworkBool GrabHold;
+
+    // 마우스 휠 클릭 = 박치기 (Phase C에서 구현)
+    public NetworkBool Headbutt;
+
+    // Shift 홀드 = 달리기 (Phase C에서 구현)
+    public NetworkBool Sprint;
 }
