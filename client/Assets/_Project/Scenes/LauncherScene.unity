@@ -709,13 +709,13 @@ MonoBehaviour:
   playerTwoText: {fileID: 1909691911}
   playerThreeText: {fileID: 419244216}
   playerFourText: {fileID: 917990469}
-  aiJiCharacterRoot: {fileID: 4106621260892783438, guid: 1bb010a1a97161349b1f0ec277534bc9,
+  aiJiCharacterRoot: {fileID: 2040576253009838110, guid: 6860d3784c0acaf43994f663535148de,
     type: 3}
-  pitCharacterRoot: {fileID: 7927393805834117259, guid: d276d0b290cfd97489e0452af731e54a,
+  pitCharacterRoot: {fileID: 2040576253009838110, guid: 6860d3784c0acaf43994f663535148de,
     type: 3}
-  seuTatiCharacterRoot: {fileID: 238660437502825593, guid: 4d3a88f5517a42049a51595cda8579be,
+  seuTatiCharacterRoot: {fileID: 2040576253009838110, guid: 6860d3784c0acaf43994f663535148de,
     type: 3}
-  waiJeuCharacterRoot: {fileID: 152467836711387989, guid: f7af88d52cee8b44c9ba95163dd5f34d,
+  waiJeuCharacterRoot: {fileID: 2040576253009838110, guid: 6860d3784c0acaf43994f663535148de,
     type: 3}
   characterSelectionPanel: {fileID: 2100001000}
   selectAiJiCharacterButton: {fileID: 2100001014}
@@ -811,16 +811,14 @@ MonoBehaviour:
   roomTagPublic: "[\uACF5\uAC1C]"
   emptyPlayerSlot: '-'
   nicknameHeaderFormat: "\uB2C9\uB124\uC784: {0}"
-  aiJiGameplayCharacterPrefab: {fileID: 4106621260892783438, guid: d9d4af982485aab45b1d905523536406,
+  aiJiGameplayCharacterPrefab: {fileID: 2040576253009838110, guid: 6860d3784c0acaf43994f663535148de,
     type: 3}
-  pitGameplayCharacterPrefab: {fileID: 7927393805834117259, guid: 85b92cf51ab429a4e834a78b9ee8f299,
+  pitGameplayCharacterPrefab: {fileID: 2040576253009838110, guid: 6860d3784c0acaf43994f663535148de,
     type: 3}
-  seuTatiGameplayCharacterPrefab: {fileID: 238660437502825593, guid: 2cf846a2d5bfb5a478c850aedead0db1,
+  seuTatiGameplayCharacterPrefab: {fileID: 2040576253009838110, guid: 6860d3784c0acaf43994f663535148de,
     type: 3}
-  waiJeuGameplayCharacterPrefab: {fileID: 152467836711387989, guid: 1bbb51a3ad229e6428e815f8932f4f82,
+  waiJeuGameplayCharacterPrefab: {fileID: 2040576253009838110, guid: 6860d3784c0acaf43994f663535148de,
     type: 3}
-  gameplaySpawnPointName: PlayerSpawnPoint
-  gameplayFallbackSpawnPosition: {x: 0, y: 1, z: 0}
 --- !u!114 &47569083
 MonoBehaviour:
   m_ObjectHideFlags: 0
