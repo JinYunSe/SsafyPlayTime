@@ -22,7 +22,9 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         [Header("로컬 테스트 컨트롤")]
         [SerializeField] private bool enableLocalDebugController = true;
+        [SerializeField] private bool allowLocalDebugControllerForNetworkPlayer = false;
         [SerializeField] private bool resetRuntimeStateOnSpace = true;
+        [SerializeField] private KeyCode localResetKey = KeyCode.R;
         [SerializeField] private float localMoveSpeed = 6f;
         [SerializeField] private float localTurnLerp = 12f;
         [SerializeField] private string localDebugDummyName = "PrototypeHitDummy";
@@ -107,6 +109,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private float _debugDistance;
         private RigidbodyConstraints _debugOriginalConstraints;
         private bool _debugConstraintsCaptured;
+        private bool _debugControllerSkipLogged;
         private Transform _debugDummyTarget;
         private Rigidbody _debugDummyBody;
         private bool _flamethrowerVisualActive;
