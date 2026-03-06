@@ -114,7 +114,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private bool IsPrefabAssetContext()
         {
 #if UNITY_EDITOR
-            return !Application.isPlaying && PrefabUtility.IsPartOfPrefabAsset(gameObject);
+            return PrefabUtility.IsPartOfPrefabAsset(gameObject);
 #else
             return false;
 #endif
