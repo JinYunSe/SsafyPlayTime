@@ -3,126 +3,583 @@ using SSAFYPlayTime.Character;
 using UnityEngine;
 
 // Fusion NetworkBehaviour 기반의 캐릭터 컨트롤러.
-// StateAuthority(서버/호스트)에서만 물리 시뮬레이션을 실행하고,
-// 클라이언트는 NetworkTransform을 통해 동기화된 위치/회전을 수신한다.
-// 입력은 Fusion 입력 파이프라인(OnInput → GetInput)을 통해 서버로 전달된다.
+// StateAuthority(서버/호스트)에서만 물리 시뮬레이션을 실행한다.
+//
+// [전투 시스템]
+// - stunDamage 누적 → 임계값(30) 초과 → 기절 → 가중치 기반 자동 회복
+// - 좌클릭 짧게=펀치, 좌클릭 꾹=그랩, 우클릭=던지기/어퍼컷
+// - 부위별/상태별 배율, 그로기 시스템
 public sealed class NetworkPlayer : NetworkBehaviour
 {
     [Header("References")]
-    [SerializeField] private Rigidbody rigidbody3D;         // 루트 Rigidbody (이동/점프 힘 적용 대상)
-    [SerializeField] private ConfigurableJoint mainJoint;   // 루트 회전 방향을 제어하는 관절
-    [SerializeField] private Animator animator;             // 애니메이션 재생기
-    [SerializeField] private SyncPhysicsObject[] syncPhysicsObjects; // 래그돌 각 부위 동기화 컴포넌트 배열
+    [SerializeField] private Rigidbody rigidbody3D;
+    [SerializeField] private ConfigurableJoint mainJoint;
+    [SerializeField] private Animator animator;
+    [SerializeField] private SyncPhysicsObject[] syncPhysicsObjects;
 
     [Header("Config")]
-    [SerializeField] private PlayerMotorConfig config;                             // 이동·점프 수치 설정 (ScriptableObject)
-    [SerializeField] private RuntimeAnimatorController fallbackAnimatorController; // Animator 컨트롤러가 없을 때 사용할 기본값
+    [SerializeField] private PlayerMotorConfig config;
+    [SerializeField] private RuntimeAnimatorController fallbackAnimatorController;
 
-    // 네트워크로 동기화되는 애니메이션 파라미터.
-    // StateAuthority에서 값을 쓰고, 모든 클라이언트의 Render()에서 읽어 Animator를 구동한다.
+    [Header("Grab")]
+    [SerializeField] private Transform holdPoint;
+
+    // ─── 네트워크 동기화 변수 ───
     [Networked] private float NetworkedMoveSpeed { get; set; }
     [Networked] private int NetworkedMotorState { get; set; }
 
-    // 접지 판정 헬퍼 (SphereCast 결과 버퍼를 재사용)
-    private readonly GroundProbe _groundProbe = new();
+    // 관절 회전값 네트워크 배열
+    [Networked, Capacity(15)]
+    public NetworkArray<Quaternion> BoneRotations { get; }
 
-    // 이동 상태(Idle/Walk/Jump/Fall/FreeFall) 전환 로직
+    // 액티브 래그돌 상태
+    [Networked] public NetworkBool NetworkedIsActiveRagdoll { get; set; }
+
+    // ─── 기절 시스템 ───
+    // stunDamage 누적치 (임계값 초과 시 기절)
+    [Networked] private float AccumulatedStunDamage { get; set; }
+    // 현재 기절 남은 시간
+    [Networked] private float StunTimeRemaining { get; set; }
+
+    // ─── 로컬 변수 ───
+    private float _localMoveSpeed;
+    private int _localMotorState;
+    private Vector2 _sandboxInput;
+    private bool _sandboxJump;
+
+    private readonly GroundProbe _groundProbe = new();
     private readonly PlayerMotorStateMachine _stateMachine = new();
 
-    // 이번 틱의 접지 여부 캐시
     private bool _isGrounded;
+    private HandGrabHandler[] _handGrabHandlers;
 
-    // 스폰 직후 한 번 호출.
-    // 래그돌 부위를 수집하고, 비-StateAuthority 클라이언트의 모든 Rigidbody를 kinematic으로 전환한다.
+    private bool _isActiveRagdoll = true;
+    public bool IsActiveRagdoll => _isActiveRagdoll;
+
+    private bool _isGrabActive;
+    public bool IsGrabActive => _isGrabActive;
+
+    // 기절 관련
+    private float _startSlerpPositionSpring;
+    private bool _isRecovering; // 회복 직전 취약 상태
+    private float _recoveringTimer;
+    private const float RECOVERING_DURATION = 2.0f; // 일어난 후 2초간 취약
+
+    // 좌클릭 꾹 vs 연타 판별
+    private bool _leftMouseDown;
+    private float _leftMouseDownTime;
+    private bool _leftMouseConsumedAsGrab;
+    private const float GRAB_HOLD_THRESHOLD = 0.15f;
+
+    // 로컬 트리거
+    private bool _dropTriggered;
+    private bool _throwTriggered;
+
+    // 기절 애니메이션 해시
+    private static readonly int H_MovementSpeed = Animator.StringToHash("movementSpeed");
+    private static readonly int H_MotorState = Animator.StringToHash("MotorState");
+    private static readonly int H_IsGrabbing = Animator.StringToHash("isGrabbing");
+    private static readonly int H_Punch = Animator.StringToHash("Punch");
+    private static readonly int H_Throw = Animator.StringToHash("Throw");
+    private static readonly int H_GetHit = Animator.StringToHash("GetHit");
+    private static readonly int H_StunFall = Animator.StringToHash("StunFall");
+    private static readonly int H_StunRecover = Animator.StringToHash("StunRecover");
+
+    private void Awake()
+    {
+        InitializeInternal();
+    }
+
     public override void Spawned()
+    {
+        InitializeInternal();
+
+        if (HasStateAuthority)
+        {
+            NetworkedIsActiveRagdoll = true;
+            AccumulatedStunDamage = 0f;
+            StunTimeRemaining = 0f;
+        }
+
+        if (!HasStateAuthority)
+        {
+            foreach (var rb in GetComponentsInChildren<Rigidbody>(true))
+                rb.isKinematic = true;
+        }
+    }
+
+    private void InitializeInternal()
     {
         if (syncPhysicsObjects == null || syncPhysicsObjects.Length == 0)
             syncPhysicsObjects = GetComponentsInChildren<SyncPhysicsObject>(true);
 
-        EnsureAnimatorBinding();
+        _handGrabHandlers = GetComponentsInChildren<HandGrabHandler>(true);
 
-        // StateAuthority(서버)만 물리 시뮬레이션을 실행한다.
-        // 나머지 클라이언트는 각 부위의 NetworkTransform이 위치를 동기화해 준다.
-        var isKinematic = !HasStateAuthority;
-        foreach (var rb in GetComponentsInChildren<Rigidbody>(true))
-            rb.isKinematic = isKinematic;
+        if (holdPoint == null)
+        {
+            var go = new GameObject("HoldPoint");
+            go.transform.SetParent(transform);
+            go.transform.localPosition = new Vector3(0f, 0.4f, 0.35f);
+            holdPoint = go.transform;
+        }
+
+        foreach (var handler in _handGrabHandlers)
+            handler.SetHoldPoint(holdPoint);
+
+        if (mainJoint != null)
+            _startSlerpPositionSpring = mainJoint.slerpDrive.positionSpring;
+
+        EnsureAnimatorBinding();
     }
 
-    // Fusion 네트워크 틱마다 호출 (StateAuthority = 서버에서만 실행).
-    // GetInput으로 이번 틱의 플레이어 입력을 받아 물리 연산을 수행하고 네트워크 상태를 갱신한다.
+    private void Update()
+    {
+        if (Object != null && Object.IsValid && !HasInputAuthority) return;
+
+        if (Runner == null)
+        {
+            _sandboxInput = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
+            if (Input.GetKeyDown(KeyCode.Space)) _sandboxJump = true;
+        }
+
+        // 좌클릭 꾹 vs 연타 판별
+        if (Input.GetMouseButtonDown(0))
+        {
+            _leftMouseDown = true;
+            _leftMouseDownTime = Time.time;
+            _leftMouseConsumedAsGrab = false;
+        }
+
+        if (Input.GetMouseButton(0) && _leftMouseDown)
+        {
+            if (Time.time - _leftMouseDownTime >= GRAB_HOLD_THRESHOLD && !_leftMouseConsumedAsGrab)
+                _leftMouseConsumedAsGrab = true;
+        }
+
+        if (Input.GetMouseButtonUp(0))
+            _leftMouseDown = false;
+
+        if (Input.GetKeyDown(KeyCode.F)) _dropTriggered = true;
+        if (Input.GetMouseButtonDown(1)) _throwTriggered = true;
+    }
+
+    private void FixedUpdate()
+    {
+        if (Runner != null) return;
+
+        bool punchTrigger = false;
+        if (Input.GetMouseButtonUp(0) && !_leftMouseConsumedAsGrab
+            && Time.time - _leftMouseDownTime < GRAB_HOLD_THRESHOLD)
+        {
+            punchTrigger = true;
+        }
+
+        PlayerNetworkInput input = new PlayerNetworkInput
+        {
+            Move = _sandboxInput,
+            Jump = _sandboxJump,
+            Punch = punchTrigger,
+            Drop = _dropTriggered,
+            Throw = _throwTriggered,
+            GrabHold = _leftMouseDown && _leftMouseConsumedAsGrab,
+            Headbutt = Input.GetMouseButtonDown(2),
+            Sprint = Input.GetKey(KeyCode.LeftShift)
+        };
+
+        DoPhysicsStep(input, Time.fixedDeltaTime);
+        _sandboxJump = false;
+    }
+
     public override void FixedUpdateNetwork()
     {
-        if (!HasStateAuthority || config == null || rigidbody3D == null || mainJoint == null)
-            return;
+        if (!HasStateAuthority) return;
 
-        // 접지 판정
+        if (GetInput(out PlayerNetworkInput input))
+        {
+            DoPhysicsStep(input, Runner.DeltaTime);
+        }
+
+        // 관절 회전값 동기화
+        for (int i = 0; i < syncPhysicsObjects.Length; i++)
+            BoneRotations.Set(i, syncPhysicsObjects[i].transform.localRotation);
+
+        NetworkedIsActiveRagdoll = _isActiveRagdoll;
+
+        // 그랩 핸들러 업데이트
+        foreach (HandGrabHandler handler in _handGrabHandlers)
+            handler.UpdateState();
+
+        // 낙사 방지
+        if (transform.position.y < -10)
+        {
+            rigidbody3D.position = Vector3.zero;
+            rigidbody3D.velocity = Vector3.zero;
+            rigidbody3D.angularVelocity = Vector3.zero;
+            ForceRecover();
+        }
+    }
+
+    private void DoPhysicsStep(PlayerNetworkInput input, float dt)
+    {
+        if (config == null || rigidbody3D == null || mainJoint == null) return;
+
+        _isGrabActive = input.GrabHold;
+
+        // ─── stunDamage 감쇠 (초당 5씩) ───
+        float decayRate = CombatSettings.Instance != null ? 5f : 5f; // CSV에서 읽기 가능
+        float accumulated = Runner != null ? AccumulatedStunDamage : _localAccumulatedStun;
+        accumulated = Mathf.Max(0f, accumulated - decayRate * dt);
+        if (Runner != null && Object != null && Object.IsValid)
+            AccumulatedStunDamage = accumulated;
+        else
+            _localAccumulatedStun = accumulated;
+
+        // ─── 회복 취약 타이머 ───
+        if (_isRecovering)
+        {
+            _recoveringTimer -= dt;
+            if (_recoveringTimer <= 0f)
+                _isRecovering = false;
+        }
+
+        // ─── 기절 상태: 자동 회복 카운트다운 ───
+        if (!_isActiveRagdoll)
+        {
+            float remaining = Runner != null ? StunTimeRemaining : _localStunTimeRemaining;
+            remaining -= dt;
+
+            if (Runner != null && Object != null && Object.IsValid)
+                StunTimeRemaining = remaining;
+            else
+                _localStunTimeRemaining = remaining;
+
+            if (remaining <= 0f)
+            {
+                // 자동 회복!
+                ForceRecover();
+            }
+            return; // 기절 중에는 이동/공격 불가
+        }
+
+        // ─── 정상 상태 로직 ───
         _isGrounded = _groundProbe.IsGrounded(
-            rigidbody3D.position,
-            transform,
-            config.groundProbeRadius,
-            config.groundProbeDistance);
+            rigidbody3D.position, transform,
+            config.groundProbeRadius, config.groundProbeDistance);
 
-        // 공중이면 추가 중력 적용
         if (!_isGrounded)
             rigidbody3D.AddForce(Vector3.down * config.extraGravity, ForceMode.Acceleration);
 
-        var inputMagnitude = 0f;
-        if (GetInput(out PlayerNetworkInput input))
+        float inputMagnitude = input.Move.magnitude;
+        float forwardVelocity = Vector3.Dot(transform.forward, rigidbody3D.velocity);
+
+        if (inputMagnitude > 0.001f)
         {
-            inputMagnitude = input.Move.magnitude;
-            var forwardVelocity = Vector3.Dot(transform.forward, rigidbody3D.velocity);
+            var desired = Quaternion.LookRotation(new Vector3(input.Move.x, 0f, -input.Move.y), transform.up);
+            mainJoint.targetRotation = Quaternion.RotateTowards(
+                mainJoint.targetRotation, desired, dt * config.rotateSpeedDeg);
 
-            // 이동 입력이 있으면 목표 방향으로 회전하고 전진 힘을 가한다
-            if (inputMagnitude > 0.001f)
-            {
-                var desired = Quaternion.LookRotation(new Vector3(input.Move.x, 0f, -input.Move.y), transform.up);
-                mainJoint.targetRotation = Quaternion.RotateTowards(
-                    mainJoint.targetRotation,
-                    desired,
-                    Runner.DeltaTime * config.rotateSpeedDeg);
-
-                if (Mathf.Abs(forwardVelocity) < config.maxSpeed)
-                    rigidbody3D.AddForce(transform.forward * inputMagnitude * config.acceleration, ForceMode.Acceleration);
-            }
-
-            // 접지 상태에서 점프 입력 시 수직 충격량 적용
-            if (_isGrounded && input.Jump)
-            {
-                rigidbody3D.AddForce(Vector3.up * config.jumpImpulse, ForceMode.Impulse);
-                _stateMachine.SetJump();
-            }
-
-            // 이동 속도를 네트워크 변수에 저장 (클라이언트 Animator에서 읽음)
-            NetworkedMoveSpeed = Mathf.Abs(Vector3.Dot(transform.forward, rigidbody3D.velocity)) * 0.4f;
+            if (Mathf.Abs(forwardVelocity) < config.maxSpeed)
+                rigidbody3D.AddForce(transform.forward * inputMagnitude * config.acceleration, ForceMode.Acceleration);
         }
 
-        // 이동 상태 머신 갱신 및 결과를 네트워크 변수에 저장
-        _stateMachine.Tick(_isGrounded, inputMagnitude, Runner.DeltaTime, config);
-        NetworkedMotorState = (int)_stateMachine.CurrentState;
+        if (_isGrounded && input.Jump)
+        {
+            rigidbody3D.AddForce(Vector3.up * config.jumpImpulse, ForceMode.Impulse);
+            _stateMachine.SetJump();
+        }
 
-        // 래그돌 관절 목표 회전을 애니메이션과 동기화 (StateAuthority에서만)
-        for (var i = 0; i < syncPhysicsObjects.Length; i++)
-            syncPhysicsObjects[i].UpdateJointFromAnimation();
+        _stateMachine.Tick(_isGrounded, inputMagnitude, dt, config);
+
+        if (Runner != null && Object != null && Object.IsValid)
+        {
+            NetworkedMoveSpeed = Mathf.Abs(forwardVelocity) * 0.4f;
+            NetworkedMotorState = (int)_stateMachine.CurrentState;
+        }
+        else
+        {
+            _localMoveSpeed = Mathf.Abs(forwardVelocity) * 0.4f;
+            _localMotorState = (int)_stateMachine.CurrentState;
+        }
+
+        if (_isActiveRagdoll)
+        {
+            for (var i = 0; i < syncPhysicsObjects.Length; i++)
+                syncPhysicsObjects[i].UpdateJointFromAnimation();
+        }
+
+        ProcessInteractions(input);
     }
 
-    // 모든 클라이언트에서 매 프레임 호출 (렌더링 직전).
-    // 네트워크로 동기화된 값을 읽어 Animator 파라미터를 설정한다.
+    // ─── 로컬 전용 기절 변수 (샌드박스) ───
+    private float _localAccumulatedStun;
+    private float _localStunTimeRemaining;
+
+    // ─── 외부에서 호출: stunDamage 적용 ───
+    /// <summary>
+    /// 피격 시 호출. stunDamage를 누적하고, 임계값 초과 시 기절.
+    /// bodyPartMultiplier: 부위 배율 (Head=1.5, Body=1.0, Limb=0.7)
+    /// attackerVelocity: 공격자 속도 (속도 보너스 계산용)
+    /// impulseMagnitude: 충격량 크기 (무게 보너스 계산용)
+    /// </summary>
+    public void ApplyStunDamage(float stunDamage, float bodyPartMultiplier, float attackerVelocity, float impulseMagnitude)
+    {
+        if (!_isActiveRagdoll) return; // 이미 기절 중
+        if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority) return;
+
+        // 상태 배율 적용
+        float stateMultiplier = 1.0f;
+        if (_isRecovering)
+            stateMultiplier = CombatSettings.Instance != null ? 2.0f : 2.0f;
+        else if (!_isGrounded) // 공중
+            stateMultiplier = CombatSettings.Instance != null ? 1.5f : 1.5f;
+
+        float finalStunDamage = stunDamage * bodyPartMultiplier * stateMultiplier;
+
+        // 누적
+        float accumulated;
+        if (Runner != null && Object != null && Object.IsValid)
+        {
+            AccumulatedStunDamage += finalStunDamage;
+            accumulated = AccumulatedStunDamage;
+        }
+        else
+        {
+            _localAccumulatedStun += finalStunDamage;
+            accumulated = _localAccumulatedStun;
+        }
+
+        // 피격 애니메이션
+        if (animator != null)
+            animator.SetTrigger(H_GetHit);
+
+        // 기절 판정
+        float threshold = CombatSettings.Instance != null
+            ? CombatSettings.Instance.knockoutThreshold : 30f;
+
+        if (accumulated >= threshold)
+        {
+            // 기절 시간 계산
+            float stunDuration = CalculateStunDuration(attackerVelocity, impulseMagnitude);
+            TriggerStun(stunDuration);
+        }
+    }
+
+    /// <summary>
+    /// 기존 충돌 기반 기절 (DetectCollision에서 호출).
+    /// impulse 기반으로 stunDamage를 자동 계산.
+    /// </summary>
+    public void OnPlayerBodyPartHit()
+    {
+        // 기존 호환 - 고정 stunDamage 사용
+        ApplyStunDamage(15f, 1.0f, 0f, 0f);
+    }
+
+    private float CalculateStunDuration(float attackerVelocity, float impulseMagnitude)
+    {
+        float baseMin = 1.5f;
+        float baseMax = 4.0f;
+        float velocityBonus = 0.15f;
+        float weightBonus = 0.02f;
+        float stunMin = 1.5f;
+        float stunMax = 8.0f;
+
+        if (CombatSettings.Instance != null)
+        {
+            // CombatSettings에서 파라미터 읽기 (추후 CSV 확장)
+            stunMin = 1.5f;
+            stunMax = 8.0f;
+        }
+
+        float duration = Random.Range(baseMin, baseMax)
+                       + attackerVelocity * velocityBonus
+                       + impulseMagnitude * weightBonus;
+
+        return Mathf.Clamp(duration, stunMin, stunMax);
+    }
+
+    private void TriggerStun(float duration)
+    {
+        if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority) return;
+
+        // mainJoint 스프링 제거
+        if (mainJoint != null)
+        {
+            JointDrive jd = mainJoint.slerpDrive;
+            jd.positionSpring = 0;
+            mainJoint.slerpDrive = jd;
+        }
+
+        for (int i = 0; i < syncPhysicsObjects.Length; i++)
+            syncPhysicsObjects[i].MakeRagdoll();
+
+        _isActiveRagdoll = false;
+        _isGrabActive = false;
+
+        if (Runner != null && Object != null && Object.IsValid)
+        {
+            StunTimeRemaining = duration;
+            AccumulatedStunDamage = 0f;
+        }
+        else
+        {
+            _localStunTimeRemaining = duration;
+            _localAccumulatedStun = 0f;
+        }
+
+        // 기절 애니메이션
+        if (animator != null)
+            animator.SetTrigger(H_StunFall);
+
+        Debug.Log($"[Combat] 기절! 시간: {duration:F1}초");
+    }
+
+    private void ForceRecover()
+    {
+        if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority) return;
+
+        // mainJoint 스프링 복원
+        if (mainJoint != null)
+        {
+            JointDrive jd = mainJoint.slerpDrive;
+            jd.positionSpring = _startSlerpPositionSpring;
+            mainJoint.slerpDrive = jd;
+        }
+
+        for (int i = 0; i < syncPhysicsObjects.Length; i++)
+            syncPhysicsObjects[i].MakeActiveRagdoll();
+
+        _isActiveRagdoll = true;
+        _isGrabActive = false;
+        _isRecovering = true;
+        _recoveringTimer = RECOVERING_DURATION;
+
+        if (Runner != null && Object != null && Object.IsValid)
+        {
+            StunTimeRemaining = 0f;
+            AccumulatedStunDamage = 0f;
+        }
+        else
+        {
+            _localStunTimeRemaining = 0f;
+            _localAccumulatedStun = 0f;
+        }
+
+        // 회복 애니메이션
+        if (animator != null)
+            animator.SetTrigger(H_StunRecover);
+
+        Debug.Log("[Combat] 회복! (2초간 취약 상태)");
+    }
+
+    private void ProcessInteractions(PlayerNetworkInput input)
+    {
+        if (_handGrabHandlers == null) return;
+        if (!_isActiveRagdoll) return;
+
+        bool punch = input.Punch;
+        bool drop = input.Drop || _dropTriggered;
+        bool @throw = input.Throw || _throwTriggered;
+
+        bool anyHolding = false;
+        foreach (var handler in _handGrabHandlers)
+            if (handler.IsHolding) anyHolding = true;
+
+        // 펀치: 좌클릭 짧게 + 잡고 있지 않음 + 그랩 모드 아님
+        if (punch && !anyHolding && !_isGrabActive)
+        {
+            if (animator != null)
+                animator.SetTrigger(H_Punch);
+        }
+
+        // 좌클릭 꾹 = 그랩 시도
+        if (_isGrabActive && !anyHolding)
+        {
+            foreach (var handler in _handGrabHandlers)
+            {
+                if (!handler.IsHolding)
+                {
+                    handler.TryGrab();
+                    if (handler.IsHolding) break;
+                }
+            }
+        }
+
+        if (drop)
+        {
+            foreach (var handler in _handGrabHandlers) handler.Drop();
+        }
+
+        if (@throw)
+        {
+            bool didThrow = false;
+            foreach (var handler in _handGrabHandlers)
+            {
+                if (handler.IsHolding) { handler.Throw(); didThrow = true; }
+            }
+            if (didThrow && animator != null) animator.SetTrigger(H_Throw);
+        }
+
+        _dropTriggered = false;
+        _throwTriggered = false;
+
+        anyHolding = false;
+        foreach (var handler in _handGrabHandlers)
+            if (handler.IsHolding) anyHolding = true;
+
+        if (animator != null)
+            animator.SetBool(H_IsGrabbing, anyHolding);
+    }
+
     public override void Render()
     {
-        if (animator == null) return;
-        animator.SetFloat("movementSpeed", NetworkedMoveSpeed);
-        animator.SetInteger("MotorState", NetworkedMotorState);
+        UpdateAnimationParameters();
+
+        if (!HasStateAuthority && Object != null && Object.IsValid)
+        {
+            var interpolator = new NetworkBehaviourBufferInterpolator(this);
+            for (int i = 0; i < syncPhysicsObjects.Length; i++)
+            {
+                syncPhysicsObjects[i].transform.localRotation = Quaternion.Slerp(
+                    syncPhysicsObjects[i].transform.localRotation,
+                    BoneRotations.Get(i),
+                    interpolator.Alpha);
+            }
+        }
     }
 
-    // Animator 컴포넌트가 없거나 컨트롤러가 비어 있을 때 fallback 설정을 적용한다.
+    private void LateUpdate()
+    {
+        if (Runner == null)
+            UpdateAnimationParameters();
+    }
+
+    private void UpdateAnimationParameters()
+    {
+        if (animator == null) return;
+        float speed;
+        int state;
+
+        if (Runner != null && Object != null && Object.IsValid)
+        {
+            speed = NetworkedMoveSpeed;
+            state = NetworkedMotorState;
+        }
+        else
+        {
+            speed = _localMoveSpeed;
+            state = _localMotorState;
+        }
+
+        animator.SetFloat(H_MovementSpeed, speed);
+        animator.SetInteger(H_MotorState, state);
+    }
+
     private void EnsureAnimatorBinding()
     {
         if (animator == null)
             animator = GetComponentInChildren<Animator>(true);
-
         if (animator == null)
             animator = gameObject.AddComponent<Animator>();
-
         if (animator.runtimeAnimatorController == null && fallbackAnimatorController != null)
             animator.runtimeAnimatorController = fallbackAnimatorController;
 
