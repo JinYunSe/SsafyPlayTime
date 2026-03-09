@@ -14,11 +14,13 @@ namespace SSAFYPlayTime.Gameplay.Items
         [Header("입력")]
         [SerializeField] private bool enableTestInput = true;
         [SerializeField] private KeyCode spawnBlackholeKey = KeyCode.Alpha1;
+        [SerializeField] private KeyCode spawnSatelliteStrikeKey = KeyCode.Alpha2;
         [SerializeField] private KeyCode useItemKey = KeyCode.None;
         [SerializeField] private KeyCode dropItemKey = KeyCode.None;
 
         [Header("테스트 설정")]
         [SerializeField] private string spawnItemId = ItemIds.BlackholeBomb;
+        [SerializeField] private string spawnSatelliteStrikeItemId = ItemIds.SatelliteStrike;
 
         [Header("디버그")]
         [SerializeField] private bool enableDebugLog = true;
@@ -38,7 +40,12 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             if (Input.GetKeyDown(spawnBlackholeKey))
             {
-                HandleSpawnInput();
+                HandleSpawnInput(spawnItemId);
+            }
+
+            if (Input.GetKeyDown(spawnSatelliteStrikeKey))
+            {
+                HandleSpawnInput(spawnSatelliteStrikeItemId);
             }
 
             // 실제 플레이어 입력과 충돌하지 않도록 기본값(None)일 때는 무시한다.
@@ -54,16 +61,16 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
         }
 
-        private void HandleSpawnInput()
+        private void HandleSpawnInput(string itemId)
         {
             if (!ResolveReferences())
             {
                 return;
             }
 
-            if (fieldInteractionService.TrySpawnItemInFront(spawnItemId, out _, out var reason))
+            if (fieldInteractionService.TrySpawnItemInFront(itemId, out _, out var reason))
             {
-                DebugLog($"Spawn request succeeded: {spawnItemId}");
+                DebugLog($"Spawn request succeeded: {itemId}");
                 return;
             }
 

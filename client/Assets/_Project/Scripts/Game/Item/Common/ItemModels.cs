@@ -73,20 +73,37 @@ namespace SSAFYPlayTime.Gameplay.Items
 
     public readonly struct SatelliteStrikeRequest
     {
-        public SatelliteStrikeRequest(Vector3 center, float warningSec, float radius, float force, float baseDamage)
+        public SatelliteStrikeRequest(
+            Vector3 center,
+            Vector3 origin,
+            Vector3 forward,
+            float warningSec,
+            float durationSec,
+            float radius,
+            float force,
+            float baseDamage,
+            float stunDamage)
         {
             Center = center;
+            Origin = origin;
+            Forward = forward;
             WarningSec = warningSec;
+            DurationSec = durationSec;
             Radius = radius;
             Force = force;
             BaseDamage = baseDamage;
+            StunDamage = stunDamage;
         }
 
         public Vector3 Center { get; }
+        public Vector3 Origin { get; }
+        public Vector3 Forward { get; }
         public float WarningSec { get; }
+        public float DurationSec { get; }
         public float Radius { get; }
         public float Force { get; }
         public float BaseDamage { get; }
+        public float StunDamage { get; }
     }
 
     public readonly struct FlamethrowerTickRequest

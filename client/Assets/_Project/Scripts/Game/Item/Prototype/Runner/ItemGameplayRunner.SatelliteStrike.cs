@@ -8,16 +8,22 @@ namespace SSAFYPlayTime.Gameplay.Items
 {
     public sealed partial class ItemGameplayRunner
     {
-        private const float SatelliteStrikeDefaultWarningSec = 3f;
-        private const float SatelliteStrikeProjectileTravelSec = 0.55f;
-        private const float SatelliteStrikeProjectileArcHeight = 2.5f;
+        private const float SatelliteStrikeDefaultChargeDurationSec = 3f;
+        private const float SatelliteStrikeDefaultBeamDurationSec = 2f;
         private const float SatelliteStrikeDefaultHealthDamage = 50f;
         private const float SatelliteStrikeDefaultStunDamage = 100f;
-        private const float SatelliteStrikeWarningHeight = 0.12f;
-        private const float SatelliteStrikeLaserDurationSec = 0.75f;
-        private const float SatelliteStrikeLaserHeight = 24f;
+        private const float SatelliteStrikeBeamDamageHeight = 8f;
+        private const float SatelliteStrikeBeamTickSec = 0.25f;
+        private const float SatelliteStrikeBeamFallbackHeight = 24f;
         private const float SatelliteStrikeGroundOffset = 0.02f;
         private const float SatelliteStrikeExplosionUpwardModifier = 0.35f;
+        private const float SatelliteStrikeProjectileLifetimeSec = 3f;
+        private const float SatelliteStrikeProjectileCollisionRadius = 0.18f;
+
+        private const string SatelliteStrikeFxRootName = "Item_SatelliteStrikeFx";
+        private const string SatelliteStrikeChargeupName = "BeamChargeup";
+        private const string SatelliteStrikeCloudName = "BeamCloud";
+        private const string SatelliteStrikeCylinderName = "BeamCylinder";
 
         private readonly Collider[] _satelliteStrikeOverlapBuffer = new Collider[256];
         private readonly HashSet<Coroutine> _activeSatelliteStrikeRoutines = new();
@@ -33,62 +39,156 @@ namespace SSAFYPlayTime.Gameplay.Items
         private IEnumerator CoSatelliteStrike(SatelliteStrikeRequest request)
         {
             var radius = Mathf.Max(0.1f, request.Radius);
-            var warningSec = request.WarningSec > 0f ? request.WarningSec : SatelliteStrikeDefaultWarningSec;
-            var healthDamage = request.BaseDamage > 0f ? request.BaseDamage : SatelliteStrikeDefaultHealthDamage;
-            var stunDamage = SatelliteStrikeDefaultStunDamage;
+            var chargeDuration = request.WarningSec > 0f
+                ? request.WarningSec
+                : SatelliteStrikeDefaultChargeDurationSec;
+            var beamDuration = request.DurationSec > 0f
+                ? request.DurationSec
+                : SatelliteStrikeDefaultBeamDurationSec;
+            var totalHealthDamage = request.BaseDamage > 0f
+                ? request.BaseDamage
+                : SatelliteStrikeDefaultHealthDamage;
+            var totalStunDamage = request.StunDamage > 0f
+                ? request.StunDamage
+                : SatelliteStrikeDefaultStunDamage;
             var explosionForce = Mathf.Max(0f, request.Force);
 
-            var strikeCenter = ResolveSatelliteStrikeGroundCenter(request.Center);
-            var projectileStart = GetTargetPosition() + Vector3.up * 1.2f + GetTargetForward() * 0.7f;
+            var fallbackCenter = ResolveSatelliteStrikeGroundCenter(request.Center);
+            var throwForward = request.Forward.sqrMagnitude > 0.0001f
+                ? request.Forward.normalized
+                : GetTargetForward();
+            var projectileStart = request.Origin + Vector3.up * 1.2f + throwForward * 0.7f;
             var projectile = CreateSatelliteProjectile(projectileStart);
+            var strikeCenter = fallbackCenter;
 
-            yield return MoveSatelliteProjectile(projectile, projectileStart, strikeCenter);
+            yield return MoveSatelliteProjectile(
+                projectile,
+                projectileStart,
+                throwForward,
+                fallbackCenter,
+                landedCenter => strikeCenter = landedCenter);
 
             if (projectile != null)
             {
                 Destroy(projectile);
             }
 
-            var warning = CreateSatelliteWarningIndicator(strikeCenter, radius);
-            yield return new WaitForSeconds(warningSec);
+            var effectRoot = CreateSatelliteEffectRoot(strikeCenter);
+            AttachSatelliteChargeVisuals(effectRoot, strikeCenter, radius);
 
-            var laser = CreateSatelliteLaserVisual(strikeCenter, radius);
-            ApplySatelliteStrikeImpact(strikeCenter, radius, healthDamage, stunDamage, explosionForce);
-            yield return new WaitForSeconds(SatelliteStrikeLaserDurationSec);
-
-            if (laser != null)
+            if (chargeDuration > 0f)
             {
-                Destroy(laser);
+                yield return new WaitForSeconds(chargeDuration);
             }
 
-            if (warning != null)
+            DestroySatelliteChild(effectRoot, SatelliteStrikeChargeupName);
+            AttachSatelliteBeamVisual(effectRoot, strikeCenter, radius);
+
+            yield return ApplySatelliteBeamDamage(
+                strikeCenter,
+                radius,
+                beamDuration,
+                totalHealthDamage,
+                totalStunDamage,
+                explosionForce);
+
+            if (effectRoot != null)
             {
-                Destroy(warning);
+                Destroy(effectRoot);
             }
         }
 
-        private IEnumerator MoveSatelliteProjectile(GameObject projectile, Vector3 start, Vector3 end)
+        private IEnumerator MoveSatelliteProjectile(
+            GameObject projectile,
+            Vector3 start,
+            Vector3 throwForward,
+            Vector3 fallbackCenter,
+            Action<Vector3> onLanded)
         {
-            var duration = Mathf.Max(0.05f, SatelliteStrikeProjectileTravelSec);
-            var controlPoint = Vector3.Lerp(start, end, 0.5f) + Vector3.up * SatelliteStrikeProjectileArcHeight;
+            var direction = (throwForward + Vector3.up * blackholeThrowArc).normalized;
+            var velocity = direction * Mathf.Max(0.1f, blackholeThrowSpeed);
+            var gravity = Physics.gravity;
+            var elapsed = 0f;
+            var current = start;
+
+            while (elapsed < SatelliteStrikeProjectileLifetimeSec)
+            {
+                var step = Mathf.Max(0.001f, Time.deltaTime);
+                var nextVelocity = velocity + gravity * step;
+                var next = current + velocity * step;
+
+                if (Physics.SphereCast(
+                        current,
+                        SatelliteStrikeProjectileCollisionRadius,
+                        (next - current).normalized,
+                        out var hit,
+                        Vector3.Distance(current, next),
+                        physicsMask,
+                        QueryTriggerInteraction.Ignore))
+                {
+                    var landed = hit.point + Vector3.up * SatelliteStrikeGroundOffset;
+                    if (projectile != null)
+                    {
+                        projectile.transform.position = landed;
+                    }
+
+                    onLanded?.Invoke(landed);
+                    yield break;
+                }
+
+                if (projectile != null)
+                {
+                    projectile.transform.position = next;
+                    var lookDirection = nextVelocity.sqrMagnitude > 0.0001f ? nextVelocity.normalized : velocity.normalized;
+                    if (lookDirection.sqrMagnitude > 0.0001f)
+                    {
+                        projectile.transform.rotation = Quaternion.LookRotation(lookDirection, Vector3.up);
+                    }
+                }
+
+                current = next;
+                velocity = nextVelocity;
+                elapsed += step;
+                yield return null;
+            }
+
+            onLanded?.Invoke(fallbackCenter);
+        }
+
+        private IEnumerator ApplySatelliteBeamDamage(
+            Vector3 center,
+            float radius,
+            float beamDuration,
+            float totalHealthDamage,
+            float totalStunDamage,
+            float explosionForce)
+        {
+            var duration = Mathf.Max(0.01f, beamDuration);
+            var tickCount = Mathf.Max(1, Mathf.CeilToInt(duration / SatelliteStrikeBeamTickSec));
+            var damagePerTick = totalHealthDamage / tickCount;
+            var stunPerTick = totalStunDamage / tickCount;
             var elapsed = 0f;
 
             while (elapsed < duration)
             {
-                elapsed += Time.deltaTime;
-                var t = Mathf.Clamp01(elapsed / duration);
-                var point = EvaluateQuadraticBezier(start, controlPoint, end, t);
-                if (projectile != null)
+                ApplySatelliteBeamImpact(
+                    center,
+                    radius,
+                    SatelliteStrikeBeamDamageHeight,
+                    damagePerTick,
+                    stunPerTick,
+                    explosionForce);
+
+                var waitSec = Mathf.Min(SatelliteStrikeBeamTickSec, duration - elapsed);
+                elapsed += waitSec;
+                if (waitSec > 0f)
                 {
-                    projectile.transform.position = point;
+                    yield return new WaitForSeconds(waitSec);
                 }
-
-                yield return null;
-            }
-
-            if (projectile != null)
-            {
-                projectile.transform.position = end;
+                else
+                {
+                    yield return null;
+                }
             }
         }
 
@@ -109,69 +209,125 @@ namespace SSAFYPlayTime.Gameplay.Items
             return requestedCenter + Vector3.up * SatelliteStrikeGroundOffset;
         }
 
-        private static Vector3 EvaluateQuadraticBezier(Vector3 start, Vector3 control, Vector3 end, float t)
+        private GameObject CreateSatelliteProjectile(Vector3 startPosition)
         {
-            var oneMinusT = 1f - t;
-            return oneMinusT * oneMinusT * start +
-                   2f * oneMinusT * t * control +
-                   t * t * end;
-        }
+            var prefab = TryLoadSatelliteProjectilePrefab();
+            if (prefab != null)
+            {
+                var projectileVisual = Instantiate(prefab, startPosition, prefab.transform.rotation);
+                projectileVisual.name = "Item_SatelliteStrikeProjectile";
+                projectileVisual.transform.localScale =
+                    Vector3.one * Mathf.Max(0.001f, satelliteProjectileVisualScale);
+                PrepareSatelliteVisualInstance(projectileVisual);
+                return projectileVisual;
+            }
 
-        private static GameObject CreateSatelliteProjectile(Vector3 startPosition)
-        {
             var projectile = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             projectile.name = "Item_SatelliteStrikeProjectile";
             projectile.transform.position = startPosition;
             projectile.transform.localScale = Vector3.one * 0.3f;
-
-            if (projectile.TryGetComponent<Collider>(out var collider))
-            {
-                collider.enabled = false;
-            }
-
+            PrepareSatelliteVisualInstance(projectile);
             ApplyTransparentColor(projectile, new Color(0.95f, 0.3f, 0.3f, 0.7f));
             return projectile;
         }
 
-        private static GameObject CreateSatelliteWarningIndicator(Vector3 center, float radius)
+        private static GameObject CreateSatelliteEffectRoot(Vector3 center)
         {
-            var warning = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            warning.name = "Item_SatelliteStrikeWarning";
-            warning.transform.position = center + Vector3.up * (SatelliteStrikeWarningHeight * 0.5f);
-            warning.transform.localScale = new Vector3(radius * 2f, SatelliteStrikeWarningHeight * 0.5f, radius * 2f);
-
-            if (warning.TryGetComponent<Collider>(out var collider))
-            {
-                collider.enabled = false;
-            }
-
-            ApplyTransparentColor(warning, new Color(1f, 0.15f, 0.15f, 0.22f));
-            return warning;
+            var root = new GameObject(SatelliteStrikeFxRootName);
+            root.transform.position = center;
+            return root;
         }
 
-        private static GameObject CreateSatelliteLaserVisual(Vector3 center, float radius)
+        private void AttachSatelliteChargeVisuals(GameObject effectRoot, Vector3 center, float radius)
         {
-            var laser = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            laser.name = "Item_SatelliteStrikeLaser";
-            laser.transform.position = center + Vector3.up * (SatelliteStrikeLaserHeight * 0.5f);
-            laser.transform.localScale = new Vector3(
-                Mathf.Max(0.35f, radius * 0.28f),
-                SatelliteStrikeLaserHeight * 0.5f,
-                Mathf.Max(0.35f, radius * 0.28f));
-
-            if (laser.TryGetComponent<Collider>(out var collider))
+            if (effectRoot == null)
             {
-                collider.enabled = false;
+                return;
             }
 
-            ApplyTransparentColor(laser, new Color(1f, 0.3f, 0.3f, 0.45f));
-            return laser;
-        }
-
-        private void ApplySatelliteStrikeImpact(Vector3 center, float radius, float healthDamage, float stunDamage, float explosionForce)
-        {
-            var overlapCount = Physics.OverlapSphereNonAlloc(
+            TryAttachSatelliteBeamChild(
+                effectRoot.transform,
+                TryLoadSatelliteBeamChargeupPrefab(),
+                SatelliteStrikeChargeupName,
                 center,
+                GetSatelliteChargeupScale(radius));
+            TryAttachSatelliteBeamChild(
+                effectRoot.transform,
+                TryLoadSatelliteBeamCloudPrefab(),
+                SatelliteStrikeCloudName,
+                center,
+                GetSatelliteCloudScale(radius));
+        }
+
+        private void AttachSatelliteBeamVisual(GameObject effectRoot, Vector3 center, float radius)
+        {
+            if (effectRoot == null)
+            {
+                return;
+            }
+
+            if (effectRoot.transform.Find(SatelliteStrikeCloudName) == null)
+            {
+                TryAttachSatelliteBeamChild(
+                    effectRoot.transform,
+                    TryLoadSatelliteBeamCloudPrefab(),
+                    SatelliteStrikeCloudName,
+                    center,
+                    GetSatelliteCloudScale(radius));
+            }
+
+            if (TryAttachSatelliteBeamChild(
+                    effectRoot.transform,
+                    TryLoadSatelliteBeamCylinderPrefab(),
+                    SatelliteStrikeCylinderName,
+                    center,
+                    GetSatelliteCylinderScale(radius)))
+            {
+                return;
+            }
+
+            // 에셋을 불러오지 못하는 경우에만 임시 실린더로 빔 범위를 표시한다.
+            var fallbackBeam = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            fallbackBeam.name = SatelliteStrikeCylinderName;
+            fallbackBeam.transform.position = center + Vector3.up * (SatelliteStrikeBeamFallbackHeight * 0.5f);
+            fallbackBeam.transform.localScale = new Vector3(
+                Mathf.Max(0.35f, radius * 0.28f),
+                SatelliteStrikeBeamFallbackHeight * 0.5f,
+                Mathf.Max(0.35f, radius * 0.28f));
+            fallbackBeam.transform.SetParent(effectRoot.transform, true);
+            PrepareSatelliteVisualInstance(fallbackBeam);
+            ApplyTransparentColor(fallbackBeam, new Color(0.35f, 0.7f, 1f, 0.45f));
+        }
+
+        private Vector3 GetSatelliteChargeupScale(float radius)
+        {
+            return Vector3.one * Mathf.Max(0.001f, satelliteBeamChargeupScale * Mathf.Max(1f, radius * 0.35f));
+        }
+
+        private Vector3 GetSatelliteCloudScale(float radius)
+        {
+            return Vector3.one * Mathf.Max(0.001f, satelliteBeamCloudScale * Mathf.Max(1f, radius * 0.3f));
+        }
+
+        private Vector3 GetSatelliteCylinderScale(float radius)
+        {
+            return Vector3.one * Mathf.Max(0.001f, satelliteBeamCylinderScale * Mathf.Max(1f, radius * 0.3f));
+        }
+
+        private void ApplySatelliteBeamImpact(
+            Vector3 center,
+            float radius,
+            float height,
+            float healthDamage,
+            float stunDamage,
+            float explosionForce)
+        {
+            var capsuleOffset = Mathf.Max(0f, (height * 0.5f) - radius);
+            var bottom = center + Vector3.down * capsuleOffset;
+            var top = center + Vector3.up * capsuleOffset;
+            var overlapCount = Physics.OverlapCapsuleNonAlloc(
+                bottom,
+                top,
                 radius,
                 _satelliteStrikeOverlapBuffer,
                 physicsMask,
@@ -223,7 +379,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             var networkPlayer = targetRoot.GetComponentInParent<NetworkPlayer>();
             if (networkPlayer != null && stunDamage > 0f)
             {
-                // 한국어: 위성 레이저는 즉시 기절시키는 강한 스턴 데미지를 준다.
+                // 빔에 닿아 있는 동안 스턴 게이지가 계속 누적되도록 틱 단위로 적용한다.
                 networkPlayer.ApplyStunDamage(stunDamage, 1f, 0f, explosionForce);
                 stunApplied = true;
             }
@@ -281,6 +437,107 @@ namespace SSAFYPlayTime.Gameplay.Items
             direction.Normalize();
 
             body.AddForce(direction * (force * Mathf.Max(0.15f, falloff)), ForceMode.VelocityChange);
+        }
+
+        private void PrepareSatelliteVisualInstance(GameObject visualRoot)
+        {
+            if (visualRoot == null)
+            {
+                return;
+            }
+
+            var colliders = visualRoot.GetComponentsInChildren<Collider>(true);
+            for (var i = 0; i < colliders.Length; i++)
+            {
+                colliders[i].enabled = false;
+            }
+
+            var bodies = visualRoot.GetComponentsInChildren<Rigidbody>(true);
+            for (var i = 0; i < bodies.Length; i++)
+            {
+                var body = bodies[i];
+                body.isKinematic = true;
+                body.useGravity = false;
+                body.velocity = Vector3.zero;
+                body.angularVelocity = Vector3.zero;
+            }
+        }
+
+        private bool TryAttachSatelliteBeamChild(
+            Transform parent,
+            GameObject prefab,
+            string childName,
+            Vector3 worldPosition,
+            Vector3 worldScale)
+        {
+            if (parent == null || prefab == null)
+            {
+                return false;
+            }
+
+            var instance = Instantiate(prefab, worldPosition, prefab.transform.rotation, parent);
+            instance.name = childName;
+            instance.transform.localScale = worldScale;
+            PrepareSatelliteVisualInstance(instance);
+            return true;
+        }
+
+        private static void DestroySatelliteChild(GameObject effectRoot, string childName)
+        {
+            if (effectRoot == null || string.IsNullOrWhiteSpace(childName))
+            {
+                return;
+            }
+
+            var child = effectRoot.transform.Find(childName);
+            if (child != null)
+            {
+                UnityEngine.Object.Destroy(child.gameObject);
+            }
+        }
+
+        private GameObject TryLoadSatelliteProjectilePrefab()
+        {
+            if (_satelliteProjectilePrefabCache != null)
+            {
+                return _satelliteProjectilePrefabCache;
+            }
+
+            TryLoadPrefabFromAssetPath(satelliteProjectilePrefabAssetPath, out _satelliteProjectilePrefabCache);
+            return _satelliteProjectilePrefabCache;
+        }
+
+        private GameObject TryLoadSatelliteBeamChargeupPrefab()
+        {
+            if (_satelliteBeamChargeupPrefabCache != null)
+            {
+                return _satelliteBeamChargeupPrefabCache;
+            }
+
+            TryLoadPrefabFromAssetPath(satelliteBeamChargeupPrefabAssetPath, out _satelliteBeamChargeupPrefabCache);
+            return _satelliteBeamChargeupPrefabCache;
+        }
+
+        private GameObject TryLoadSatelliteBeamCloudPrefab()
+        {
+            if (_satelliteBeamCloudPrefabCache != null)
+            {
+                return _satelliteBeamCloudPrefabCache;
+            }
+
+            TryLoadPrefabFromAssetPath(satelliteBeamCloudPrefabAssetPath, out _satelliteBeamCloudPrefabCache);
+            return _satelliteBeamCloudPrefabCache;
+        }
+
+        private GameObject TryLoadSatelliteBeamCylinderPrefab()
+        {
+            if (_satelliteBeamCylinderPrefabCache != null)
+            {
+                return _satelliteBeamCylinderPrefabCache;
+            }
+
+            TryLoadPrefabFromAssetPath(satelliteBeamCylinderPrefabAssetPath, out _satelliteBeamCylinderPrefabCache);
+            return _satelliteBeamCylinderPrefabCache;
         }
 
         private static void ApplyTransparentColor(GameObject target, Color color)
