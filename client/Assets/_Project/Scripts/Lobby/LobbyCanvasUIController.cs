@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -63,11 +63,16 @@ namespace SSAFYPlayTime
         [SerializeField] private GameObject roomPanel;
         [SerializeField] private GameObject createRoomModal;
         [SerializeField] private GameObject passwordModal;
+        [SerializeField] private GameObject mainPanel;
+        [SerializeField] private GameObject gameSettingModal;
+        [SerializeField] private GameObject editNicknameModal;
 
         [Header("Nickname")]
         [SerializeField] private TMP_InputField nicknameInput;
         [SerializeField] private Button nicknameConfirmButton;
         [SerializeField] private TMP_Text nicknameValidationText;
+        [SerializeField] private TMP_Text mainPanelNicknameText;
+        [SerializeField] private TMP_InputField editNicknameInput;
 
         [Header("Lobby")]
         [SerializeField] private TMP_Text lobbyHeaderText;
@@ -397,7 +402,7 @@ namespace SSAFYPlayTime
             _nickname = entered;
             nicknameInput.text = entered;
             _isNicknameConfirmed = true;
-            ShowLobbyPanel();
+            ShowMainPanel();
             RefreshRoomList();
         }
 
@@ -1493,6 +1498,7 @@ namespace SSAFYPlayTime
         private void ShowNicknamePanel()
         {
             nicknamePanel.SetActive(true);
+            if (mainPanel != null) mainPanel.SetActive(false);
             lobbyPanel.SetActive(false);
             roomPanel.SetActive(false);
             createRoomModal.SetActive(false);
@@ -1502,9 +1508,27 @@ namespace SSAFYPlayTime
             RefreshCharacterSelectionUiState();
         }
 
-        private void ShowLobbyPanel()
+        public void ShowMainPanel()
         {
             nicknamePanel.SetActive(false);
+            lobbyPanel.SetActive(false);
+            roomPanel.SetActive(false);
+            createRoomModal.SetActive(false);
+            passwordModal.SetActive(false);
+            if (gameSettingModal != null) gameSettingModal.SetActive(false);
+
+            if (mainPanel != null) mainPanel.SetActive(true);
+
+            if (mainPanelNicknameText != null)
+            {
+                mainPanelNicknameText.text = _nickname;
+            }
+        }
+
+        public void ShowLobbyPanel()
+        {
+            nicknamePanel.SetActive(false);
+            if (mainPanel != null) mainPanel.SetActive(false);
             lobbyPanel.SetActive(true);
             roomPanel.SetActive(false);
             passwordModal.SetActive(false);
@@ -1517,6 +1541,7 @@ namespace SSAFYPlayTime
         {
             nicknamePanel.SetActive(false);
             lobbyPanel.SetActive(false);
+            if (mainPanel != null) mainPanel.SetActive(false);
             roomPanel.SetActive(true);
             if (startGameButton == null && _runner != null && _runner.IsServer)
             {
@@ -2447,6 +2472,46 @@ namespace SSAFYPlayTime
         }
 
         private static string FilterNumericPassword(string value) => LobbyInputValidator.FilterNumericPassword(value);
+
+        public void OpenEditNicknameModal()
+        {
+            if (editNicknameModal != null)
+            {
+                editNicknameModal.SetActive(true);
+                if (editNicknameInput != null)
+                {
+                    editNicknameInput.text = _nickname;
+                }
+            }
+        }
+
+        public void OnEditButtonClicked()
+        {
+            if (editNicknameModal == null) return;
+
+            var newName = (editNicknameInput.text ?? string.Empty).Trim();
+            newName = SanitizeNameToken(newName);
+
+            if (!string.IsNullOrEmpty(newName))
+            {
+                _nickname = newName;
+
+                if(mainPanelNicknameText != null)
+                {
+                    mainPanelNicknameText.text = _nickname;
+                }
+
+                if (editNicknameModal != null) editNicknameModal.SetActive(false);
+            }
+        }
+
+        public void QuitGame()
+        {
+            Application.Quit();
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+#endif
+        }
     }
 }
 
