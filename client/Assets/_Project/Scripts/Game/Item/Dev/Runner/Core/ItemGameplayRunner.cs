@@ -68,6 +68,9 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private float blackholeEffectScale = 0.7f;
         [SerializeField] private Color blackholeOuterLayerColor = new Color(0.08f, 0.02f, 0.14f, 0.28f);
         [SerializeField] private Color blackholeOuterLayerRimColor = new Color(0.52f, 0.3f, 0.82f, 0.45f);
+        [SerializeField] private bool enableBlackholeTargetOutline = true;
+        [SerializeField] private Color blackholeTargetOutlineColor = new Color(0.72f, 0.56f, 1f, 0.9f);
+        [SerializeField] private float blackholeTargetOutlineScaleMultiplier = 1.045f;
 
         [Header("화염방사기")]
         [SerializeField] private LayerMask physicsMask = ~0;
@@ -117,6 +120,8 @@ namespace SSAFYPlayTime.Gameplay.Items
         private GameObject _satelliteBeamCloudPrefabCache;
         private GameObject _satelliteBeamCylinderPrefabCache;
         private Material _blackholeOuterLayerFallbackMaterial;
+        private Material _blackholeTargetOutlineMaterial;
+        private readonly Dictionary<Transform, BlackholeOutlineState> _blackholeOutlineStates = new();
         private bool _presentationLoaded;
         private AudioListener _fallbackAudioListener;
         private float _nextAudioListenerCheckTime;
@@ -141,6 +146,12 @@ namespace SSAFYPlayTime.Gameplay.Items
         private bool _flamethrowerVisualActive;
         private float _flamethrowerVisualRange;
         private float _flamethrowerVisualRadius;
+
+        private sealed class BlackholeOutlineState
+        {
+            public int RefCount;
+            public readonly List<GameObject> ProxyObjects = new();
+        }
 
         private Vector3 GetTargetPosition()
         {
