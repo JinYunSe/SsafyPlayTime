@@ -339,7 +339,7 @@ namespace SSAFYPlayTime
                             ? _localSelectedCharacterIndex
                             : savedCharacterIndex >= 0
                                 ? savedCharacterIndex
-                                : (int)CharacterKind.Ssaty;
+                                : (int)CharacterKind.Statty;
                         SetLocalPlayerSelectedCharacter(charToSend);
                     }
                 }

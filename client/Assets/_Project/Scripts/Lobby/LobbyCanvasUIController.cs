@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -37,10 +37,11 @@ namespace SSAFYPlayTime
 
         private enum CharacterKind
         {
-            Ssaty = 0,
-            Pit = 1,
-            SeuTati = 2,
-            WaiJeu = 3
+            Statty = 0,
+            AlG = 1,
+            Fit = 2,
+            Wise = 3,
+            Random = 4
         }
 
         private const string PrivateKey = "isPrivate";
@@ -60,7 +61,7 @@ namespace SSAFYPlayTime
         private static readonly ReliableKey CharacterSelectionReliableKey =
             ReliableKey.FromInts(unchecked((int)0x53534146), unchecked((int)0x504C4159), 2, 0);
         private const int PlayerSlotCount = 4;
-        private const int CharacterOptionCount = 4;
+        private const int CharacterOptionCount = 5;
 
         [Header("Panels")]
         [SerializeField] private GameObject nicknamePanel;
@@ -107,17 +108,19 @@ namespace SSAFYPlayTime
         [SerializeField] private TMP_Text playerTwoText;
         [SerializeField] private TMP_Text playerThreeText;
         [SerializeField] private TMP_Text playerFourText;
-        [SerializeField] private GameObject ssatyCharacterRoot;
-        [SerializeField] private GameObject pitCharacterRoot;
-        [SerializeField] private GameObject seuTatiCharacterRoot;
-        [SerializeField] private GameObject waiJeuCharacterRoot;
+        [SerializeField] private GameObject stattyCharacterRoot;
+        [SerializeField] private GameObject alGCharacterRoot;
+        [SerializeField] private GameObject fitCharacterRoot;
+        [SerializeField] private GameObject wiseCharacterRoot;
+        [SerializeField] private GameObject randomCharacterRoot;
         [SerializeField] private GameObject characterSelectionPanel;
-        [SerializeField] private Button selectSsatyCharacterButton;
-        [SerializeField] private Button selectPitCharacterButton;
-        [SerializeField] private Button selectSeuTatiCharacterButton;
-        [SerializeField] private Button selectWaiJeuCharacterButton;
+        [SerializeField] private Button selectStattyCharacterButton;
+        [SerializeField] private Button selectAlGCharacterButton;
+        [SerializeField] private Button selectFitCharacterButton;
+        [SerializeField] private Button selectWiseCharacterButton;
+        [SerializeField] private Button selectRandomCharacterButton;
         [SerializeField] private bool lockPlayerSlotLayoutToViewport = true;
-        [SerializeField] private float playerSlotViewportY = 0.3f;
+        [SerializeField] private float playerSlotViewportY = 0.36f;
         [SerializeField] private float playerSlotVerticalPixelOffset = 0f;
         [SerializeField] private float playerSlotWidthRatio = 0.22f;
         [SerializeField] private float playerSlotMinWidth = 180f;
@@ -132,8 +135,10 @@ namespace SSAFYPlayTime
         [SerializeField] private float nicknameFontSizeMax = 64f;
         [SerializeField] private float characterVerticalOffset = 20f;
         [SerializeField] private float characterExtraVerticalOffset = 20f;
-        [SerializeField] private float seuTatiCharacterVerticalOffsetAdjustment = -18f;
-        [SerializeField] private float seuTatiCharacterWorldYAdjustment = -0.73f;
+        [SerializeField] private float algCharacterVerticalOffsetAdjustment = -10f;
+        [SerializeField] private float fitCharacterVerticalOffsetAdjustment = 32f;
+        [SerializeField] private float fitCharacterWorldYAdjustment = -0.73f;
+        [SerializeField] private float wiseCharacterVerticalOffsetAdjustment = 10f;
         [SerializeField] private Transform characterRuntimeRoot;
         [SerializeField] private Camera characterPlacementCamera;
         [SerializeField] private float characterWorldDepth = 8f;
@@ -142,6 +147,30 @@ namespace SSAFYPlayTime
         [SerializeField] private bool keepCharacterScreenSize = true;
         [SerializeField] private float characterTargetScreenHeightPixels = 170f;
         [SerializeField] private float characterScreenHeightMultiplier = 2.5f;
+        [SerializeField] private bool useFixedCharacterScale = true;
+        [SerializeField] private Vector3 fixedCharacterScale = new Vector3(5f, 5f, 5f);
+        [SerializeField] private float[] slotVerticalOffsetAdjustments = { 0f, 0f, 0f, 0f };
+        [SerializeField] private Vector3[] slotPositionOffsets =
+        {
+            Vector3.zero,
+            Vector3.zero,
+            Vector3.zero,
+            Vector3.zero
+        };
+        [SerializeField] private Vector3[] slotRotationOverrides =
+        {
+            Vector3.zero,
+            Vector3.zero,
+            Vector3.zero,
+            Vector3.zero
+        };
+        [SerializeField] private Vector3[] slotScaleOverrides =
+        {
+            new Vector3(5f, 5f, 5f),
+            new Vector3(5f, 5f, 5f),
+            new Vector3(5f, 5f, 5f),
+            new Vector3(5f, 5f, 5f)
+        };
         [SerializeField] private bool testShowOneCharacterPerSlot = true;
         [SerializeField] private Button leaveRoomButton;
         [SerializeField] private Button startGameButton;
@@ -222,6 +251,8 @@ namespace SSAFYPlayTime
         // 새 방장에게 캐릭터 선택을 재전송할 때 사용된다. 연쇄 마이그레이션에도 유지된다.
         private int _localSelectedCharacterIndex = -1;
         private readonly Dictionary<Transform, Vector3> _characterBaseLocalScales = new();
+        private readonly Dictionary<Transform, Quaternion> _characterBaseLocalRotations = new();
+        private readonly Dictionary<Transform, Quaternion> _characterVisualChildBaseLocalRotations = new();
         private readonly Dictionary<Transform, float> _characterBaseBoundsHeights = new();
         private readonly Dictionary<Transform, int> _characterOptionIndexByTransform = new();
         private readonly Dictionary<Transform, float> _characterPrePlacedWorldY = new();
@@ -233,7 +264,6 @@ namespace SSAFYPlayTime
         {
             EnsurePersistentAcrossScenes();
             RuntimeLogOverlay.EnsureInstance();
-            ApplyRuntimeLayoutOverrides();
             EnsureCharacterSelectionUi();
             NormalizeCanvasRoot();
             NormalizeRoomListBindings();
@@ -244,26 +274,6 @@ namespace SSAFYPlayTime
                 characterPreview.Initialize(GetNameSlots());
             }
             ShowNicknamePanel();
-        }
-
-        // 런타임에서 레이아웃 파라미터를 강제로 덮어쓴다.
-        // 인스펙터에 직렬화된 값이 빌드 환경마다 달라질 수 있으므로 코드에서 고정값으로 재지정한다.
-        private void ApplyRuntimeLayoutOverrides()
-        {
-            // Scene-serialized inspector values can override code defaults.
-            // Force requested lobby preview layout values at runtime so build output matches.
-            playerSlotViewportY = 0.36f;
-            playerSlotExtraViewportY = 0f;
-            playerSlotSizeMultiplier = 1.35f;
-            useQuarterWidthNameSlots = true;
-            playerSlotQuarterHorizontalMargin = 12f;
-            playerSlotQuarterWidthScale = 0.95f;
-            nicknameFontSizeMin = 32f;
-            nicknameFontSizeMax = 64f;
-            characterVerticalOffset = 20f;
-            characterExtraVerticalOffset = 20f;
-            seuTatiCharacterVerticalOffsetAdjustment = -18f;
-            characterScreenHeightMultiplier = 2.5f;
         }
 
         // 매 프레임 호스트 F5 게임 시작 단축키 처리 및 캐릭터 배치·정렬을 갱신한다.
@@ -336,24 +346,29 @@ namespace SSAFYPlayTime
                 startGameButton.onClick.AddListener(OnStartGameClicked);
             }
 
-            if (selectSsatyCharacterButton != null)
+            if (selectStattyCharacterButton != null)
             {
-                selectSsatyCharacterButton.onClick.AddListener(OnSelectSsatyCharacter);
+                selectStattyCharacterButton.onClick.AddListener(OnSelectStattyCharacter);
             }
 
-            if (selectPitCharacterButton != null)
+            if (selectAlGCharacterButton != null)
             {
-                selectPitCharacterButton.onClick.AddListener(OnSelectPitCharacter);
+                selectAlGCharacterButton.onClick.AddListener(OnSelectAlGCharacter);
             }
 
-            if (selectSeuTatiCharacterButton != null)
+            if (selectFitCharacterButton != null)
             {
-                selectSeuTatiCharacterButton.onClick.AddListener(OnSelectSeuTatiCharacter);
+                selectFitCharacterButton.onClick.AddListener(OnSelectFitCharacter);
             }
 
-            if (selectWaiJeuCharacterButton != null)
+            if (selectWiseCharacterButton != null)
             {
-                selectWaiJeuCharacterButton.onClick.AddListener(OnSelectWaiJeuCharacter);
+                selectWiseCharacterButton.onClick.AddListener(OnSelectWiseCharacter);
+            }
+
+            if (selectRandomCharacterButton != null)
+            {
+                selectRandomCharacterButton.onClick.AddListener(OnSelectRandomCharacter);
             }
 
             if (characterPreview != null)
@@ -918,22 +933,23 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            var templates = new[] { ssatyCharacterRoot, pitCharacterRoot, seuTatiCharacterRoot, waiJeuCharacterRoot };
+            var templates = new[] { stattyCharacterRoot, alGCharacterRoot, fitCharacterRoot, wiseCharacterRoot, randomCharacterRoot };
             var nameSlots = GetNameSlots();
-            if (templates.Any(t => t == null) || nameSlots.Any(t => t == null))
+            if (templates.Take(4).Any(t => t == null) || nameSlots.Any(t => t == null))
             {
                 return;
             }
 
             var runtimeRoot = ResolveCharacterRuntimeRoot();
-            // slot(플레이어 슬롯 0~3) × option(캐릭터 종류 0~3) 조합의 2차원 배열을 구성한다.
+            // slot(플레이어 슬롯 0~3) × option(캐릭터 종류 0~4) 조합의 2차원 배열을 구성한다.
             for (var slot = 0; slot < PlayerSlotCount; slot++)
             {
                 for (var option = 0; option < CharacterOptionCount; option++)
                 {
                     var template = templates[option];
+                    if (template == null) continue;
                     // 씬에 미리 배치된 오브젝트가 있으면 Instantiate 없이 재사용한다.
-                    // 이름 규칙: "{템플릿명}_Slot{슬롯번호}" (예: "SsatyCharacter_Slot1")
+                    // 이름 규칙: "{템플릿명}_Slot{슬롯번호}" (예: "StattyCharacter_Slot1")
                     var prePlacedName = $"{template.name}_Slot{slot + 1}";
                     var prePlaced = runtimeRoot.Find(prePlacedName);
 
@@ -957,6 +973,8 @@ namespace SSAFYPlayTime
                     cloneTransform.gameObject.SetActive(false);
                     _slotCharacterRoots[slot, option] = cloneTransform;
                     _characterBaseLocalScales[cloneTransform] = cloneTransform.localScale;
+                    _characterBaseLocalRotations[cloneTransform] = cloneTransform.localRotation;
+                    CacheCharacterVisualChildRotations(cloneTransform);
                     _characterBaseBoundsHeights[cloneTransform] = CalculateCombinedBoundsHeight(cloneTransform);
                     _characterOptionIndexByTransform[cloneTransform] = option;
                 }
@@ -989,14 +1007,14 @@ namespace SSAFYPlayTime
                 var nameSlot = nameSlots[slot];
                 for (var option = 0; option < CharacterOptionCount; option++)
                 {
-                    AlignCharacterSlot(_slotCharacterRoots[slot, option], nameSlot);
+                    AlignCharacterSlot(_slotCharacterRoots[slot, option], nameSlot, slot);
                 }
             }
         }
 
         // 캐릭터 슬롯 하나를 이름 슬롯 텍스트 위치 기준으로 배치한다.
         // UI 공간(RectTransform)과 월드 공간 오브젝트 두 가지 경우를 모두 처리한다.
-        private void AlignCharacterSlot(Transform characterSlot, TMP_Text nameSlot)
+        private void AlignCharacterSlot(Transform characterSlot, TMP_Text nameSlot, int slotIndex = -1)
         {
             if (characterSlot == null || nameSlot == null || nameSlot.transform is not RectTransform nameRect)
             {
@@ -1011,12 +1029,19 @@ namespace SSAFYPlayTime
                 }
 
                 var characterSpecificOffset = GetCharacterSpecificVerticalOffset(characterSlot);
+                var slotOffset = GetSlotVerticalOffset(slotIndex);
+                var slotPositionOffset = GetSlotPositionOffset(slotIndex);
                 charRect.anchorMin = nameRect.anchorMin;
                 charRect.anchorMax = nameRect.anchorMax;
                 charRect.pivot = nameRect.pivot;
                 charRect.anchoredPosition = nameRect.anchoredPosition + new Vector2(
-                    0f,
-                    characterVerticalOffset + characterExtraVerticalOffset + characterSpecificOffset);
+                    slotPositionOffset.x,
+                    characterVerticalOffset + characterExtraVerticalOffset + characterSpecificOffset + slotOffset + slotPositionOffset.y);
+                ApplySlotRotationToVisuals(characterSlot, slotIndex);
+                if (useFixedCharacterScale)
+                {
+                    charRect.localScale = GetSlotScale(slotIndex);
+                }
                 return;
             }
 
@@ -1029,7 +1054,12 @@ namespace SSAFYPlayTime
             var uiCam = ResolveUiCamera();
             var uiWorldPoint = GetNameAnchorWorldPoint(nameSlot, nameRect);
             var screenPoint = RectTransformUtility.WorldToScreenPoint(uiCam, uiWorldPoint);
-            screenPoint.y += characterVerticalOffset + characterExtraVerticalOffset + GetCharacterSpecificVerticalOffset(characterSlot);
+            var slotPositionOffsetWorld = GetSlotPositionOffset(slotIndex);
+            screenPoint.x += slotPositionOffsetWorld.x;
+            screenPoint.y += characterVerticalOffset + characterExtraVerticalOffset
+                             + GetCharacterSpecificVerticalOffset(characterSlot)
+                             + GetSlotVerticalOffset(slotIndex)
+                             + slotPositionOffsetWorld.y;
             var padding = Mathf.Max(0f, characterScreenPaddingPixels);
             screenPoint.x = Mathf.Clamp(screenPoint.x, padding, Screen.width - padding);
             screenPoint.y = Mathf.Clamp(screenPoint.y, padding, Screen.height - padding);
@@ -1047,14 +1077,19 @@ namespace SSAFYPlayTime
             }
 
             var targetWorld = worldCam.ScreenToWorldPoint(new Vector3(screenPoint.x, screenPoint.y, depth));
-            var finalPos = targetWorld + characterWorldOffset;
+            var finalPos = targetWorld + characterWorldOffset + new Vector3(0f, 0f, slotPositionOffsetWorld.z);
             if (_characterPrePlacedWorldY.TryGetValue(characterSlot, out var lockedY))
             {
                 finalPos.y = lockedY + GetCharacterPrePlacedWorldYAdjustment(characterSlot);
             }
             characterSlot.position = finalPos;
+            ApplySlotRotationToVisuals(characterSlot, slotIndex);
 
-            if (keepCharacterScreenSize)
+            if (useFixedCharacterScale)
+            {
+                characterSlot.localScale = GetSlotScale(slotIndex);
+            }
+            else if (keepCharacterScreenSize)
             {
                 ApplyCharacterScreenHeightScale(characterSlot, worldCam);
             }
@@ -1185,7 +1220,99 @@ namespace SSAFYPlayTime
             return characterRuntimeRoot;
         }
 
-        // 캐릭터별 추가 수직 오프셋을 반환한다. 스티의 경우 별도 조정값을 적용한다.
+        private float GetSlotVerticalOffset(int slotIndex)
+        {
+            if (slotVerticalOffsetAdjustments == null || slotIndex < 0 || slotIndex >= slotVerticalOffsetAdjustments.Length)
+            {
+                return 0f;
+            }
+            return slotVerticalOffsetAdjustments[slotIndex];
+        }
+
+        private Vector3 GetSlotPositionOffset(int slotIndex)
+        {
+            if (slotPositionOffsets != null && slotIndex >= 0 && slotIndex < slotPositionOffsets.Length)
+            {
+                return slotPositionOffsets[slotIndex];
+            }
+            return Vector3.zero;
+        }
+
+        private Vector3 GetSlotRotation(int slotIndex)
+        {
+            if (slotRotationOverrides != null && slotIndex >= 0 && slotIndex < slotRotationOverrides.Length)
+            {
+                return slotRotationOverrides[slotIndex];
+            }
+            return Vector3.zero;
+        }
+
+        private Vector3 GetSlotScale(int slotIndex)
+        {
+            if (slotScaleOverrides != null && slotIndex >= 0 && slotIndex < slotScaleOverrides.Length)
+            {
+                return slotScaleOverrides[slotIndex];
+            }
+            return fixedCharacterScale;
+        }
+
+        private void CacheCharacterVisualChildRotations(Transform characterSlot)
+        {
+            if (characterSlot == null)
+            {
+                return;
+            }
+
+            for (var i = 0; i < characterSlot.childCount; i++)
+            {
+                var child = characterSlot.GetChild(i);
+                if (child == null)
+                {
+                    continue;
+                }
+
+                _characterVisualChildBaseLocalRotations[child] = child.localRotation;
+            }
+        }
+
+        private void ApplySlotRotationToVisuals(Transform characterSlot, int slotIndex)
+        {
+            if (characterSlot == null)
+            {
+                return;
+            }
+
+            var slotRotation = Quaternion.Euler(GetSlotRotation(slotIndex));
+            if (_characterBaseLocalRotations.TryGetValue(characterSlot, out var rootBaseRotation))
+            {
+                characterSlot.localRotation = rootBaseRotation;
+            }
+
+            if (characterSlot.childCount <= 0)
+            {
+                characterSlot.localRotation *= slotRotation;
+                return;
+            }
+
+            for (var i = 0; i < characterSlot.childCount; i++)
+            {
+                var child = characterSlot.GetChild(i);
+                if (child == null)
+                {
+                    continue;
+                }
+
+                if (!_characterVisualChildBaseLocalRotations.TryGetValue(child, out var childBaseRotation))
+                {
+                    childBaseRotation = child.localRotation;
+                    _characterVisualChildBaseLocalRotations[child] = childBaseRotation;
+                }
+
+                child.localRotation = childBaseRotation * slotRotation;
+            }
+        }
+
+        // 캐릭터별 추가 수직 오프셋을 반환한다.
         private float GetCharacterSpecificVerticalOffset(Transform characterSlot)
         {
             if (characterSlot == null)
@@ -1193,22 +1320,27 @@ namespace SSAFYPlayTime
                 return 0f;
             }
 
-            if (_characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) &&
-                option == (int)CharacterKind.SeuTati)
+            if (!_characterOptionIndexByTransform.TryGetValue(characterSlot, out var option))
             {
-                return seuTatiCharacterVerticalOffsetAdjustment;
+                return 0f;
             }
 
-            return 0f;
+            return option switch
+            {
+                (int)CharacterKind.AlG => algCharacterVerticalOffsetAdjustment,
+                (int)CharacterKind.Fit => fitCharacterVerticalOffsetAdjustment,
+                (int)CharacterKind.Wise => wiseCharacterVerticalOffsetAdjustment,
+                _ => 0f
+            };
         }
 
         // 미리 배치된 캐릭터의 월드 Y 보정값을 반환한다. 스티의 경우 별도 조정값을 적용한다.
         private float GetCharacterPrePlacedWorldYAdjustment(Transform characterSlot)
         {
             if (_characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) &&
-                option == (int)CharacterKind.SeuTati)
+                option == (int)CharacterKind.Fit)
             {
-                return seuTatiCharacterWorldYAdjustment;
+                return fitCharacterWorldYAdjustment;
             }
 
             return 0f;
@@ -1374,10 +1506,11 @@ namespace SSAFYPlayTime
             ApplySelectedCharacterForSlot(slotIndex, true);
         }
 
-        public void OnSelectSsatyCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Ssaty);
-        public void OnSelectPitCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Pit);
-        public void OnSelectSeuTatiCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.SeuTati);
-        public void OnSelectWaiJeuCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.WaiJeu);
+        public void OnSelectStattyCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Statty);
+        public void OnSelectAlGCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.AlG);
+        public void OnSelectFitCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Fit);
+        public void OnSelectWiseCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Wise);
+        public void OnSelectRandomCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Random);
         public void SetLocalSelectedCharacterByName(string characterName) =>
             SetLocalPlayerSelectedCharacter(CharacterNameToIndex(characterName));
 
@@ -1530,24 +1663,24 @@ namespace SSAFYPlayTime
         // 캐릭터 이름 문자열을 CharacterKind 인덱스로 변환한다. 매칭 실패 시 -1을 반환한다.
         private static int CharacterNameToIndex(string characterName)
         {
-            if (string.Equals(characterName, "SsatyCharacter", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(characterName, "StattyCharacter", StringComparison.OrdinalIgnoreCase))
             {
-                return (int)CharacterKind.Ssaty;
+                return (int)CharacterKind.Statty;
             }
 
-            if (string.Equals(characterName, "PitCharacter", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(characterName, "AI.gCharacter", StringComparison.OrdinalIgnoreCase))
             {
-                return (int)CharacterKind.Pit;
+                return (int)CharacterKind.AlG;
             }
 
-            if (string.Equals(characterName, "SeuTatiCharacter", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(characterName, "FitCharacter", StringComparison.OrdinalIgnoreCase))
             {
-                return (int)CharacterKind.SeuTati;
+                return (int)CharacterKind.Fit;
             }
 
-            if (string.Equals(characterName, "WaiJeuCharacter", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(characterName, "WiseCharacter", StringComparison.OrdinalIgnoreCase))
             {
-                return (int)CharacterKind.WaiJeu;
+                return (int)CharacterKind.Wise;
             }
 
             return -1;
@@ -1558,10 +1691,11 @@ namespace SSAFYPlayTime
         {
             return SanitizeCharacterIndexOrNone(characterIndex) switch
             {
-                (int)CharacterKind.Ssaty => ssatyCharacterRoot,
-                (int)CharacterKind.Pit => pitCharacterRoot,
-                (int)CharacterKind.SeuTati => seuTatiCharacterRoot,
-                (int)CharacterKind.WaiJeu => waiJeuCharacterRoot,
+                (int)CharacterKind.Statty => stattyCharacterRoot,
+                (int)CharacterKind.AlG => alGCharacterRoot,
+                (int)CharacterKind.Fit => fitCharacterRoot,
+                (int)CharacterKind.Wise => wiseCharacterRoot,
+                (int)CharacterKind.Random => randomCharacterRoot,
                 _ => null
             };
         }
@@ -2179,10 +2313,11 @@ namespace SSAFYPlayTime
         private void EnsureCharacterSelectionUi()
         {
             if (characterSelectionPanel == null ||
-                selectSsatyCharacterButton == null ||
-                selectPitCharacterButton == null ||
-                selectSeuTatiCharacterButton == null ||
-                selectWaiJeuCharacterButton == null)
+                selectStattyCharacterButton == null ||
+                selectAlGCharacterButton == null ||
+                selectFitCharacterButton == null ||
+                selectWiseCharacterButton == null ||
+                selectRandomCharacterButton == null)
             {
                 Debug.LogWarning("[Lobby] 캐릭터 선택 UI 참조가 Inspector에 할당되지 않았습니다. CharacterSelectionPanel과 4개의 선택 버튼을 Inspector에서 연결해 주세요.");
             }
@@ -2218,28 +2353,34 @@ namespace SSAFYPlayTime
                 }
             }
 
-            if (selectSsatyCharacterButton != null)
+            if (selectStattyCharacterButton != null)
             {
-                TrySetButtonInteractable(selectSsatyCharacterButton,
-                    canSelect && localSelected != (int)CharacterKind.Ssaty && !takenByOthers.Contains((int)CharacterKind.Ssaty));
+                TrySetButtonInteractable(selectStattyCharacterButton,
+                    canSelect && localSelected != (int)CharacterKind.Statty && !takenByOthers.Contains((int)CharacterKind.Statty));
             }
 
-            if (selectPitCharacterButton != null)
+            if (selectAlGCharacterButton != null)
             {
-                TrySetButtonInteractable(selectPitCharacterButton,
-                    canSelect && localSelected != (int)CharacterKind.Pit && !takenByOthers.Contains((int)CharacterKind.Pit));
+                TrySetButtonInteractable(selectAlGCharacterButton,
+                    canSelect && localSelected != (int)CharacterKind.AlG && !takenByOthers.Contains((int)CharacterKind.AlG));
             }
 
-            if (selectSeuTatiCharacterButton != null)
+            if (selectFitCharacterButton != null)
             {
-                TrySetButtonInteractable(selectSeuTatiCharacterButton,
-                    canSelect && localSelected != (int)CharacterKind.SeuTati && !takenByOthers.Contains((int)CharacterKind.SeuTati));
+                TrySetButtonInteractable(selectFitCharacterButton,
+                    canSelect && localSelected != (int)CharacterKind.Fit && !takenByOthers.Contains((int)CharacterKind.Fit));
             }
 
-            if (selectWaiJeuCharacterButton != null)
+            if (selectWiseCharacterButton != null)
             {
-                TrySetButtonInteractable(selectWaiJeuCharacterButton,
-                    canSelect && localSelected != (int)CharacterKind.WaiJeu && !takenByOthers.Contains((int)CharacterKind.WaiJeu));
+                TrySetButtonInteractable(selectWiseCharacterButton,
+                    canSelect && localSelected != (int)CharacterKind.Wise && !takenByOthers.Contains((int)CharacterKind.Wise));
+            }
+
+            if (selectRandomCharacterButton != null)
+            {
+                TrySetButtonInteractable(selectRandomCharacterButton,
+                    canSelect && localSelected != (int)CharacterKind.Random);
             }
 
             characterPreview?.RefreshSelectionUiState(canSelect, localSelected, takenByOthers);
@@ -2541,6 +2682,4 @@ namespace SSAFYPlayTime
         }
     }
 }
-
-
 
