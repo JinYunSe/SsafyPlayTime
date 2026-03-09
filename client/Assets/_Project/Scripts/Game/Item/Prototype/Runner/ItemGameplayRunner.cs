@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Reflection;
-using Fusion;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Gameplay.Items
@@ -14,7 +13,6 @@ namespace SSAFYPlayTime.Gameplay.Items
     {
         private const string RuntimeSceneName = "ItemScene";
         private const string BlackholeVisualName = "Item_Blackhole";
-        private const float RunnerLookupIntervalSec = 1f;
         private const float AudioListenerCheckIntervalSec = 1f;
 
         [Header("참조")]
@@ -24,7 +22,11 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         [Header("로컬 테스트 컨트롤")]
         [SerializeField] private bool enableLocalDebugController = true;
+        [SerializeField] private bool allowLocalDebugControllerForNetworkPlayer = false;
+        [SerializeField] private bool enableTemporaryRightClickPickup = true;
+        [SerializeField] private KeyCode temporaryPickupKey = KeyCode.Mouse1;
         [SerializeField] private bool resetRuntimeStateOnSpace = true;
+        [SerializeField] private KeyCode localResetKey = KeyCode.R;
         [SerializeField] private float localMoveSpeed = 6f;
         [SerializeField] private float localTurnLerp = 12f;
         [SerializeField] private string localDebugDummyName = "PrototypeHitDummy";
@@ -39,9 +41,6 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private float localCameraMinDistance = 2f;
         [SerializeField] private float localCameraMaxDistance = 10f;
         [SerializeField] private float localCameraDefaultDistance = 5f;
-
-        [Header("권한")]
-        [SerializeField] private bool hostAuthorityOnlyWhenRunnerExists = true;
 
         [Header("프리젠테이션")]
         [SerializeField] private bool enableRuntimePresentation = true;
@@ -94,8 +93,6 @@ namespace SSAFYPlayTime.Gameplay.Items
         private GameObject _flamethrowerEffectPrefabCache;
         private GameObject _blackholeEffectPrefabCache;
         private Material _blackholeOuterLayerFallbackMaterial;
-        private NetworkRunner _runnerCache;
-        private float _nextRunnerLookupTime;
         private bool _presentationLoaded;
         private AudioListener _fallbackAudioListener;
         private float _nextAudioListenerCheckTime;
@@ -114,6 +111,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private float _debugDistance;
         private RigidbodyConstraints _debugOriginalConstraints;
         private bool _debugConstraintsCaptured;
+        private bool _debugControllerSkipLogged;
         private Transform _debugDummyTarget;
         private Rigidbody _debugDummyBody;
         private bool _flamethrowerVisualActive;

@@ -29,58 +29,25 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             PlayUsePresentation(def, ownerPosition);
-
-            switch (def.Master.ItemId)
+            var context = new ItemUseModuleContext(this, def, ownerPosition, ownerForward, targetPosition);
+            var result = _useModuleRegistry.TryUse(def.Master.ItemId, context);
+            if (!result.Success)
             {
-                case ItemIds.BlackholeBomb:
-                    UseBlackhole(def, ownerPosition, ownerForward);
-                    ConsumeHeldItem(def);
-                    return true;
-
-                case ItemIds.Growth:
-                    ActivateGrowth(def);
-                    ConsumeHeldItem(def);
-                    return true;
-
-                case ItemIds.Shrink:
-                    ActivateShrink(def);
-                    ConsumeHeldItem(def);
-                    return true;
-
-                case ItemIds.Americano:
-                    ActivateSuperArmor(def);
-                    ConsumeHeldItem(def);
-                    return true;
-
-                case ItemIds.Invisibility:
-                    ActivateInvisibility(def);
-                    ConsumeHeldItem(def);
-                    return true;
-
-                case ItemIds.SatelliteStrike:
-                    UseSatelliteStrike(def, targetPosition);
-                    ConsumeHeldItem(def);
-                    return true;
-
-                case ItemIds.Flamethrower:
-                    ToggleFlamethrower(def);
-                    return true;
-
-                case ItemIds.WaterMelonSword:
-                    // 수박검 계열은 전투 상세 로직을 별도 시스템에서 처리한다.
-                    return true;
-
-                default:
-                    if (def.Master.ConsumeOnUse)
-                    {
-                        ConsumeHeldItem(def);
-                    }
-
-                    return true;
+                reason = string.IsNullOrWhiteSpace(result.Reason)
+                    ? $"Failed to use item module: {def.Master.ItemId}"
+                    : result.Reason;
+                return false;
             }
+
+            if (result.ConsumeHeldItem)
+            {
+                ConsumeHeldItem(def);
+            }
+
+            return true;
         }
 
-        private void UseBlackhole(ItemDefinition def, Vector3 ownerPosition, Vector3 ownerForward)
+        internal void UseBlackhole(ItemDefinition def, Vector3 ownerPosition, Vector3 ownerForward)
         {
             var request = new BlackholeSkillRequest(
                 ownerPosition + ownerForward * 6f,
@@ -91,7 +58,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             _bridge.OnBlackholeRequested(request);
         }
 
-        private void UseSatelliteStrike(ItemDefinition def, Vector3 targetPosition)
+        internal void UseSatelliteStrike(ItemDefinition def, Vector3 targetPosition)
         {
             var request = new SatelliteStrikeRequest(
                 targetPosition,
@@ -102,7 +69,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             _bridge.OnSatelliteStrikeRequested(request);
         }
 
-        private void ToggleFlamethrower(ItemDefinition def)
+        internal void ToggleFlamethrower(ItemDefinition def)
         {
             if (_isFlamethrowerActive)
             {
@@ -116,6 +83,22 @@ namespace SSAFYPlayTime.Gameplay.Items
             _nextFlamethrowerTickAt = now;
             _isFlamethrowerActive = true;
             _bridge.OnFlamethrowerStart(def.Master.ItemId, _equipmentEndAt);
+        }
+
+        internal void UseWatermelonSword(ItemDefinition def)
+        {
+            if (def == null)
+            {
+                return;
+            }
+
+            // 수박검 근접 타격은 현재 고정 피해(체력/스턴 각 5) 정책으로 요청한다.
+            var request = new MeleeSwingRequest(
+                def.Master.ItemId,
+                DefaultWatermelonSwordActiveDuration,
+                DefaultWatermelonSwordHealthDamage,
+                DefaultWatermelonSwordStunDamage);
+            _bridge.OnMeleeSwingRequested(request);
         }
 
         private void TickFlamethrower(float now, Vector3 ownerPosition, Vector3 ownerForward)

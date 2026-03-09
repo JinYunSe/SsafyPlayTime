@@ -7,7 +7,7 @@ namespace SSAFYPlayTime.Gameplay.Items
     /// </summary>
     public sealed partial class ItemRuntimeController
     {
-        private void ActivateGrowth(ItemDefinition def)
+        internal void ActivateGrowth(ItemDefinition def)
         {
             // 성장/축소 버프는 동시에 유지하지 않는다.
             _activeBuffMask |= ItemBuffMask.Growth;
@@ -17,7 +17,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             NotifyBuffStateChanged();
         }
 
-        private void ActivateShrink(ItemDefinition def)
+        internal void ActivateShrink(ItemDefinition def)
         {
             // 성장/축소 버프는 동시에 유지하지 않는다.
             _activeBuffMask |= ItemBuffMask.Shrink;
@@ -27,14 +27,14 @@ namespace SSAFYPlayTime.Gameplay.Items
             NotifyBuffStateChanged();
         }
 
-        private void ActivateSuperArmor(ItemDefinition def)
+        internal void ActivateSuperArmor(ItemDefinition def)
         {
             _activeBuffMask |= ItemBuffMask.SuperArmor;
             _superArmorEndAt = _bridge.Now + Mathf.Max(0f, def.Master.DurationSec);
             NotifyBuffStateChanged();
         }
 
-        private void ActivateInvisibility(ItemDefinition def)
+        internal void ActivateInvisibility(ItemDefinition def)
         {
             _activeBuffMask |= ItemBuffMask.Invisibility;
             _invisibilityEndAt = _bridge.Now + Mathf.Max(0f, def.Master.DurationSec);
