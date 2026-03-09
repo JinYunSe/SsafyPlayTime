@@ -58,14 +58,18 @@ namespace SSAFYPlayTime.Gameplay.Items
             _bridge.OnBlackholeRequested(request);
         }
 
-        internal void UseSatelliteStrike(ItemDefinition def, Vector3 targetPosition)
+        internal void UseSatelliteStrike(ItemDefinition def, Vector3 ownerPosition, Vector3 ownerForward, Vector3 targetPosition)
         {
             var request = new SatelliteStrikeRequest(
                 targetPosition,
+                ownerPosition,
+                ownerForward,
                 Mathf.Max(0f, def.Master.WarningTimeSec),
+                Mathf.Max(0f, def.Master.DurationSec),
                 Mathf.Max(0f, def.Master.Range),
                 Mathf.Max(0f, def.Master.Force),
-                Mathf.Max(0f, def.Master.BaseDamage));
+                Mathf.Max(0f, def.Master.BaseDamage),
+                Mathf.Max(0f, def.Master.StunDamage));
             _bridge.OnSatelliteStrikeRequested(request);
         }
 

@@ -72,6 +72,20 @@ namespace SSAFYPlayTime.Gameplay.Items
             "Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile 7 fire.prefab";
         [SerializeField] private float flamethrowerEffectScale = 1f;
 
+        [Header("위성 폭격")]
+        [SerializeField] private string satelliteProjectilePrefabAssetPath =
+            "Assets/Polygon Arsenal/Prefabs/Combat/Missiles/Sci-Fi/Antimatter/AntimatterMissileBlue.prefab";
+        [SerializeField] private string satelliteBeamChargeupPrefabAssetPath =
+            "Assets/Polygon Arsenal/Prefabs/Interactive/BeamUp/Chargeup/BeamupChargeupBlue.prefab";
+        [SerializeField] private string satelliteBeamCloudPrefabAssetPath =
+            "Assets/Polygon Arsenal/Prefabs/Interactive/BeamUp/Cloud/BeamupCloudBlue.prefab";
+        [SerializeField] private string satelliteBeamCylinderPrefabAssetPath =
+            "Assets/Polygon Arsenal/Prefabs/Interactive/BeamUp/Cylinder/BeamupCylinderBlue.prefab";
+        [SerializeField] private float satelliteProjectileVisualScale = 1f;
+        [SerializeField] private float satelliteBeamChargeupScale = 1f;
+        [SerializeField] private float satelliteBeamCloudScale = 1f;
+        [SerializeField] private float satelliteBeamCylinderScale = 1f;
+
         [Header("로그")]
         [SerializeField] private bool enableStatusLog = true;
 
@@ -92,6 +106,10 @@ namespace SSAFYPlayTime.Gameplay.Items
         private GameObject _flamethrowerFxRoot;
         private GameObject _flamethrowerEffectPrefabCache;
         private GameObject _blackholeEffectPrefabCache;
+        private GameObject _satelliteProjectilePrefabCache;
+        private GameObject _satelliteBeamChargeupPrefabCache;
+        private GameObject _satelliteBeamCloudPrefabCache;
+        private GameObject _satelliteBeamCylinderPrefabCache;
         private Material _blackholeOuterLayerFallbackMaterial;
         private bool _presentationLoaded;
         private AudioListener _fallbackAudioListener;

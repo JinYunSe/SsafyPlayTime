@@ -14,7 +14,11 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return ItemUseModuleResult.Failed("Definition missing for satellite strike item.");
             }
 
-            context.Controller.UseSatelliteStrike(context.Definition, context.TargetPosition);
+            context.Controller.UseSatelliteStrike(
+                context.Definition,
+                context.OwnerPosition,
+                context.OwnerForward,
+                context.TargetPosition);
             return ItemUseModuleResult.SuccessAndConsume();
         }
     }
