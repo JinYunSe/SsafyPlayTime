@@ -14,10 +14,10 @@ public class CharacterAnimationSetup : EditorWindow
     // =============================================
     static readonly string[][] ep1Characters = new string[][]
     {
-        new string[] { "GhostCharacter", "Ghost Animated" },
-        new string[] { "GlassesCharacter", "Glasses Animated" },
-        new string[] { "GreenCharacter", "Green Animated" },
-        new string[] { "SsatyCharacter", "Ssaty Animated" },
+        new string[] { "AI.gCharacter", "Ghost Animated" },
+        new string[] { "WiseCharacter", "Glasses Animated" },
+        new string[] { "FitCharacter", "Green Animated" },
+        new string[] { "StattyCharacter", "Statty Animated" },
     };
 
     // EP1: CharacterArmature bone -> Knight bone

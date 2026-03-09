@@ -13,10 +13,10 @@ namespace SSAFYPlayTime.Editor
 
         private static readonly string[] CharacterPrefabPaths =
         {
-            "Assets/_Project/Prefabs/Characters/SsatyCharacter.prefab",
-            "Assets/_Project/Prefabs/Characters/PitCharacter.prefab",
-            "Assets/_Project/Prefabs/Characters/SeuTatiCharacter.prefab",
-            "Assets/_Project/Prefabs/Characters/WaiJeuCharacter.prefab"
+            "Assets/_Project/Prefabs/Characters/StattyCharacter.prefab",
+            "Assets/_Project/Prefabs/Characters/AI.gCharacter.prefab",
+            "Assets/_Project/Prefabs/Characters/FitCharacter.prefab",
+            "Assets/_Project/Prefabs/Characters/WiseCharacter.prefab"
         };
 
         [InitializeOnLoadMethod]
