@@ -1,3 +1,9 @@
+﻿/*
+ * 파일 개요:
+ * - ItemPresentationTableCsvLoader 스크립트가 들어 있는 파일이다.
+ * - Data 계층에서 CSV 파싱과 로더 책임을 담당하며, 원본 데이터 형식을 코드 객체로 변환한다.
+ * - 스키마 변경이 필요하면 Catalog 계층과 데이터 테이블을 함께 수정해야 한다.
+ */
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -112,4 +118,5 @@ namespace SSAFYPlayTime.Gameplay.Items
         }
     }
 }
+
 
