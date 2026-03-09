@@ -6,6 +6,7 @@
  */
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 #if UNITY_EDITOR
@@ -20,6 +21,8 @@ namespace SSAFYPlayTime.Gameplay.Items
         {
             var startPos = GetTargetPosition() + Vector3.up * 1.2f + GetTargetForward() * 0.7f;
             var throwDirection = (GetTargetForward() + Vector3.up * blackholeThrowArc).normalized;
+            var outlinedTargets = new HashSet<Transform>();
+            var outlinedTargetsThisFrame = new HashSet<Transform>();
 
             var bomb = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             bomb.name = BlackholeVisualName;
@@ -37,101 +40,140 @@ namespace SSAFYPlayTime.Gameplay.Items
             bombBody.AddForce(throwDirection * blackholeThrowSpeed, ForceMode.VelocityChange);
             bombBody.AddTorque(UnityEngine.Random.onUnitSphere * 4f, ForceMode.VelocityChange);
 
-            var delaySec = Mathf.Max(0f, request.DelaySec);
-            if (delaySec > 0f)
+            try
             {
-                yield return new WaitForSeconds(delaySec);
-            }
-
-            var center = bomb != null ? bomb.transform.position : request.Center;
-            if (bombBody != null)
-            {
-                bombBody.velocity = Vector3.zero;
-                bombBody.angularVelocity = Vector3.zero;
-                bombBody.isKinematic = true;
-            }
-
-            if (bomb != null && bomb.TryGetComponent<Collider>(out var bombCollider))
-            {
-                // 투척 구체는 시각 전용이므로 충돌은 비활성화한다.
-                bombCollider.enabled = false;
-
-                // 발동 이후 범위 구체 메시는 숨기고 이펙트만 표시한다.
-                var bombRenderer = bomb.GetComponent<Renderer>();
-                if (bombRenderer != null)
+                var delaySec = Mathf.Max(0f, request.DelaySec);
+                if (delaySec > 0f)
                 {
-                    bombRenderer.enabled = false;
+                    yield return new WaitForSeconds(delaySec);
                 }
 
-                TryAttachBlackholeEffect(bomb.transform);
-            }
-
-            var duration = Mathf.Max(0f, request.DurationSec);
-            var radius = Mathf.Max(0f, request.Radius);
-            var force = Mathf.Max(0f, request.Force);
-            var elapsed = 0f;
-            var expandDuration = Mathf.Max(0.01f, duration / Mathf.Max(0.01f, blackholeExpandSpeedMultiplier));
-
-            while (elapsed < duration)
-            {
-                elapsed += Time.deltaTime;
-                var ramp = Mathf.Clamp01(elapsed / expandDuration);
-
-                var overlapCount = Physics.OverlapSphereNonAlloc(
-                    center,
-                    radius,
-                    _blackholeOverlapBuffer,
-                    physicsMask,
-                    QueryTriggerInteraction.Ignore);
-
-                for (var i = 0; i < overlapCount; i++)
+                var center = bomb != null ? bomb.transform.position : request.Center;
+                if (bombBody != null)
                 {
-                    var hitCollider = _blackholeOverlapBuffer[i];
-                    if (hitCollider == null)
+                    bombBody.velocity = Vector3.zero;
+                    bombBody.angularVelocity = Vector3.zero;
+                    bombBody.isKinematic = true;
+                }
+
+                if (bomb != null && bomb.TryGetComponent<Collider>(out var bombCollider))
+                {
+                    // 투척 구체는 시각 전용이므로 충돌은 비활성화한다.
+                    bombCollider.enabled = false;
+
+                    // 발동 이후 범위 구체 메시는 숨기고 이펙트만 표시한다.
+                    var bombRenderer = bomb.GetComponent<Renderer>();
+                    if (bombRenderer != null)
                     {
-                        continue;
+                        bombRenderer.enabled = false;
                     }
 
-                    var body = hitCollider.attachedRigidbody;
-                    if (body == null || body.isKinematic)
+                    TryAttachBlackholeEffect(bomb.transform);
+                }
+
+                var duration = Mathf.Max(0f, request.DurationSec);
+                var radius = Mathf.Max(0f, request.Radius);
+                var force = Mathf.Max(0f, request.Force);
+                var elapsed = 0f;
+                var expandDuration = Mathf.Max(0.01f, duration / Mathf.Max(0.01f, blackholeExpandSpeedMultiplier));
+
+                while (elapsed < duration)
+                {
+                    elapsed += Time.deltaTime;
+                    var ramp = Mathf.Clamp01(elapsed / expandDuration);
+
+                    var overlapCount = Physics.OverlapSphereNonAlloc(
+                        center,
+                        radius,
+                        _blackholeOverlapBuffer,
+                        physicsMask,
+                        QueryTriggerInteraction.Ignore);
+
+                    for (var i = 0; i < overlapCount; i++)
                     {
-                        continue;
+                        var hitCollider = _blackholeOverlapBuffer[i];
+                        if (hitCollider == null)
+                        {
+                            continue;
+                        }
+
+                        var body = hitCollider.attachedRigidbody;
+                        if (body == null || body.isKinematic)
+                        {
+                            continue;
+                        }
+
+                        var toCenter = center - body.worldCenterOfMass;
+                        if (!ShouldPullByBlackhole(hitCollider, body, toCenter))
+                        {
+                            continue;
+                        }
+
+                        var root = body.transform.root;
+                        if (root != null && outlinedTargetsThisFrame.Add(root))
+                        {
+                            if (!outlinedTargets.Contains(root))
+                            {
+                                ApplyBlackholeOutlineForTarget(root);
+                                outlinedTargets.Add(root);
+                            }
+                        }
+
+                        var distance = Mathf.Max(toCenter.magnitude, 0.35f);
+                        var pullMultiplier = GetBlackholePullMultiplier(root);
+                        var pullStrength =
+                            (force * blackholePullStrengthMultiplier * (0.4f + ramp * 1.6f)) /
+                            Mathf.Sqrt(distance) * pullMultiplier;
+
+                        if (IsPlayerTarget(root))
+                        {
+                            ApplyPlayerEscapeDamping(body, toCenter.normalized);
+                        }
+
+                        body.AddForce(toCenter.normalized * pullStrength, ForceMode.Acceleration);
                     }
 
-                    var toCenter = center - body.worldCenterOfMass;
-                    if (!ShouldPullByBlackhole(hitCollider, body, toCenter))
+                    if (outlinedTargets.Count > 0)
                     {
-                        continue;
+                        var releaseBuffer = new List<Transform>();
+                        foreach (var target in outlinedTargets)
+                        {
+                            if (target == null || !outlinedTargetsThisFrame.Contains(target))
+                            {
+                                releaseBuffer.Add(target);
+                            }
+                        }
+
+                        for (var i = 0; i < releaseBuffer.Count; i++)
+                        {
+                            var target = releaseBuffer[i];
+                            ReleaseBlackholeOutlineForTarget(target);
+                            outlinedTargets.Remove(target);
+                        }
                     }
 
-                    var root = body.transform.root;
-                    var distance = Mathf.Max(toCenter.magnitude, 0.35f);
-                    var pullMultiplier = GetBlackholePullMultiplier(root);
-                    var pullStrength =
-                        (force * blackholePullStrengthMultiplier * (0.4f + ramp * 1.6f)) /
-                        Mathf.Sqrt(distance) * pullMultiplier;
-
-                    if (IsPlayerTarget(root))
+                    if (bomb != null)
                     {
-                        ApplyPlayerEscapeDamping(body, toCenter.normalized);
+                        bomb.transform.position = center;
+                        bomb.transform.localScale = Vector3.one * Mathf.Lerp(0.45f, radius * 2f, ramp);
+                        bomb.transform.Rotate(Vector3.up, 220f * Time.deltaTime, Space.World);
                     }
 
-                    body.AddForce(toCenter.normalized * pullStrength, ForceMode.Acceleration);
+                    outlinedTargetsThisFrame.Clear();
+                    yield return null;
+                }
+            }
+            finally
+            {
+                foreach (var target in outlinedTargets)
+                {
+                    ReleaseBlackholeOutlineForTarget(target);
                 }
 
                 if (bomb != null)
                 {
-                    bomb.transform.position = center;
-                    bomb.transform.localScale = Vector3.one * Mathf.Lerp(0.45f, radius * 2f, ramp);
-                    bomb.transform.Rotate(Vector3.up, 220f * Time.deltaTime, Space.World);
+                    Destroy(bomb);
                 }
-
-                yield return null;
-            }
-
-            if (bomb != null)
-            {
-                Destroy(bomb);
             }
         }
 
