@@ -1,3 +1,9 @@
+﻿/*
+ * 파일 개요:
+ * - ItemRuntimeController 스크립트가 들어 있는 파일이다.
+ * - Runtime/Controller 계층에서 아이템 상태 전이, 사용 요청 처리, 공용 브리지 호출을 조합한다.
+ * - 아이템 공통 흐름을 수정할 때 진입점으로 삼는 파일이며, 개별 아이템 예외는 Modules 계층으로 분리하는 것을 우선한다.
+ */
 using System;
 using UnityEngine;
 
@@ -144,3 +150,4 @@ namespace SSAFYPlayTime.Gameplay.Items
         }
     }
 }
+

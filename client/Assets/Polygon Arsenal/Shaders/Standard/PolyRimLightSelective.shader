@@ -58,7 +58,6 @@ Shader "PolygonArsenal/PolyRimLightSelective"
             {
                 Varyings OUT;
 
-                // 월드 좌표/노멀 변환 후 카메라 방향 계산
                 float3 positionWS = TransformObjectToWorld(IN.positionOS.xyz);
                 OUT.positionHCS = TransformWorldToHClip(positionWS);
                 OUT.normalWS = TransformObjectToWorldNormal(IN.normalOS);
@@ -73,7 +72,6 @@ Shader "PolygonArsenal/PolyRimLightSelective"
                 float3 normalWS = normalize(IN.normalWS);
                 float3 viewDirWS = normalize(IN.viewDirWS);
 
-                // 프레넬 기반 림 라이트
                 float rim = 1.0 - saturate(dot(viewDirWS, normalWS));
                 float rimTerm = pow(rim, _RimWidth);
 
