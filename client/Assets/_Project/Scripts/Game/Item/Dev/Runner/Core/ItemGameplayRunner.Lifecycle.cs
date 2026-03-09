@@ -56,7 +56,9 @@ namespace SSAFYPlayTime.Gameplay.Items
             StopAllLoopingSfx();
             RestoreRuntimeAudioOutputPolicy();
             CleanupFallbackAudioListener();
+            ReleaseAllBlackholeTargetOutlines();
             ReleaseBlackholeOuterLayerFallbackMaterial();
+            ReleaseBlackholeTargetOutlineMaterial();
         }
 
         private void ResolveReferences()
