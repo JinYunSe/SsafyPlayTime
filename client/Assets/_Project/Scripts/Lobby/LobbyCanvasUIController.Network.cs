@@ -53,13 +53,17 @@ namespace SSAFYPlayTime
 
             if (runner.IsServer)
             {
+                // 연결 토큰(닉네임)을 이용해 입장한 플레이어를 참가자 목록에 등록한다.
                 TryRegisterParticipantFromToken(runner, player);
 
+                // 로컬 플레이어(방장 본인)가 토큰 없이 입장한 경우 닉네임으로 직접 등록한다.
                 if (player == runner.LocalPlayer && !_roomParticipantsByPlayerId.ContainsKey(player.PlayerId))
                 {
                     RegisterParticipant(player, _nickname);
                 }
 
+                // 방장이 아직 지정되지 않은 경우 현재 로컬 플레이어를 방장으로 설정한다.
+                // (방 생성 직후 첫 OnPlayerJoined 또는 호스트 마이그레이션 직후에 해당)
                 if (_currentOwnerPlayerId <= 0 && runner.LocalPlayer.IsRealPlayer)
                 {
                     _currentOwnerPlayerId = runner.LocalPlayer.PlayerId;
@@ -71,6 +75,8 @@ namespace SSAFYPlayTime
             }
             else if (player == runner.LocalPlayer)
             {
+                // 클라이언트는 자신이 입장했을 때만 로컬 정보를 등록한다.
+                // 다른 플레이어 정보는 방장이 보내는 Roster를 통해 동기화된다.
                 RegisterParticipant(player, _nickname);
             }
 
@@ -105,6 +111,7 @@ namespace SSAFYPlayTime
                 }
             }
             _spawnedGameplayNetworkCharacters.Remove(player.PlayerId);
+            _spawnedCharacterIndexByPlayerId.Remove(player.PlayerId);
 
             if (player.IsRealPlayer)
             {
@@ -139,6 +146,8 @@ namespace SSAFYPlayTime
             }
             Debug.Log($"[Lobby] Runner shutdown: reason={shutdownReason}");
 
+            // ShutdownRunnerAsync 또는 방 생성/입장 처리 중에 발생한 종료는
+            // 상위 흐름에서 이미 처리 중이므로 여기서 추가 복구를 하지 않는다.
             if (_isShuttingDownRunner || _isProcessing)
             {
                 Debug.Log("[Lobby] Shutdown in progress, skip recovery.");
@@ -223,6 +232,9 @@ namespace SSAFYPlayTime
                 var savedAllCharacterIndices = _selectedCharacterIndexByPlayerId
                     .Where(kvp => SanitizeCharacterIndexOrNone(kvp.Value) >= 0)
                     .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+                var savedNicknamesByOldPlayerId = _roomParticipantsByPlayerId.Values
+                    .Where(p => p != null && p.PlayerId > 0 && !string.IsNullOrWhiteSpace(p.Nickname))
+                    .ToDictionary(p => p.PlayerId, p => SanitizeNameToken(p.Nickname));
 
                 if (priorityIndex > 0)
                 {
@@ -278,6 +290,8 @@ namespace SSAFYPlayTime
                     _selectedCharacterIndexByPlayerId[kvp.Key] = kvp.Value;
                 }
 
+                RemapMigrationEntriesByNickname(_runner, savedNicknamesByOldPlayerId);
+
                 // 새 방장의 PlayerId가 바뀐 경우 위치·캐릭터 선택 테이블의 키를 새 PlayerId로 교체한다.
                 // 닉네임을 사용하지 않으므로 닉네임 중복에 완전히 안전하다.
                 if (IsActiveGameplayScene())
@@ -317,7 +331,7 @@ namespace SSAFYPlayTime
                     // - 클라이언트: SetLocalPlayerSelectedCharacter → SendCharacterSelectionToHost
                     //   → 새 방장의 OnReliableDataReceived에서 수신 후 TrySpawnGameplayNetworkCharacter 호출
                     // 연쇄 마이그레이션도 동일한 흐름으로 처리된다.
-                    // _localSelectedCharacterIndex가 미설정(-1)인 경우 savedCharacterIndex → AiJi 순으로 폴백해
+                    // _localSelectedCharacterIndex가 미설정(-1)인 경우 savedCharacterIndex → Ssaty 순으로 폴백해
                     // 항상 유효한 캐릭터를 전송함으로써 스폰 누락을 방지한다.
                     if (_runner.LocalPlayer.IsRealPlayer)
                     {
@@ -325,7 +339,7 @@ namespace SSAFYPlayTime
                             ? _localSelectedCharacterIndex
                             : savedCharacterIndex >= 0
                                 ? savedCharacterIndex
-                                : (int)CharacterKind.AiJi;
+                                : (int)CharacterKind.Ssaty;
                         SetLocalPlayerSelectedCharacter(charToSend);
                     }
                 }
@@ -361,6 +375,55 @@ namespace SSAFYPlayTime
         }
 
         // ─── 좌클릭 꾹 vs 연타 판별용 필드 ───
+        private void RemapMigrationEntriesByNickname(NetworkRunner runner, Dictionary<int, string> oldNicknamesByPlayerId)
+        {
+            if (runner == null || oldNicknamesByPlayerId == null || oldNicknamesByPlayerId.Count == 0)
+            {
+                return;
+            }
+
+            var newPlayerIdByNickname = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var active in runner.ActivePlayers.Where(p => p.IsRealPlayer).OrderBy(p => p.PlayerId))
+            {
+                var nickname = DecodeConnectionToken(runner.GetPlayerConnectionToken(active));
+                if (string.IsNullOrWhiteSpace(nickname) && active == runner.LocalPlayer)
+                {
+                    nickname = _nickname;
+                }
+
+                nickname = SanitizeNameToken(nickname);
+                if (string.IsNullOrWhiteSpace(nickname))
+                {
+                    continue;
+                }
+
+                if (!newPlayerIdByNickname.ContainsKey(nickname))
+                {
+                    newPlayerIdByNickname[nickname] = active.PlayerId;
+                }
+            }
+
+            foreach (var kvp in oldNicknamesByPlayerId)
+            {
+                var oldPlayerId = kvp.Key;
+                var nickname = kvp.Value;
+                if (oldPlayerId <= 0 || string.IsNullOrWhiteSpace(nickname))
+                {
+                    continue;
+                }
+
+                if (!newPlayerIdByNickname.TryGetValue(nickname, out var newPlayerId))
+                {
+                    continue;
+                }
+
+                if (oldPlayerId != newPlayerId)
+                {
+                    RemapMigrationEntry(oldPlayerId, newPlayerId);
+                }
+            }
+        }
+
         private bool _netLeftMouseDown;
         private float _netLeftMouseDownTime;
         private bool _netLeftMouseConsumedAsGrab;
@@ -431,6 +494,9 @@ namespace SSAFYPlayTime
                 payload = string.Empty;
             }
 
+            // 수신 키에 따라 처리 분기:
+            // PlayerRosterReliableKey       → 방장이 보낸 전체 참가자 목록 동기화 (클라이언트 수신)
+            // CharacterSelectionReliableKey → 클라이언트가 보낸 캐릭터 선택 처리 (방장 수신)
             if (key == PlayerRosterReliableKey)
             {
                 ApplyRosterPayload(payload);
@@ -494,6 +560,7 @@ namespace SSAFYPlayTime
             }
 
             _spawnedGameplayNetworkCharacters.Clear();
+            _spawnedCharacterIndexByPlayerId.Clear();
             _cachedSpawnPointGroup = null;
 
             // 마이그레이션 중에는 캡처해둔 위치 테이블을 지우지 않는다.
