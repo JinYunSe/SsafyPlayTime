@@ -14,11 +14,10 @@ namespace SSAFYPlayTime
     {
         [Header("Gameplay Spawning")]
         // 각 캐릭터 종류별 게임플레이용 프리팹 (NetworkObject 포함)
-        [FormerlySerializedAs("aiJiGameplayCharacterPrefab")]
-        [SerializeField] private GameObject ssatyGameplayCharacterPrefab;
-        [SerializeField] private GameObject pitGameplayCharacterPrefab;
-        [SerializeField] private GameObject seuTatiGameplayCharacterPrefab;
-        [SerializeField] private GameObject waiJeuGameplayCharacterPrefab;
+        [SerializeField] private GameObject stattyGameplayCharacterPrefab;
+        [SerializeField] private GameObject alGGameplayCharacterPrefab;
+        [SerializeField] private GameObject fitGameplayCharacterPrefab;
+        [SerializeField] private GameObject wiseGameplayCharacterPrefab;
 
         // 씬 전환 후 DontDestroyOnLoad 처리됐는지 여부 (중복 호출 방지)
         private bool _isPersistentAcrossScenes;
@@ -70,12 +69,18 @@ namespace SSAFYPlayTime
         // characterIndex(0~3)에 해당하는 게임플레이 캐릭터 프리팹을 반환한다.
         private GameObject GetGameplayCharacterPrefabByIndex(int characterIndex)
         {
-            return SanitizeCharacterIndexOrNone(characterIndex) switch
+            var idx = SanitizeCharacterIndexOrNone(characterIndex);
+            if (idx == (int)CharacterKind.Random)
             {
-                (int)CharacterKind.Ssaty => ssatyGameplayCharacterPrefab,
-                (int)CharacterKind.Pit => pitGameplayCharacterPrefab,
-                (int)CharacterKind.SeuTati => seuTatiGameplayCharacterPrefab,
-                (int)CharacterKind.WaiJeu => waiJeuGameplayCharacterPrefab,
+                idx = UnityEngine.Random.Range(0, 4);
+            }
+
+            return idx switch
+            {
+                (int)CharacterKind.Statty => stattyGameplayCharacterPrefab,
+                (int)CharacterKind.AlG => alGGameplayCharacterPrefab,
+                (int)CharacterKind.Fit => fitGameplayCharacterPrefab,
+                (int)CharacterKind.Wise => wiseGameplayCharacterPrefab,
                 _ => null
             };
         }
@@ -168,10 +173,10 @@ namespace SSAFYPlayTime
             var selectedCharacter = _selectedCharacterIndexByPlayerId.TryGetValue(player.PlayerId, out var selected)
                 ? SanitizeCharacterIndexOrNone(selected)
                 : -1;
-            // 캐릭터를 선택하지 않은 플레이어는 기본 캐릭터(Ssaty)로 스폰한다.
+            // 캐릭터를 선택하지 않은 플레이어는 기본 캐릭터(Statty)로 스폰한다.
             if (selectedCharacter < 0)
             {
-                selectedCharacter = (int)CharacterKind.Ssaty;
+                selectedCharacter = (int)CharacterKind.Statty;
             }
 
             if (_spawnedGameplayNetworkCharacters.TryGetValue(player.PlayerId, out var existingSpawned))
