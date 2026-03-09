@@ -106,6 +106,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         {
             if (_activeBlackholeRoutines.Count == 0)
             {
+                ReleaseAllBlackholeTargetOutlines();
                 return;
             }
 
@@ -121,6 +122,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             _activeBlackholeRoutines.Clear();
+            ReleaseAllBlackholeTargetOutlines();
         }
     }
 }
