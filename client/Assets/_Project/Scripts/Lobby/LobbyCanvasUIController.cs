@@ -149,27 +149,30 @@ namespace SSAFYPlayTime
         [SerializeField] private float characterScreenHeightMultiplier = 2.5f;
         [SerializeField] private bool useFixedCharacterScale = true;
         [SerializeField] private Vector3 fixedCharacterScale = new Vector3(5f, 5f, 5f);
-        [SerializeField] private float[] slotVerticalOffsetAdjustments = { 0f, 0f, 0f, 0f };
-        [SerializeField] private Vector3[] slotPositionOffsets =
+        [Header("Character Kind Overrides (Statty=0, AlG=1, Fit=2, Wise=3, Random=4)")]
+        [SerializeField] private Vector3[] characterKindPositionOffsets =
         {
+            Vector3.zero,
             Vector3.zero,
             Vector3.zero,
             Vector3.zero,
             Vector3.zero
         };
-        [SerializeField] private Vector3[] slotRotationOverrides =
+        [SerializeField] private Vector3[] characterKindRotationOffsets =
         {
+            Vector3.zero,
             Vector3.zero,
             Vector3.zero,
             Vector3.zero,
             Vector3.zero
         };
-        [SerializeField] private Vector3[] slotScaleOverrides =
+        [SerializeField] private Vector3[] characterKindScaleMultipliers =
         {
-            new Vector3(5f, 5f, 5f),
-            new Vector3(5f, 5f, 5f),
-            new Vector3(5f, 5f, 5f),
-            new Vector3(5f, 5f, 5f)
+            Vector3.one,
+            Vector3.one,
+            Vector3.one,
+            Vector3.one,
+            Vector3.one
         };
         [SerializeField] private bool testShowOneCharacterPerSlot = true;
         [SerializeField] private Button leaveRoomButton;
@@ -1029,18 +1032,17 @@ namespace SSAFYPlayTime
                 }
 
                 var characterSpecificOffset = GetCharacterSpecificVerticalOffset(characterSlot);
-                var slotOffset = GetSlotVerticalOffset(slotIndex);
-                var slotPositionOffset = GetSlotPositionOffset(slotIndex);
+                var kindPositionOffset = GetCharacterKindPositionOffset(characterSlot);
                 charRect.anchorMin = nameRect.anchorMin;
                 charRect.anchorMax = nameRect.anchorMax;
                 charRect.pivot = nameRect.pivot;
                 charRect.anchoredPosition = nameRect.anchoredPosition + new Vector2(
-                    slotPositionOffset.x,
-                    characterVerticalOffset + characterExtraVerticalOffset + characterSpecificOffset + slotOffset + slotPositionOffset.y);
-                ApplySlotRotationToVisuals(characterSlot, slotIndex);
+                    kindPositionOffset.x,
+                    characterVerticalOffset + characterExtraVerticalOffset + characterSpecificOffset + kindPositionOffset.y);
+                ApplyRotationToVisuals(characterSlot);
                 if (useFixedCharacterScale)
                 {
-                    charRect.localScale = GetSlotScale(slotIndex);
+                    charRect.localScale = Vector3.Scale(fixedCharacterScale, GetCharacterKindScaleMultiplier(characterSlot));
                 }
                 return;
             }
@@ -1054,12 +1056,11 @@ namespace SSAFYPlayTime
             var uiCam = ResolveUiCamera();
             var uiWorldPoint = GetNameAnchorWorldPoint(nameSlot, nameRect);
             var screenPoint = RectTransformUtility.WorldToScreenPoint(uiCam, uiWorldPoint);
-            var slotPositionOffsetWorld = GetSlotPositionOffset(slotIndex);
-            screenPoint.x += slotPositionOffsetWorld.x;
+            var kindPositionOffsetWorld = GetCharacterKindPositionOffset(characterSlot);
+            screenPoint.x += kindPositionOffsetWorld.x;
             screenPoint.y += characterVerticalOffset + characterExtraVerticalOffset
                              + GetCharacterSpecificVerticalOffset(characterSlot)
-                             + GetSlotVerticalOffset(slotIndex)
-                             + slotPositionOffsetWorld.y;
+                             + kindPositionOffsetWorld.y;
             var padding = Mathf.Max(0f, characterScreenPaddingPixels);
             screenPoint.x = Mathf.Clamp(screenPoint.x, padding, Screen.width - padding);
             screenPoint.y = Mathf.Clamp(screenPoint.y, padding, Screen.height - padding);
@@ -1077,17 +1078,17 @@ namespace SSAFYPlayTime
             }
 
             var targetWorld = worldCam.ScreenToWorldPoint(new Vector3(screenPoint.x, screenPoint.y, depth));
-            var finalPos = targetWorld + characterWorldOffset + new Vector3(0f, 0f, slotPositionOffsetWorld.z);
+            var finalPos = targetWorld + characterWorldOffset + new Vector3(0f, 0f, kindPositionOffsetWorld.z);
             if (_characterPrePlacedWorldY.TryGetValue(characterSlot, out var lockedY))
             {
-                finalPos.y = lockedY + GetCharacterPrePlacedWorldYAdjustment(characterSlot);
+                finalPos.y = lockedY + GetCharacterPrePlacedWorldYAdjustment(characterSlot) + kindPositionOffsetWorld.y;
             }
             characterSlot.position = finalPos;
-            ApplySlotRotationToVisuals(characterSlot, slotIndex);
+            ApplyRotationToVisuals(characterSlot);
 
             if (useFixedCharacterScale)
             {
-                characterSlot.localScale = GetSlotScale(slotIndex);
+                characterSlot.localScale = Vector3.Scale(fixedCharacterScale, GetCharacterKindScaleMultiplier(characterSlot));
             }
             else if (keepCharacterScreenSize)
             {
@@ -1220,42 +1221,6 @@ namespace SSAFYPlayTime
             return characterRuntimeRoot;
         }
 
-        private float GetSlotVerticalOffset(int slotIndex)
-        {
-            if (slotVerticalOffsetAdjustments == null || slotIndex < 0 || slotIndex >= slotVerticalOffsetAdjustments.Length)
-            {
-                return 0f;
-            }
-            return slotVerticalOffsetAdjustments[slotIndex];
-        }
-
-        private Vector3 GetSlotPositionOffset(int slotIndex)
-        {
-            if (slotPositionOffsets != null && slotIndex >= 0 && slotIndex < slotPositionOffsets.Length)
-            {
-                return slotPositionOffsets[slotIndex];
-            }
-            return Vector3.zero;
-        }
-
-        private Vector3 GetSlotRotation(int slotIndex)
-        {
-            if (slotRotationOverrides != null && slotIndex >= 0 && slotIndex < slotRotationOverrides.Length)
-            {
-                return slotRotationOverrides[slotIndex];
-            }
-            return Vector3.zero;
-        }
-
-        private Vector3 GetSlotScale(int slotIndex)
-        {
-            if (slotScaleOverrides != null && slotIndex >= 0 && slotIndex < slotScaleOverrides.Length)
-            {
-                return slotScaleOverrides[slotIndex];
-            }
-            return fixedCharacterScale;
-        }
-
         private void CacheCharacterVisualChildRotations(Transform characterSlot)
         {
             if (characterSlot == null)
@@ -1275,14 +1240,14 @@ namespace SSAFYPlayTime
             }
         }
 
-        private void ApplySlotRotationToVisuals(Transform characterSlot, int slotIndex)
+        private void ApplyRotationToVisuals(Transform characterSlot)
         {
             if (characterSlot == null)
             {
                 return;
             }
 
-            var slotRotation = Quaternion.Euler(GetSlotRotation(slotIndex));
+            var combinedRotation = Quaternion.Euler(GetCharacterKindRotationOffset(characterSlot));
             if (_characterBaseLocalRotations.TryGetValue(characterSlot, out var rootBaseRotation))
             {
                 characterSlot.localRotation = rootBaseRotation;
@@ -1290,7 +1255,7 @@ namespace SSAFYPlayTime
 
             if (characterSlot.childCount <= 0)
             {
-                characterSlot.localRotation *= slotRotation;
+                characterSlot.localRotation *= combinedRotation;
                 return;
             }
 
@@ -1308,7 +1273,7 @@ namespace SSAFYPlayTime
                     _characterVisualChildBaseLocalRotations[child] = childBaseRotation;
                 }
 
-                child.localRotation = childBaseRotation * slotRotation;
+                child.localRotation = childBaseRotation * combinedRotation;
             }
         }
 
@@ -1344,6 +1309,39 @@ namespace SSAFYPlayTime
             }
 
             return 0f;
+        }
+
+        private Vector3 GetCharacterKindPositionOffset(Transform characterSlot)
+        {
+            if (characterKindPositionOffsets != null &&
+                _characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) &&
+                option >= 0 && option < characterKindPositionOffsets.Length)
+            {
+                return characterKindPositionOffsets[option];
+            }
+            return Vector3.zero;
+        }
+
+        private Vector3 GetCharacterKindRotationOffset(Transform characterSlot)
+        {
+            if (characterKindRotationOffsets != null &&
+                _characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) &&
+                option >= 0 && option < characterKindRotationOffsets.Length)
+            {
+                return characterKindRotationOffsets[option];
+            }
+            return Vector3.zero;
+        }
+
+        private Vector3 GetCharacterKindScaleMultiplier(Transform characterSlot)
+        {
+            if (characterKindScaleMultipliers != null &&
+                _characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) &&
+                option >= 0 && option < characterKindScaleMultipliers.Length)
+            {
+                return characterKindScaleMultipliers[option];
+            }
+            return Vector3.one;
         }
 
         private static void ConfigureCharacterPreviewClone(GameObject clone)
