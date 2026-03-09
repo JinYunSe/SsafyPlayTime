@@ -44,6 +44,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             UnbindRuntimeEvents();
 
             StopAllBlackholeRoutines();
+            StopAllSatelliteStrikeRoutines();
 
             StopFlamethrowerParticle();
             StopAllLoopingSfx();
