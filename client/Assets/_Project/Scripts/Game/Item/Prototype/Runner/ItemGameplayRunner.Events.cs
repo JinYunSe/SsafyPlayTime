@@ -14,6 +14,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             itemRuntimeHost.BlackholeRequested += OnBlackholeRequested;
+            itemRuntimeHost.SatelliteStrikeRequested += OnSatelliteStrikeRequested;
             itemRuntimeHost.FlamethrowerStarted += OnFlamethrowerStarted;
             itemRuntimeHost.FlamethrowerTicked += OnFlamethrowerTicked;
             itemRuntimeHost.FlamethrowerStopped += OnFlamethrowerStopped;
@@ -29,6 +30,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             itemRuntimeHost.BlackholeRequested -= OnBlackholeRequested;
+            itemRuntimeHost.SatelliteStrikeRequested -= OnSatelliteStrikeRequested;
             itemRuntimeHost.FlamethrowerStarted -= OnFlamethrowerStarted;
             itemRuntimeHost.FlamethrowerTicked -= OnFlamethrowerTicked;
             itemRuntimeHost.FlamethrowerStopped -= OnFlamethrowerStopped;
@@ -57,6 +59,23 @@ namespace SSAFYPlayTime.Gameplay.Items
         {
             EnsureFlamethrowerParticle();
             LogStatus($"Flamethrower started: {itemId}");
+        }
+
+        private void OnSatelliteStrikeRequested(SatelliteStrikeRequest request)
+        {
+            Coroutine routine = null;
+            routine = StartCoroutine(CoSatelliteStrikeTracked(request, () =>
+            {
+                if (routine != null)
+                {
+                    _activeSatelliteStrikeRoutines.Remove(routine);
+                }
+            }));
+
+            if (routine != null)
+            {
+                _activeSatelliteStrikeRoutines.Add(routine);
+            }
         }
 
         private void OnFlamethrowerStopped(string itemId)
