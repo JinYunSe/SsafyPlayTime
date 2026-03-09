@@ -107,13 +107,11 @@ namespace SSAFYPlayTime
         [SerializeField] private TMP_Text playerTwoText;
         [SerializeField] private TMP_Text playerThreeText;
         [SerializeField] private TMP_Text playerFourText;
-        [FormerlySerializedAs("aiJiCharacterRoot")]
         [SerializeField] private GameObject ssatyCharacterRoot;
         [SerializeField] private GameObject pitCharacterRoot;
         [SerializeField] private GameObject seuTatiCharacterRoot;
         [SerializeField] private GameObject waiJeuCharacterRoot;
         [SerializeField] private GameObject characterSelectionPanel;
-        [FormerlySerializedAs("selectAiJiCharacterButton")]
         [SerializeField] private Button selectSsatyCharacterButton;
         [SerializeField] private Button selectPitCharacterButton;
         [SerializeField] private Button selectSeuTatiCharacterButton;
