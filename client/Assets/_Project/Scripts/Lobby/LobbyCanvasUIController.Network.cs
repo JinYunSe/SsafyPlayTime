@@ -53,7 +53,7 @@ namespace SSAFYPlayTime
 
             if (runner.IsServer)
             {
-                // 연결 토큰(닉네임)을 이용해 입장한 플레이어를 참가자 목록에 등록한다.
+                // 연결 토큰(clientId, 닉네임)을 이용해 입장한 플레이어를 참가자 목록에 등록한다.
                 TryRegisterParticipantFromToken(runner, player);
 
                 // 로컬 플레이어(방장 본인)가 토큰 없이 입장한 경우 닉네임으로 직접 등록한다.
@@ -80,9 +80,17 @@ namespace SSAFYPlayTime
                 RegisterParticipant(player, _nickname);
             }
 
-            if (runner.IsServer && IsActiveGameplayScene())
+            if (runner.IsServer)
             {
-                TrySpawnGameplayNetworkCharacter(player);
+                // 마이그레이션 후 재접속하는 플레이어는 새 PlayerId가 할당된다.
+                // 캐릭터 데이터가 구 PlayerId로 저장돼 있으므로 스폰·등록 전에 리매핑한다.
+                // LauncherScene·GameScene 공통으로 필요하다.
+                TryRemapMigrationEntryOnJoin(runner, player);
+
+                if (IsActiveGameplayScene())
+                {
+                    TrySpawnGameplayNetworkCharacter(player);
+                }
             }
 
             if (roomPanel.activeSelf)
@@ -183,10 +191,10 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            var nickname = DecodeConnectionToken(token);
-            if (!string.IsNullOrEmpty(nickname))
+            var tokenInfo = ParseConnectionToken(token);
+            if (!string.IsNullOrEmpty(tokenInfo.Nickname))
             {
-                Debug.Log($"[Lobby] Connect request from {request.RemoteAddress}: {PlayerRosterLabel}={nickname}");
+                Debug.Log($"[Lobby] Connect request from {request.RemoteAddress}: clientId={tokenInfo.ClientId}, {PlayerRosterLabel}={tokenInfo.Nickname}");
             }
         }
 
@@ -232,14 +240,29 @@ namespace SSAFYPlayTime
                 var savedAllCharacterIndices = _selectedCharacterIndexByPlayerId
                     .Where(kvp => SanitizeCharacterIndexOrNone(kvp.Value) >= 0)
                     .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-                var savedNicknamesByOldPlayerId = _roomParticipantsByPlayerId.Values
-                    .Where(p => p != null && p.PlayerId > 0 && !string.IsNullOrWhiteSpace(p.Nickname))
-                    .ToDictionary(p => p.PlayerId, p => SanitizeNameToken(p.Nickname));
+                var savedClientIdsByOldPlayerId = _roomParticipantsByPlayerId.Values
+                    .Where(p => p != null && p.PlayerId > 0 && !string.IsNullOrWhiteSpace(p.ClientId))
+                    .ToDictionary(p => p.PlayerId, p => p.ClientId);
 
                 if (priorityIndex > 0)
                 {
                     // 낮은 ID 플레이어가 먼저 StartGame 을 호출하도록 대기
                     await Task.Delay(priorityIndex * 350);
+                }
+
+                // clientId → 구PlayerId 역방향 테이블을 보존한다.
+                // LauncherScene·GameScene 공통으로 필요하다.
+                // OnHostMigration 완료 시점에는 아직 재접속하지 않은 플레이어가 있으므로
+                // 이후 OnPlayerJoined에서 각 플레이어가 재접속할 때 TryRemapMigrationEntryOnJoin()으로
+                // 캐릭터 데이터를 올바른 새 PlayerId로 리매핑하기 위해 필요하다.
+                // stale key cleanup이 아직 재접속 중인 플레이어 데이터를 삭제하지 않도록 보호한다.
+                // 나간 방장(_currentOwnerPlayerId)은 재접속하지 않으므로 제외한다.
+                var leavingHostId = _currentOwnerPlayerId;
+                _migrationOldPlayerIdByClientId.Clear();
+                foreach (var kvp in savedClientIdsByOldPlayerId)
+                {
+                    if (kvp.Key != leavingHostId)
+                        _migrationOldPlayerIdByClientId[kvp.Value] = kvp.Key;
                 }
 
                 // GameScene에서 마이그레이션 발생 시 ShutdownRunnerAsync 전에 위치를 캡처한다.
@@ -248,6 +271,7 @@ namespace SSAFYPlayTime
                 {
                     _isMigrating = true;
                     CaptureCharacterStatesForMigration();
+                    CaptureEnvironmentStatesForMigration();
                 }
 
                 // StartGame 후 새 PlayerId를 알 수 있으므로 로컬 플레이어의 구 PlayerId를 미리 저장한다.
@@ -290,13 +314,31 @@ namespace SSAFYPlayTime
                     _selectedCharacterIndexByPlayerId[kvp.Key] = kvp.Value;
                 }
 
-                RemapMigrationEntriesByNickname(_runner, savedNicknamesByOldPlayerId);
-
-                // 새 방장의 PlayerId가 바뀐 경우 위치·캐릭터 선택 테이블의 키를 새 PlayerId로 교체한다.
-                // 닉네임을 사용하지 않으므로 닉네임 중복에 완전히 안전하다.
-                if (IsActiveGameplayScene())
+                var migrationRemapMap = BuildMigrationRemapMap(_runner, savedClientIdsByOldPlayerId);
+                if (IsActiveGameplayScene() &&
+                    localOldPlayerId > 0 &&
+                    _runner.LocalPlayer.IsRealPlayer &&
+                    !migrationRemapMap.ContainsKey(localOldPlayerId))
                 {
-                    RemapMigrationEntry(localOldPlayerId, _runner.LocalPlayer.PlayerId);
+                    migrationRemapMap[localOldPlayerId] = _runner.LocalPlayer.PlayerId;
+                }
+
+                RemapMigrationEntries(migrationRemapMap);
+
+                // 리매핑 후 더 이상 활성 플레이어가 아닌 구 PlayerId 항목을 정리한다.
+                // 단, _migrationOldPlayerIdByClientId.Values에 있는 키는 아직 재접속 중인 플레이어이므로
+                // 제거하지 않는다 — TryRemapMigrationEntryOnJoin에서 OnPlayerJoined 시 리매핑된다.
+                var activePids = new HashSet<int>(_runner.ActivePlayers
+                    .Where(p => p.IsRealPlayer)
+                    .Select(p => p.PlayerId));
+                var pendingOldPids = new HashSet<int>(_migrationOldPlayerIdByClientId.Values);
+                var staleKeys = _selectedCharacterIndexByPlayerId.Keys
+                    .Where(k => !activePids.Contains(k) && !pendingOldPids.Contains(k))
+                    .ToList();
+                foreach (var staleKey in staleKeys)
+                {
+                    _selectedCharacterIndexByPlayerId.Remove(staleKey);
+                    Debug.LogWarning($"[Lobby] Removed stale character selection for departed/unresolved player={staleKey}");
                 }
 
                 if (_runner.IsServer && _runner.LocalPlayer.IsRealPlayer)
@@ -322,6 +364,7 @@ namespace SSAFYPlayTime
                     // 다른 클라이언트는 아직 재접속 전이므로 여기서는 스폰하지 않는다.
                     if (_runner.IsServer)
                     {
+                        RestoreEnvironmentStatesAfterMigration();
                         TrySpawnGameplayNetworkCharactersForAllPlayers();
                     }
 
@@ -335,11 +378,15 @@ namespace SSAFYPlayTime
                     // 항상 유효한 캐릭터를 전송함으로써 스폰 누락을 방지한다.
                     if (_runner.LocalPlayer.IsRealPlayer)
                     {
-                        var charToSend = _localSelectedCharacterIndex >= 0
-                            ? _localSelectedCharacterIndex
-                            : savedCharacterIndex >= 0
-                                ? savedCharacterIndex
+                        // savedCharacterIndex를 우선한다: 마이그레이션 직전 서버 동기화된 값이므로
+                        // _localSelectedCharacterIndex(UI 설정값)보다 신뢰도가 높다.
+                        // savedCharacterIndex가 유효하지 않을 경우에만 _localSelectedCharacterIndex를 사용한다.
+                        var charToSend = savedCharacterIndex >= 0
+                            ? savedCharacterIndex
+                            : _localSelectedCharacterIndex >= 0
+                                ? _localSelectedCharacterIndex
                                 : (int)CharacterKind.Statty;
+                        _localSelectedCharacterIndex = charToSend;
                         SetLocalPlayerSelectedCharacter(charToSend);
                     }
                 }
@@ -375,53 +422,57 @@ namespace SSAFYPlayTime
         }
 
         // ─── 좌클릭 꾹 vs 연타 판별용 필드 ───
-        private void RemapMigrationEntriesByNickname(NetworkRunner runner, Dictionary<int, string> oldNicknamesByPlayerId)
+        private Dictionary<int, int> BuildMigrationRemapMap(NetworkRunner runner, Dictionary<int, string> oldClientIdsByPlayerId)
         {
-            if (runner == null || oldNicknamesByPlayerId == null || oldNicknamesByPlayerId.Count == 0)
+            if (runner == null || oldClientIdsByPlayerId == null || oldClientIdsByPlayerId.Count == 0)
             {
-                return;
+                return new Dictionary<int, int>();
             }
 
-            var newPlayerIdByNickname = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var newPlayerIdByClientId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var active in runner.ActivePlayers.Where(p => p.IsRealPlayer).OrderBy(p => p.PlayerId))
             {
-                var nickname = DecodeConnectionToken(runner.GetPlayerConnectionToken(active));
-                if (string.IsNullOrWhiteSpace(nickname) && active == runner.LocalPlayer)
+                var clientId = DecodeConnectionTokenClientId(runner.GetPlayerConnectionToken(active));
+                if (string.IsNullOrWhiteSpace(clientId) && active == runner.LocalPlayer)
                 {
-                    nickname = _nickname;
+                    EnsureLocalClientId();
+                    clientId = _localClientId;
                 }
 
-                nickname = SanitizeNameToken(nickname);
-                if (string.IsNullOrWhiteSpace(nickname))
+                if (string.IsNullOrWhiteSpace(clientId))
                 {
                     continue;
                 }
 
-                if (!newPlayerIdByNickname.ContainsKey(nickname))
+                if (!newPlayerIdByClientId.ContainsKey(clientId))
                 {
-                    newPlayerIdByNickname[nickname] = active.PlayerId;
+                    newPlayerIdByClientId[clientId] = active.PlayerId;
+                }
+                else
+                {
+                    Debug.LogWarning($"[Lobby] ClientId collision during migration remap: '{clientId}' (PlayerId={active.PlayerId}).");
                 }
             }
 
-            foreach (var kvp in oldNicknamesByPlayerId)
+            var oldToNewPlayerIds = new Dictionary<int, int>();
+            foreach (var kvp in oldClientIdsByPlayerId)
             {
                 var oldPlayerId = kvp.Key;
-                var nickname = kvp.Value;
-                if (oldPlayerId <= 0 || string.IsNullOrWhiteSpace(nickname))
+                var clientId = kvp.Value;
+                if (oldPlayerId <= 0 || string.IsNullOrWhiteSpace(clientId))
                 {
                     continue;
                 }
 
-                if (!newPlayerIdByNickname.TryGetValue(nickname, out var newPlayerId))
+                if (!newPlayerIdByClientId.TryGetValue(clientId, out var newPlayerId))
                 {
                     continue;
                 }
 
-                if (oldPlayerId != newPlayerId)
-                {
-                    RemapMigrationEntry(oldPlayerId, newPlayerId);
-                }
+                oldToNewPlayerIds[oldPlayerId] = newPlayerId;
             }
+
+            return oldToNewPlayerIds;
         }
 
         private bool _netLeftMouseDown;
@@ -566,9 +617,23 @@ namespace SSAFYPlayTime
             // 마이그레이션 중에는 캡처해둔 위치 테이블을 지우지 않는다.
             // StartGame(HostMigrationToken) 과정에서 OnSceneLoadStart 가 발동할 수 있으나
             // 이 데이터는 재스폰에 반드시 필요하므로 _isMigrating 플래그로 보호한다.
+            //
+            // 환경 마이그레이션 데이터(_migratedSeaLevelsByPath, _migratedDeathZonesByPath)는
+            // _isMigrating = false 이후에도 씬 리로드가 일어날 수 있으므로
+            // 데이터가 남아있는 한 OnSceneLoadDone에서 복원할 수 있도록 지우지 않는다.
+            // RestoreEnvironmentStatesAfterMigration()이 직접 초기화한다.
             if (!_isMigrating)
             {
                 _migratedPositionsByOldPlayerId.Clear();
+                _migratedPositionsByClientId.Clear();
+                _migrationOldPlayerIdByClientId.Clear();
+                // 환경 상태 데이터는 복원 완료 전까지 보존한다.
+                // 미복원 데이터가 남아있으면 OnSceneLoadDone에서 복원할 수 있도록 유지한다.
+                if (_migratedSeaLevelsByPath.Count == 0 && _migratedDeathZonesByPath.Count == 0)
+                {
+                    _migratedSeaLevelsByPath.Clear();
+                    _migratedDeathZonesByPath.Clear();
+                }
             }
         }
 
@@ -587,12 +652,18 @@ namespace SSAFYPlayTime
                 if (roomPanel != null) roomPanel.SetActive(false);
                 if (createRoomModal != null) createRoomModal.SetActive(false);
                 if (passwordModal != null) passwordModal.SetActive(false);
+                if (gamePanel != null) gamePanel.SetActive(true);
 
                 // 게임씬 전환 시 로비 UI 캐릭터 미리보기 전부 숨김
                 HideAllCharacterSlots();
 
                 if (runner.IsServer)
                 {
+                    // 씬 리로드 후 마이그레이션 환경 상태 복원.
+                    // StartGame(HostMigrationToken) 이후 씬이 새로 로드된 경우,
+                    // 마이그레이션 핸들러보다 OnSceneLoadDone이 먼저 실행되므로 여기서도 복원한다.
+                    // 마이그레이션 데이터가 없으면 no-op.
+                    RestoreEnvironmentStatesAfterMigration();
                     TrySpawnGameplayNetworkCharactersForAllPlayers();
                 }
             }

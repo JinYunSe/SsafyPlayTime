@@ -31,8 +31,21 @@ namespace SSAFYPlayTime
         private sealed class ParticipantPresence
         {
             public int PlayerId;
+            public string ClientId;
             public string Nickname;
             public int CharacterIndex;
+        }
+
+        private readonly struct ConnectionTokenInfo
+        {
+            public ConnectionTokenInfo(string clientId, string nickname)
+            {
+                ClientId = clientId;
+                Nickname = nickname;
+            }
+
+            public string ClientId { get; }
+            public string Nickname { get; }
         }
 
         private enum CharacterKind
@@ -52,6 +65,7 @@ namespace SSAFYPlayTime
         private const int MaxPlayers = 4;
         private const string FallbackAppVersion = "ssafy-playtime-v1";
         private const string SharedLobbyName = "ssafy-main-lobby";
+        private const char ConnectionTokenSeparator = '|';
         // Fusion ReliableData 채널 식별자. 두 키 모두 "SSAF"·"PLAY" ASCII 코드를 공유하며
         // 세 번째 인자(1 또는 2)로 채널을 구분한다.
         // PlayerRosterReliableKey  : 방장→모든 클라이언트 참가자 목록 동기화
@@ -149,6 +163,9 @@ namespace SSAFYPlayTime
         [SerializeField] private float characterScreenHeightMultiplier = 2.5f;
         [SerializeField] private bool useFixedCharacterScale = true;
         [SerializeField] private Vector3 fixedCharacterScale = new Vector3(5f, 5f, 5f);
+        [Header("Slot Particle Rotation Y Overrides (degrees, Slot1~4)")]
+        [SerializeField] private float[] slotParticleRotationYOffsets = { 180f, 180f, 180f, 180f };
+
         [Header("Character Kind Overrides (Statty=0, AlG=1, Fit=2, Wise=3, Random=4)")]
         [SerializeField] private Vector3[] characterKindPositionOffsets =
         {
@@ -178,6 +195,9 @@ namespace SSAFYPlayTime
         [SerializeField] private Button leaveRoomButton;
         [SerializeField] private Button startGameButton;
         [SerializeField] private string gameplaySceneName = string.Empty;
+        [Header("In-Game Panel (GameScene)")]
+        [SerializeField] private GameObject gamePanel;
+        [SerializeField] private Button leaveGameButton;
 
         [Header("Character Preview (optional)")]
         [SerializeField] private CharacterPreviewController characterPreview;
@@ -228,6 +248,7 @@ namespace SSAFYPlayTime
 
         private NetworkRunner _runner;
         private GameObject _runnerObject;
+        private string _localClientId = string.Empty;
         private string _nickname = string.Empty;
         private string _currentRoomName = string.Empty;
         private bool _currentRoomIsPrivate;
@@ -266,6 +287,7 @@ namespace SSAFYPlayTime
         private void Start()
         {
             EnsurePersistentAcrossScenes();
+            EnsureLocalClientId();
             RuntimeLogOverlay.EnsureInstance();
             EnsureCharacterSelectionUi();
             NormalizeCanvasRoot();
@@ -344,6 +366,10 @@ namespace SSAFYPlayTime
             }
 
             leaveRoomButton.onClick.AddListener(OnLeaveRoomClicked);
+            if (leaveGameButton != null)
+            {
+                leaveGameButton.onClick.AddListener(OnLeaveRoomClicked);
+            }
             if (startGameButton != null)
             {
                 startGameButton.onClick.AddListener(OnStartGameClicked);
@@ -421,14 +447,6 @@ namespace SSAFYPlayTime
             if (!await EnsureLobbyRunnerAsync())
             {
                 SetNicknameValidation(statusNetworkLobbyFailed);
-                return;
-            }
-
-            await WaitForInitialSessionListAsync();
-
-            if (IsNicknameAlreadyUsed(entered))
-            {
-                SetNicknameValidation(validationNicknameInUse);
                 return;
             }
 
@@ -1085,6 +1103,7 @@ namespace SSAFYPlayTime
             }
             characterSlot.position = finalPos;
             ApplyRotationToVisuals(characterSlot);
+            ApplySlotParticleRotationY(characterSlot, slotIndex);
 
             if (useFixedCharacterScale)
             {
@@ -1309,6 +1328,25 @@ namespace SSAFYPlayTime
             }
 
             return 0f;
+        }
+
+        private void ApplySlotParticleRotationY(Transform characterSlot, int slotIndex)
+        {
+            if (characterSlot == null || slotIndex < 0 ||
+                slotParticleRotationYOffsets == null || slotIndex >= slotParticleRotationYOffsets.Length)
+            {
+                return;
+            }
+
+            var ps = characterSlot.GetComponent<ParticleSystem>();
+            if (ps == null)
+            {
+                return;
+            }
+
+            var totalY = slotParticleRotationYOffsets[slotIndex] * Mathf.Deg2Rad;
+            var main = ps.main;
+            main.startRotationY = new ParticleSystem.MinMaxCurve(totalY);
         }
 
         private Vector3 GetCharacterKindPositionOffset(Transform characterSlot)
@@ -1701,6 +1739,7 @@ namespace SSAFYPlayTime
         // 닉네임 입력 패널만 활성화하고 나머지 패널·슬롯을 모두 숨긴다.
         private void ShowNicknamePanel()
         {
+            if (gamePanel != null) gamePanel.SetActive(false);
             nicknamePanel.SetActive(true);
             if (mainPanel != null) mainPanel.SetActive(false);
             lobbyPanel.SetActive(false);
@@ -1714,6 +1753,7 @@ namespace SSAFYPlayTime
 
         public void ShowMainPanel()
         {
+            if (gamePanel != null) gamePanel.SetActive(false);
             nicknamePanel.SetActive(false);
             lobbyPanel.SetActive(false);
             roomPanel.SetActive(false);
@@ -1729,8 +1769,9 @@ namespace SSAFYPlayTime
             }
         }
 
-        public void ShowLobbyPanel()
+        public async void ShowLobbyPanel()
         {
+            if (gamePanel != null) gamePanel.SetActive(false);
             nicknamePanel.SetActive(false);
             if (mainPanel != null) mainPanel.SetActive(false);
             lobbyPanel.SetActive(true);
@@ -1739,11 +1780,25 @@ namespace SSAFYPlayTime
             lobbyHeaderText.text = string.Format(nicknameHeaderFormat, _nickname);
             HideAllCharacterSlots();
             RefreshCharacterSelectionUiState();
+
+            if (_isNicknameConfirmed)
+            {
+                SetLobbyStatus(statusRefreshingRooms);
+                if (await EnsureLobbyRunnerAsync())
+                {
+                    RefreshRoomList();
+                }
+                else
+                {
+                    SetLobbyStatus(statusNetworkLobbyFailed);
+                }
+            }
         }
 
         // 방 대기 패널을 활성화하고 닉네임·로비 패널을 숨긴다.
         private void ShowRoomPanel()
         {
+            if (gamePanel != null) gamePanel.SetActive(false);
             nicknamePanel.SetActive(false);
             lobbyPanel.SetActive(false);
             if (mainPanel != null) mainPanel.SetActive(false);
@@ -1917,37 +1972,66 @@ namespace SSAFYPlayTime
         }
 
         // 닉네임을 UTF-8 바이트 배열로 인코딩해 Fusion 연결 토큰으로 반환한다.
-        private static byte[] BuildConnectionToken(string nickname)
+        private void EnsureLocalClientId()
         {
+            if (!string.IsNullOrWhiteSpace(_localClientId))
+            {
+                return;
+            }
+
+            // 같은 PC에서 여러 클라이언트를 동시에 띄우는 테스트를 지원하기 위해
+            // PlayerPrefs 고정값이 아니라 실행 인스턴스마다 고유한 clientId를 사용한다.
+            _localClientId = Guid.NewGuid().ToString("N");
+        }
+
+        private byte[] BuildConnectionToken(string nickname)
+        {
+            EnsureLocalClientId();
             var safeName = SanitizeNameToken(nickname);
-            if (string.IsNullOrEmpty(safeName))
+            if (string.IsNullOrEmpty(safeName) || string.IsNullOrWhiteSpace(_localClientId))
             {
                 return Array.Empty<byte>();
             }
 
-            return Encoding.UTF8.GetBytes(safeName);
+            return Encoding.UTF8.GetBytes($"{_localClientId}{ConnectionTokenSeparator}{safeName}");
         }
 
-        // Fusion 연결 토큰(UTF-8 바이트)을 닉네임 문자열로 디코딩한다. 실패 시 빈 문자열을 반환한다.
-        private static string DecodeConnectionToken(byte[] token)
+        private static ConnectionTokenInfo ParseConnectionToken(byte[] token)
         {
             if (token == null || token.Length == 0)
             {
-                return string.Empty;
+                return default;
             }
 
             try
             {
-                return SanitizeNameToken(Encoding.UTF8.GetString(token));
+                var raw = Encoding.UTF8.GetString(token);
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    return default;
+                }
+
+                var separatorIndex = raw.IndexOf(ConnectionTokenSeparator);
+                if (separatorIndex <= 0 || separatorIndex >= raw.Length - 1)
+                {
+                    return new ConnectionTokenInfo(string.Empty, SanitizeNameToken(raw));
+                }
+
+                var clientId = raw.Substring(0, separatorIndex).Trim();
+                var nickname = SanitizeNameToken(raw.Substring(separatorIndex + 1));
+                return new ConnectionTokenInfo(clientId, nickname);
             }
             catch
             {
-                return string.Empty;
+                return default;
             }
         }
 
+        private static string DecodeConnectionToken(byte[] token) => ParseConnectionToken(token).Nickname;
+        private static string DecodeConnectionTokenClientId(byte[] token) => ParseConnectionToken(token).ClientId;
+
         // 플레이어를 _roomParticipantsByPlayerId에 등록하고 이전에 선택한 캐릭터 인덱스를 유지한다.
-        private void RegisterParticipant(PlayerRef player, string nickname)
+        private void RegisterParticipant(PlayerRef player, string nickname, string clientId = null)
         {
             if (!player.IsRealPlayer)
             {
@@ -1960,6 +2044,15 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            EnsureLocalClientId();
+            var safeClientId = string.IsNullOrWhiteSpace(clientId)
+                ? (player == _runner?.LocalPlayer ? _localClientId : string.Empty)
+                : clientId.Trim();
+            if (string.IsNullOrWhiteSpace(safeClientId))
+            {
+                return;
+            }
+
             var selectedCharacter = SanitizeCharacterIndexOrNone(
                 _selectedCharacterIndexByPlayerId.TryGetValue(player.PlayerId, out var existing) ? existing : -1);
             _selectedCharacterIndexByPlayerId[player.PlayerId] = selectedCharacter;
@@ -1967,6 +2060,7 @@ namespace SSAFYPlayTime
             _roomParticipantsByPlayerId[player.PlayerId] = new ParticipantPresence
             {
                 PlayerId = player.PlayerId,
+                ClientId = safeClientId,
                 Nickname = safeName,
                 CharacterIndex = selectedCharacter
             };
@@ -1981,23 +2075,31 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            var nickname = DecodeConnectionToken(runner.GetPlayerConnectionToken(player));
+            var tokenInfo = ParseConnectionToken(runner.GetPlayerConnectionToken(player));
+            var nickname = tokenInfo.Nickname;
+            var clientId = tokenInfo.ClientId;
             if (string.IsNullOrEmpty(nickname) && player == runner.LocalPlayer)
             {
                 nickname = _nickname;
             }
 
-            RegisterParticipant(player, nickname);
+            if (string.IsNullOrWhiteSpace(clientId) && player == runner.LocalPlayer)
+            {
+                EnsureLocalClientId();
+                clientId = _localClientId;
+            }
+
+            RegisterParticipant(player, nickname, clientId);
         }
 
         // 현재 참가자 목록과 방장 PlayerId를 직렬화해 ReliableData 전송용 문자열을 생성한다.
-        // 포맷: "{ownerPlayerId};{id}={nickname}^{charIdx}|..."
+        // 포맷: "{ownerPlayerId};{id}={clientId}^{nickname}^{charIdx}|..."
         private string BuildRosterPayload()
         {
             var entries = _roomParticipantsByPlayerId.Values
                 .OrderBy(p => p.PlayerId)
-                .Where(p => !string.IsNullOrWhiteSpace(p?.Nickname))
-                .Select(p => $"{p.PlayerId}={p.Nickname}^{SanitizeCharacterIndexOrNone(p.CharacterIndex)}");
+                .Where(p => !string.IsNullOrWhiteSpace(p?.Nickname) && !string.IsNullOrWhiteSpace(p.ClientId))
+                .Select(p => $"{p.PlayerId}={p.ClientId}^{p.Nickname}^{SanitizeCharacterIndexOrNone(p.CharacterIndex)}");
             return $"{_currentOwnerPlayerId};{string.Join("|", entries)}";
         }
 
@@ -2014,7 +2116,7 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            // 포맷 예시: "3;1=Alice^0|2=Bob^2|3=Charlie^1"
+            // 포맷 예시: "3;1=clientA^Alice^0|2=clientB^Bob^2|3=clientC^Charlie^1"
             // ';' 앞은 방장 PlayerId, 뒤는 '|' 구분 참가자 목록
             var separatorIndex = payload.IndexOf(';');
             if (separatorIndex >= 0)
@@ -2054,24 +2156,23 @@ namespace SSAFYPlayTime
                 }
 
                 var rawValue = entry.Substring(idSeparator + 1);
-                var characterIndex = -1;
-                var nicknameToken = rawValue;
-                // '^' 기준으로 닉네임과 캐릭터 인덱스를 분리
-                var charSeparator = rawValue.IndexOf('^');
-                if (charSeparator >= 0)
-                {
-                    nicknameToken = rawValue.Substring(0, charSeparator);
-                    var charToken = rawValue.Substring(charSeparator + 1);
-                    if (int.TryParse(charToken, out var parsed))
-                    {
-                        characterIndex = parsed;
-                    }
-                }
-
-                var nickname = SanitizeNameToken(nicknameToken);
-                if (string.IsNullOrEmpty(nickname))
+                var valueTokens = rawValue.Split('^');
+                if (valueTokens.Length < 3)
                 {
                     continue;
+                }
+
+                var clientId = valueTokens[0].Trim();
+                var nickname = SanitizeNameToken(valueTokens[1]);
+                if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrEmpty(nickname))
+                {
+                    continue;
+                }
+
+                var characterIndex = -1;
+                if (int.TryParse(valueTokens[2], out var parsed))
+                {
+                    characterIndex = parsed;
                 }
 
                 characterIndex = SanitizeCharacterIndexOrNone(characterIndex);
@@ -2080,6 +2181,7 @@ namespace SSAFYPlayTime
                 _roomParticipantsByPlayerId[playerId] = new ParticipantPresence
                 {
                     PlayerId = playerId,
+                    ClientId = clientId,
                     Nickname = nickname,
                     CharacterIndex = characterIndex
                 };
