@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using Fusion;
+using Fusion.Editor;
 using UnityEditor;
 using UnityEngine;
 
@@ -12,7 +13,7 @@ namespace SSAFYPlayTime.Editor
 
         private static readonly string[] CharacterPrefabPaths =
         {
-            "Assets/_Project/Prefabs/Characters/AiJiCharacter.prefab",
+            "Assets/_Project/Prefabs/Characters/SsatyCharacter.prefab",
             "Assets/_Project/Prefabs/Characters/PitCharacter.prefab",
             "Assets/_Project/Prefabs/Characters/SeuTatiCharacter.prefab",
             "Assets/_Project/Prefabs/Characters/WaiJeuCharacter.prefab"
@@ -100,6 +101,26 @@ namespace SSAFYPlayTime.Editor
             else
             {
                 Debug.Log("[NetworkPrefabSetup] Completed. No changes needed.");
+            }
+
+            // Keep Fusion's guid->prefab id table in sync after prefab component changes.
+            NetworkProjectConfigUtilities.RebuildPrefabTable();
+            NetworkProjectConfigImporter.RebuildPrefabHash();
+            Debug.Log("[NetworkPrefabSetup] Rebuilt Fusion prefab table.");
+
+            foreach (var path in CharacterPrefabPaths)
+            {
+                var assetGuid = AssetDatabase.AssetPathToGUID(path);
+                var objectGuid = new NetworkObjectGuid(assetGuid);
+                var mapped = NetworkProjectConfigUtilities.TryGetPrefabId(objectGuid, out var prefabId) && prefabId.IsValid;
+
+                if (!mapped)
+                {
+                    Debug.LogError($"[NetworkPrefabSetup] Fusion prefab id mapping missing: path={path}, guid={assetGuid}");
+                    continue;
+                }
+
+                Debug.Log($"[NetworkPrefabSetup] Fusion prefab id mapped: path={path}, guid={assetGuid}, prefabId={prefabId}");
             }
         }
     }
