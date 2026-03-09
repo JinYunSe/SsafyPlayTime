@@ -23,6 +23,8 @@ namespace SSAFYPlayTime.Gameplay.Items
         [Header("로컬 테스트 컨트롤")]
         [SerializeField] private bool enableLocalDebugController = true;
         [SerializeField] private bool allowLocalDebugControllerForNetworkPlayer = false;
+        [SerializeField] private bool enableTemporaryRightClickPickup = true;
+        [SerializeField] private KeyCode temporaryPickupKey = KeyCode.Mouse1;
         [SerializeField] private bool resetRuntimeStateOnSpace = true;
         [SerializeField] private KeyCode localResetKey = KeyCode.R;
         [SerializeField] private float localMoveSpeed = 6f;
