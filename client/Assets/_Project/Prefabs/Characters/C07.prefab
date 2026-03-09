@@ -1810,8 +1810,6 @@ GameObject:
   m_Component:
   - component: {fileID: 7405075349719061762}
   - component: {fileID: 5494170530935106104}
-  - component: {fileID: 5272040943497001196}
-  - component: {fileID: 813296664888102394}
   m_Layer: 0
   m_Name: C07
   m_TagString: Untagged
@@ -1863,55 +1861,6 @@ Animator:
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
   m_WriteDefaultValuesOnDisable: 0
---- !u!114 &5272040943497001196
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1487425558794981285}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d57dcd88397469a41977cfad0c9805b7, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  characterControllerLayer: 0
-  ragdollLayer: 8
-  weight: 20
-  includeSpine: 1
-  includeChest: 1
-  includeHands: 0
-  includeFeet: 1
-  muscleSpring: 100
-  muscleDamper: 5
-  pinWeight: 1
-  mappingWeight: 1
-  animatorController: {fileID: 9100000, guid: 9eddf852cfeddb643b9a91e563ee539d, type: 2}
-  behaviourPuppetPrefab: {fileID: 11466454, guid: bdc15cb97660141638eaeea7afbe7591,
-    type: 3}
-  behaviourFallPrefab: {fileID: 11446532, guid: 1549100322cdb4b80b441323f4142fce,
-    type: 3}
-  puppetMaster: {fileID: 0}
---- !u!114 &813296664888102394
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1487425558794981285}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2dd1ff04030beb6409cd7504d9ce47c5, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  moveSpeed: 4
-  rotateSpeed: 720
-  explosionForce: 15
-  punchForce: 8
-  punchRadius: 1
-  grabRadius: 0.8
-  throwForce: 12
-  grabHoldThreshold: 0.2
 --- !u!1 &1547241927911118744
 GameObject:
   m_ObjectHideFlags: 0
