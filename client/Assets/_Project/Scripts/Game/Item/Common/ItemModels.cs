@@ -1,3 +1,9 @@
+﻿/*
+ * 파일 개요:
+ * - ItemModels 스크립트가 들어 있는 파일이다.
+ * - Common 계층에서 아이템 시스템 전반이 공유하는 모델, 상수, 인터페이스를 정의한다.
+ * - 이 파일이 바뀌면 Character, World, Runtime 전부에 영향이 갈 수 있으므로 하위 호환성을 우선 확인한다.
+ */
 using System;
 using UnityEngine;
 
@@ -73,20 +79,37 @@ namespace SSAFYPlayTime.Gameplay.Items
 
     public readonly struct SatelliteStrikeRequest
     {
-        public SatelliteStrikeRequest(Vector3 center, float warningSec, float radius, float force, float baseDamage)
+        public SatelliteStrikeRequest(
+            Vector3 center,
+            Vector3 origin,
+            Vector3 forward,
+            float warningSec,
+            float durationSec,
+            float radius,
+            float force,
+            float baseDamage,
+            float stunDamage)
         {
             Center = center;
+            Origin = origin;
+            Forward = forward;
             WarningSec = warningSec;
+            DurationSec = durationSec;
             Radius = radius;
             Force = force;
             BaseDamage = baseDamage;
+            StunDamage = stunDamage;
         }
 
         public Vector3 Center { get; }
+        public Vector3 Origin { get; }
+        public Vector3 Forward { get; }
         public float WarningSec { get; }
+        public float DurationSec { get; }
         public float Radius { get; }
         public float Force { get; }
         public float BaseDamage { get; }
+        public float StunDamage { get; }
     }
 
     public readonly struct FlamethrowerTickRequest
@@ -138,3 +161,4 @@ namespace SSAFYPlayTime.Gameplay.Items
         public float StunDamage { get; }
     }
 }
+

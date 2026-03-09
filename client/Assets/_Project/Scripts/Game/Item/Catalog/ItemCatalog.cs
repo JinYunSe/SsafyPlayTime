@@ -1,3 +1,9 @@
+﻿/*
+ * 파일 개요:
+ * - ItemCatalog 스크립트가 들어 있는 파일이다.
+ * - Catalog 계층에서 CSV 로더 결과를 합쳐 런타임에서 사용할 아이템 카탈로그를 구성한다.
+ * - 데이터 구조를 바꾸더라도 실제 사용 흐름과 캐싱 정책은 Runtime 계층과 함께 검토해야 한다.
+ */
 using System;
 using System.Collections.Generic;
 
@@ -89,3 +95,4 @@ namespace SSAFYPlayTime.Gameplay.Items
         }
     }
 }
+
