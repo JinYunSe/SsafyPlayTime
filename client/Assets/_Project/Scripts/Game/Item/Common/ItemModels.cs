@@ -117,4 +117,24 @@ namespace SSAFYPlayTime.Gameplay.Items
         public float DamagePerTick { get; }
         public float StunDamagePerTick { get; }
     }
+
+    public readonly struct MeleeSwingRequest
+    {
+        public MeleeSwingRequest(
+            string itemId,
+            float activeDurationSec,
+            float healthDamage,
+            float stunDamage)
+        {
+            ItemId = itemId;
+            ActiveDurationSec = activeDurationSec;
+            HealthDamage = healthDamage;
+            StunDamage = stunDamage;
+        }
+
+        public string ItemId { get; }
+        public float ActiveDurationSec { get; }
+        public float HealthDamage { get; }
+        public float StunDamage { get; }
+    }
 }

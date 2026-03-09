@@ -15,8 +15,8 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private Camera aimingCamera;
 
         [Header("입력")]
-        [SerializeField] private bool useLegacyInput = true;
-        [SerializeField] private KeyCode useItemKey = KeyCode.E;
+        [SerializeField] private bool useLegacyInput = false;
+        [SerializeField] private KeyCode useItemKey = KeyCode.Mouse0;
 
         [Header("조준")]
         [SerializeField] private bool useCameraRayAim = true;
@@ -70,6 +70,11 @@ namespace SSAFYPlayTime.Gameplay.Items
         public void SetUseLegacyInput(bool enabled)
         {
             useLegacyInput = enabled;
+        }
+
+        public void SetUseItemKey(KeyCode key)
+        {
+            useItemKey = key;
         }
 
         public bool TryUseHeldItem(out string reason)

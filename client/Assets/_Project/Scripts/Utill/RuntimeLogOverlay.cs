@@ -22,6 +22,7 @@ namespace SSAFYPlayTime
         private TMP_Text _text;
         private ScrollRect _scrollRect;
         private RectTransform _textRect;
+        private bool _uiDirty;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
@@ -74,6 +75,8 @@ namespace SSAFYPlayTime
             {
                 TogglePanel();
             }
+
+            FlushPendingUi();
         }
 
         private void OnGUI()
@@ -293,23 +296,35 @@ namespace SSAFYPlayTime
 
             if (_text != null)
             {
-                _text.text = string.Join("\n", _lines);
-                if (_textRect != null && _scrollRect != null)
-                {
-                    Canvas.ForceUpdateCanvases();
-                    var viewportWidth = _scrollRect.viewport != null ? _scrollRect.viewport.rect.width : _textRect.rect.width;
-                    var preferredHeight = _text.GetPreferredValues(_text.text, viewportWidth, 0f).y;
-                    _textRect.sizeDelta = new Vector2(0f, preferredHeight);
-                    var contentRect = _scrollRect.content;
-                    if (contentRect != null)
-                    {
-                        contentRect.sizeDelta = new Vector2(contentRect.sizeDelta.x, preferredHeight);
-                    }
-
-                    Canvas.ForceUpdateCanvases();
-                    _scrollRect.verticalNormalizedPosition = 0f;
-                }
+                _uiDirty = true;
             }
+        }
+
+        private void FlushPendingUi()
+        {
+            if (!_uiDirty || _text == null)
+            {
+                return;
+            }
+
+            _text.text = string.Join("\n", _lines);
+            if (_textRect != null && _scrollRect != null)
+            {
+                var viewportWidth = _scrollRect.viewport != null ? _scrollRect.viewport.rect.width : _textRect.rect.width;
+                var preferredHeight = _text.GetPreferredValues(_text.text, viewportWidth, 0f).y;
+                _textRect.sizeDelta = new Vector2(0f, preferredHeight);
+
+                var contentRect = _scrollRect.content;
+                if (contentRect != null)
+                {
+                    contentRect.sizeDelta = new Vector2(contentRect.sizeDelta.x, preferredHeight);
+                }
+
+                Canvas.ForceUpdateCanvases();
+                _scrollRect.verticalNormalizedPosition = 0f;
+            }
+
+            _uiDirty = false;
         }
 
         private void TogglePanel()

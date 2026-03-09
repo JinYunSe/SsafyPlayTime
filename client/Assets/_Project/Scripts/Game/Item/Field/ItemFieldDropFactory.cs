@@ -29,16 +29,20 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             GameObject instance;
-            if (string.Equals(definition.Master.ItemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal))
+            var prefab = _prefabResolver?.Resolve(definition.Master.PrefabPath);
+            if (prefab != null)
             {
-                instance = CreateBlackholeFieldDropRoot(position, parent);
+                instance = Object.Instantiate(prefab, position, Quaternion.identity, parent);
             }
             else
             {
-                var prefab = _prefabResolver?.Resolve(definition.Master.PrefabPath);
-                if (prefab != null)
+                if (string.Equals(definition.Master.ItemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal))
                 {
-                    instance = Object.Instantiate(prefab, position, Quaternion.identity, parent);
+                    // 블랙홀은 프리팹 우선 정책을 따르되, 누락 시 임시 생성으로 동작을 유지한다.
+                    instance = CreateBlackholeFieldDropRoot(position, parent);
+                    Debug.LogWarning(
+                        $"[ItemFieldDropFactory] Missing blackhole prefab: {definition.Master.PrefabPath}. Using fallback sphere.",
+                        instance);
                 }
                 else
                 {
@@ -49,6 +53,10 @@ namespace SSAFYPlayTime.Gameplay.Items
                     {
                         instance.transform.SetParent(parent, true);
                     }
+
+                    Debug.LogWarning(
+                        $"[ItemFieldDropFactory] Missing item prefab: {definition.Master.PrefabPath}. Using fallback cube for {definition.Master.ItemId}.",
+                        instance);
                 }
             }
 
@@ -56,6 +64,11 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 ApplyScaleMultiplier(instance, WaterMelonSwordScaleMultiplier);
                 ApplyUrpMaterialFallback(instance);
+            }
+
+            if (string.Equals(definition.Master.ItemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal))
+            {
+                ConfigureBlackholeVisual(instance);
             }
 
             instance.name = $"FieldItem_{definition.Master.ItemId}";
@@ -67,7 +80,19 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             fieldDrop.SetItemId(definition.Master.ItemId);
             EnsureCollider(instance);
+            EnsureDynamicRigidbody(instance);
             return fieldDrop;
+        }
+
+        private void ConfigureBlackholeVisual(GameObject root)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            ApplyBlackholeShellTransparency(root);
+            AttachOrRefreshBlackholeEffect(root.transform);
         }
 
         private GameObject CreateBlackholeFieldDropRoot(Vector3 position, Transform parent)
@@ -82,19 +107,37 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             ApplyBlackholeShellTransparency(root);
 
-            var effectPrefab = TryLoadBlackholeFieldEffectPrefab();
-            if (effectPrefab != null)
-            {
-                var effectInstance = Object.Instantiate(effectPrefab, root.transform);
-                effectInstance.name = "Item_BlackholeFx";
-                effectInstance.transform.localPosition = Vector3.zero;
-                effectInstance.transform.localRotation = Quaternion.identity;
-                effectInstance.transform.localScale = Vector3.one * 0.7f;
-                DisableColliders(effectInstance);
-                DisableUnsupportedDistortionRenderers(effectInstance);
-            }
+            AttachOrRefreshBlackholeEffect(root.transform);
 
             return root;
+        }
+
+        private void AttachOrRefreshBlackholeEffect(Transform blackholeRoot)
+        {
+            if (blackholeRoot == null)
+            {
+                return;
+            }
+
+            var effectPrefab = TryLoadBlackholeFieldEffectPrefab();
+            if (effectPrefab == null)
+            {
+                return;
+            }
+
+            var existing = blackholeRoot.Find("Item_BlackholeFx");
+            if (existing != null)
+            {
+                Object.Destroy(existing.gameObject);
+            }
+
+            var effectInstance = Object.Instantiate(effectPrefab, blackholeRoot);
+            effectInstance.name = "Item_BlackholeFx";
+            effectInstance.transform.localPosition = Vector3.zero;
+            effectInstance.transform.localRotation = Quaternion.identity;
+            effectInstance.transform.localScale = Vector3.one * 0.7f;
+            DisableColliders(effectInstance);
+            DisableUnsupportedDistortionRenderers(effectInstance);
         }
 
         private static void ApplyBlackholeShellTransparency(GameObject root)
@@ -118,7 +161,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            var shellColor = new Color(0.07f, 0.07f, 0.08f, 0.14f);
+            var shellColor = new Color(0.07f, 0.07f, 0.08f, 0.4f);
             if (material.HasProperty("_BaseColor"))
             {
                 material.SetColor("_BaseColor", shellColor);
@@ -245,6 +288,30 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             target.AddComponent<SphereCollider>();
+        }
+
+        private static void EnsureDynamicRigidbody(GameObject target)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            var body = target.GetComponent<Rigidbody>();
+            if (body == null)
+            {
+                body = target.AddComponent<Rigidbody>();
+                // 필드 스폰 아이템은 기본적으로 물리 반응이 가능하도록 구성한다.
+                body.mass = 1f;
+                body.drag = 0f;
+                body.angularDrag = 0.05f;
+                body.interpolation = RigidbodyInterpolation.Interpolate;
+                body.collisionDetectionMode = CollisionDetectionMode.Continuous;
+            }
+
+            body.useGravity = true;
+            body.isKinematic = false;
+            body.WakeUp();
         }
 
         private static void ApplyScaleMultiplier(GameObject target, float multiplier)
