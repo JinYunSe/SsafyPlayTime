@@ -4,8 +4,7 @@ using UnityEngine;
 namespace SSAFYPlayTime.Gameplay.Items
 {
     /// <summary>
-    /// 필드 아이템의 근접 획득 API를 제공한다.
-    /// 입력 기반 획득은 제거하고 외부 호출만 지원한다.
+    /// 한국어: 필드 아이템의 근접 습득 API와 임시 입력 처리를 담당한다.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class ItemFieldPickupInteractor : MonoBehaviour
@@ -18,7 +17,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private bool useLegacyInput = false;
         [SerializeField] private KeyCode pickupKey = KeyCode.None;
 
-        [Header("판정")]
+        [Header("설정")]
         [SerializeField] private float pickupRadius = 2.2f;
         [SerializeField] private LayerMask pickupMask = ~0;
         [SerializeField] private bool includeTriggerColliders = true;
@@ -37,8 +36,29 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private void Update()
         {
-            // 필드 아이템 습득은 좌클릭 홀드 그랩 흐름으로 통합한다.
-            // 키 입력 기반(기존 우클릭) 픽업은 완전히 비활성화한다.
+            if (!useLegacyInput || pickupKey == KeyCode.None)
+            {
+                return;
+            }
+
+            if (!Input.GetKeyDown(pickupKey))
+            {
+                return;
+            }
+
+            ResolveReferences();
+            if (itemRuntimeHost == null)
+            {
+                return;
+            }
+
+            // 한국어: 이미 아이템을 들고 있을 때는 기존 우클릭 동작을 유지한다.
+            if (!string.IsNullOrWhiteSpace(itemRuntimeHost.HeldItemId))
+            {
+                return;
+            }
+
+            TryPickupNearest(out _, out _);
         }
 
         private void ResolveReferences()

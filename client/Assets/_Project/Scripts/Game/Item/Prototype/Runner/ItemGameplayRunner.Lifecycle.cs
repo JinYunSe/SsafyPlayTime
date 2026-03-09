@@ -14,6 +14,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             ResolveReferences();
             itemRuntimeHost?.SetOwnerTransform(targetRoot);
+            EnsureCharacterItemRuntimeBindings();
         }
 
         private void OnEnable()
@@ -25,6 +26,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             ResolveReferences();
+            EnsureCharacterItemRuntimeBindings();
             BindRuntimeEvents();
 
             if (itemRuntimeHost != null && !itemRuntimeHost.IsReady && !itemRuntimeHost.Initialize())
@@ -71,10 +73,12 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (player != null)
             {
                 targetRoot = player.transform;
+                EnsureCharacterItemRuntimeBindings();
                 return;
             }
 
             targetRoot = itemRuntimeHost != null ? itemRuntimeHost.transform : transform;
+            EnsureCharacterItemRuntimeBindings();
         }
 
         // 입력 처리 전 런타임이 준비되어 있는지 확인한다.
@@ -97,6 +101,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             itemRuntimeHost.SetOwnerTransform(targetRoot);
+            EnsureCharacterItemRuntimeBindings();
             BindRuntimeEvents();
 
             if (!itemRuntimeHost.IsReady && !itemRuntimeHost.Initialize())
@@ -125,6 +130,151 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             LogStatus($"ItemRuntimeHost init failed: {itemRuntimeHost.LastError}");
             return false;
+        }
+
+        private void EnsureCharacterItemRuntimeBindings()
+        {
+            if (targetRoot == null || itemRuntimeHost == null)
+            {
+                return;
+            }
+
+            itemRuntimeHost.SetOwnerTransform(targetRoot);
+            EnsurePickupInteractorOnTarget();
+            var useInteractor = EnsureUseInteractorOnTarget();
+            var heldItemPresenter = EnsureHeldItemPresenterOnTarget();
+            EnsureMeleeSwingHandlerOnTarget(heldItemPresenter);
+            EnsureBuffApplierOnTarget();
+            EnsureHandGrabHandlerRuntimeHosts();
+
+            var interactionService = targetRoot.GetComponent<ItemFieldInteractionService>();
+            if (interactionService != null)
+            {
+                interactionService.SetRuntimeHost(itemRuntimeHost);
+                interactionService.SetOwnerTransform(targetRoot);
+            }
+
+            if (useInteractor != null)
+            {
+                useInteractor.SetAimingCamera(Camera.main);
+            }
+        }
+
+        private void EnsurePickupInteractorOnTarget()
+        {
+            if (targetRoot == null || itemRuntimeHost == null)
+            {
+                return;
+            }
+
+            var pickupInteractor = targetRoot.GetComponent<ItemFieldPickupInteractor>();
+            if (pickupInteractor == null)
+            {
+                // 한국어: ItemScene에서는 플레이어 손 프리팹과 무관하게 우클릭 습득 경로를 보장한다.
+                pickupInteractor = targetRoot.gameObject.AddComponent<ItemFieldPickupInteractor>();
+            }
+
+            pickupInteractor.SetRuntimeHost(itemRuntimeHost);
+            pickupInteractor.SetInteractorRoot(targetRoot);
+            pickupInteractor.SetUseLegacyInput(enableTemporaryRightClickPickup);
+            pickupInteractor.SetPickupKey(enableTemporaryRightClickPickup ? temporaryPickupKey : KeyCode.None);
+        }
+
+        private ItemCharacterUseInteractor EnsureUseInteractorOnTarget()
+        {
+            if (targetRoot == null || itemRuntimeHost == null)
+            {
+                return null;
+            }
+
+            var useInteractor = targetRoot.GetComponent<ItemCharacterUseInteractor>();
+            if (useInteractor == null)
+            {
+                // 한국어: 캐릭터에 사용 인터랙터가 없으면 런타임에 보강한다.
+                useInteractor = targetRoot.gameObject.AddComponent<ItemCharacterUseInteractor>();
+            }
+
+            useInteractor.SetRuntimeHost(itemRuntimeHost);
+            useInteractor.SetOwnerRoot(targetRoot);
+            useInteractor.SetUseItemKey(KeyCode.Mouse0);
+            useInteractor.SetUseLegacyInput(false);
+            return useInteractor;
+        }
+
+        private ItemCharacterHeldItemPresenter EnsureHeldItemPresenterOnTarget()
+        {
+            if (targetRoot == null || itemRuntimeHost == null)
+            {
+                return null;
+            }
+
+            var heldItemPresenter = targetRoot.GetComponent<ItemCharacterHeldItemPresenter>();
+            if (heldItemPresenter == null)
+            {
+                // 한국어: 손에 드는 시각화가 빠진 경우 런타임에만 보강한다.
+                heldItemPresenter = targetRoot.gameObject.AddComponent<ItemCharacterHeldItemPresenter>();
+            }
+
+            heldItemPresenter.SetRuntimeHost(itemRuntimeHost);
+            heldItemPresenter.SetCharacterRoot(targetRoot);
+            return heldItemPresenter;
+        }
+
+        private void EnsureMeleeSwingHandlerOnTarget(ItemCharacterHeldItemPresenter heldItemPresenter)
+        {
+            if (targetRoot == null || itemRuntimeHost == null)
+            {
+                return;
+            }
+
+            var meleeSwingHandler = targetRoot.GetComponent<ItemCharacterMeleeSwingHandler>();
+            if (meleeSwingHandler == null)
+            {
+                // 한국어: 근접 무기 사용 이벤트를 받기 위해 핸들러를 맞춰 둔다.
+                meleeSwingHandler = targetRoot.gameObject.AddComponent<ItemCharacterMeleeSwingHandler>();
+            }
+
+            meleeSwingHandler.SetRuntimeHost(itemRuntimeHost);
+            meleeSwingHandler.SetHeldItemPresenter(heldItemPresenter);
+            meleeSwingHandler.SetOwnerRoot(targetRoot);
+        }
+
+        private void EnsureBuffApplierOnTarget()
+        {
+            if (targetRoot == null || itemRuntimeHost == null)
+            {
+                return;
+            }
+
+            var buffApplier = targetRoot.GetComponent<ItemCharacterBuffApplier>();
+            if (buffApplier == null)
+            {
+                // 한국어: 성장/축소/투명화 같은 버프 이벤트를 같은 호스트로 묶는다.
+                buffApplier = targetRoot.gameObject.AddComponent<ItemCharacterBuffApplier>();
+            }
+
+            buffApplier.SetRuntimeHost(itemRuntimeHost);
+            buffApplier.SetCharacterRoot(targetRoot);
+        }
+
+        private void EnsureHandGrabHandlerRuntimeHosts()
+        {
+            if (targetRoot == null || itemRuntimeHost == null)
+            {
+                return;
+            }
+
+            var handGrabHandlers = targetRoot.GetComponentsInChildren<HandGrabHandler>(true);
+            for (var i = 0; i < handGrabHandlers.Length; i++)
+            {
+                var handGrabHandler = handGrabHandlers[i];
+                if (handGrabHandler == null)
+                {
+                    continue;
+                }
+
+                handGrabHandler.SetItemRuntimeHost(itemRuntimeHost);
+            }
         }
     }
 }
