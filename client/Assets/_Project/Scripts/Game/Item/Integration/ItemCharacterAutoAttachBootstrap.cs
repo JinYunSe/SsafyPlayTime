@@ -19,8 +19,8 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private float bindTimeoutSec = 15f;
 
         [Header("입력 연결")]
-        [SerializeField] private bool enableLegacyPickupInput = true;
-        [SerializeField] private bool enableLegacyUseInput = true;
+        [SerializeField] private bool enableLegacyPickupInput = false;
+        [SerializeField] private bool enableLegacyUseInput = false;
 
         [Header("디버그")]
         [SerializeField] private bool enableDebugLog;
@@ -189,7 +189,9 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
             pickup.SetRuntimeHost(host);
             pickup.SetInteractorRoot(characterRootObject.transform);
+            // 우클릭 픽업 입력은 제거하고 API 호출 경로만 유지한다.
             pickup.SetUseLegacyInput(enableLegacyPickupInput);
+            pickup.SetPickupKey(KeyCode.None);
 
             var useInteractor = characterRootObject.GetComponent<ItemCharacterUseInteractor>();
             if (useInteractor == null)
@@ -198,6 +200,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
             useInteractor.SetRuntimeHost(host);
             useInteractor.SetOwnerRoot(characterRootObject.transform);
+            useInteractor.SetUseItemKey(KeyCode.Mouse0);
             useInteractor.SetUseLegacyInput(enableLegacyUseInput);
 
             var heldPresenter = characterRootObject.GetComponent<ItemCharacterHeldItemPresenter>();
@@ -207,6 +210,15 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
             heldPresenter.SetRuntimeHost(host);
             heldPresenter.SetCharacterRoot(characterRootObject.transform);
+
+            var meleeSwingHandler = characterRootObject.GetComponent<ItemCharacterMeleeSwingHandler>();
+            if (meleeSwingHandler == null)
+            {
+                meleeSwingHandler = characterRootObject.AddComponent<ItemCharacterMeleeSwingHandler>();
+            }
+            meleeSwingHandler.SetRuntimeHost(host);
+            meleeSwingHandler.SetHeldItemPresenter(heldPresenter);
+            meleeSwingHandler.SetOwnerRoot(characterRootObject.transform);
 
             var buffApplier = characterRootObject.GetComponent<ItemCharacterBuffApplier>();
             if (buffApplier == null)

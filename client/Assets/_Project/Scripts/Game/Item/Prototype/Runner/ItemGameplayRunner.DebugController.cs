@@ -7,17 +7,18 @@ namespace SSAFYPlayTime.Gameplay.Items
     {
         private void TickLocalDebugController()
         {
-            if (!enableLocalDebugController || targetRoot == null)
+            if (!ShouldRunLocalDebugController())
             {
                 return;
             }
 
             EnsureLocalDebugControllerInitialized();
+            EnsureStableDebugState();
             HandleLocalDebugMovement();
             HandleLocalDebugCameraInput();
 
-            // Space는 점프가 아니라 위치/상태 초기화 용도로 사용한다.
-            if (Input.GetKeyDown(KeyCode.Space))
+            // 점프(Space)와 충돌하지 않도록 리셋 키를 분리한다.
+            if (Input.GetKeyDown(localResetKey))
             {
                 ResetLocalDebugState();
             }
@@ -153,11 +154,17 @@ namespace SSAFYPlayTime.Gameplay.Items
                     localCameraMinDistance,
                     localCameraMaxDistance);
             }
+
+            if (!IsFinite(_debugYaw) || !IsFinite(_debugPitch) || !IsFinite(_debugDistance))
+            {
+                // 카메라 상태값이 오염되면 즉시 기본값으로 되돌린다.
+                ResetDebugCameraState();
+            }
         }
 
         private void UpdateLocalDebugCameraPose()
         {
-            if (!enableLocalDebugController || targetRoot == null)
+            if (!ShouldRunLocalDebugController())
             {
                 return;
             }
@@ -171,13 +178,65 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
             }
 
+            if (!IsFinite(targetRoot.position))
+            {
+                // 타겟 좌표가 비정상(NaN/Infinity)이면 카메라 갱신을 중단한다.
+                return;
+            }
+
             var pivot = targetRoot.position + Vector3.up * localCameraPivotHeight;
             var rotation = Quaternion.Euler(_debugPitch, _debugYaw, 0f);
             var cameraPos = pivot - (rotation * Vector3.forward * _debugDistance);
 
+            if (!IsFinite(pivot) || !IsFinite(cameraPos) || !IsFinite(rotation))
+            {
+                // 프러스텀 계산 오류를 막기 위해 비정상 카메라 포즈를 폐기한다.
+                ResetDebugCameraState();
+                return;
+            }
+
             _debugRuntimeCamera.transform.position = cameraPos;
             _debugRuntimeCamera.transform.rotation = rotation;
             _debugRuntimeCamera.transform.LookAt(pivot);
+        }
+
+        private void EnsureStableDebugState()
+        {
+            if (targetRoot == null)
+            {
+                return;
+            }
+
+            if (!IsFinite(targetRoot.position) || !IsFinite(targetRoot.rotation))
+            {
+                // 플레이어 상태가 깨진 경우 초기 상태로 복구한다.
+                targetRoot.position = _debugInitialPosition;
+                targetRoot.rotation = _debugInitialRotation;
+            }
+
+            if (_debugControlBody != null)
+            {
+                if (!IsFinite(_debugControlBody.velocity) || !IsFinite(_debugControlBody.angularVelocity))
+                {
+                    _debugControlBody.velocity = Vector3.zero;
+                    _debugControlBody.angularVelocity = Vector3.zero;
+                }
+            }
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        private static bool IsFinite(Vector3 value)
+        {
+            return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
+        }
+
+        private static bool IsFinite(Quaternion value)
+        {
+            return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z) && IsFinite(value.w);
         }
 
         private void ResolveDebugCamera()
@@ -238,7 +297,51 @@ namespace SSAFYPlayTime.Gameplay.Items
             PlaceDummyInFrontOfPlayer();
             ResetDebugCameraState();
 
-            LogStatus("Space reset: player/item state restored.");
+            LogStatus($"{localResetKey} reset: player/item state restored.");
+        }
+
+        private bool ShouldRunLocalDebugController()
+        {
+            if (!enableLocalDebugController || targetRoot == null)
+            {
+                ReleaseDebugControlOverride();
+                return false;
+            }
+
+            if (allowLocalDebugControllerForNetworkPlayer)
+            {
+                _debugControllerSkipLogged = false;
+                return true;
+            }
+
+            var networkPlayer = targetRoot.GetComponent<NetworkPlayer>();
+            if (networkPlayer == null)
+            {
+                _debugControllerSkipLogged = false;
+                return true;
+            }
+
+            if (!_debugControllerSkipLogged)
+            {
+                // 실제 캐릭터(NetworkPlayer)에는 디버그 모터를 적용하지 않는다.
+                LogStatus("Local debug controller skipped for NetworkPlayer target.");
+                _debugControllerSkipLogged = true;
+            }
+
+            ReleaseDebugControlOverride();
+            return false;
+        }
+
+        private void ReleaseDebugControlOverride()
+        {
+            if (_debugControlBody != null && _debugConstraintsCaptured)
+            {
+                _debugControlBody.constraints = _debugOriginalConstraints;
+            }
+
+            _debugControlInitialized = false;
+            _debugControlTarget = null;
+            _debugControlBody = null;
         }
 
         private void ResolveDebugDummy()

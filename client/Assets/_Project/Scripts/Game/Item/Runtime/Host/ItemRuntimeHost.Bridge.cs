@@ -25,11 +25,6 @@ namespace SSAFYPlayTime.Gameplay.Items
             SfxRequested?.Invoke(sfxId, worldPosition, loop);
         }
 
-        void IItemRuntimeBridge.OnSpawnVfx(string vfxId, Vector3 worldPosition)
-        {
-            VfxRequested?.Invoke(vfxId, worldPosition);
-        }
-
         void IItemRuntimeBridge.OnBlackholeRequested(in BlackholeSkillRequest request)
         {
             BlackholeRequested?.Invoke(request);
@@ -53,6 +48,11 @@ namespace SSAFYPlayTime.Gameplay.Items
         void IItemRuntimeBridge.OnFlamethrowerStop(string itemId)
         {
             FlamethrowerStopped?.Invoke(itemId);
+        }
+
+        void IItemRuntimeBridge.OnMeleeSwingRequested(in MeleeSwingRequest request)
+        {
+            MeleeSwingRequested?.Invoke(request);
         }
 
         void IItemRuntimeBridge.OnBuffStateChanged(ItemBuffMask activeBuffMask, in ItemBuffRuntimeState buffState)

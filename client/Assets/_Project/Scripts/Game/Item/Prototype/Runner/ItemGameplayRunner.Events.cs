@@ -18,7 +18,6 @@ namespace SSAFYPlayTime.Gameplay.Items
             itemRuntimeHost.FlamethrowerTicked += OnFlamethrowerTicked;
             itemRuntimeHost.FlamethrowerStopped += OnFlamethrowerStopped;
             itemRuntimeHost.SfxRequested += OnSfxRequested;
-            itemRuntimeHost.VfxRequested += OnVfxRequested;
             _eventsBound = true;
         }
 
@@ -34,7 +33,6 @@ namespace SSAFYPlayTime.Gameplay.Items
             itemRuntimeHost.FlamethrowerTicked -= OnFlamethrowerTicked;
             itemRuntimeHost.FlamethrowerStopped -= OnFlamethrowerStopped;
             itemRuntimeHost.SfxRequested -= OnSfxRequested;
-            itemRuntimeHost.VfxRequested -= OnVfxRequested;
             _eventsBound = false;
         }
 

@@ -14,8 +14,8 @@ namespace SSAFYPlayTime.Gameplay.Items
         [Header("입력")]
         [SerializeField] private bool enableTestInput = true;
         [SerializeField] private KeyCode spawnBlackholeKey = KeyCode.Alpha1;
-        [SerializeField] private KeyCode interactKey = KeyCode.Mouse1;
-        [SerializeField] private KeyCode dropItemKey = KeyCode.F;
+        [SerializeField] private KeyCode useItemKey = KeyCode.None;
+        [SerializeField] private KeyCode dropItemKey = KeyCode.None;
 
         [Header("테스트 설정")]
         [SerializeField] private string spawnItemId = ItemIds.BlackholeBomb;
@@ -26,6 +26,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private void Awake()
         {
             ResolveReferences();
+            DisableConflictingKeysForNetworkPlayer();
         }
 
         private void Update()
@@ -40,12 +41,14 @@ namespace SSAFYPlayTime.Gameplay.Items
                 HandleSpawnInput();
             }
 
-            if (Input.GetKeyDown(interactKey))
+            // 실제 플레이어 입력과 충돌하지 않도록 기본값(None)일 때는 무시한다.
+            if (useItemKey != KeyCode.None && Input.GetKeyDown(useItemKey))
             {
-                HandleInteractInput();
+                HandleUseInput();
             }
 
-            if (Input.GetKeyDown(dropItemKey))
+            // 실제 플레이어 입력과 충돌하지 않도록 기본값(None)일 때는 무시한다.
+            if (dropItemKey != KeyCode.None && Input.GetKeyDown(dropItemKey))
             {
                 HandleDropInput();
             }
@@ -67,16 +70,10 @@ namespace SSAFYPlayTime.Gameplay.Items
             DebugLog($"Spawn request failed: {reason}");
         }
 
-        private void HandleInteractInput()
+        private void HandleUseInput()
         {
             if (!ResolveReferences())
             {
-                return;
-            }
-
-            if (fieldInteractionService.TryPickupNearest(out var pickedItemId, out var pickupReason))
-            {
-                DebugLog($"Pickup succeeded: {pickedItemId}");
                 return;
             }
 
@@ -86,7 +83,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            DebugLog($"Interact failed (pickup: {pickupReason}, use: {useReason})");
+            DebugLog($"Use failed: {useReason}");
         }
 
         private void HandleDropInput()
@@ -120,6 +117,18 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             fieldInteractionService = FindObjectOfType<ItemFieldInteractionService>(true);
             return fieldInteractionService != null;
+        }
+
+        private void DisableConflictingKeysForNetworkPlayer()
+        {
+            // 네트워크 플레이어가 있는 씬에서는 사용/드롭 테스트 키를 강제로 비활성화한다.
+            if (FindObjectOfType<NetworkPlayer>(true) == null)
+            {
+                return;
+            }
+
+            useItemKey = KeyCode.None;
+            dropItemKey = KeyCode.None;
         }
 
         private void DebugLog(string message)
