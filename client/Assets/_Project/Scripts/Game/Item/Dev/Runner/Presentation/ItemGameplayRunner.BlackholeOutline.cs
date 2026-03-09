@@ -157,14 +157,14 @@ namespace SSAFYPlayTime.Gameplay.Items
             proxy.transform.localScale = Vector3.one * Mathf.Max(1f, blackholeTargetOutlineScaleMultiplier);
             proxy.layer = renderer.gameObject.layer;
 
-            var proxyRenderer = proxy.AddComponent<SkinnedMeshRenderer>();
-            proxyRenderer.sharedMesh = renderer.sharedMesh;
-            proxyRenderer.rootBone = renderer.rootBone;
-            proxyRenderer.bones = renderer.bones;
-            proxyRenderer.updateWhenOffscreen = true;
-            proxyRenderer.localBounds = renderer.localBounds;
+            var proxyFilter = proxy.AddComponent<MeshFilter>();
+
+            var proxyRenderer = proxy.AddComponent<MeshRenderer>();
             proxyRenderer.sharedMaterials = BuildOutlineMaterialArray(renderer.sharedMesh.subMeshCount, outlineMaterial);
             ConfigureOutlineRenderer(proxyRenderer);
+
+            var proxyUpdater = proxy.AddComponent<BlackholeSkinnedOutlineProxy>();
+            proxyUpdater.Initialize(renderer, proxyFilter);
             return proxy;
         }
 
