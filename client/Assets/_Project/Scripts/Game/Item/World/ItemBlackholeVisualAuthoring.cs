@@ -151,6 +151,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             effectRoot.localRotation = Quaternion.identity;
             effectRoot.localScale = effectLocalScale;
             DisableColliders(effectRoot.gameObject);
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(effectRoot.gameObject);
             DisableUnsupportedDistortionRenderers(effectRoot.gameObject);
         }
 
