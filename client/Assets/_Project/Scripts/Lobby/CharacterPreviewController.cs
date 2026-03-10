@@ -564,8 +564,11 @@ namespace SSAFYPlayTime
             {
                 var rb = rigidbodies[i];
                 if (rb == null) continue;
-                rb.velocity = Vector3.zero;
-                rb.angularVelocity = Vector3.zero;
+                if (!rb.isKinematic)
+                {
+                    rb.velocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
+                }
                 rb.useGravity = false;
                 rb.isKinematic = true;
                 rb.detectCollisions = false;
