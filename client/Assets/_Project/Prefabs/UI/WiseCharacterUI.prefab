@@ -10,7 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 7197146735275952504}
   m_Layer: 0
-  m_Name: WaiJeuCharacterUI
+  m_Name: WiseCharacterUI
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

@@ -17,7 +17,7 @@ GameObject:
   - component: {fileID: 3048865779075330190}
   - component: {fileID: 3735632080659111276}
   m_Layer: 0
-  m_Name: WaiJeuCharacter
+  m_Name: WiseCharacter
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -223,6 +223,10 @@ MonoBehaviour:
   syncPhysicsObjects: []
   config: {fileID: 11400000, guid: 75abf164104853249b9f62f7cd147f60, type: 2}
   fallbackAnimatorController: {fileID: 0}
+  holdPoint: {fileID: 0}
+  _BoneRotations: []
+  _NetworkedIsActiveRagdoll:
+    _value: 0
 --- !u!114 &3048865779075330190
 MonoBehaviour:
   m_ObjectHideFlags: 0

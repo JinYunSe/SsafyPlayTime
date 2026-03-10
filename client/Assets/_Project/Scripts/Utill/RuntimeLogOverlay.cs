@@ -71,6 +71,8 @@ namespace SSAFYPlayTime
 
         private void Update()
         {
+            EnsureEventSystem();
+
             if (Input.GetKeyDown(KeyCode.F6))
             {
                 TogglePanel();
@@ -218,6 +220,7 @@ namespace SSAFYPlayTime
             label.fontSize = 16f;
             label.alignment = TextAlignmentOptions.Center;
             label.color = Color.white;
+            label.raycastTarget = false;
         }
 
         private void InitializeLogFile()
