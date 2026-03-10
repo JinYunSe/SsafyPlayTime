@@ -1939,6 +1939,12 @@ namespace SSAFYPlayTime
                 return false;
             }
 
+            // 호스트 마이그레이션 시 씬에 배치된 NetworkObject(물, DeathZone 등)가
+            // runner 종료 때 파괴되지 않도록 커스텀 Provider를 등록한다.
+            // 기본 NetworkObjectProviderDefault는 DestroySceneObject()에서
+            // Destroy(gameObject)를 호출해 씬 오브젝트를 제거한다.
+            _runnerObject.AddComponent<MigrationAwareNetworkObjectProvider>();
+
             runner.ProvideInput = true;
             runner.AddCallbacks(this);
             Debug.Log($"[Lobby] Runner created: object={_runnerObject.name}");
