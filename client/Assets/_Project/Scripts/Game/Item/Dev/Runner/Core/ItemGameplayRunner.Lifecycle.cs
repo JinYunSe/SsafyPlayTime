@@ -102,11 +102,17 @@ namespace SSAFYPlayTime.Gameplay.Items
             UnbindRuntimeEvents();
             itemRuntimeHost = runtimeHost;
 
-            if (targetRoot == null)
+            // OwnerTransform이 유효하면 항상 갱신한다.
+            // 멀티플레이에서 로컬 플레이어가 스폰된 뒤 SetRuntimeHost가 호출될 때
+            // targetRoot가 이미 자기 자신(ItemGameplayRunner)으로 설정되어 있어도
+            // 올바른 플레이어 트랜스폼으로 덮어쓴다.
+            if (itemRuntimeHost.OwnerTransform != null)
             {
-                targetRoot = itemRuntimeHost.OwnerTransform != null
-                    ? itemRuntimeHost.OwnerTransform
-                    : itemRuntimeHost.transform;
+                targetRoot = itemRuntimeHost.OwnerTransform;
+            }
+            else if (targetRoot == null)
+            {
+                targetRoot = itemRuntimeHost.transform;
             }
 
             itemRuntimeHost.SetOwnerTransform(targetRoot);

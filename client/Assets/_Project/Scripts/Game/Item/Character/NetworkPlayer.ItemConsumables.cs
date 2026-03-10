@@ -15,6 +15,9 @@ public sealed partial class NetworkPlayer
     [Networked] private float NetworkedItemOutgoingStunMultiplier { get; set; }
     [Networked] private NetworkBool NetworkedItemSuperArmorActive { get; set; }
     [Networked] private NetworkBool NetworkedItemInvisibilityActive { get; set; }
+    [Networked] private NetworkString<_32> NetworkedHeldItemId { get; set; }
+
+    private string _lastReplicatedHeldItemId = string.Empty;
 
     public bool CanWriteItemBuffSnapshot()
     {
@@ -79,5 +82,38 @@ public sealed partial class NetworkPlayer
     {
         _itemBuffNetworkReady = true;
         SetItemBuffSnapshot(_localItemBuffSnapshot);
+        SyncHeldItemNetworkState();
+    }
+
+    private void SyncHeldItemNetworkState()
+    {
+        if (Object == null || !Object.IsValid || !HasStateAuthority)
+        {
+            return;
+        }
+
+        NetworkedHeldItemId = _itemRuntimeHost != null ? _itemRuntimeHost.HeldItemId ?? string.Empty : string.Empty;
+    }
+
+    private void ApplyReplicatedHeldItemPresentation()
+    {
+        if (Object == null || !Object.IsValid || HasStateAuthority)
+        {
+            return;
+        }
+
+        var heldItemId = NetworkedHeldItemId.ToString();
+        if (string.Equals(_lastReplicatedHeldItemId, heldItemId, System.StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lastReplicatedHeldItemId = heldItemId;
+        if (_heldItemPresenter == null)
+        {
+            _heldItemPresenter = GetComponent<ItemCharacterHeldItemPresenter>();
+        }
+
+        _heldItemPresenter?.SetReplicatedHeldItemId(heldItemId);
     }
 }

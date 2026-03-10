@@ -53,6 +53,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private readonly ItemFieldCatalogProvider _catalogProvider = new();
         private readonly DefaultItemFieldPrefabResolver _prefabResolver = new();
         private GameObject _spawnedHeldVisual;
+        private string _replicatedHeldItemId = string.Empty;
         public Transform CurrentHeldVisualRoot => _spawnedHeldVisual != null ? _spawnedHeldVisual.transform : null;
 
         private static readonly string[] HandNameCandidates =
@@ -104,6 +105,18 @@ namespace SSAFYPlayTime.Gameplay.Items
         {
             handAnchorOverride = handAnchor;
             RefreshHeldVisual(itemRuntimeHost != null ? itemRuntimeHost.HeldItemId : string.Empty);
+        }
+
+        public void SetReplicatedHeldItemId(string heldItemId)
+        {
+            heldItemId ??= string.Empty;
+            if (string.Equals(_replicatedHeldItemId, heldItemId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _replicatedHeldItemId = heldItemId;
+            RefreshHeldVisual(heldItemId);
         }
 
         private void BindEvents()
@@ -349,10 +362,14 @@ namespace SSAFYPlayTime.Gameplay.Items
             for (var i = 0; i < bodies.Length; i++)
             {
                 var body = bodies[i];
+                if (!body.isKinematic)
+                {
+                    body.velocity = Vector3.zero;
+                    body.angularVelocity = Vector3.zero;
+                }
+
                 body.isKinematic = true;
                 body.useGravity = false;
-                body.velocity = Vector3.zero;
-                body.angularVelocity = Vector3.zero;
             }
         }
 
