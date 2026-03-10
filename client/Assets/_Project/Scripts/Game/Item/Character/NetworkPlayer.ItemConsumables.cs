@@ -56,7 +56,12 @@ public sealed partial class NetworkPlayer
 
     public ItemBuffSnapshot GetItemBuffSnapshot()
     {
-        if (!CanWriteItemBuffSnapshot())
+        if (Object == null || !Object.IsValid)
+        {
+            return _localItemBuffSnapshot;
+        }
+
+        if (CanWriteItemBuffSnapshot())
         {
             return _localItemBuffSnapshot;
         }
