@@ -1439,14 +1439,7 @@ MonoBehaviour:
   roomTagPublic: "[\uACF5\uAC1C]"
   emptyPlayerSlot: 
   nicknameHeaderFormat: "\uB2C9\uB124\uC784: {0}"
-  stattyGameplayCharacterPrefab: {fileID: 1956676462428397128, guid: 6eca31580e4c07c4aba3c9143a9c442a,
-    type: 3}
-  alGGameplayCharacterPrefab: {fileID: 238660437502825593, guid: 2cf846a2d5bfb5a478c850aedead0db1,
-    type: 3}
-  fitGameplayCharacterPrefab: {fileID: 7927393805834117259, guid: 85b92cf51ab429a4e834a78b9ee8f299,
-    type: 3}
-  wiseGameplayCharacterPrefab: {fileID: 152467836711387989, guid: 1bbb51a3ad229e6428e815f8932f4f82,
-    type: 3}
+  characterRegistry: {fileID: 11400000, guid: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6, type: 2}
   fallbackSpawnPoints: []
 --- !u!114 &47569083
 MonoBehaviour:
