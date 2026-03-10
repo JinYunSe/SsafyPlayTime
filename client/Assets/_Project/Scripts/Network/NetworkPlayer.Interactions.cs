@@ -1,3 +1,4 @@
+using Fusion;
 using SSAFYPlayTime.Gameplay.Items;
 using UnityEngine;
 
@@ -22,7 +23,7 @@ public sealed partial class NetworkPlayer
             TryProcessDrop();
 
         if (throwRequested)
-            TryProcessThrow();
+            TryProcessSecondaryAction(anyHolding);
 
         ResetInteractionTriggers();
         UpdateGrabbingAnimatorFlag();
@@ -91,6 +92,17 @@ public sealed partial class NetworkPlayer
             animator.SetTrigger(H_Throw);
     }
 
+    private void TryProcessSecondaryAction(bool anyHolding)
+    {
+        if (anyHolding)
+        {
+            TryProcessThrow();
+            return;
+        }
+
+        TryPickupNearestFieldItemByKey();
+    }
+
     private void ResetInteractionTriggers()
     {
         _dropTriggered = false;
@@ -106,6 +118,17 @@ public sealed partial class NetworkPlayer
     private bool TryUseHeldItemByPrimaryClick()
     {
         var runtimeHost = ResolveItemRuntimeHostForCharacter();
+        if (_itemFieldInteractionService == null)
+            _itemFieldInteractionService = GetComponent<ItemFieldInteractionService>();
+
+        if (_itemFieldInteractionService != null)
+        {
+            if (runtimeHost != null)
+                _itemFieldInteractionService.SetRuntimeHost(runtimeHost);
+            _itemFieldInteractionService.SetOwnerTransform(transform);
+
+            return _itemFieldInteractionService.TryUseHeldItem(out _, out _);
+        }
 
         if (_itemUseInteractor == null)
             _itemUseInteractor = GetComponent<ItemCharacterUseInteractor>();
@@ -134,9 +157,74 @@ public sealed partial class NetworkPlayer
         return runtimeHost.TryUseHeldItem(targetPosition, out _);
     }
 
+    private bool TryPickupNearestFieldItemByKey()
+    {
+        var runtimeHost = ResolveItemRuntimeHostForCharacter();
+        if (_itemFieldInteractionService == null)
+            _itemFieldInteractionService = GetComponent<ItemFieldInteractionService>();
+
+        if (_itemFieldInteractionService != null)
+        {
+            if (runtimeHost != null)
+                _itemFieldInteractionService.SetRuntimeHost(runtimeHost);
+            _itemFieldInteractionService.SetOwnerTransform(transform);
+
+            if (!string.IsNullOrWhiteSpace(runtimeHost != null ? runtimeHost.HeldItemId : string.Empty))
+                return false;
+
+            if (!_itemFieldInteractionService.TryPickupNearest(out var pickedItemId, out _))
+                return false;
+
+            BroadcastPickedFieldDrop(pickedItemId, transform.position);
+            return true;
+        }
+
+        if (_itemPickupInteractor == null)
+            _itemPickupInteractor = GetComponent<ItemFieldPickupInteractor>();
+
+        if (_itemPickupInteractor == null)
+            return false;
+
+        if (runtimeHost != null)
+            _itemPickupInteractor.SetRuntimeHost(runtimeHost);
+
+        _itemPickupInteractor.SetInteractorRoot(transform);
+
+        if (!string.IsNullOrWhiteSpace(runtimeHost != null ? runtimeHost.HeldItemId : string.Empty))
+            return false;
+
+        if (!_itemPickupInteractor.TryPickupNearest(out var fallbackPickedItemId, out _))
+            return false;
+
+        BroadcastPickedFieldDrop(fallbackPickedItemId, transform.position);
+        return true;
+    }
+
     private bool TryDropHeldItemByKey()
     {
         var runtimeHost = ResolveItemRuntimeHostForCharacter();
+        if (_itemFieldInteractionService == null)
+            _itemFieldInteractionService = GetComponent<ItemFieldInteractionService>();
+
+        if (_itemFieldInteractionService != null)
+        {
+            if (runtimeHost != null)
+                _itemFieldInteractionService.SetRuntimeHost(runtimeHost);
+            _itemFieldInteractionService.SetOwnerTransform(transform);
+
+            if (string.IsNullOrWhiteSpace(runtimeHost != null ? runtimeHost.HeldItemId : string.Empty))
+                return false;
+
+            var serviceDroppedItemId = runtimeHost.HeldItemId;
+            var beforeDropCount = CountFieldDropsByItemId(serviceDroppedItemId);
+            if (!_itemFieldInteractionService.TryDropHeldItem(out _, out _))
+                return false;
+
+            EnsureFieldDropSpawnFallback(serviceDroppedItemId, runtimeHost, beforeDropCount);
+            BroadcastDroppedFieldItem(serviceDroppedItemId);
+            return true;
+        }
+
         if (runtimeHost == null)
             return false;
 
@@ -147,12 +235,33 @@ public sealed partial class NetworkPlayer
             return false;
 
         var droppedItemId = runtimeHost.HeldItemId;
-        var beforeDropCount = CountFieldDropsByItemId(droppedItemId);
+        var fallbackBeforeDropCount = CountFieldDropsByItemId(droppedItemId);
         if (!runtimeHost.TryDropHeldItem(out _))
             return false;
 
-        EnsureFieldDropSpawnFallback(droppedItemId, runtimeHost, beforeDropCount);
+        EnsureFieldDropSpawnFallback(droppedItemId, runtimeHost, fallbackBeforeDropCount);
+        BroadcastDroppedFieldItem(droppedItemId);
         return true;
+    }
+
+    private void BroadcastPickedFieldDrop(string itemId, Vector3 origin)
+    {
+        if (Runner == null || !HasStateAuthority || string.IsNullOrWhiteSpace(itemId))
+            return;
+
+        RPC_MarkNearestFieldDropPicked(itemId, origin);
+    }
+
+    private void BroadcastDroppedFieldItem(string itemId)
+    {
+        if (Runner == null || !HasStateAuthority || string.IsNullOrWhiteSpace(itemId))
+            return;
+
+        var drop = FindNearestFieldDropByItemId(itemId, transform.position, 6f);
+        if (drop == null)
+            return;
+
+        RPC_SpawnFieldDropReplica(itemId, drop.transform.position);
     }
 
     private void EnsureFieldDropSpawnFallback(string droppedItemId, ItemRuntimeHost runtimeHost, int beforeDropCount)
@@ -215,5 +324,69 @@ public sealed partial class NetworkPlayer
         }
 
         return count;
+    }
+
+    private static ItemFieldDrop FindNearestFieldDropByItemId(string itemId, Vector3 origin, float maxDistance)
+    {
+        if (string.IsNullOrWhiteSpace(itemId))
+            return null;
+
+        var drops = FindObjectsOfType<ItemFieldDrop>(true);
+        ItemFieldDrop nearest = null;
+        var bestDistance = Mathf.Max(0.01f, maxDistance) * Mathf.Max(0.01f, maxDistance);
+        for (var i = 0; i < drops.Length; i++)
+        {
+            var drop = drops[i];
+            if (drop == null || drop.IsPickedUp || !string.Equals(drop.ItemId, itemId, System.StringComparison.Ordinal))
+                continue;
+
+            var distance = (drop.transform.position - origin).sqrMagnitude;
+            if (distance > bestDistance)
+                continue;
+
+            bestDistance = distance;
+            nearest = drop;
+        }
+
+        return nearest;
+    }
+
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_MarkNearestFieldDropPicked(string itemId, Vector3 origin)
+    {
+        if (HasStateAuthority)
+            return;
+
+        var drop = FindNearestFieldDropByItemId(itemId, origin, 3f);
+        if (drop != null)
+            drop.MarkPickedUp();
+    }
+
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_SpawnFieldDropReplica(string itemId, Vector3 worldPosition)
+    {
+        if (HasStateAuthority || string.IsNullOrWhiteSpace(itemId))
+            return;
+
+        var spawners = FindObjectsOfType<ItemFieldDropSpawner>(true);
+        ItemFieldDropSpawner spawner = null;
+        for (var i = 0; i < spawners.Length; i++)
+        {
+            if (spawners[i] == null)
+                continue;
+
+            spawner = spawners[i];
+            if (spawner.RuntimeHost == _itemRuntimeHost)
+                break;
+        }
+
+        if (spawner == null)
+            return;
+
+        var existing = FindNearestFieldDropByItemId(itemId, worldPosition, 0.6f);
+        if (existing != null)
+            return;
+
+        spawner.TrySpawnItem(itemId, worldPosition, out _);
     }
 }

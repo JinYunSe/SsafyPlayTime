@@ -11,8 +11,12 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 2b38186d59998b742ae27ea2f1f577b0, type: 3}
   m_Name: CharacterRegistry
-  m_EditorClassIdentifier:
-  stattyPrefab: {fileID: 1956676462428397128, guid: 6eca31580e4c07c4aba3c9143a9c442a, type: 3}
-  alGPrefab: {fileID: 238660437502825593, guid: 2cf846a2d5bfb5a478c850aedead0db1, type: 3}
-  fitPrefab: {fileID: 7927393805834117259, guid: 85b92cf51ab429a4e834a78b9ee8f299, type: 3}
-  wisePrefab: {fileID: 152467836711387989, guid: 1bbb51a3ad229e6428e815f8932f4f82, type: 3}
+  m_EditorClassIdentifier: 
+  stattyPrefab: {fileID: 1956676462428397128, guid: 6eca31580e4c07c4aba3c9143a9c442a,
+    type: 3}
+  alGPrefab: {fileID: 238660437502825593, guid: 2cf846a2d5bfb5a478c850aedead0db1,
+    type: 3}
+  fitPrefab: {fileID: 7927393805834117259, guid: 85b92cf51ab429a4e834a78b9ee8f299,
+    type: 3}
+  wisePrefab: {fileID: 152467836711387989, guid: 1bbb51a3ad229e6428e815f8932f4f82,
+    type: 3}
