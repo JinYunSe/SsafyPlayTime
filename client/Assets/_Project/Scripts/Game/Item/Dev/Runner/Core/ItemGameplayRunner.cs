@@ -179,6 +179,22 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             Debug.Log($"[ItemGameplayRunner] {message}", this);
         }
+
+        public void SetRunOnlyInItemScene(bool enabled)
+        {
+            runOnlyInItemScene = enabled;
+        }
+
+        public void SetTemporaryPickupInput(bool enabled, KeyCode pickupKey)
+        {
+            enableTemporaryRightClickPickup = enabled;
+            temporaryPickupKey = pickupKey;
+        }
+
+        public void SetLocalDebugControllerEnabled(bool enabled)
+        {
+            enableLocalDebugController = enabled;
+        }
     }
 }
 
