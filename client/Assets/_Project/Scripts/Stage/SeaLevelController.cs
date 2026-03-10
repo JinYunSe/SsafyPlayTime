@@ -37,6 +37,10 @@ public class SeaLevelController : NetworkBehaviour
     private int _localWaterPhase;
     private bool _warnedMissingNetworkObject;
 
+    // HasStateAuthority 없이 RestoreMigrationState()가 호출될 때
+    // 복원값을 보관했다가 StateAuthority 확보 후 FixedUpdateNetwork()에서 적용한다.
+    private float? _pendingRestoreY;
+
     private float PhaseDuration => Mathf.Max(0f, riseDuration) + Mathf.Max(0f, checkInterval);
 
     private void Awake()
@@ -67,7 +71,13 @@ public class SeaLevelController : NetworkBehaviour
     {
         if (HasStateAuthority)
         {
-            EnsureNetworkStateInitialized();
+            // 복원 대기 중인 마이그레이션 상태가 있으면 우선 적용한다.
+            // EnsureNetworkStateInitialized()가 잘못된 초기값으로 먼저 설정된 경우에도 덮어쓴다.
+            if (_pendingRestoreY.HasValue)
+                ApplyPendingRestore();
+            else
+                EnsureNetworkStateInitialized();
+
             AdvanceNetworkPhaseIfNeeded();
         }
 
@@ -104,13 +114,29 @@ public class SeaLevelController : NetworkBehaviour
         ApplyWaterHeight(restoredY);
         ResetLocalPhaseState(restoredY);
 
+        // 복원값을 항상 보관한다.
+        // HasStateAuthority가 있으면 즉시 networked 상태에 반영하고,
+        // 없으면 FixedUpdateNetwork()에서 StateAuthority 확보 후 적용한다.
+        _pendingRestoreY = restoredY;
+
         if (Runner != null && Object != null && Object.IsValid && HasStateAuthority)
-        {
-            PhaseStartY = restoredY;
-            PhaseStartTick = Runner.Tick;
-            WaterPhase = restoredY >= maxWaterLevel ? PhaseCompleted : PhaseRising;
-            IsInitialized = true;
-        }
+            ApplyPendingRestore();
+    }
+
+    private void ApplyPendingRestore()
+    {
+        if (!_pendingRestoreY.HasValue)
+            return;
+
+        var restoredY = _pendingRestoreY.Value;
+        _pendingRestoreY = null;
+
+        PhaseStartY = restoredY;
+        PhaseStartTick = Runner.Tick;
+        WaterPhase = restoredY >= maxWaterLevel ? PhaseCompleted : PhaseRising;
+        IsInitialized = true;
+
+        Debug.Log($"[{nameof(SeaLevelController)}] Applied pending migration restore on '{name}'. y={restoredY:F3}");
     }
 
     private void Update()

@@ -272,6 +272,22 @@ namespace SSAFYPlayTime
                     _isMigrating = true;
                     CaptureCharacterStatesForMigration();
                     CaptureEnvironmentStatesForMigration();
+
+                    // CaptureCharacterStatesForMigration()이 NetworkPlayer.CharacterTypeIndex를 읽어
+                    // _selectedCharacterIndexByPlayerId를 실제 스폰 캐릭터 인덱스(0~3)로 갱신한다.
+                    // savedAllCharacterIndices·savedCharacterIndex는 이 갱신 전에 캡처됐으므로
+                    // ? 선택자의 경우 여전히 4(Random)를 갖는다.
+                    // ShutdownRunnerAsync 이후 이 값으로 복원하면 재추첨이 발생하므로
+                    // 갱신된 dict를 기반으로 재캡처한다.
+                    savedAllCharacterIndices = _selectedCharacterIndexByPlayerId
+                        .Where(kvp => SanitizeCharacterIndexOrNone(kvp.Value) >= 0)
+                        .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+                    if (_selectedCharacterIndexByPlayerId.TryGetValue(localPlayerId, out var scResolved))
+                    {
+                        var resolvedIdx = SanitizeCharacterIndexOrNone(scResolved);
+                        if (resolvedIdx >= 0)
+                            savedCharacterIndex = resolvedIdx;
+                    }
                 }
 
                 // StartGame 후 새 PlayerId를 알 수 있으므로 로컬 플레이어의 구 PlayerId를 미리 저장한다.

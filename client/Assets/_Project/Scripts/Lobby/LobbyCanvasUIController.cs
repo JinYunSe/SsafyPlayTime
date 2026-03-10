@@ -872,6 +872,8 @@ namespace SSAFYPlayTime
             _currentRoomOwner = "-";
             _currentOwnerPlayerId = -1;
             _currentRoomIsPrivate = false;
+            // 다음 방 입장 시 ? 기본 선택이 다시 적용되도록 리셋한다.
+            _localSelectedCharacterIndex = -1;
 
             await ShutdownRunnerAsync();
             ShowLobbyPanel();
@@ -1807,6 +1809,15 @@ namespace SSAFYPlayTime
             {
                 SetLobbyStatus(statusHostCanStartWithF5);
             }
+
+            // 방 입장 시 캐릭터 선택이 없으면 ? (Random)을 기본값으로 설정한다.
+            // 마이그레이션 복귀 등 이미 선택된 경우(_localSelectedCharacterIndex >= 0)에는 유지한다.
+            if (_localSelectedCharacterIndex < 0 &&
+                _runner != null && _runner.IsRunning && _runner.LocalPlayer.IsRealPlayer)
+            {
+                SetLocalPlayerSelectedCharacter((int)CharacterKind.Random);
+            }
+
             RefreshCharacterSelectionUiState();
         }
 
@@ -1938,6 +1949,12 @@ namespace SSAFYPlayTime
                 _runnerObject = null;
                 return false;
             }
+
+            // 호스트 마이그레이션 시 씬에 배치된 NetworkObject(물, DeathZone 등)가
+            // runner 종료 때 파괴되지 않도록 커스텀 Provider를 등록한다.
+            // 기본 NetworkObjectProviderDefault는 DestroySceneObject()에서
+            // Destroy(gameObject)를 호출해 씬 오브젝트를 제거한다.
+            _runnerObject.AddComponent<MigrationAwareNetworkObjectProvider>();
 
             runner.ProvideInput = true;
             runner.AddCallbacks(this);
