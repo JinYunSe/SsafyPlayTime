@@ -19,6 +19,14 @@ namespace SSAFYPlayTime.Gameplay.Items
         private const string BlackholeFieldEffectAssetPath =
             "Assets/Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple.prefab";
         private const float WaterMelonSwordScaleMultiplier = 1.3f;
+        private const float GrowthFieldVisualScaleMultiplier = 0.5f;
+        private const float GrowthFieldColliderRadius = 0.16f;
+        private const float ShrinkFieldVisualScaleMultiplier = 1.45f;
+        private const float ShrinkFieldColliderRadius = 0.18f;
+        private const float ConsumableFieldDrag = 1.75f;
+        private const float ConsumableFieldAngularDrag = 12f;
+        private const float EquipmentFieldDrag = 0.15f;
+        private const float EquipmentFieldAngularDrag = 0.35f;
         private readonly IItemFieldPrefabResolver _prefabResolver;
         private GameObject _blackholeEffectPrefabCache;
 
@@ -77,6 +85,18 @@ namespace SSAFYPlayTime.Gameplay.Items
                 ConfigureBlackholeVisual(instance);
             }
 
+            if (string.Equals(definition.Master.ItemId, ItemIds.Growth, System.StringComparison.Ordinal))
+            {
+                // 헬스 아이콘은 필드에서 과하게 크게 보여 절반 수준으로 줄여 맞춘다.
+                ApplyScaleMultiplier(instance, GrowthFieldVisualScaleMultiplier);
+            }
+
+            if (string.Equals(definition.Master.ItemId, ItemIds.Shrink, System.StringComparison.Ordinal))
+            {
+                // 스피드 아이콘은 파티클 중심 비주얼이 작아 필드에서만 체급을 조금 키운다.
+                ApplyScaleMultiplier(instance, ShrinkFieldVisualScaleMultiplier);
+            }
+
             instance.name = $"FieldItem_{definition.Master.ItemId}";
             var fieldDrop = instance.GetComponent<ItemFieldDrop>();
             if (fieldDrop == null)
@@ -85,8 +105,8 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             fieldDrop.SetItemId(definition.Master.ItemId);
-            EnsureCollider(instance);
-            EnsureDynamicRigidbody(instance);
+            EnsureCollider(instance, definition);
+            EnsureDynamicRigidbody(instance, definition);
             return fieldDrop;
         }
 
@@ -286,17 +306,31 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
         }
 
-        private static void EnsureCollider(GameObject target)
+        private static void EnsureCollider(GameObject target, ItemDefinition definition)
         {
             if (target.GetComponentInChildren<Collider>() != null)
             {
                 return;
             }
 
-            target.AddComponent<SphereCollider>();
+            var sphereCollider = target.AddComponent<SphereCollider>();
+            if (definition != null &&
+                string.Equals(definition.Master.ItemId, ItemIds.Growth, System.StringComparison.Ordinal))
+            {
+                // 헬스 아이콘은 파티클 외곽이 넓어 기본 구체 콜라이더가 과하게 크게 느껴져 전용 반경을 쓴다.
+                sphereCollider.radius = GrowthFieldColliderRadius;
+                return;
+            }
+
+            if (definition != null &&
+                string.Equals(definition.Master.ItemId, ItemIds.Shrink, System.StringComparison.Ordinal))
+            {
+                // 스피드 아이콘은 기본 구체 콜라이더가 시각 대비 지나치게 크게 느껴져 전용 반경을 쓴다.
+                sphereCollider.radius = ShrinkFieldColliderRadius;
+            }
         }
 
-        private static void EnsureDynamicRigidbody(GameObject target)
+        private static void EnsureDynamicRigidbody(GameObject target, ItemDefinition definition)
         {
             if (target == null)
             {
@@ -307,16 +341,33 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (body == null)
             {
                 body = target.AddComponent<Rigidbody>();
-                // 필드 스폰 아이템은 기본적으로 물리 반응이 가능하도록 구성한다.
-                body.mass = 1f;
-                body.drag = 0f;
-                body.angularDrag = 0.05f;
-                body.interpolation = RigidbodyInterpolation.Interpolate;
-                body.collisionDetectionMode = CollisionDetectionMode.Continuous;
             }
 
+            // 필드 스폰 아이템은 기본적으로 물리 반응이 가능하도록 구성한다.
+            body.mass = 1f;
+            body.interpolation = RigidbodyInterpolation.Interpolate;
+            body.collisionDetectionMode = CollisionDetectionMode.Continuous;
             body.useGravity = true;
             body.isKinematic = false;
+            body.velocity = Vector3.zero;
+            body.angularVelocity = Vector3.zero;
+
+            if (definition != null && definition.Master.ItemType == ItemType.Consumable)
+            {
+                // 소비형 아이콘은 구르기보다 제자리에 안정적으로 멈추는 쪽이 플레이 감각에 맞다.
+                body.drag = ConsumableFieldDrag;
+                body.angularDrag = ConsumableFieldAngularDrag;
+                body.maxAngularVelocity = 1f;
+                body.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+            }
+            else
+            {
+                body.drag = EquipmentFieldDrag;
+                body.angularDrag = EquipmentFieldAngularDrag;
+                body.maxAngularVelocity = 7f;
+                body.constraints = RigidbodyConstraints.None;
+            }
+
             body.WakeUp();
         }
 
