@@ -191,6 +191,17 @@ namespace SSAFYPlayTime
                 _migratedPositionsByOldPlayerId[playerId] = (np.transform.position, np.transform.rotation);
                 Debug.Log($"[Lobby] Captured migration state. object={np.name}, player={playerId}, inputAuthority={no.InputAuthority}, stateAuthority={no.StateAuthority}, pos={np.transform.position}");
 
+                // 실제 스폰된 캐릭터 타입을 Networked 속성에서 읽어 캐릭터 선택 테이블을 덮어쓴다.
+                // ? 선택자는 _selectedCharacterIndexByPlayerId에 4(Random)가 남아있을 수 있으나
+                // CharacterTypeIndex에는 onBeforeSpawned에서 확정된 실제 인덱스(0~3)가 저장돼 있다.
+                // roster 수신 여부와 무관하므로 레이스 컨디션을 근본적으로 해소한다.
+                var resolvedCharIdx = np.CharacterTypeIndex;
+                if (resolvedCharIdx >= 0 && resolvedCharIdx < (int)CharacterKind.Random)
+                {
+                    _selectedCharacterIndexByPlayerId[playerId] = resolvedCharIdx;
+                    Debug.Log($"[Lobby] Captured resolved character type from NetworkPlayer. player={playerId}, charIdx={resolvedCharIdx}");
+                }
+
                 if (_roomParticipantsByPlayerId.TryGetValue(playerId, out var presence) &&
                     presence != null &&
                     !string.IsNullOrWhiteSpace(presence.ClientId))
@@ -431,7 +442,20 @@ namespace SSAFYPlayTime
             var selectedCharacter = _selectedCharacterIndexByPlayerId.TryGetValue(player.PlayerId, out var selected)
                 ? SanitizeCharacterIndexOrNone(selected)
                 : -1;
-            // 캐릭터를 선택하지 않은 플레이어는 기본 캐릭터(Statty)로 스폰한다.
+
+            // Random(?) 또는 미선택 상태이면 다른 플레이어와 중복되지 않도록 확정한다.
+            // TrySpawnGameplayNetworkCharactersForAllPlayers()를 거치지 않고
+            // 개별 호출되는 경우(늦은 재접속, 마이그레이션 후 개별 스폰 등)에도
+            // 이미 배정된 캐릭터를 고려해 중복 없이 배정할 수 있도록 여기서도 호출한다.
+            if (selectedCharacter < 0 || selectedCharacter == (int)CharacterKind.Random)
+            {
+                ResolveRandomCharacterSelections();
+                selectedCharacter = _selectedCharacterIndexByPlayerId.TryGetValue(player.PlayerId, out var resolved)
+                    ? SanitizeCharacterIndexOrNone(resolved)
+                    : -1;
+            }
+
+            // 그래도 미확정이면 기본 캐릭터(Statty)로 스폰한다.
             if (selectedCharacter < 0)
             {
                 selectedCharacter = (int)CharacterKind.Statty;
@@ -563,7 +587,17 @@ namespace SSAFYPlayTime
 
             try
             {
-                var spawned = _runner.Spawn(prefab, spawnPosition, spawnRotation, player);
+                // onBeforeSpawned에서 확정된 캐릭터 인덱스를 NetworkPlayer에 기록한다.
+                // ? 선택자도 실제 배정값으로 저장되므로, 마이그레이션 캡처 시
+                // roster 수신 여부와 무관하게 외형을 보존할 수 있다.
+                var charIndexToStore = selectedCharacter;
+                var spawned = _runner.Spawn(prefab, spawnPosition, spawnRotation, player,
+                    onBeforeSpawned: (_, obj) =>
+                    {
+                        var np = obj.GetComponent<NetworkPlayer>();
+                        if (np != null)
+                            np.CharacterTypeIndex = charIndexToStore;
+                    });
                 if (spawned == null)
                 {
                     Debug.LogWarning($"[Lobby] Network spawn returned null. player={player.PlayerId}, prefab={prefab.name}");
@@ -638,6 +672,13 @@ namespace SSAFYPlayTime
             }
 
             ResolveRandomCharacterSelections();
+
+            // ? 선택을 확정된 캐릭터 인덱스로 클라이언트에 동기화한다.
+            // ResolveRandomCharacterSelections()가 _selectedCharacterIndexByPlayerId를 갱신했으므로
+            // 이 시점에 Roster를 브로드캐스트하면 클라이언트의 _selectedCharacterIndexByPlayerId에도
+            // 확정값이 저장된다. 이로써 호스트 마이그레이션 시 savedAllCharacterIndices가
+            // ? 대신 실제 캐릭터 인덱스를 캡처하게 되어 재추첨이 발생하지 않는다.
+            BroadcastPlayerRoster();
 
             foreach (var player in GetOrderedActivePlayers())
             {
