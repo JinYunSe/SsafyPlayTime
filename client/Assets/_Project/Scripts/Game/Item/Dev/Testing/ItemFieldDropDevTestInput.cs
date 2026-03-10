@@ -21,12 +21,20 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private bool enableTestInput = true;
         [SerializeField] private KeyCode spawnBlackholeKey = KeyCode.Alpha1;
         [SerializeField] private KeyCode spawnSatelliteStrikeKey = KeyCode.Alpha2;
+        [SerializeField] private KeyCode spawnGrowthKey = KeyCode.Alpha3;
+        [SerializeField] private KeyCode spawnShrinkKey = KeyCode.Alpha4;
+        [SerializeField] private KeyCode spawnInvisibilityKey = KeyCode.Alpha5;
+        [SerializeField] private KeyCode spawnAmericanoKey = KeyCode.Alpha6;
         [SerializeField] private KeyCode useItemKey = KeyCode.None;
         [SerializeField] private KeyCode dropItemKey = KeyCode.None;
 
         [Header("테스트 설정")]
         [SerializeField] private string spawnItemId = ItemIds.BlackholeBomb;
         [SerializeField] private string spawnSatelliteStrikeItemId = ItemIds.SatelliteStrike;
+        [SerializeField] private string spawnGrowthItemId = ItemIds.Growth;
+        [SerializeField] private string spawnShrinkItemId = ItemIds.Shrink;
+        [SerializeField] private string spawnInvisibilityItemId = ItemIds.Invisibility;
+        [SerializeField] private string spawnAmericanoItemId = ItemIds.Americano;
 
         [Header("디버그")]
         [SerializeField] private bool enableDebugLog = true;
@@ -52,6 +60,26 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (Input.GetKeyDown(spawnSatelliteStrikeKey))
             {
                 HandleSpawnInput(spawnSatelliteStrikeItemId);
+            }
+
+            if (Input.GetKeyDown(spawnGrowthKey))
+            {
+                HandleSpawnInput(spawnGrowthItemId);
+            }
+
+            if (Input.GetKeyDown(spawnShrinkKey))
+            {
+                HandleSpawnInput(spawnShrinkItemId);
+            }
+
+            if (Input.GetKeyDown(spawnInvisibilityKey))
+            {
+                HandleSpawnInput(spawnInvisibilityItemId);
+            }
+
+            if (Input.GetKeyDown(spawnAmericanoKey))
+            {
+                HandleSpawnInput(spawnAmericanoItemId);
             }
 
             // 실제 플레이어 입력과 충돌하지 않도록 기본값(None)일 때는 무시한다.

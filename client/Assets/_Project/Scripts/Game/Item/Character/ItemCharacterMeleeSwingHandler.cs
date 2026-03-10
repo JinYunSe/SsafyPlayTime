@@ -178,8 +178,14 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
+            var buffApplier = ownerRoot != null ? ownerRoot.GetComponent<ItemCharacterBuffApplier>() : null;
+            var outgoingStunMultiplier = buffApplier != null
+                ? Mathf.Max(0.05f, buffApplier.CurrentOutgoingStunDamageMultiplier)
+                : 1f;
+
             _currentHealthDamage = request.HealthDamage > 0f ? request.HealthDamage : Mathf.Max(0f, defaultHealthDamage);
-            _currentStunDamage = request.StunDamage > 0f ? request.StunDamage : Mathf.Max(0f, defaultStunDamage);
+            _currentStunDamage = (request.StunDamage > 0f ? request.StunDamage : Mathf.Max(0f, defaultStunDamage)) *
+                                 outgoingStunMultiplier;
             var duration = request.ActiveDurationSec > 0f ? request.ActiveDurationSec : Mathf.Max(0.05f, defaultSwingDurationSec);
 
             _isSwingActive = true;
