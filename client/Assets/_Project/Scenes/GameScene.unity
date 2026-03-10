@@ -933,6 +933,7 @@ GameObject:
   - component: {fileID: 403653134}
   - component: {fileID: 403653133}
   - component: {fileID: 403653138}
+  - component: {fileID: 403653139}
   m_Layer: 0
   m_Name: DeathZone
   m_TagString: Untagged
@@ -973,7 +974,7 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 1, y: 1, z: 1}
+  m_Size: {x: 3.94, y: 1, z: 20.17}
   m_Center: {x: 0, y: 0, z: 0}
 --- !u!23 &403653135
 MeshRenderer:
@@ -1055,6 +1056,26 @@ MonoBehaviour:
   sinkingSpeed: 0.1
   maxWaterLevel: -3.5
   checkInterval: 1
+  riseDuration: 0.5
+--- !u!114 &403653139
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 403653132}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  SortKey: 2294232933
+  ObjectInterest: 1
+  Flags: 1
+  NestedObjects: []
+  NetworkedBehaviours:
+  - {fileID: 403653138}
+  ForceRemoteRenderTimeframe: 0
 --- !u!1 &425342455 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 4383020300256347612, guid: 23f8c0ffe3ff1e340aa225c155cea12b,
@@ -10467,13 +10488,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 8974012561332354414}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: -0.7071068, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: 5, y: 0, z: 0}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 14, y: 2, z: -1}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 7782225985734461863}
-  m_LocalEulerAnglesHint: {x: 0, y: -90, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!4 &263211900617528542
 Transform:
   m_ObjectHideFlags: 0
@@ -125395,13 +125416,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 425848726298604559}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0.7071068, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: -5, y: 0, z: 0}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -8.39, y: -1, z: -1}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 7782225985734461863}
-  m_LocalEulerAnglesHint: {x: 0, y: 90, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!137 &5356485553714661034
 SkinnedMeshRenderer:
   m_ObjectHideFlags: 0
@@ -161142,13 +161163,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7150349979332492272}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 1, z: 0, w: 0}
-  m_LocalPosition: {x: 0, y: 0, z: 5}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 3, y: -0.2, z: 3.75}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 7782225985734461863}
-  m_LocalEulerAnglesHint: {x: 0, y: 180, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!64 &6931507021421768210
 MeshCollider:
   m_ObjectHideFlags: 0
@@ -169219,7 +169240,7 @@ Transform:
   m_GameObject: {fileID: 804397396937672883}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: -5}
+  m_LocalPosition: {x: 3, y: -0.2, z: -5.75}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -206240,6 +206261,7 @@ GameObject:
   - component: {fileID: 7355445213469880791}
   - component: {fileID: 3892766238477732902}
   - component: {fileID: 9012606667406675971}
+  - component: {fileID: 9012606667406675972}
   m_Layer: 0
   m_Name: water_001
   m_TagString: Untagged
@@ -206262,6 +206284,26 @@ MonoBehaviour:
   sinkingSpeed: 0.1
   maxWaterLevel: 5
   checkInterval: 1
+  riseDuration: 0.5
+--- !u!114 &9012606667406675972
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9012606667406675970}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  SortKey: 3984781182
+  ObjectInterest: 1
+  Flags: 1
+  NestedObjects: []
+  NetworkedBehaviours:
+  - {fileID: 9012606667406675971}
+  ForceRemoteRenderTimeframe: 0
 --- !u!1 &9013393533803977403
 GameObject:
   m_ObjectHideFlags: 0

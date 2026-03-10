@@ -1,5 +1,6 @@
 using System;
 
+using Fusion;
 using UnityEngine;
 
 // 플레이어의 체력을 관리하고, 시작 시 SpawnManager에서 스폰 위치를 받아 배치하는 컴포넌트.
@@ -13,6 +14,13 @@ public class PlayerStats : MonoBehaviour
 
     void Start()
     {
+        var networkObject = GetComponent<NetworkObject>();
+        if (networkObject != null && networkObject.Runner != null && networkObject.IsValid)
+        {
+            // Fusion이 이미 스폰 위치를 결정한 네트워크 캐릭터는 로컬 SpawnManager로 다시 옮기지 않는다.
+            return;
+        }
+
         SpawnManager spawnManager = GameObject.FindObjectOfType<SpawnManager>();
 
         if (spawnManager != null)

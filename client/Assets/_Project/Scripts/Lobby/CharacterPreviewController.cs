@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using TMPro;
@@ -14,19 +14,17 @@ namespace SSAFYPlayTime
         private const int CharacterOptionCount = 4;
 
         [Header("Character Templates")]
-        [FormerlySerializedAs("aiJiCharacterRoot")]
-        [SerializeField] private GameObject ssatyCharacterRoot;
-        [SerializeField] private GameObject pitCharacterRoot;
-        [SerializeField] private GameObject seuTatiCharacterRoot;
-        [SerializeField] private GameObject waiJeuCharacterRoot;
+        [SerializeField] private GameObject stattyCharacterRoot;
+        [SerializeField] private GameObject alGCharacterRoot;
+        [SerializeField] private GameObject fitCharacterRoot;
+        [SerializeField] private GameObject wiseCharacterRoot;
 
         [Header("Selection UI")]
         [SerializeField] private GameObject characterSelectionPanel;
-        [FormerlySerializedAs("selectAiJiCharacterButton")]
-        [SerializeField] private Button selectSsatyCharacterButton;
-        [SerializeField] private Button selectPitCharacterButton;
-        [SerializeField] private Button selectSeuTatiCharacterButton;
-        [SerializeField] private Button selectWaiJeuCharacterButton;
+        [SerializeField] private Button selectStattyCharacterButton;
+        [SerializeField] private Button selectAlGCharacterButton;
+        [SerializeField] private Button selectFitCharacterButton;
+        [SerializeField] private Button selectWiseCharacterButton;
 
         [Header("Name Slot Layout")]
         [SerializeField] private bool lockPlayerSlotLayoutToViewport = true;
@@ -47,8 +45,10 @@ namespace SSAFYPlayTime
         [Header("Character Placement")]
         [SerializeField] private float characterVerticalOffset = 20f;
         [SerializeField] private float characterExtraVerticalOffset = 20f;
-        [SerializeField] private float seuTatiCharacterVerticalOffsetAdjustment = -18f;
-        [SerializeField] private float seuTatiCharacterWorldYAdjustment = -0.73f;
+        [SerializeField] private float algCharacterVerticalOffsetAdjustment = -10f;
+        [SerializeField] private float fitCharacterVerticalOffsetAdjustment = 32f;
+        [SerializeField] private float fitCharacterWorldYAdjustment = -0.73f;
+        [SerializeField] private float wiseCharacterVerticalOffsetAdjustment = 10f;
         [SerializeField] private Transform characterRuntimeRoot;
         [SerializeField] private Camera characterPlacementCamera;
         [SerializeField] private float characterWorldDepth = 8f;
@@ -57,6 +57,29 @@ namespace SSAFYPlayTime
         [SerializeField] private bool keepCharacterScreenSize = true;
         [SerializeField] private float characterTargetScreenHeightPixels = 170f;
         [SerializeField] private float characterScreenHeightMultiplier = 2.5f;
+        [SerializeField] private bool useFixedCharacterScale = true;
+        [SerializeField] private Vector3 fixedCharacterScale = new Vector3(5f, 5f, 5f);
+        [SerializeField] private Vector3[] slotPositionOffsets =
+        {
+            Vector3.zero,
+            Vector3.zero,
+            Vector3.zero,
+            Vector3.zero
+        };
+        [SerializeField] private Vector3[] slotRotationOverrides =
+        {
+            Vector3.zero,
+            Vector3.zero,
+            Vector3.zero,
+            Vector3.zero
+        };
+        [SerializeField] private Vector3[] slotScaleOverrides =
+        {
+            new Vector3(5f, 5f, 5f),
+            new Vector3(5f, 5f, 5f),
+            new Vector3(5f, 5f, 5f),
+            new Vector3(5f, 5f, 5f)
+        };
 
         private TMP_Text[] _nameSlots;
 
@@ -64,6 +87,8 @@ namespace SSAFYPlayTime
         private readonly int[] _selectedCharacterIndexBySlot = { -1, -1, -1, -1 };
         private readonly int[] _playerIdBySlot = { -1, -1, -1, -1 };
         private readonly Dictionary<Transform, Vector3> _characterBaseLocalScales = new();
+        private readonly Dictionary<Transform, Quaternion> _characterBaseLocalRotations = new();
+        private readonly Dictionary<Transform, Quaternion> _characterVisualChildBaseLocalRotations = new();
         private readonly Dictionary<Transform, float> _characterBaseBoundsHeights = new();
         private readonly Dictionary<Transform, int> _characterOptionIndexByTransform = new();
         private readonly Dictionary<Transform, float> _characterPrePlacedWorldY = new();
@@ -77,7 +102,6 @@ namespace SSAFYPlayTime
         public void Initialize(TMP_Text[] nameSlots)
         {
             _nameSlots = nameSlots;
-            ApplyRuntimeLayoutOverrides();
             BindButtonEvents();
             InitializeCharacterSlotsIfNeeded();
         }
@@ -140,76 +164,60 @@ namespace SSAFYPlayTime
             TrySetGameObjectActive(characterSelectionPanel, canSelect);
             var selected = SanitizeCharacterIndexOrNone(localPlayerSelectedCharacterIndex);
 
-            if (selectSsatyCharacterButton != null)
+            if (selectStattyCharacterButton != null)
             {
-                TrySetButtonInteractable(selectSsatyCharacterButton,
+                TrySetButtonInteractable(selectStattyCharacterButton,
                     canSelect && selected != 0 && (takenByOthers == null || !takenByOthers.Contains(0)));
             }
 
-            if (selectPitCharacterButton != null)
+            if (selectAlGCharacterButton != null)
             {
-                TrySetButtonInteractable(selectPitCharacterButton,
+                TrySetButtonInteractable(selectAlGCharacterButton,
                     canSelect && selected != 1 && (takenByOthers == null || !takenByOthers.Contains(1)));
             }
 
-            if (selectSeuTatiCharacterButton != null)
+            if (selectFitCharacterButton != null)
             {
-                TrySetButtonInteractable(selectSeuTatiCharacterButton,
+                TrySetButtonInteractable(selectFitCharacterButton,
                     canSelect && selected != 2 && (takenByOthers == null || !takenByOthers.Contains(2)));
             }
 
-            if (selectWaiJeuCharacterButton != null)
+            if (selectWiseCharacterButton != null)
             {
-                TrySetButtonInteractable(selectWaiJeuCharacterButton,
+                TrySetButtonInteractable(selectWiseCharacterButton,
                     canSelect && selected != 3 && (takenByOthers == null || !takenByOthers.Contains(3)));
             }
         }
 
         // ── Character select button callbacks ────────────────────────────────────
 
-        public void OnSelectSsatyCharacter() => CharacterSelected?.Invoke(0);
-        public void OnSelectPitCharacter() => CharacterSelected?.Invoke(1);
-        public void OnSelectSeuTatiCharacter() => CharacterSelected?.Invoke(2);
-        public void OnSelectWaiJeuCharacter() => CharacterSelected?.Invoke(3);
+        public void OnSelectStattyCharacter() => CharacterSelected?.Invoke(0);
+        public void OnSelectAlGCharacter() => CharacterSelected?.Invoke(1);
+        public void OnSelectFitCharacter() => CharacterSelected?.Invoke(2);
+        public void OnSelectWiseCharacter() => CharacterSelected?.Invoke(3);
 
         // ── Private implementation ────────────────────────────────────────────────
 
-        private void ApplyRuntimeLayoutOverrides()
-        {
-            playerSlotViewportY = 0.36f;
-            playerSlotExtraViewportY = 0f;
-            playerSlotSizeMultiplier = 1.35f;
-            useQuarterWidthNameSlots = true;
-            playerSlotQuarterHorizontalMargin = 12f;
-            playerSlotQuarterWidthScale = 0.95f;
-            nicknameFontSizeMin = 32f;
-            nicknameFontSizeMax = 64f;
-            characterVerticalOffset = 20f;
-            characterExtraVerticalOffset = 20f;
-            seuTatiCharacterVerticalOffsetAdjustment = -18f;
-            characterScreenHeightMultiplier = 2.5f;
-        }
-
         private void BindButtonEvents()
         {
-            if (selectSsatyCharacterButton != null)
+            if (selectStattyCharacterButton != null)
             {
-                selectSsatyCharacterButton.onClick.AddListener(OnSelectSsatyCharacter);
+                selectStattyCharacterButton.onClick.AddListener(OnSelectStattyCharacter);
             }
 
-            if (selectPitCharacterButton != null)
+            if (selectAlGCharacterButton != null)
             {
-                selectPitCharacterButton.onClick.AddListener(OnSelectPitCharacter);
+                selectAlGCharacterButton.onClick.AddListener(OnSelectAlGCharacter);
             }
 
-            if (selectSeuTatiCharacterButton != null)
+            if (selectFitCharacterButton != null)
             {
-                selectSeuTatiCharacterButton.onClick.AddListener(OnSelectSeuTatiCharacter);
+                selectFitCharacterButton.onClick.AddListener(OnSelectFitCharacter);
             }
 
-            if (selectWaiJeuCharacterButton != null)
+            if (selectWiseCharacterButton != null)
             {
-                selectWaiJeuCharacterButton.onClick.AddListener(OnSelectWaiJeuCharacter);
+                selectWiseCharacterButton.onClick.AddListener(OnSelectWiseCharacter);
             }
         }
 
@@ -220,7 +228,7 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            var templates = new[] { ssatyCharacterRoot, pitCharacterRoot, seuTatiCharacterRoot, waiJeuCharacterRoot };
+            var templates = new[] { stattyCharacterRoot, alGCharacterRoot, fitCharacterRoot, wiseCharacterRoot };
             var nameSlots = _nameSlots;
             if (nameSlots == null || templates.Any(t => t == null) || nameSlots.Any(t => t == null))
             {
@@ -254,6 +262,8 @@ namespace SSAFYPlayTime
                     cloneTransform.gameObject.SetActive(false);
                     _slotCharacterRoots[slot, option] = cloneTransform;
                     _characterBaseLocalScales[cloneTransform] = cloneTransform.localScale;
+                    _characterBaseLocalRotations[cloneTransform] = cloneTransform.localRotation;
+                    CacheCharacterVisualChildRotations(cloneTransform);
                     _characterBaseBoundsHeights[cloneTransform] = CalculateCombinedBoundsHeight(cloneTransform);
                     _characterOptionIndexByTransform[cloneTransform] = option;
                 }
@@ -290,12 +300,12 @@ namespace SSAFYPlayTime
                 var nameSlot = nameSlots[slot];
                 for (var option = 0; option < CharacterOptionCount; option++)
                 {
-                    AlignCharacterSlot(_slotCharacterRoots[slot, option], nameSlot);
+                    AlignCharacterSlot(_slotCharacterRoots[slot, option], nameSlot, slot);
                 }
             }
         }
 
-        private void AlignCharacterSlot(Transform characterSlot, TMP_Text nameSlot)
+        private void AlignCharacterSlot(Transform characterSlot, TMP_Text nameSlot, int slotIndex = -1)
         {
             if (characterSlot == null || nameSlot == null || nameSlot.transform is not RectTransform nameRect)
             {
@@ -310,12 +320,18 @@ namespace SSAFYPlayTime
                 }
 
                 var characterSpecificOffset = GetCharacterSpecificVerticalOffset(characterSlot);
+                var slotPosOffset = GetSlotPositionOffset(slotIndex);
                 charRect.anchorMin = nameRect.anchorMin;
                 charRect.anchorMax = nameRect.anchorMax;
                 charRect.pivot = nameRect.pivot;
                 charRect.anchoredPosition = nameRect.anchoredPosition + new Vector2(
-                    0f,
-                    characterVerticalOffset + characterExtraVerticalOffset + characterSpecificOffset);
+                    slotPosOffset.x,
+                    characterVerticalOffset + characterExtraVerticalOffset + characterSpecificOffset + slotPosOffset.y);
+                ApplySlotRotationToVisuals(characterSlot, slotIndex);
+                if (useFixedCharacterScale)
+                {
+                    charRect.localScale = GetSlotScale(slotIndex);
+                }
                 return;
             }
 
@@ -328,8 +344,11 @@ namespace SSAFYPlayTime
             var uiCam = ResolveUiCamera();
             var uiWorldPoint = GetNameAnchorWorldPoint(nameSlot, nameRect);
             var screenPoint = RectTransformUtility.WorldToScreenPoint(uiCam, uiWorldPoint);
-            screenPoint.y += characterVerticalOffset + characterExtraVerticalOffset +
-                             GetCharacterSpecificVerticalOffset(characterSlot);
+            var worldSlotPosOffset = GetSlotPositionOffset(slotIndex);
+            screenPoint.x += worldSlotPosOffset.x;
+            screenPoint.y += characterVerticalOffset + characterExtraVerticalOffset
+                             + GetCharacterSpecificVerticalOffset(characterSlot)
+                             + worldSlotPosOffset.y;
             var padding = Mathf.Max(0f, characterScreenPaddingPixels);
             screenPoint.x = Mathf.Clamp(screenPoint.x, padding, Screen.width - padding);
             screenPoint.y = Mathf.Clamp(screenPoint.y, padding, Screen.height - padding);
@@ -346,15 +365,20 @@ namespace SSAFYPlayTime
             }
 
             var targetWorld = worldCam.ScreenToWorldPoint(new Vector3(screenPoint.x, screenPoint.y, depth));
-            var finalPos = targetWorld + characterWorldOffset;
+            var finalPos = targetWorld + characterWorldOffset + new Vector3(0f, 0f, worldSlotPosOffset.z);
             if (_characterPrePlacedWorldY.TryGetValue(characterSlot, out var lockedY))
             {
                 finalPos.y = lockedY + GetCharacterPrePlacedWorldYAdjustment(characterSlot);
             }
 
             characterSlot.position = finalPos;
+            ApplySlotRotationToVisuals(characterSlot, slotIndex);
 
-            if (keepCharacterScreenSize)
+            if (useFixedCharacterScale)
+            {
+                characterSlot.localScale = GetSlotScale(slotIndex);
+            }
+            else if (keepCharacterScreenSize)
             {
                 ApplyCharacterScreenHeightScale(characterSlot, worldCam);
             }
@@ -421,19 +445,108 @@ namespace SSAFYPlayTime
                 return 0f;
             }
 
-            if (_characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) && option == 2)
+            if (!_characterOptionIndexByTransform.TryGetValue(characterSlot, out var option))
             {
-                return seuTatiCharacterVerticalOffsetAdjustment;
+                return 0f;
             }
 
-            return 0f;
+            return option switch
+            {
+                1 => algCharacterVerticalOffsetAdjustment,
+                2 => fitCharacterVerticalOffsetAdjustment,
+                3 => wiseCharacterVerticalOffsetAdjustment,
+                _ => 0f
+            };
+        }
+
+        private Vector3 GetSlotPositionOffset(int slotIndex)
+        {
+            if (slotPositionOffsets != null && slotIndex >= 0 && slotIndex < slotPositionOffsets.Length)
+            {
+                return slotPositionOffsets[slotIndex];
+            }
+            return Vector3.zero;
+        }
+
+        private Vector3 GetSlotRotation(int slotIndex)
+        {
+            if (slotRotationOverrides != null && slotIndex >= 0 && slotIndex < slotRotationOverrides.Length)
+            {
+                return slotRotationOverrides[slotIndex];
+            }
+            return Vector3.zero;
+        }
+
+        private Vector3 GetSlotScale(int slotIndex)
+        {
+            if (slotScaleOverrides != null && slotIndex >= 0 && slotIndex < slotScaleOverrides.Length)
+            {
+                return slotScaleOverrides[slotIndex];
+            }
+            return fixedCharacterScale;
+        }
+
+        private void CacheCharacterVisualChildRotations(Transform characterSlot)
+        {
+            if (characterSlot == null)
+            {
+                return;
+            }
+
+            for (var i = 0; i < characterSlot.childCount; i++)
+            {
+                var child = characterSlot.GetChild(i);
+                if (child == null)
+                {
+                    continue;
+                }
+
+                _characterVisualChildBaseLocalRotations[child] = child.localRotation;
+            }
+        }
+
+        private void ApplySlotRotationToVisuals(Transform characterSlot, int slotIndex)
+        {
+            if (characterSlot == null)
+            {
+                return;
+            }
+
+            var slotRotation = Quaternion.Euler(GetSlotRotation(slotIndex));
+            if (_characterBaseLocalRotations.TryGetValue(characterSlot, out var rootBaseRotation))
+            {
+                characterSlot.localRotation = rootBaseRotation;
+            }
+
+            if (characterSlot.childCount <= 0)
+            {
+                characterSlot.localRotation *= slotRotation;
+                return;
+            }
+
+            for (var i = 0; i < characterSlot.childCount; i++)
+            {
+                var child = characterSlot.GetChild(i);
+                if (child == null)
+                {
+                    continue;
+                }
+
+                if (!_characterVisualChildBaseLocalRotations.TryGetValue(child, out var childBaseRotation))
+                {
+                    childBaseRotation = child.localRotation;
+                    _characterVisualChildBaseLocalRotations[child] = childBaseRotation;
+                }
+
+                child.localRotation = childBaseRotation * slotRotation;
+            }
         }
 
         private float GetCharacterPrePlacedWorldYAdjustment(Transform characterSlot)
         {
             if (_characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) && option == 2)
             {
-                return seuTatiCharacterWorldYAdjustment;
+                return fitCharacterWorldYAdjustment;
             }
 
             return 0f;
