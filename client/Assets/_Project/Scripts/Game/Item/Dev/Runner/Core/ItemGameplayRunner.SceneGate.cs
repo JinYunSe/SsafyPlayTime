@@ -54,9 +54,10 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private bool ShouldRunInCurrentScene()
         {
-            if (GetComponent<ItemSceneBootstrap>() != null)
+            var sceneBootstrap = GetComponent<ItemSceneBootstrap>();
+            if (sceneBootstrap != null)
             {
-                return true;
+                return sceneBootstrap.ShouldUseSceneRunner();
             }
 
             return !runOnlyInItemScene || IsItemRuntimeScene(gameObject.scene);
