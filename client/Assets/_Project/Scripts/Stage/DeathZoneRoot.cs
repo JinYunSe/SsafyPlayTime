@@ -33,6 +33,10 @@ public class DeathZoneRoot : NetworkBehaviour
     private float _localNextHeightTime;
     private bool _warnedMissingNetworkObject;
 
+    // HasStateAuthority 없이 RestoreMigrationState()가 호출될 때
+    // 복원값을 보관했다가 StateAuthority 확보 후 FixedUpdateNetwork()에서 적용한다.
+    private float? _pendingRestoreScaleY;
+
     private void Awake()
     {
         _localScaleY = transform.localScale.y;
@@ -56,7 +60,13 @@ public class DeathZoneRoot : NetworkBehaviour
     {
         if (HasStateAuthority)
         {
-            EnsureInitialized();
+            // 복원 대기 중인 마이그레이션 상태가 있으면 우선 적용한다.
+            // EnsureInitialized()가 잘못된 초기값으로 먼저 설정된 경우에도 덮어쓴다.
+            if (_pendingRestoreScaleY.HasValue)
+                ApplyPendingRestore();
+            else
+                EnsureInitialized();
+
             AdvancePhaseIfNeeded();
         }
 
@@ -110,12 +120,28 @@ public class DeathZoneRoot : NetworkBehaviour
         _localScaleY = scaleY;
         _localNextHeightTime = Time.time + heightInterval;
 
+        // 복원값을 항상 보관한다.
+        // HasStateAuthority가 있으면 즉시 networked 상태에 반영하고,
+        // 없으면 FixedUpdateNetwork()에서 StateAuthority 확보 후 적용한다.
+        _pendingRestoreScaleY = scaleY;
+
         if (Runner != null && Object != null && Object.IsValid && HasStateAuthority)
-        {
-            NetworkScaleY = scaleY;
-            PhaseStartTick = Runner.Tick;
-            IsInitialized = true;
-        }
+            ApplyPendingRestore();
+    }
+
+    private void ApplyPendingRestore()
+    {
+        if (!_pendingRestoreScaleY.HasValue)
+            return;
+
+        var scaleY = _pendingRestoreScaleY.Value;
+        _pendingRestoreScaleY = null;
+
+        NetworkScaleY = scaleY;
+        PhaseStartTick = Runner.Tick;
+        IsInitialized = true;
+
+        Debug.Log($"[{nameof(DeathZoneRoot)}] Applied pending migration restore on '{name}'. scaleY={scaleY:F3}");
     }
 
     // ──────────────────────────────────────────────────────────────────────────
