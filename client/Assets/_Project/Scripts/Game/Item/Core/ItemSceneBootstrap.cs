@@ -114,6 +114,17 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
+            if (!ShouldUseSceneRunner())
+            {
+                itemGameplayRunner.enabled = false;
+                return;
+            }
+
+            if (!itemGameplayRunner.enabled)
+            {
+                itemGameplayRunner.enabled = true;
+            }
+
             // 한국어: 다른 씬에서도 동작해야 하므로 ItemScene 전용 제한을 끈다.
             itemGameplayRunner.SetRunOnlyInItemScene(false);
             // 한국어: 다른 씬에서는 개발용 더미 조작기를 꺼서 실제 플레이어 입력과 충돌하지 않게 한다.
@@ -218,6 +229,51 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             return 0;
+        }
+
+        internal bool ShouldUseSceneRunner()
+        {
+            var activeScene = gameObject.scene;
+            if (!activeScene.IsValid())
+            {
+                activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            }
+
+            if (IsItemRuntimeScene(activeScene))
+            {
+                return true;
+            }
+
+            var players = FindObjectsOfType<NetworkPlayer>(true);
+            for (var i = 0; i < players.Length; i++)
+            {
+                var player = players[i];
+                if (player == null || player.gameObject.scene != activeScene)
+                {
+                    continue;
+                }
+
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsItemRuntimeScene(UnityEngine.SceneManagement.Scene scene)
+        {
+            if (!scene.IsValid())
+            {
+                return false;
+            }
+
+            if (string.Equals(scene.name, "ItemScene", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var scenePath = scene.path ?? string.Empty;
+            return scenePath.EndsWith("/ItemScene.unity", System.StringComparison.OrdinalIgnoreCase) ||
+                   scenePath.EndsWith("\\ItemScene.unity", System.StringComparison.OrdinalIgnoreCase);
         }
 
         private void DebugLog(string message)
