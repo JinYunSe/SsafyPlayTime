@@ -5363,6 +5363,8 @@ MonoBehaviour:
   config: {fileID: 11400000, guid: 75abf164104853249b9f62f7cd147f60, type: 2}
   fallbackAnimatorController: {fileID: 9100000, guid: 1dcced58a31ca824b80e3df57c75627d,
     type: 2}
+  useAnimatedVisualOnly: 1
+  disablePhysicsAnimationSync: 1
   holdPoint: {fileID: 1019010066}
   _CharacterTypeIndex: -1
   _BoneRotations: []
@@ -34851,6 +34853,8 @@ MonoBehaviour:
   config: {fileID: 11400000, guid: 75abf164104853249b9f62f7cd147f60, type: 2}
   fallbackAnimatorController: {fileID: 9100000, guid: 1dcced58a31ca824b80e3df57c75627d,
     type: 2}
+  useAnimatedVisualOnly: 1
+  disablePhysicsAnimationSync: 1
   holdPoint: {fileID: 1117340525}
   _CharacterTypeIndex: -1
   _BoneRotations: []
@@ -49125,7 +49129,7 @@ PrefabInstance:
     - target: {fileID: 7951731572060109151, guid: 1969249f494acab43b9293087ceb9cc7,
         type: 3}
       propertyPath: m_IsActive
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 8581349063496401574, guid: 1969249f494acab43b9293087ceb9cc7,
         type: 3}
@@ -50425,6 +50429,8 @@ MonoBehaviour:
   config: {fileID: 11400000, guid: 75abf164104853249b9f62f7cd147f60, type: 2}
   fallbackAnimatorController: {fileID: 9100000, guid: 1dcced58a31ca824b80e3df57c75627d,
     type: 2}
+  useAnimatedVisualOnly: 1
+  disablePhysicsAnimationSync: 1
   holdPoint: {fileID: 1047903578}
   _CharacterTypeIndex: -1
   _BoneRotations: []
@@ -53328,7 +53334,7 @@ PrefabInstance:
     - target: {fileID: 2102456035509772786, guid: a99a10cb9b62ce84194e07136633e50d,
         type: 3}
       propertyPath: m_IsActive
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 4083810359640999240, guid: a99a10cb9b62ce84194e07136633e50d,
         type: 3}
@@ -61154,6 +61160,8 @@ MonoBehaviour:
   config: {fileID: 11400000, guid: 75abf164104853249b9f62f7cd147f60, type: 2}
   fallbackAnimatorController: {fileID: 9100000, guid: 1dcced58a31ca824b80e3df57c75627d,
     type: 2}
+  useAnimatedVisualOnly: 1
+  disablePhysicsAnimationSync: 1
   holdPoint: {fileID: 767589753}
   _CharacterTypeIndex: -1
   _BoneRotations: []
@@ -62597,7 +62605,7 @@ PrefabInstance:
     - target: {fileID: 2819578425952204500, guid: db3027ce361aa5646969db3145797743,
         type: 3}
       propertyPath: m_IsActive
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 3266675538193306812, guid: db3027ce361aa5646969db3145797743,
         type: 3}
@@ -66262,7 +66270,7 @@ PrefabInstance:
     - target: {fileID: 1956676462428397128, guid: 6eca31580e4c07c4aba3c9143a9c442a,
         type: 3}
       propertyPath: m_IsActive
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 2041266976590487708, guid: 6eca31580e4c07c4aba3c9143a9c442a,
         type: 3}
