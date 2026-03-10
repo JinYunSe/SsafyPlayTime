@@ -31,6 +31,10 @@ public sealed partial class NetworkPlayer
         if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
             return;
 
+        var buffApplier = ResolveItemBuffApplier();
+        if (buffApplier != null && buffApplier.IsSuperArmorActive)
+            return;
+
         var finalStunDamage = stunDamage * bodyPartMultiplier * ResolveStunStateMultiplier();
         var accumulated = AddStunDamage(finalStunDamage);
 
@@ -83,6 +87,11 @@ public sealed partial class NetworkPlayer
 
     private void SimulateLocomotion(PlayerNetworkInput input, float dt)
     {
+        var buffApplier = ResolveItemBuffApplier();
+        var moveSpeedMultiplier = buffApplier != null ? buffApplier.CurrentMoveSpeedMultiplier : 1f;
+        var gravityMultiplier = buffApplier != null ? buffApplier.CurrentGravityMultiplier : 1f;
+        var jumpMultiplier = buffApplier != null ? buffApplier.CurrentJumpMultiplier : 1f;
+
         _isGrounded = _groundProbe.IsGrounded(
             rigidbody3D.position,
             transform,
@@ -90,14 +99,16 @@ public sealed partial class NetworkPlayer
             config.groundProbeDistance);
 
         if (!_isGrounded)
-            rigidbody3D.AddForce(Vector3.down * config.extraGravity, ForceMode.Acceleration);
+            rigidbody3D.AddForce(
+                Vector3.down * config.extraGravity * Mathf.Max(0.05f, gravityMultiplier),
+                ForceMode.Acceleration);
 
         var inputMagnitude = input.Move.magnitude;
         var forwardVelocity = Vector3.Dot(transform.forward, rigidbody3D.velocity);
 
         RotateTowardInput(input.Move, inputMagnitude, dt);
-        ApplyMovementForce(inputMagnitude, forwardVelocity);
-        ApplyJumpIfPossible(input.Jump);
+        ApplyMovementForce(inputMagnitude, forwardVelocity, moveSpeedMultiplier);
+        ApplyJumpIfPossible(input.Jump, jumpMultiplier);
         _stateMachine.Tick(_isGrounded, inputMagnitude, dt, config);
 
         var normalizedMoveSpeed = Mathf.Abs(forwardVelocity) * 0.4f;
@@ -116,22 +127,26 @@ public sealed partial class NetworkPlayer
             dt * config.rotateSpeedDeg);
     }
 
-    private void ApplyMovementForce(float inputMagnitude, float forwardVelocity)
+    private void ApplyMovementForce(float inputMagnitude, float forwardVelocity, float moveSpeedMultiplier)
     {
         if (inputMagnitude <= 0.001f)
             return;
-        if (Mathf.Abs(forwardVelocity) >= config.maxSpeed)
+        if (Mathf.Abs(forwardVelocity) >= config.maxSpeed * Mathf.Max(0.05f, moveSpeedMultiplier))
             return;
 
-        rigidbody3D.AddForce(transform.forward * inputMagnitude * config.acceleration, ForceMode.Acceleration);
+        rigidbody3D.AddForce(
+            transform.forward * inputMagnitude * config.acceleration * Mathf.Max(0.05f, moveSpeedMultiplier),
+            ForceMode.Acceleration);
     }
 
-    private void ApplyJumpIfPossible(bool jumpPressed)
+    private void ApplyJumpIfPossible(bool jumpPressed, float jumpMultiplier)
     {
         if (!_isGrounded || !jumpPressed)
             return;
 
-        rigidbody3D.AddForce(Vector3.up * config.jumpImpulse, ForceMode.Impulse);
+        rigidbody3D.AddForce(
+            Vector3.up * config.jumpImpulse * Mathf.Max(0.05f, jumpMultiplier),
+            ForceMode.Impulse);
         _stateMachine.SetJump();
     }
 
