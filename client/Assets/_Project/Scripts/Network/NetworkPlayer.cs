@@ -99,6 +99,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     public override void Spawned()
     {
         InitializeInternal();
+        MarkItemBuffNetworkReady();
 
         if (HasStateAuthority)
         {
@@ -183,6 +184,16 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         }
         _heldItemPresenter.SetRuntimeHost(runtimeHost);
         _heldItemPresenter.SetCharacterRoot(transform);
+
+        var buffApplier = GetComponent<ItemCharacterBuffApplier>();
+        if (buffApplier == null)
+        {
+            // 소비형 버프는 캐릭터 루트에 직접 적용되므로 네트워크 플레이어 경로에서도 항상 보장한다.
+            buffApplier = gameObject.AddComponent<ItemCharacterBuffApplier>();
+        }
+
+        buffApplier.SetRuntimeHost(runtimeHost);
+        buffApplier.SetCharacterRoot(transform);
 
         // 사용/드롭 이벤트를 처리하는 씬 시스템이 같은 런타임 호스트를 바라보도록 맞춘다.
         if (Runner == null || HasInputAuthority)
