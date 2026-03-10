@@ -59,7 +59,8 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            DontDestroyOnLoad(gameObject);
+            var persistentTarget = transform.root != null ? transform.root.gameObject : gameObject;
+            DontDestroyOnLoad(persistentTarget);
             _isPersistentAcrossScenes = true;
         }
 
