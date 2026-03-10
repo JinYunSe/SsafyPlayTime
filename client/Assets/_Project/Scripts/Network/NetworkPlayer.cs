@@ -29,6 +29,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [Networked] private float NetworkedMoveSpeed { get; set; }
     [Networked] private int NetworkedMotorState { get; set; }
 
+    // 스폰 시 확정된 캐릭터 종류(0=Statty, 1=AlG, 2=Fit, 3=Wise).
+    // ? 선택도 스폰 전 onBeforeSpawned에서 실제 배정값으로 기록된다.
+    // 호스트 마이그레이션 캡처 시 roster 수신 여부와 무관하게 실제 외형을 보존하기 위해 사용한다.
+    [Networked] public int CharacterTypeIndex { get; set; } = -1;
+
     // 관절 회전값 네트워크 배열
     [Networked, Capacity(15)]
     public NetworkArray<Quaternion> BoneRotations { get; }
