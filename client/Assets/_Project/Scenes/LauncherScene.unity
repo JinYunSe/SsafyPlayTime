@@ -1378,6 +1378,8 @@ MonoBehaviour:
   leaveRoomButton: {fileID: 1877379251}
   startGameButton: {fileID: 2100001054}
   gameplaySceneName: GameScene
+  gamePanel: {fileID: 0}
+  leaveGameButton: {fileID: 0}
   characterPreview: {fileID: 0}
   statusRefreshingRooms: "\uBC29 \uBAA9\uB85D\uC744 \uC0C8\uB85C\uACE0\uCE68 \uC911\uC785\uB2C8\uB2E4..."
   statusNetworkLobbyFailed: "\uB124\uD2B8\uC6CC\uD06C \uB85C\uBE44 \uC5F0\uACB0\uC5D0
