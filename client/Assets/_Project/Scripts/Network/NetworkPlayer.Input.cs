@@ -6,6 +6,7 @@ public sealed partial class NetworkPlayer
     private void Update()
     {
         ApplyReplicatedHeldItemPresentation();
+        ApplyReplicatedWorldItemEffects();
 
         if (Object != null && Object.IsValid && !HasInputAuthority)
             return;
@@ -119,8 +120,11 @@ public sealed partial class NetworkPlayer
             return;
 
         rigidbody3D.position = Vector3.zero;
-        rigidbody3D.velocity = Vector3.zero;
-        rigidbody3D.angularVelocity = Vector3.zero;
+        if (rigidbody3D != null && !rigidbody3D.isKinematic)
+        {
+            rigidbody3D.velocity = Vector3.zero;
+            rigidbody3D.angularVelocity = Vector3.zero;
+        }
         ForceRecover();
     }
 }

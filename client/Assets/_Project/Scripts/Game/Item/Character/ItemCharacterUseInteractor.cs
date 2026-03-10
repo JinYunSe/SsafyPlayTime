@@ -123,6 +123,12 @@ namespace SSAFYPlayTime.Gameplay.Items
             return true;
         }
 
+        public Vector3 GetTargetPosition()
+        {
+            ResolveReferences();
+            return ResolveTargetPosition();
+        }
+
         private Vector3 ResolveTargetPosition()
         {
             var root = ownerRoot != null ? ownerRoot : transform;

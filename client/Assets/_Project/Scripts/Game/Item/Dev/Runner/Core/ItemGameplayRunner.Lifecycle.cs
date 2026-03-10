@@ -93,6 +93,12 @@ namespace SSAFYPlayTime.Gameplay.Items
         // 입력 처리 전 런타임이 준비되어 있는지 확인한다.
         public void SetRuntimeHost(ItemRuntimeHost runtimeHost)
         {
+            if (!ShouldRunInCurrentScene())
+            {
+                enabled = false;
+                return;
+            }
+
             if (runtimeHost == null || itemRuntimeHost == runtimeHost)
             {
                 return;
