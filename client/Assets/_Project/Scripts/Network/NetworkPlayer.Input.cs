@@ -5,6 +5,8 @@ public sealed partial class NetworkPlayer
 {
     private void Update()
     {
+        ApplyReplicatedHeldItemPresentation();
+
         if (Object != null && Object.IsValid && !HasInputAuthority)
             return;
 

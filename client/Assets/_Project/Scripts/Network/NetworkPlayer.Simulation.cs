@@ -22,6 +22,7 @@ public sealed partial class NetworkPlayer
         SynchronizeMotorPresentation();
         UpdateActiveRagdollJoints();
         ProcessInteractions(input);
+        SyncHeldItemNetworkState();
     }
 
     public void ApplyStunDamage(float stunDamage, float bodyPartMultiplier, float attackerVelocity, float impulseMagnitude)

@@ -59,6 +59,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private bool _isGrounded;
     private HandGrabHandler[] _handGrabHandlers;
     private ItemRuntimeHost _itemRuntimeHost;
+    private ItemFieldInteractionService _itemFieldInteractionService;
+    private ItemFieldPickupInteractor _itemPickupInteractor;
     private ItemCharacterUseInteractor _itemUseInteractor;
     private ItemCharacterHeldItemPresenter _heldItemPresenter;
 
@@ -169,6 +171,26 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             }
         }
 
+        _itemFieldInteractionService = GetComponent<ItemFieldInteractionService>();
+        if (_itemFieldInteractionService == null)
+        {
+            _itemFieldInteractionService = gameObject.AddComponent<ItemFieldInteractionService>();
+        }
+
+        _itemFieldInteractionService.SetRuntimeHost(runtimeHost);
+        _itemFieldInteractionService.SetOwnerTransform(transform);
+
+        _itemPickupInteractor = GetComponent<ItemFieldPickupInteractor>();
+        if (_itemPickupInteractor == null)
+        {
+            _itemPickupInteractor = gameObject.AddComponent<ItemFieldPickupInteractor>();
+        }
+
+        _itemPickupInteractor.SetRuntimeHost(runtimeHost);
+        _itemPickupInteractor.SetInteractorRoot(transform);
+        _itemPickupInteractor.SetPickupKey(KeyCode.None);
+        _itemPickupInteractor.SetUseLegacyInput(false);
+
         _itemUseInteractor = GetComponent<ItemCharacterUseInteractor>();
         if (_itemUseInteractor == null)
         {
@@ -251,12 +273,12 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         if (ownerMatchedHost != null)
             return ownerMatchedHost;
+        if (localHost != null)
+            return localHost;
         if (gameplayRunnerHost != null)
             return gameplayRunnerHost;
         if (fieldDropSpawnerHost != null)
             return fieldDropSpawnerHost;
-        if (localHost != null)
-            return localHost;
 
         return hostCount == 1 ? singleFallback : null;
     }
