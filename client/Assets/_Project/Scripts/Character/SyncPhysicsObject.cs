@@ -52,6 +52,11 @@ public class SyncPhysicsObject : MonoBehaviour
         ConfigurableJointExtensions.SetTargetRotationLocal(joint, animatedRigidbody3D.transform.localRotation, startLocalRotation);
     }
 
+    public void SetSyncAnimationEnabled(bool enabled)
+    {
+        syncAnimation = enabled;
+    }
+
     // [Phase 2] 관절 스프링을 거의 0으로 만들어
     // 물리 시뮬레이션에 의해 흐느적거리는 완전 래그돌 상태로 전환한다.
     // 타격을 받아 기절할 때 호출된다.
