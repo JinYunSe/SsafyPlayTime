@@ -1,0 +1,125 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &355174558251487902
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 8365716900488386750}
+  - component: {fileID: 8915738719840419371}
+  - component: {fileID: 8726332579967769802}
+  m_Layer: 0
+  m_Name: ItemSceneBootstrap
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &8365716900488386750
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 355174558251487902}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &8915738719840419371
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 355174558251487902}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f6261c14d87a6614faf299a1e5ada4b8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  itemGameplayRunner: {fileID: 0}
+  enableRightClickPickup: 1
+  pickupKey: 324
+  bindRetryIntervalSec: 0.5
+  bindTimeoutSec: 15
+  enableDebugLog: 0
+--- !u!114 &8726332579967769802
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 355174558251487902}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a869dd70f1e4e00a6a8f037a49a9e23, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  itemRuntimeHost: {fileID: 0}
+  targetRoot: {fileID: 0}
+  runOnlyInItemScene: 1
+  enableLocalDebugController: 1
+  allowLocalDebugControllerForNetworkPlayer: 0
+  enableTemporaryRightClickPickup: 1
+  temporaryPickupKey: 324
+  resetRuntimeStateOnSpace: 1
+  localResetKey: 114
+  localMoveSpeed: 6
+  localTurnLerp: 12
+  localDebugDummyName: PrototypeHitDummy
+  localDebugDummyForwardOffset: 7
+  localDebugDummyHeight: 1
+  localCameraPivotHeight: 1.4
+  localCameraMouseSensitivity: 3
+  localCameraZoomSpeed: 2
+  localCameraMinPitch: -20
+  localCameraMaxPitch: 70
+  localCameraDefaultPitch: 20
+  localCameraMinDistance: 2
+  localCameraMaxDistance: 10
+  localCameraDefaultDistance: 5
+  enableRuntimePresentation: 1
+  disableRuntimeAudioOutput: 1
+  soundAssetTableRelativePath: _Project/Data/SoundAssetTable.csv
+  vfxAssetTableRelativePath: _Project/Data/VfxAssetTable.csv
+  defaultSfxVolume: 1
+  blackholeThrowSpeed: 8
+  blackholeThrowArc: 0.35
+  blackholePullStrengthMultiplier: 2.25
+  blackholeExpandSpeedMultiplier: 1.5
+  blackholePlayerPullMultiplier: 1.5
+  blackholeItemPullMultiplier: 1.5
+  blackholePlayerEscapeDamping: 0.2
+  blackholeEffectPrefabAssetPath: Assets/Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple.prefab
+  blackholeEffectScale: 0.7
+  blackholeOuterLayerColor: {r: 0.08, g: 0.02, b: 0.14, a: 0.28}
+  blackholeOuterLayerRimColor: {r: 0.52, g: 0.3, b: 0.82, a: 0.45}
+  enableBlackholeTargetOutline: 1
+  blackholeTargetOutlineColor: {r: 0.72, g: 0.56, b: 1, a: 0.9}
+  blackholeTargetOutlineScaleMultiplier: 1.045
+  physicsMask:
+    serializedVersion: 2
+    m_Bits: 119
+  applyFlamethrowerDamageToDummy: 1
+  applyFlamethrowerPushForce: 1
+  flamethrowerDamageRangeMultiplier: 0.5
+  flamethrowerEffectPrefabAssetPath: Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile
+    7 fire.prefab
+  flamethrowerEffectScale: 1
+  satelliteProjectilePrefabAssetPath: Assets/Polygon Arsenal/Prefabs/Combat/Missiles/Sci-Fi/Antimatter/AntimatterMissileBlue.prefab
+  satelliteBeamChargeupPrefabAssetPath: Assets/Polygon Arsenal/Prefabs/Interactive/BeamUp/Chargeup/BeamupChargeupBlue.prefab
+  satelliteBeamCloudPrefabAssetPath: Assets/Polygon Arsenal/Prefabs/Interactive/BeamUp/Cloud/BeamupCloudBlue.prefab
+  satelliteBeamCylinderPrefabAssetPath: Assets/Polygon Arsenal/Prefabs/Interactive/BeamUp/Cylinder/BeamupCylinderBlue.prefab
+  satelliteProjectileVisualScale: 1
+  satelliteBeamChargeupScale: 1
+  satelliteBeamCloudScale: 1
+  satelliteBeamCylinderScale: 1
+  enableStatusLog: 1
