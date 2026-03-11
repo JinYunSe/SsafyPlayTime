@@ -1956,7 +1956,6 @@ namespace SSAFYPlayTime
         private bool TryCreateRunner(out NetworkRunner runner)
         {
             _runnerObject = new GameObject("LobbyNetworkRunner");
-            _runnerObject.transform.SetParent(transform, false);
             runner = _runnerObject.AddComponent<NetworkRunner>();
             if (runner == null)
             {
