@@ -2,7 +2,7 @@
 VFX_ITEM_GROWTH,Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile 13 star.prefab,true,2,1.5,Self,1.0,true,커짐 버프 이펙트
 VFX_ITEM_SHRINK,Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile 8 triangle.prefab,true,2,1.5,Self,1.0,true,작아짐 버프 이펙트
 VFX_ITEM_SUPERARMOR,Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile 9 thunder.prefab,true,2,3.0,Self,1.0,true,슈퍼아머 이펙트
-VFX_ITEM_FLAME,Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile 7 fire.prefab,true,4,5.0,Muzzle,1.0,true,화염 분사 이펙트
+VFX_ITEM_FLAME,Assets/Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky.prefab,true,4,5.0,Muzzle,1.0,true,화염 분사 이펙트
 VFX_ITEM_INVIS,Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile 4 water.prefab,true,2,8.0,Self,1.0,true,투명화 이펙트
 VFX_ITEM_HIT,Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile 11 bullets.prefab,true,6,0.8,Impact,1.0,true,타격 히트 이펙트
 VFX_ITEM_SATELLITE,Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile 3 torpedo.prefab,true,2,2.0,World,1.0,true,위성 폭격 경고/타격 이펙트

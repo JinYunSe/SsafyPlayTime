@@ -31,7 +31,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.45, y: 0.45, z: 0.45}
+  m_LocalScale: {x: 0.2, y: 0.2, z: 0.2}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 5000752715803762065}
@@ -136,7 +136,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   shellAlpha: 0.4
-  effectLocalScale: {x: 0.7, y: 0.7, z: 0.7}
+  effectLocalScale: {x: 0.6, y: 0.6, z: 0.6}
 --- !u!1001 &478213741743302759
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -145,6 +145,66 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 6978308569488861694}
     m_Modifications:
+    - target: {fileID: 4686379108935336100, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.size
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4686379108935336100, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 4686379108935336100, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.data[1]
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 4687703638559184048, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.size
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4687703638559184048, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 2100000, guid: 6ccdc8326c83d48ea962619d0f6626e6, type: 2}
+    - target: {fileID: 4687703638559184048, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.data[1]
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 4687850901955369162, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.size
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4687850901955369162, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 4687850901955369162, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.data[1]
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 4687936959075061660, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.size
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4687936959075061660, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 4687936959075061660, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.data[1]
+      value: 
+      objectReference: {fileID: 0}
     - target: {fileID: 4883250842768799222, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_LocalScale.x
@@ -214,6 +274,31 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Name
       value: Item_BlackholeFx
+      objectReference: {fileID: 0}
+    - target: {fileID: 5908527952244329289, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.size
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 5908527952244329289, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 5908527952244329289, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.data[1]
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 5908527953393908627, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 5908527953393908627, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.data[1]
+      value: 
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
