@@ -46,6 +46,10 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private bool watermelonSwordUseMaxOnPrimaryAxis;
         [SerializeField] private bool watermelonSwordFlipGripDirection;
         [SerializeField] private Vector3 watermelonSwordGripFineTune = new Vector3(0f, 0.02f, 0f);
+        [SerializeField] private bool useDefaultFlamethrowerPose = true;
+        [SerializeField] private Vector3 flamethrowerLocalPositionOffset = new Vector3(0.05f, 0.05f, 0.05f);
+        [SerializeField] private Vector3 flamethrowerLocalEulerOffset = new Vector3(-90f, -90f, 90f);
+        [SerializeField] private Vector3 flamethrowerLocalScale = Vector3.one * 0.35f;
 
         [Header("디버그")]
         [SerializeField] private bool enableDebugLog;
@@ -196,6 +200,14 @@ namespace SSAFYPlayTime.Gameplay.Items
                 // 역수로 보이지 않도록 기본 오일러에 보정 회전을 더한다.
                 euler = watermelonSwordLocalEulerOffset + watermelonSwordAdditionalEulerOffset;
                 scale = watermelonSwordLocalScale * Mathf.Max(0.01f, watermelonSwordHeldScaleMultiplier);
+            }
+            else if (useDefaultFlamethrowerPose &&
+                     string.Equals(heldItemId, ItemIds.Flamethrower, StringComparison.Ordinal))
+            {
+                // 한국어: 화염방사기는 테스트 씬 장착값을 기본 손 위치 보정으로 사용한다.
+                position = flamethrowerLocalPositionOffset;
+                euler = flamethrowerLocalEulerOffset;
+                scale = flamethrowerLocalScale;
             }
 
             if (watermelonSwordAutoGripSnap &&

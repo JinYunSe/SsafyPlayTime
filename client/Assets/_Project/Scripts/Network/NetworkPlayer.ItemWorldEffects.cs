@@ -10,7 +10,10 @@ public sealed partial class NetworkPlayer
     private const string ReplicatedSatelliteVisualName = "Item_SatelliteStrike_Replicated";
     private const string ReplicatedSatelliteChargeName = "Item_SatelliteStrike_Charge";
     private const string ReplicatedSatelliteBeamName = "Item_SatelliteStrike_Beam";
+    private const string ReplicatedFlamethrowerFxName = "Item_FlamethrowerFx_Replicated";
     private const string BlackholeEffectResourcePath = "Effect_02_BlackHole";
+    private const string FlamethrowerEffectAssetPath = "Assets/Resources/Hovl Studio/Toon projectiles/Prefabs/Projectile 7 fire.prefab";
+    private const string FlamethrowerEffectResourcePath = "Hovl Studio/Toon projectiles/Prefabs/Projectile 7 fire";
 
     [Header("Item World Effects")]
     [SerializeField] private LayerMask itemWorldEffectMask = ~0;
@@ -25,6 +28,9 @@ public sealed partial class NetworkPlayer
     [SerializeField] private float blackholePlayerEscapeDamping = 0.2f;
     [SerializeField] private float satelliteProjectileTravelSec = 0.35f;
     [SerializeField] private float satelliteBeamHeight = 24f;
+    [SerializeField] private float flamethrowerVisualForwardOffset = 0.7f;
+    [SerializeField] private float flamethrowerVisualHeightOffset = 1.2f;
+    [SerializeField] private float flamethrowerVisualScale = 1f;
     [SerializeField] private bool enableItemWorldEffectLog;
 
     private readonly Collider[] _replicatedBlackholeOverlapBuffer = new Collider[256];
@@ -36,9 +42,14 @@ public sealed partial class NetworkPlayer
     private ItemRuntimeHost _itemWorldEffectBoundHost;
     private int _lastAppliedBlackholeSeq;
     private int _lastAppliedSatelliteStrikeSeq;
+    private int _lastAppliedFlamethrowerTickSeq;
+    private int _lastAppliedFlamethrowerStopSeq;
     private Coroutine _activeReplicatedBlackholeRoutine;
     private Coroutine _activeReplicatedSatelliteRoutine;
     private GameObject _blackholeEffectPrefabCache;
+    private GameObject _flamethrowerEffectPrefabCache;
+    private GameObject _replicatedFlamethrowerFxRoot;
+    private ParticleSystem[] _replicatedFlamethrowerParticles = System.Array.Empty<ParticleSystem>();
 
     [Networked] private int NetworkedBlackholeSeq { get; set; }
     [Networked] private Vector3 NetworkedBlackholeCenter { get; set; }
@@ -54,6 +65,13 @@ public sealed partial class NetworkPlayer
     [Networked] private float NetworkedSatelliteStrikeForce { get; set; }
     [Networked] private float NetworkedSatelliteStrikeBaseDamage { get; set; }
     [Networked] private float NetworkedSatelliteStrikeStunDamage { get; set; }
+    [Networked] private NetworkBool NetworkedFlamethrowerActive { get; set; }
+    [Networked] private int NetworkedFlamethrowerTickSeq { get; set; }
+    [Networked] private int NetworkedFlamethrowerStopSeq { get; set; }
+    [Networked] private Vector3 NetworkedFlamethrowerOrigin { get; set; }
+    [Networked] private Vector3 NetworkedFlamethrowerForward { get; set; }
+    [Networked] private float NetworkedFlamethrowerRange { get; set; }
+    [Networked] private float NetworkedFlamethrowerRadius { get; set; }
 
     private void OnDisable()
     {
@@ -83,6 +101,9 @@ public sealed partial class NetworkPlayer
         _itemWorldEffectBoundHost = _itemRuntimeHost;
         _itemWorldEffectBoundHost.BlackholeRequested += HandleBlackholeRequested;
         _itemWorldEffectBoundHost.SatelliteStrikeRequested += HandleSatelliteStrikeRequested;
+        _itemWorldEffectBoundHost.FlamethrowerStarted += HandleFlamethrowerStarted;
+        _itemWorldEffectBoundHost.FlamethrowerTicked += HandleFlamethrowerTicked;
+        _itemWorldEffectBoundHost.FlamethrowerStopped += HandleFlamethrowerStopped;
         _itemWorldEffectEventsBound = true;
     }
 
@@ -97,6 +118,9 @@ public sealed partial class NetworkPlayer
 
         _itemWorldEffectBoundHost.BlackholeRequested -= HandleBlackholeRequested;
         _itemWorldEffectBoundHost.SatelliteStrikeRequested -= HandleSatelliteStrikeRequested;
+        _itemWorldEffectBoundHost.FlamethrowerStarted -= HandleFlamethrowerStarted;
+        _itemWorldEffectBoundHost.FlamethrowerTicked -= HandleFlamethrowerTicked;
+        _itemWorldEffectBoundHost.FlamethrowerStopped -= HandleFlamethrowerStopped;
         _itemWorldEffectBoundHost = null;
         _itemWorldEffectEventsBound = false;
     }
@@ -145,6 +169,56 @@ public sealed partial class NetworkPlayer
         StartReplicatedSatelliteStrike(request, applyGameplay: true);
     }
 
+    private void HandleFlamethrowerStarted(string itemId, float endAtSec)
+    {
+        if (!CanWriteItemWorldEffectState())
+        {
+            return;
+        }
+
+        NetworkedFlamethrowerActive = true;
+        if (!HasInputAuthority)
+        {
+            EnsureReplicatedFlamethrowerVisual();
+            PlayReplicatedFlamethrowerParticles();
+        }
+    }
+
+    private void HandleFlamethrowerTicked(FlamethrowerTickRequest request)
+    {
+        if (!CanWriteItemWorldEffectState())
+        {
+            return;
+        }
+
+        NetworkedFlamethrowerActive = true;
+        NetworkedFlamethrowerOrigin = request.Origin;
+        NetworkedFlamethrowerForward = request.Forward;
+        NetworkedFlamethrowerRange = request.Range;
+        NetworkedFlamethrowerRadius = request.Radius;
+        NetworkedFlamethrowerTickSeq++;
+
+        if (!HasInputAuthority)
+        {
+            ApplyReplicatedFlamethrowerTick(request.Origin, request.Forward, request.Range, request.Radius);
+        }
+    }
+
+    private void HandleFlamethrowerStopped(string itemId)
+    {
+        if (!CanWriteItemWorldEffectState())
+        {
+            return;
+        }
+
+        NetworkedFlamethrowerActive = false;
+        NetworkedFlamethrowerStopSeq++;
+        if (!HasInputAuthority)
+        {
+            StopReplicatedFlamethrowerVisual();
+        }
+    }
+
     private void ApplyReplicatedWorldItemEffects()
     {
         if (Object == null || !Object.IsValid || HasStateAuthority)
@@ -181,6 +255,22 @@ public sealed partial class NetworkPlayer
                     NetworkedSatelliteStrikeStunDamage),
                 applyGameplay: false);
         }
+
+        if (NetworkedFlamethrowerActive && _lastAppliedFlamethrowerTickSeq != NetworkedFlamethrowerTickSeq)
+        {
+            _lastAppliedFlamethrowerTickSeq = NetworkedFlamethrowerTickSeq;
+            ApplyReplicatedFlamethrowerTick(
+                NetworkedFlamethrowerOrigin,
+                NetworkedFlamethrowerForward,
+                NetworkedFlamethrowerRange,
+                NetworkedFlamethrowerRadius);
+        }
+
+        if (!NetworkedFlamethrowerActive && _lastAppliedFlamethrowerStopSeq != NetworkedFlamethrowerStopSeq)
+        {
+            _lastAppliedFlamethrowerStopSeq = NetworkedFlamethrowerStopSeq;
+            StopReplicatedFlamethrowerVisual();
+        }
     }
 
     private void StartReplicatedBlackhole(BlackholeSkillRequest request, bool applyGameplay)
@@ -216,6 +306,8 @@ public sealed partial class NetworkPlayer
             StopCoroutine(_activeReplicatedSatelliteRoutine);
             _activeReplicatedSatelliteRoutine = null;
         }
+
+        StopReplicatedFlamethrowerVisual();
     }
 
     private IEnumerator CoReplicatedBlackhole(BlackholeSkillRequest request, bool applyGameplay)
@@ -508,6 +600,198 @@ public sealed partial class NetworkPlayer
         return requestedCenter + Vector3.up * 0.02f;
     }
 
+    private void UpdateReplicatedFlamethrowerVisualFollow()
+    {
+        if (Object == null || !Object.IsValid || HasInputAuthority || !NetworkedFlamethrowerActive || _replicatedFlamethrowerFxRoot == null)
+        {
+            return;
+        }
+
+        var forward = NetworkedFlamethrowerForward.sqrMagnitude > 0.0001f
+            ? NetworkedFlamethrowerForward.normalized
+            : transform.forward;
+        var origin = transform.position + Vector3.up * flamethrowerVisualHeightOffset + forward * flamethrowerVisualForwardOffset;
+        ApplyReplicatedFlamethrowerTick(origin, forward, NetworkedFlamethrowerRange, NetworkedFlamethrowerRadius);
+    }
+
+    private void ApplyReplicatedFlamethrowerTick(Vector3 origin, Vector3 forward, float range, float radius)
+    {
+        if (HasInputAuthority)
+        {
+            return;
+        }
+
+        EnsureReplicatedFlamethrowerVisual();
+        if (_replicatedFlamethrowerFxRoot == null)
+        {
+            return;
+        }
+
+        var safeForward = forward.sqrMagnitude > 0.0001f ? forward.normalized : transform.forward;
+        _replicatedFlamethrowerFxRoot.transform.position = origin;
+        _replicatedFlamethrowerFxRoot.transform.rotation = Quaternion.LookRotation(safeForward, Vector3.up);
+        _replicatedFlamethrowerFxRoot.transform.localScale = Vector3.one * Mathf.Max(0.01f, flamethrowerVisualScale);
+        TuneReplicatedFlamethrowerParticles(range, radius);
+        PlayReplicatedFlamethrowerParticles();
+    }
+
+    private void EnsureReplicatedFlamethrowerVisual()
+    {
+        if (_replicatedFlamethrowerFxRoot != null)
+        {
+            return;
+        }
+
+        var prefab = TryLoadReplicatedFlamethrowerEffectPrefab();
+        if (prefab != null)
+        {
+            _replicatedFlamethrowerFxRoot = Instantiate(prefab, transform);
+            _replicatedFlamethrowerFxRoot.name = ReplicatedFlamethrowerFxName;
+            _replicatedFlamethrowerFxRoot.transform.localPosition = Vector3.zero;
+            _replicatedFlamethrowerFxRoot.transform.localRotation = Quaternion.identity;
+            _replicatedFlamethrowerFxRoot.transform.localScale = Vector3.one * Mathf.Max(0.01f, flamethrowerVisualScale);
+            DisableColliders(_replicatedFlamethrowerFxRoot);
+            DisableBehaviours(_replicatedFlamethrowerFxRoot);
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_replicatedFlamethrowerFxRoot);
+            _replicatedFlamethrowerParticles = _replicatedFlamethrowerFxRoot.GetComponentsInChildren<ParticleSystem>(true);
+            ConfigureReplicatedFlamethrowerParticles();
+            return;
+        }
+
+        var fx = new GameObject(ReplicatedFlamethrowerFxName);
+        fx.transform.SetParent(transform, false);
+        var particle = fx.AddComponent<ParticleSystem>();
+        _replicatedFlamethrowerFxRoot = fx;
+        _replicatedFlamethrowerParticles = new[] { particle };
+
+        var main = particle.main;
+        main.loop = true;
+        main.playOnAwake = false;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(0.18f, 0.32f);
+        main.startSpeed = new ParticleSystem.MinMaxCurve(6f, 9f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.18f);
+        main.startColor = new ParticleSystem.MinMaxGradient(
+            new Color(1f, 0.9f, 0.4f, 0.9f),
+            new Color(1f, 0.35f, 0.1f, 0.55f));
+
+        var emission = particle.emission;
+        emission.rateOverTime = 200f;
+
+        var shape = particle.shape;
+        shape.shapeType = ParticleSystemShapeType.Cone;
+        shape.angle = 24f;
+        shape.radius = 0.12f;
+        shape.length = 0.6f;
+        shape.randomDirectionAmount = 0.2f;
+    }
+
+    private GameObject TryLoadReplicatedFlamethrowerEffectPrefab()
+    {
+        if (_flamethrowerEffectPrefabCache != null)
+        {
+            return _flamethrowerEffectPrefabCache;
+        }
+
+        _flamethrowerEffectPrefabCache = _replicatedEffectPrefabResolver.Resolve(FlamethrowerEffectAssetPath);
+        if (_flamethrowerEffectPrefabCache != null)
+        {
+            return _flamethrowerEffectPrefabCache;
+        }
+
+        _flamethrowerEffectPrefabCache = Resources.Load<GameObject>(FlamethrowerEffectResourcePath);
+        return _flamethrowerEffectPrefabCache;
+    }
+
+    private void ConfigureReplicatedFlamethrowerParticles()
+    {
+        if (_replicatedFlamethrowerParticles == null || _replicatedFlamethrowerParticles.Length == 0)
+        {
+            return;
+        }
+
+        for (var i = 0; i < _replicatedFlamethrowerParticles.Length; i++)
+        {
+            var particle = _replicatedFlamethrowerParticles[i];
+            if (particle == null)
+            {
+                continue;
+            }
+
+            var main = particle.main;
+            main.loop = true;
+            main.playOnAwake = false;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+        }
+    }
+
+    private void TuneReplicatedFlamethrowerParticles(float range, float radius)
+    {
+        if (_replicatedFlamethrowerParticles == null || _replicatedFlamethrowerParticles.Length == 0)
+        {
+            return;
+        }
+
+        var safeRange = Mathf.Max(0.5f, range);
+        var safeRadius = Mathf.Max(0.1f, radius);
+        var speed = Mathf.Max(4f, safeRange * 2.2f);
+        var lifetime = Mathf.Max(0.08f, safeRange / Mathf.Max(0.01f, speed));
+        var minSize = Mathf.Max(0.08f, safeRadius * 0.35f);
+        var maxSize = Mathf.Max(0.16f, safeRadius * 0.65f);
+
+        for (var i = 0; i < _replicatedFlamethrowerParticles.Length; i++)
+        {
+            var particle = _replicatedFlamethrowerParticles[i];
+            if (particle == null)
+            {
+                continue;
+            }
+
+            var main = particle.main;
+            main.startSpeed = new ParticleSystem.MinMaxCurve(speed * 0.75f, speed);
+            main.startLifetime = new ParticleSystem.MinMaxCurve(lifetime * 0.8f, lifetime * 1.2f);
+            main.startSize = new ParticleSystem.MinMaxCurve(minSize, maxSize);
+
+            var shape = particle.shape;
+            if (shape.enabled && shape.shapeType == ParticleSystemShapeType.Cone)
+            {
+                shape.length = Mathf.Max(0.1f, safeRange * 0.2f);
+            }
+        }
+    }
+
+    private void PlayReplicatedFlamethrowerParticles()
+    {
+        if (_replicatedFlamethrowerParticles == null)
+        {
+            return;
+        }
+
+        for (var i = 0; i < _replicatedFlamethrowerParticles.Length; i++)
+        {
+            var particle = _replicatedFlamethrowerParticles[i];
+            if (particle != null && !particle.isPlaying)
+            {
+                particle.Play(true);
+            }
+        }
+    }
+
+    private void StopReplicatedFlamethrowerVisual()
+    {
+        if (_replicatedFlamethrowerParticles != null)
+        {
+            for (var i = 0; i < _replicatedFlamethrowerParticles.Length; i++)
+            {
+                var particle = _replicatedFlamethrowerParticles[i];
+                if (particle != null)
+                {
+                    particle.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                }
+            }
+        }
+    }
+
     private void TryAttachReplicatedBlackholeFx(Transform parent)
     {
         if (parent == null || parent.Find(ReplicatedBlackholeFxName) != null)
@@ -540,6 +824,38 @@ public sealed partial class NetworkPlayer
         for (var i = 0; i < colliders.Length; i++)
         {
             colliders[i].enabled = false;
+        }
+    }
+
+    private static void DisableColliders(GameObject root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        var colliders = root.GetComponentsInChildren<Collider>(true);
+        for (var i = 0; i < colliders.Length; i++)
+        {
+            colliders[i].enabled = false;
+        }
+    }
+
+    private static void DisableBehaviours(GameObject root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        var behaviours = root.GetComponents<MonoBehaviour>();
+        for (var i = 0; i < behaviours.Length; i++)
+        {
+            var behaviour = behaviours[i];
+            if (behaviour != null)
+            {
+                behaviour.enabled = false;
+            }
         }
     }
 
