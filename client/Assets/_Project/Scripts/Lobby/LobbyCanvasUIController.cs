@@ -90,15 +90,12 @@ namespace SSAFYPlayTime
         [Header("Nickname")]
         [SerializeField] private TMP_InputField nicknameInput;
         [SerializeField] private Button nicknameConfirmButton;
-        [SerializeField] private TMP_Text nicknameValidationText;
         [SerializeField] private TMP_Text mainPanelNicknameText;
         [SerializeField] private TMP_InputField editNicknameInput;
 
         [Header("Lobby")]
         [SerializeField] private TMP_Text lobbyHeaderText;
-        [SerializeField] private TMP_Text lobbyStatusText;
         [SerializeField] private Button createRoomOpenButton;
-        [SerializeField] private Button refreshRoomsButton;
         [SerializeField] private Transform roomListContent;
         [SerializeField] private GameObject roomItemTemplate;
 
@@ -286,6 +283,11 @@ namespace SSAFYPlayTime
         // 모든 UI 참조는 Inspector에서 SerializeField로 직접 할당해야 한다.
         private void Start()
         {
+            if (!ValidateInitialReferences())
+            {
+                enabled = false;
+                return;
+            }
             EnsurePersistentAcrossScenes();
             EnsureLocalClientId();
             RuntimeLogOverlay.EnsureInstance();
@@ -320,6 +322,66 @@ namespace SSAFYPlayTime
             }
         }
 
+        private bool ValidateInitialReferences()
+        {
+            var references = new Dictionary<string, UnityEngine.Object>
+            {
+                { nameof(nicknamePanel), nicknamePanel },
+                { nameof(lobbyPanel), lobbyPanel },
+                { nameof(roomPanel), roomPanel },
+                { nameof(createRoomModal), createRoomModal },
+                { nameof(passwordModal), passwordModal },
+                { nameof(mainPanel), mainPanel },
+                { nameof(nicknameInput), nicknameInput },
+                { nameof(nicknameConfirmButton), nicknameConfirmButton },
+                { nameof(mainPanelNicknameText), mainPanelNicknameText },
+                { nameof(lobbyHeaderText), lobbyHeaderText },
+                { nameof(createRoomOpenButton), createRoomOpenButton },
+                { nameof(roomListContent), roomListContent },
+                { nameof(roomItemTemplate), roomItemTemplate },
+                { nameof(createRoomNameInput), createRoomNameInput },
+                { nameof(createPrivateToggle), createPrivateToggle },
+                { nameof(createPasswordInput), createPasswordInput },
+                { nameof(createValidationText), createValidationText },
+                { nameof(createConfirmButton), createConfirmButton },
+                { nameof(createCancelButton), createCancelButton },
+                { nameof(joinPasswordInput), joinPasswordInput },
+                { nameof(passwordValidationText), passwordValidationText },
+                { nameof(passwordJoinButton), passwordJoinButton },
+                { nameof(passwordCancelButton), passwordCancelButton },
+                { nameof(roomTitleText), roomTitleText },
+                { nameof(playerOneText), playerOneText },
+                { nameof(playerTwoText), playerTwoText },
+                { nameof(playerThreeText), playerThreeText },
+                { nameof(playerFourText), playerFourText },
+                { nameof(stattyCharacterRoot), stattyCharacterRoot },
+                { nameof(alGCharacterRoot), alGCharacterRoot },
+                { nameof(fitCharacterRoot), fitCharacterRoot },
+                { nameof(wiseCharacterRoot), wiseCharacterRoot },
+                { nameof(characterSelectionPanel), characterSelectionPanel },
+                { nameof(selectStattyCharacterButton), selectStattyCharacterButton },
+                { nameof(selectAlGCharacterButton), selectAlGCharacterButton },
+                { nameof(selectFitCharacterButton), selectFitCharacterButton },
+                { nameof(selectWiseCharacterButton), selectWiseCharacterButton },
+                { nameof(selectRandomCharacterButton), selectRandomCharacterButton },
+                { nameof(characterRuntimeRoot), characterRuntimeRoot },
+                { nameof(leaveRoomButton), leaveRoomButton },
+            };
+
+            var missing = references
+                .Where(kvp => kvp.Value == null)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            if (missing.Any())
+            {
+                Debug.LogError($"[LobbyCanvasUIController] The following required references are not assigned in the Inspector on GameObject '{gameObject.name}':\n- {string.Join("\n- ", missing)}\nPlease assign them in the Unity Editor and restart play mode.");
+                return false;
+            }
+
+            return true;
+        }
+
 
         // 오브젝트 파괴 시 NetworkRunner를 안전하게 종료한다.
         private async void OnDestroy()
@@ -332,7 +394,6 @@ namespace SSAFYPlayTime
         {
             nicknameConfirmButton.onClick.AddListener(OnNicknameConfirmed);
             createRoomOpenButton.onClick.AddListener(OpenCreateRoomModal);
-            refreshRoomsButton.onClick.AddListener(OnRefreshRoomsClicked);
 
             if (nicknameInput != null)
             {
@@ -406,24 +467,7 @@ namespace SSAFYPlayTime
             }
         }
 
-        // 방 목록 새로고침 버튼 클릭 처리. 로비 러너를 재연결하고 방 목록을 갱신한다.
-        private async void OnRefreshRoomsClicked()
-        {
-            if (!_isNicknameConfirmed)
-            {
-                return;
-            }
 
-            SetLobbyStatus(statusRefreshingRooms);
-            if (!await EnsureLobbyRunnerAsync())
-            {
-                SetLobbyStatus(statusNetworkLobbyFailed);
-                return;
-            }
-
-            RefreshRoomList();
-            Debug.Log("[Lobby] Room list refresh completed via lobby reconnect.");
-        }
 
         // 닉네임 확인 버튼 클릭 처리. 유효성 검사 후 로비에 연결하고 방 목록을 표시한다.
         private async void OnNicknameConfirmed()
@@ -432,21 +476,17 @@ namespace SSAFYPlayTime
             entered = SanitizeNameToken(entered);
             if (string.IsNullOrEmpty(entered))
             {
-                SetNicknameValidation(validationEnterNickname);
                 return;
             }
 
             if (!IsWithinNameLengthLimit(entered))
             {
-                SetNicknameValidation(validationNicknameLengthExceeded);
                 return;
             }
 
-            SetNicknameValidation(string.Empty);
 
             if (!await EnsureLobbyRunnerAsync())
             {
-                SetNicknameValidation(statusNetworkLobbyFailed);
                 return;
             }
 
@@ -599,7 +639,6 @@ namespace SSAFYPlayTime
 
             if (roomListContent == null || roomItemTemplate == null)
             {
-                SetLobbyStatus(statusRoomListUiNotBound);
                 return;
             }
 
@@ -616,11 +655,9 @@ namespace SSAFYPlayTime
 
             if (_roomSnapshots.Count == 0)
             {
-                SetLobbyStatus(statusNoRooms);
                 return;
             }
 
-            SetLobbyStatus(statusSelectRoom);
             // 인원이 많은 방을 상단에 표시하고, 인원이 같으면 방 이름 오름차순으로 정렬한다.
             foreach (var room in _roomSnapshots.OrderByDescending(r => r.PlayerCount).ThenBy(r => r.Name))
             {
@@ -656,7 +693,6 @@ namespace SSAFYPlayTime
             var selected = _roomSnapshots.FirstOrDefault(r => string.Equals(r.Name, roomName, StringComparison.Ordinal));
             if (selected == null)
             {
-                SetLobbyStatus(statusRoomNotFound);
                 return;
             }
 
@@ -715,7 +751,6 @@ namespace SSAFYPlayTime
             if (!TryCreateRunner(out var runner))
             {
                 _isProcessing = false;
-                SetLobbyStatus(statusRunnerInitFailed);
                 return;
             }
 
@@ -741,7 +776,6 @@ namespace SSAFYPlayTime
 
             if (!result.Ok)
             {
-                SetLobbyStatus(string.Format(statusRoomJoinFailedFormat, result.ShutdownReason));
                 Debug.LogWarning($"[Lobby] Room join failed: name={room.Name}, reason={result.ShutdownReason}");
                 return;
             }
@@ -762,25 +796,21 @@ namespace SSAFYPlayTime
         {
             if (_runner == null || !_runner.IsRunning)
             {
-                SetLobbyStatus(statusRunnerNotReady);
                 return;
             }
 
             if (!_runner.IsServer)
             {
-                SetLobbyStatus(statusOnlyHostCanStart);
                 return;
             }
 
             if (!_runner.SessionInfo.IsValid)
             {
-                SetLobbyStatus(statusSessionNotReady);
                 return;
             }
 
             if (_runner.SessionInfo.PlayerCount <= 1)
             {
-                SetLobbyStatus(statusNeedTwoPlayers);
                 return;
             }
 
@@ -798,7 +828,6 @@ namespace SSAFYPlayTime
 
             if (string.IsNullOrWhiteSpace(gameplaySceneName))
             {
-                SetLobbyStatus(statusStartRequestedNoScene);
                 Debug.Log("[Lobby] Start requested but gameplaySceneName is empty.");
                 return;
             }
@@ -806,7 +835,6 @@ namespace SSAFYPlayTime
             if (!TryResolveGameplaySceneName(gameplaySceneName, out var resolvedSceneName))
             {
                 var message = $"게임 씬을 찾을 수 없습니다: {gameplaySceneName}";
-                SetLobbyStatus(message);
                 Debug.LogWarning($"[Lobby] {message}. Build Settings에 씬이 포함되어 있는지 확인하세요.");
                 return;
             }
@@ -818,7 +846,6 @@ namespace SSAFYPlayTime
             }
             catch (Exception e)
             {
-                SetLobbyStatus(string.Format(statusStartGameFailedFormat, e.Message));
                 Debug.LogWarning($"[Lobby] Start game failed: {e.Message}");
             }
         }
@@ -1753,7 +1780,6 @@ namespace SSAFYPlayTime
             roomPanel.SetActive(false);
             createRoomModal.SetActive(false);
             passwordModal.SetActive(false);
-            SetNicknameValidation(string.Empty);
             HideAllCharacterSlots();
             RefreshCharacterSelectionUiState();
         }
@@ -1790,14 +1816,9 @@ namespace SSAFYPlayTime
 
             if (_isNicknameConfirmed)
             {
-                SetLobbyStatus(statusRefreshingRooms);
                 if (await EnsureLobbyRunnerAsync())
                 {
                     RefreshRoomList();
-                }
-                else
-                {
-                    SetLobbyStatus(statusNetworkLobbyFailed);
                 }
             }
         }
@@ -1810,10 +1831,6 @@ namespace SSAFYPlayTime
             lobbyPanel.SetActive(false);
             if (mainPanel != null) mainPanel.SetActive(false);
             roomPanel.SetActive(true);
-            if (startGameButton == null && _runner != null && _runner.IsServer)
-            {
-                SetLobbyStatus(statusHostCanStartWithF5);
-            }
 
             // 방 입장 시 캐릭터 선택이 없으면 ? (Random)을 기본값으로 설정한다.
             // 마이그레이션 복귀 등 이미 선택된 경우(_localSelectedCharacterIndex >= 0)에는 유지한다.
@@ -1844,7 +1861,6 @@ namespace SSAFYPlayTime
 
                 if (!TryCreateRunner(out var runner))
                 {
-                    SetLobbyStatus(statusRunnerInitFailed);
                     return false;
                 }
 
@@ -1858,18 +1874,12 @@ namespace SSAFYPlayTime
                         SharedLobbyName,
                         customAppSettings: appSettings);
                     _isInLobby = true;
-                    SetLobbyStatus(string.Format(
-                        statusConnectedFormat,
-                        appSettings.FixedRegion,
-                        appSettings.AppVersion,
-                        SharedLobbyName));
                     Debug.Log($"[Lobby] Connected to custom lobby: region={appSettings.FixedRegion}, version={appSettings.AppVersion}, lobby={SharedLobbyName}");
                     return true;
                 }
                 catch (Exception e)
                 {
                     _isInLobby = false;
-                    SetLobbyStatus(string.Format(statusLobbyConnectFailedFormat, e.Message));
                     Debug.LogWarning($"[Lobby] Lobby connect failed: {e.Message}");
                     await ShutdownRunnerInternalAsync();
                     return false;
@@ -2320,14 +2330,7 @@ namespace SSAFYPlayTime
             UpdateOwnerSessionProperty();
         }
 
-        // 로비 상태 텍스트를 갱신한다.
-        private void SetLobbyStatus(string message)
-        {
-            if (lobbyStatusText != null)
-            {
-                lobbyStatusText.text = message;
-            }
-        }
+
 
         // 방 만들기 모달의 유효성 검사 메시지를 갱신한다.
         private void SetCreateValidation(string message)
@@ -2341,14 +2344,7 @@ namespace SSAFYPlayTime
             }
         }
 
-        // 닉네임 입력 패널의 유효성 검사 메시지를 갱신한다.
-        private void SetNicknameValidation(string message)
-        {
-            if (nicknameValidationText != null)
-            {
-                nicknameValidationText.text = message;
-            }
-        }
+
 
         // 현재 방 목록의 방장 닉네임과 비교해 중복 여부를 반환한다.
         private bool IsNicknameAlreadyUsed(string nickname)

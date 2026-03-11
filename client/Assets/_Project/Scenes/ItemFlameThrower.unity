@@ -387,14 +387,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   maxHp: 100
   currentHp: 0
-  _isBurning: 0
-  _burnTimer: 0
-  _burnDamagePerTick: 0
-  _lastBurnTickTime: 0
-  _timeSinceLastDirectHit: 100
   burnEffectPrefab: {fileID: 1534949854296103914, guid: c4e259058854a5042bd8631af85b465b,
     type: 3}
-  _activeBurnEffect: {fileID: 0}
 --- !u!65 &1254880097
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -519,7 +513,7 @@ PrefabInstance:
     - target: {fileID: 415537193144372740, guid: 6eca31580e4c07c4aba3c9143a9c442a,
         type: 3}
       propertyPath: SortKey
-      value: 3785841601
+      value: 3293802355
       objectReference: {fileID: 0}
     - target: {fileID: 1956676462428397128, guid: 6eca31580e4c07c4aba3c9143a9c442a,
         type: 3}
@@ -633,12 +627,6 @@ MonoBehaviour:
   attackRadius: 1.5
   forceForwardRotation: 1
   forwardRotationOffset: {x: 0, y: -180, z: 0}
-  _currentUsageTime: 0
-  _lastDamageTime: 0
-  _animator: {fileID: 0}
-  _equippedWeapon: {fileID: 0}
-  _equippedEffect: {fileID: 0}
-  _anchorHand: {fileID: 0}
 --- !u!1 &2141730239
 GameObject:
   m_ObjectHideFlags: 0
