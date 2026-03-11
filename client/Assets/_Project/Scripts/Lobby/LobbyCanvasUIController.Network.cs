@@ -520,11 +520,13 @@ namespace SSAFYPlayTime
             }
 
             bool isGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
+            var cameraYaw = Camera.main != null ? Camera.main.transform.eulerAngles.y : 0f;
 
             input.Set(new PlayerNetworkInput
             {
                 Move = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical")),
-                Jump = Input.GetKey(KeyCode.Space),
+                CameraYaw = cameraYaw,
+                Jump = Input.GetKeyDown(KeyCode.Space),
                 Punch = isPunch,
                 Drop = Input.GetKeyDown(KeyCode.F),
                 Throw = Input.GetMouseButtonDown(1),

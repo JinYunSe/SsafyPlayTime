@@ -1,6 +1,7 @@
 using Fusion;
 using SSAFYPlayTime.Character;
 using SSAFYPlayTime.Gameplay.Items;
+using System.Collections.Generic;
 using UnityEngine;
 
 // Fusion NetworkBehaviour 기반의 캐릭터 컨트롤러.
@@ -66,6 +67,12 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private ItemFieldInteractionService _itemFieldInteractionService;
     private ItemCharacterHeldItemPresenter _heldItemPresenter;
     private Transform _animatedVisualRoot;
+    private Camera[] _ownedCamerasCache;
+    private AudioListener[] _ownedListenersCache;
+    private CameraRig[] _ownedCameraRigsCache;
+    private CameraModeController[] _ownedCameraModeControllersCache;
+    private readonly List<Transform> _detachedCameraRoots = new();
+    private bool _cameraHierarchyDetached;
 
     private bool _isActiveRagdoll = true;
     public bool IsActiveRagdoll => _isActiveRagdoll;
@@ -106,6 +113,17 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         InitializeInternal();
     }
 
+    private void Start()
+    {
+        if (Runner == null)
+            ConfigureLocalOwnershipPresentation();
+    }
+
+    private void OnDestroy()
+    {
+        CleanupDetachedCameraRoots();
+    }
+
     public override void Spawned()
     {
         InitializeInternal();
@@ -124,6 +142,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             foreach (var rb in GetComponentsInChildren<Rigidbody>(true))
                 rb.isKinematic = true;
         }
+
+        ConfigureLocalOwnershipPresentation();
     }
 
     private void InitializeInternal()
@@ -150,6 +170,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         ConfigureAnimatedVisualMode();
         EnsureAnimatorBinding();
+        CacheOwnedPresentationComponents();
     }
 
     private void EnsureItemRuntimeIntegration()
@@ -238,6 +259,136 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         if (_itemRuntimeHost != resolved)
             EnsureItemRuntimeIntegration();
+    }
+
+    private void ConfigureLocalOwnershipPresentation()
+    {
+        var isLocalOwner = Runner == null || HasInputAuthority;
+        CacheOwnedPresentationComponents();
+
+        if (isLocalOwner)
+            DetachOwnedCameraHierarchyIfNeeded();
+
+        foreach (var camera in _ownedCamerasCache)
+        {
+            if (camera == null)
+                continue;
+
+            camera.enabled = isLocalOwner;
+
+            if (isLocalOwner)
+                camera.tag = "MainCamera";
+            else if (camera.CompareTag("MainCamera"))
+                camera.tag = "Untagged";
+        }
+
+        foreach (var listener in _ownedListenersCache)
+        {
+            if (listener == null)
+                continue;
+
+            listener.enabled = isLocalOwner;
+        }
+
+        foreach (var cameraRig in _ownedCameraRigsCache)
+        {
+            if (cameraRig == null)
+                continue;
+
+            cameraRig.enabled = isLocalOwner;
+            if (isLocalOwner)
+                cameraRig.SetTarget(transform);
+        }
+
+        foreach (var cameraModeController in _ownedCameraModeControllersCache)
+        {
+            if (cameraModeController == null)
+                continue;
+
+            cameraModeController.enabled = isLocalOwner;
+            if (isLocalOwner)
+                cameraModeController.BindLocalPlayer(gameObject);
+        }
+
+        if (!isLocalOwner)
+            return;
+
+        foreach (var camera in FindObjectsOfType<Camera>(true))
+        {
+            if (camera == null)
+                continue;
+
+            var isOwnedCamera = false;
+            for (var i = 0; i < _ownedCamerasCache.Length; i++)
+            {
+                if (_ownedCamerasCache[i] == camera)
+                {
+                    isOwnedCamera = true;
+                    break;
+                }
+            }
+
+            if (isOwnedCamera)
+                continue;
+
+            if (camera.CompareTag("MainCamera"))
+                camera.tag = "Untagged";
+
+            var listener = camera.GetComponent<AudioListener>();
+            if (listener != null)
+                listener.enabled = false;
+        }
+    }
+
+    private void CacheOwnedPresentationComponents()
+    {
+        _ownedCamerasCache ??= GetComponentsInChildren<Camera>(true);
+        _ownedListenersCache ??= GetComponentsInChildren<AudioListener>(true);
+        _ownedCameraRigsCache ??= GetComponentsInChildren<CameraRig>(true);
+        _ownedCameraModeControllersCache ??= GetComponentsInChildren<CameraModeController>(true);
+    }
+
+    private void DetachOwnedCameraHierarchyIfNeeded()
+    {
+        if (_cameraHierarchyDetached)
+            return;
+
+        var detachedAny = false;
+        var detachedRoots = new HashSet<Transform>();
+
+        foreach (var cameraRig in _ownedCameraRigsCache)
+        {
+            if (cameraRig == null)
+                continue;
+
+            var rigTransform = cameraRig.transform;
+            if (rigTransform == null || rigTransform == transform || !rigTransform.IsChildOf(transform))
+                continue;
+
+            if (!detachedRoots.Add(rigTransform))
+                continue;
+
+            rigTransform.SetParent(null, true);
+            _detachedCameraRoots.Add(rigTransform);
+            detachedAny = true;
+        }
+
+        _cameraHierarchyDetached = detachedAny || _cameraHierarchyDetached;
+    }
+
+    private void CleanupDetachedCameraRoots()
+    {
+        for (var i = 0; i < _detachedCameraRoots.Count; i++)
+        {
+            var root = _detachedCameraRoots[i];
+            if (root == null)
+                continue;
+
+            Destroy(root.gameObject);
+        }
+
+        _detachedCameraRoots.Clear();
+        _cameraHierarchyDetached = false;
     }
 
 }

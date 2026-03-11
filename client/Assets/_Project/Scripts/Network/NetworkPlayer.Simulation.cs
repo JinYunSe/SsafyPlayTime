@@ -104,39 +104,47 @@ public sealed partial class NetworkPlayer
                 Vector3.down * config.extraGravity * Mathf.Max(0.05f, gravityMultiplier),
                 ForceMode.Acceleration);
 
-        var inputMagnitude = input.Move.magnitude;
-        var forwardVelocity = Vector3.Dot(transform.forward, rigidbody3D.velocity);
+        var moveInput = new Vector3(input.Move.x, 0f, input.Move.y);
+        var cameraRelativeMove = Quaternion.Euler(0f, input.CameraYaw, 0f) * moveInput;
+        var inputMagnitude = Mathf.Clamp01(moveInput.magnitude);
+        var moveDirection = cameraRelativeMove.sqrMagnitude > 0.0001f
+            ? cameraRelativeMove.normalized
+            : Vector3.zero;
+        var alignedVelocity = moveDirection == Vector3.zero
+            ? 0f
+            : Vector3.Dot(moveDirection, rigidbody3D.velocity);
 
-        RotateTowardInput(input.Move, inputMagnitude, dt);
-        ApplyMovementForce(inputMagnitude, forwardVelocity, moveSpeedMultiplier);
+        RotateTowardInput(cameraRelativeMove, inputMagnitude, dt);
+        ApplyMovementForce(moveDirection, inputMagnitude, alignedVelocity, moveSpeedMultiplier);
         ApplyJumpIfPossible(input.Jump, jumpMultiplier);
         _stateMachine.Tick(_isGrounded, inputMagnitude, dt, config);
 
-        var normalizedMoveSpeed = Mathf.Abs(forwardVelocity) * 0.4f;
+        var normalizedMoveSpeed = Mathf.Abs(alignedVelocity) * 0.4f;
         SetMotorPresentationState(normalizedMoveSpeed, (int)_stateMachine.CurrentState);
     }
 
-    private void RotateTowardInput(Vector2 moveInput, float inputMagnitude, float dt)
+    private void RotateTowardInput(Vector3 moveDirection, float inputMagnitude, float dt)
     {
-        if (inputMagnitude <= 0.001f)
+        if (inputMagnitude <= 0.001f || moveDirection.sqrMagnitude <= 0.0001f)
             return;
 
-        var desired = Quaternion.LookRotation(new Vector3(moveInput.x, 0f, -moveInput.y), transform.up);
+        var visualDirection = new Vector3(-moveDirection.x, 0f, moveDirection.z);
+        var desired = Quaternion.LookRotation(visualDirection.normalized, transform.up);
         mainJoint.targetRotation = Quaternion.RotateTowards(
             mainJoint.targetRotation,
             desired,
             dt * config.rotateSpeedDeg);
     }
 
-    private void ApplyMovementForce(float inputMagnitude, float forwardVelocity, float moveSpeedMultiplier)
+    private void ApplyMovementForce(Vector3 moveDirection, float inputMagnitude, float alignedVelocity, float moveSpeedMultiplier)
     {
-        if (inputMagnitude <= 0.001f)
+        if (inputMagnitude <= 0.001f || moveDirection == Vector3.zero)
             return;
-        if (Mathf.Abs(forwardVelocity) >= config.maxSpeed * Mathf.Max(0.05f, moveSpeedMultiplier))
+        if (Mathf.Abs(alignedVelocity) >= config.maxSpeed * Mathf.Max(0.05f, moveSpeedMultiplier))
             return;
 
         rigidbody3D.AddForce(
-            transform.forward * inputMagnitude * config.acceleration * Mathf.Max(0.05f, moveSpeedMultiplier),
+            moveDirection * inputMagnitude * config.acceleration * Mathf.Max(0.05f, moveSpeedMultiplier),
             ForceMode.Acceleration);
     }
 
