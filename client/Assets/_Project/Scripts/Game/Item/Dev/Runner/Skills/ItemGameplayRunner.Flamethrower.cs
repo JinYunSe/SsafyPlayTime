@@ -112,6 +112,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
 
                 ConfigureFlamethrowerPrefabForSpray();
+                ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_flamethrowerFxRoot);
                 DisableUnsupportedGrabPassRenderers(_flamethrowerFxRoot);
                 _flamethrowerParticles = _flamethrowerFxRoot.GetComponentsInChildren<ParticleSystem>(true);
                 _flamethrowerParticle = _flamethrowerParticles.Length > 0 ? _flamethrowerParticles[0] : null;

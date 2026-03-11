@@ -5,7 +5,6 @@
  * - 필드 공통 규칙을 바꾸면 모든 아이템 획득 흐름에 영향이 가므로 개별 아이템 예외와 분리해서 수정해야 한다.
  */
 using System;
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Gameplay.Items
@@ -20,10 +19,6 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private ItemRuntimeHost itemRuntimeHost;
         [SerializeField] private Transform spawnCenter;
 
-        [Header("초기 배치")]
-        [SerializeField] private bool spawnAllItemsOnStart = true;
-        [SerializeField] private bool clearExistingDropsOnStart;
-        [SerializeField] private float spawnRadius = 6f;
         [SerializeField] private float spawnHeightOffset = 0.2f;
 
         [Header("드랍 이벤트")]
@@ -57,21 +52,6 @@ namespace SSAFYPlayTime.Gameplay.Items
             BindEvents();
         }
 
-        private void Start()
-        {
-            if (!spawnAllItemsOnStart)
-            {
-                return;
-            }
-
-            if (clearExistingDropsOnStart)
-            {
-                ClearExistingDrops();
-            }
-
-            SpawnAllEnabledItems();
-        }
-
         private void OnDisable()
         {
             UnbindEvents();
@@ -85,43 +65,6 @@ namespace SSAFYPlayTime.Gameplay.Items
         public void RefreshCatalogCache()
         {
             _catalogProvider.Invalidate();
-        }
-
-        public bool SpawnAllEnabledItems()
-        {
-            if (!TryGetCatalog(out var catalog))
-            {
-                return false;
-            }
-
-            var itemIds = new List<string>(catalog.Definitions.Keys);
-            itemIds.Sort(StringComparer.Ordinal);
-            if (itemIds.Count == 0)
-            {
-                DebugLog("Spawn skipped: item definition is empty.");
-                return false;
-            }
-
-            var center = ResolveSpawnCenter();
-            var radius = Mathf.Max(0.5f, spawnRadius);
-            for (var i = 0; i < itemIds.Count; i++)
-            {
-                if (!catalog.TryGetDefinition(itemIds[i], out var definition))
-                {
-                    continue;
-                }
-
-                var offset = ItemFieldPositionUtility.GetRingOffset(i, itemIds.Count, radius);
-                var worldPosition = ItemFieldPositionUtility.ResolveGroundPosition(
-                    center + offset + Vector3.up * spawnHeightOffset,
-                    useGroundRaycast,
-                    groundMask,
-                    spawnHeightOffset);
-                SpawnDefinition(definition, worldPosition, false, Vector3.zero);
-            }
-
-            DebugLog($"Spawned field items: {itemIds.Count}");
-            return true;
         }
 
         public bool TrySpawnItem(string itemId, Vector3 worldPosition, out ItemFieldDrop spawnedDrop)
@@ -298,20 +241,6 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             return transform.position;
-        }
-
-        private void ClearExistingDrops()
-        {
-            var drops = FindObjectsOfType<ItemFieldDrop>(true);
-            for (var i = 0; i < drops.Length; i++)
-            {
-                if (drops[i] == null)
-                {
-                    continue;
-                }
-
-                Destroy(drops[i].gameObject);
-            }
         }
 
         private void DebugLog(string message)

@@ -48,6 +48,11 @@ namespace SSAFYPlayTime.Gameplay.Items
         /// </summary>
         public void RefreshVisual()
         {
+            if (IsPrefabAssetContext())
+            {
+                return;
+            }
+
             ApplyShellTransparency();
             EnsureEffectChild();
         }
@@ -128,6 +133,11 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private void EnsureEffectChild()
         {
+            if (IsPrefabAssetContext())
+            {
+                return;
+            }
+
             var effectRoot = transform.Find(EffectChildName);
             if (effectRoot == null)
             {
@@ -151,6 +161,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             effectRoot.localRotation = Quaternion.identity;
             effectRoot.localScale = effectLocalScale;
             DisableColliders(effectRoot.gameObject);
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(effectRoot.gameObject);
             DisableUnsupportedDistortionRenderers(effectRoot.gameObject);
         }
 
