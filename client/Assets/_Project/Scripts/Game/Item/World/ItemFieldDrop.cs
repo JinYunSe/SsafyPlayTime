@@ -19,6 +19,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private string instanceId = string.Empty;
         [SerializeField] private bool destroyOnPickup = true;
         [SerializeField] private bool disableCollidersOnPickup = true;
+        [SerializeField, HideInInspector] private bool runtimeInitialized;
 
         private bool _pickedUp;
 
@@ -30,12 +31,19 @@ namespace SSAFYPlayTime.Gameplay.Items
         private void Awake()
         {
             EnsureInstanceId();
-            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(gameObject);
+            EnsureRuntimeSetup();
         }
 
         public void SetItemId(string value)
         {
-            itemId = value ?? string.Empty;
+            var normalized = value ?? string.Empty;
+            if (string.Equals(itemId, normalized, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            itemId = normalized;
+            runtimeInitialized = false;
         }
 
         public void SetInstanceId(string value)
@@ -48,6 +56,17 @@ namespace SSAFYPlayTime.Gameplay.Items
         public bool CanBePickedUp()
         {
             return !_pickedUp && !string.IsNullOrWhiteSpace(itemId);
+        }
+
+        internal void EnsureRuntimeSetup()
+        {
+            if (runtimeInitialized)
+            {
+                return;
+            }
+
+            ItemFieldDropFactory.ApplyFieldDropRuntimeSetup(gameObject, itemId);
+            runtimeInitialized = true;
         }
 
         public void MarkPickedUp()

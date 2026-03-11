@@ -172,9 +172,29 @@ public sealed partial class NetworkPlayer
                 existing.SetInstanceId(dropInstanceId);
             }
 
+            StabilizeRemoteFieldDrop(existing);
             return;
         }
 
-        spawner.TrySpawnItem(itemId, worldPosition, dropInstanceId, out _);
+        if (spawner.TrySpawnItem(itemId, worldPosition, dropInstanceId, out var spawned))
+        {
+            StabilizeRemoteFieldDrop(spawned);
+        }
+    }
+
+    private static void StabilizeRemoteFieldDrop(ItemFieldDrop fieldDrop)
+    {
+        if (fieldDrop == null)
+            return;
+
+        var body = fieldDrop.GetComponent<Rigidbody>();
+        if (body == null)
+            return;
+
+        // 한국어: 현재 필드 아이템은 연속 위치 동기화가 없으므로 원격 복제품은 고정해 물리 드리프트를 막는다.
+        body.velocity = Vector3.zero;
+        body.angularVelocity = Vector3.zero;
+        body.isKinematic = true;
+        body.useGravity = false;
     }
 }

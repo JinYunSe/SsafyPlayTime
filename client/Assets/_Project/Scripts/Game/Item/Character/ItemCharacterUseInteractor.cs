@@ -15,6 +15,8 @@ namespace SSAFYPlayTime.Gameplay.Items
     [DisallowMultipleComponent]
     public sealed class ItemCharacterUseInteractor : MonoBehaviour
     {
+        private readonly RaycastHit[] _aimHitBuffer = new RaycastHit[16];
+
         [Header("참조")]
         [SerializeField] private ItemRuntimeHost itemRuntimeHost;
         [SerializeField] private Transform ownerRoot;
@@ -138,16 +140,46 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return fallback;
             }
 
-            var cam = aimingCamera != null ? aimingCamera : Camera.main;
+            var cam = ResolveAimingCamera();
             if (cam == null)
             {
                 return fallback;
             }
 
             var ray = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
-            if (Physics.Raycast(ray, out var hit, Mathf.Max(0.1f, maxAimDistance), aimMask, QueryTriggerInteraction.Ignore))
+            var hitCount = Physics.RaycastNonAlloc(
+                ray,
+                _aimHitBuffer,
+                Mathf.Max(0.1f, maxAimDistance),
+                aimMask,
+                QueryTriggerInteraction.Ignore);
+
+            var bestDistance = float.MaxValue;
+            for (var i = 0; i < hitCount; i++)
             {
-                return hit.point;
+                var hit = _aimHitBuffer[i];
+                if (hit.collider == null)
+                {
+                    continue;
+                }
+
+                if (ownerRoot != null && hit.collider.transform.IsChildOf(ownerRoot))
+                {
+                    continue;
+                }
+
+                if (hit.distance >= bestDistance)
+                {
+                    continue;
+                }
+
+                bestDistance = hit.distance;
+                fallback = hit.point;
+            }
+
+            if (bestDistance < float.MaxValue)
+            {
+                return fallback;
             }
 
             return ray.origin + ray.direction * Mathf.Max(0.1f, defaultAimDistance);
@@ -169,6 +201,35 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 ownerRoot = transform;
             }
+
+            aimingCamera = ResolveAimingCamera();
+        }
+
+        private Camera ResolveAimingCamera()
+        {
+            if (aimingCamera != null && aimingCamera.gameObject.activeInHierarchy)
+            {
+                return aimingCamera;
+            }
+
+            if (ownerRoot != null)
+            {
+                var cameras = ownerRoot.GetComponentsInChildren<Camera>(true);
+                for (var i = 0; i < cameras.Length; i++)
+                {
+                    var candidate = cameras[i];
+                    if (candidate == null || !candidate.gameObject.activeInHierarchy)
+                    {
+                        continue;
+                    }
+
+                    aimingCamera = candidate;
+                    return aimingCamera;
+                }
+            }
+
+            aimingCamera = Camera.main;
+            return aimingCamera;
         }
 
         private void RaiseFailed(string reason)
