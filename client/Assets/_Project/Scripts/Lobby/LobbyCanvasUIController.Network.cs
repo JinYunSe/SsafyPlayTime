@@ -54,6 +54,7 @@ namespace SSAFYPlayTime
             {
                 // 연결 토큰(clientId, 닉네임)을 이용해 입장한 플레이어를 참가자 목록에 등록한다.
                 TryRegisterParticipantFromToken(runner, player);
+                TryApplyMigrationReadyStateOnJoin(runner, player);
 
                 // 로컬 플레이어(방장 본인)가 토큰 없이 입장한 경우 닉네임으로 직접 등록한다.
                 if (player == runner.LocalPlayer && !_roomParticipantsByPlayerId.ContainsKey(player.PlayerId))
@@ -124,6 +125,7 @@ namespace SSAFYPlayTime
             {
                 _roomParticipantsByPlayerId.Remove(player.PlayerId);
                 _selectedCharacterIndexByPlayerId.Remove(player.PlayerId);
+                _readyStateByPlayerId.Remove(player.PlayerId);
             }
 
             if (runner.IsServer)
@@ -238,6 +240,18 @@ namespace SSAFYPlayTime
                 var savedClientIdsByOldPlayerId = _roomParticipantsByPlayerId.Values
                     .Where(p => p != null && p.PlayerId > 0 && !string.IsNullOrWhiteSpace(p.ClientId))
                     .ToDictionary(p => p.PlayerId, p => p.ClientId);
+                var savedLocalIsReady = _localIsReady;
+                _migrationReadyStateByClientId.Clear();
+                foreach (var presence in _roomParticipantsByPlayerId.Values)
+                {
+                    if (presence == null || string.IsNullOrWhiteSpace(presence.ClientId))
+                    {
+                        continue;
+                    }
+
+                    var isReady = _readyStateByPlayerId.TryGetValue(presence.PlayerId, out var ready) && ready;
+                    _migrationReadyStateByClientId[presence.ClientId] = isReady;
+                }
 
                 if (priorityIndex > 0)
                 {
@@ -323,6 +337,14 @@ namespace SSAFYPlayTime
                     _selectedCharacterIndexByPlayerId[kvp.Key] = kvp.Value;
                 }
 
+                if (_runner.IsServer)
+                {
+                    foreach (var activePlayer in _runner.ActivePlayers.Where(p => p.IsRealPlayer))
+                    {
+                        TryApplyMigrationReadyStateOnJoin(_runner, activePlayer);
+                    }
+                }
+
                 var migrationRemapMap = BuildMigrationRemapMap(_runner, savedClientIdsByOldPlayerId);
                 if (IsActiveGameplayScene() &&
                     localOldPlayerId > 0 &&
@@ -352,9 +374,17 @@ namespace SSAFYPlayTime
 
                 if (_runner.IsServer && _runner.LocalPlayer.IsRealPlayer)
                 {
+                    // 새 방장은 준비 상태가 없으므로 리셋한다.
+                    // 방장이었다가 다시 방장이 되는 경우도 동일하게 처리한다.
+                    _localIsReady = false;
                     RegisterParticipant(_runner.LocalPlayer, _nickname);
                     _currentOwnerPlayerId = _runner.LocalPlayer.PlayerId;
                     _currentRoomOwner = _nickname;
+                    _readyStateByPlayerId[_runner.LocalPlayer.PlayerId] = false;
+                    if (_roomParticipantsByPlayerId.TryGetValue(_runner.LocalPlayer.PlayerId, out var hostPresence) && hostPresence != null)
+                    {
+                        hostPresence.IsReady = false;
+                    }
                     UpdateOwnerSessionProperty();
                     BroadcastPlayerRoster();
                 }
@@ -406,11 +436,12 @@ namespace SSAFYPlayTime
                     ShowRoomPanel();
                     UpdateRoomPanel();
 
-                    // 클라이언트는 새 방장에게 캐릭터 선택을 재전송해야 roster 에 반영됨.
-                    // 서버는 이미 RegisterParticipant + BroadcastPlayerRoster 로 처리됨.
-                    // savedAllCharacterIndices 에서 로컬 플레이어 인덱스를 읽어 재전송한다.
+                    // 클라이언트는 새 방장에게 캐릭터 선택과 준비 상태를 재전송해야 roster 에 반영됨.
+                    // 서버(새 방장)는 RegisterParticipant + BroadcastPlayerRoster 로 처리되며
+                    // 방장의 준비 상태는 불필요하므로 재전송하지 않는다.
                     if (!_runner.IsServer && _runner.LocalPlayer.IsRealPlayer)
                     {
+                        _localIsReady = savedLocalIsReady;
                         var localIndex = savedAllCharacterIndices.TryGetValue(_runner.LocalPlayer.PlayerId, out var li)
                             ? li
                             : savedCharacterIndex;
@@ -418,6 +449,9 @@ namespace SSAFYPlayTime
                         {
                             SetLocalPlayerSelectedCharacter(localIndex);
                         }
+
+                        // 준비 상태 재전송: 마이그레이션 전 상태를 새 방장에게 다시 동기화한다.
+                        SendReadyStateToHost(_localIsReady);
                     }
                 }
             }
@@ -570,6 +604,29 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            if (key == ReadyStateReliableKey && _runner != null && _runner.IsRunning && _runner.IsServer)
+            {
+                if (player.IsRealPlayer && (payload == "1" || payload == "0"))
+                {
+                    var isReady = payload == "1";
+                    _readyStateByPlayerId[player.PlayerId] = isReady;
+                    if (_roomParticipantsByPlayerId.TryGetValue(player.PlayerId, out var readyPresence) && readyPresence != null)
+                    {
+                        readyPresence.IsReady = isReady;
+                    }
+
+                    BroadcastPlayerRoster();
+                    Debug.Log($"[Lobby] Player ready state updated: player={player.PlayerId}, isReady={isReady}");
+                }
+
+                if (roomPanel.activeSelf)
+                {
+                    UpdateRoomPanel();
+                }
+
+                return;
+            }
+
             if (key == CharacterSelectionReliableKey && _runner != null && _runner.IsRunning && _runner.IsServer)
             {
                 if (player.IsRealPlayer && int.TryParse(payload, out var selected))
@@ -638,6 +695,7 @@ namespace SSAFYPlayTime
                 _migratedPositionsByOldPlayerId.Clear();
                 _migratedPositionsByClientId.Clear();
                 _migrationOldPlayerIdByClientId.Clear();
+                _migrationReadyStateByClientId.Clear();
                 // 환경 상태 데이터는 복원 완료 전까지 보존한다.
                 // 미복원 데이터가 남아있으면 OnSceneLoadDone에서 복원할 수 있도록 유지한다.
                 if (_migratedSeaLevelsByPath.Count == 0 && _migratedDeathZonesByPath.Count == 0)
