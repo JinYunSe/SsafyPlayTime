@@ -80,7 +80,7 @@ public sealed partial class NetworkPlayer
         var didThrow = false;
         foreach (var handler in _handGrabHandlers)
         {
-            if (!handler.IsHolding)
+            if (handler == null || !handler.IsHoldingThrowableTarget)
                 continue;
 
             handler.Throw();
@@ -97,10 +97,27 @@ public sealed partial class NetworkPlayer
         _throwTriggered = false;
     }
 
+    private bool IsAnyHandHoldingThrowableTarget()
+    {
+        foreach (var handler in _handGrabHandlers)
+        {
+            if (handler != null && handler.IsHoldingThrowableTarget)
+                return true;
+        }
+
+        return false;
+    }
+
     private void UpdateGrabbingAnimatorFlag()
     {
-        if (animator != null)
-            animator.SetBool(H_IsGrabbing, IsAnyHandHoldingObject());
+        if (animator == null)
+            return;
+
+        var isCarrying = IsAnyHandHoldingThrowableTarget();
+        var isGrabbing = _isGrabActive && !isCarrying;
+
+        animator.SetBool(H_IsGrabbing, isGrabbing);
+        animator.SetBool("isCarrying", isCarrying);
     }
 
     private bool TryUseHeldItemByPrimaryClick()

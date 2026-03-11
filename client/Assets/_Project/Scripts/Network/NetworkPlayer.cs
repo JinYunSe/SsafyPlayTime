@@ -22,6 +22,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [SerializeField] private PlayerMotorConfig config;
     [SerializeField] private RuntimeAnimatorController fallbackAnimatorController;
 
+    [Header("Visuals")]
+    [SerializeField] private bool useAnimatedVisualOnly = true;
+    [SerializeField] private bool disablePhysicsAnimationSync = true;
+
     [Header("Grab")]
     [SerializeField] private Transform holdPoint;
 
@@ -61,6 +65,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private ItemRuntimeHost _itemRuntimeHost;
     private ItemCharacterUseInteractor _itemUseInteractor;
     private ItemCharacterHeldItemPresenter _heldItemPresenter;
+    private Transform _animatedVisualRoot;
 
     private bool _isActiveRagdoll = true;
     public bool IsActiveRagdoll => _isActiveRagdoll;
@@ -142,6 +147,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (mainJoint != null)
             _startSlerpPositionSpring = mainJoint.slerpDrive.positionSpring;
 
+        ConfigureAnimatedVisualMode();
         EnsureAnimatorBinding();
     }
 
