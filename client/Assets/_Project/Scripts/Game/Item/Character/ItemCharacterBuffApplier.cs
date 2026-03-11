@@ -533,6 +533,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             var instance = Instantiate(prefab, characterRoot);
             instance.name = objectName;
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
             DisableRuntimePhysics(instance);
             return instance;
         }

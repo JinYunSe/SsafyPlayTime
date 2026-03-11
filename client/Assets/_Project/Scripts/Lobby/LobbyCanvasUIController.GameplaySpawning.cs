@@ -14,11 +14,8 @@ namespace SSAFYPlayTime
     public sealed partial class LobbyCanvasUIController
     {
         [Header("Gameplay Spawning")]
-        // 각 캐릭터 종류별 게임플레이용 프리팹 (NetworkObject 포함)
-        [SerializeField] private GameObject stattyGameplayCharacterPrefab;
-        [SerializeField] private GameObject alGGameplayCharacterPrefab;
-        [SerializeField] private GameObject fitGameplayCharacterPrefab;
-        [SerializeField] private GameObject wiseGameplayCharacterPrefab;
+        // 캐릭터 인덱스 → 프리팹 매핑 에셋. 프리팹 교체 시 이 에셋만 수정하면 된다.
+        [SerializeField] private CharacterRegistry characterRegistry;
 
         // SpawnPointGroup이 없거나 포인트가 고갈됐을 때 사용할 폴백 스폰 위치 목록.
         // 인스펙터에서 씬의 Transform을 직접 지정한다.
@@ -62,7 +59,8 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            DontDestroyOnLoad(gameObject);
+            var persistentTarget = transform.root != null ? transform.root.gameObject : gameObject;
+            DontDestroyOnLoad(persistentTarget);
             _isPersistentAcrossScenes = true;
         }
 
@@ -82,6 +80,12 @@ namespace SSAFYPlayTime
         // characterIndex(0~3)에 해당하는 게임플레이 캐릭터 프리팹을 반환한다.
         private GameObject GetGameplayCharacterPrefabByIndex(int characterIndex)
         {
+            if (characterRegistry == null)
+            {
+                Debug.LogError("[Lobby] CharacterRegistry is not assigned. Assign it in the inspector.");
+                return null;
+            }
+
             var idx = SanitizeCharacterIndexOrNone(characterIndex);
             if (idx == (int)CharacterKind.Random)
             {
@@ -89,14 +93,7 @@ namespace SSAFYPlayTime
                 idx = UnityEngine.Random.Range(0, 4);
             }
 
-            return idx switch
-            {
-                (int)CharacterKind.Statty => stattyGameplayCharacterPrefab,
-                (int)CharacterKind.AlG => alGGameplayCharacterPrefab,
-                (int)CharacterKind.Fit => fitGameplayCharacterPrefab,
-                (int)CharacterKind.Wise => wiseGameplayCharacterPrefab,
-                _ => null
-            };
+            return characterRegistry.GetPrefabByIndex(idx);
         }
 
         // Random을 선택한 플레이어들에게 다른 플레이어와 중복되지 않는 캐릭터를 배정한다.

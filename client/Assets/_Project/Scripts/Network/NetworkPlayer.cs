@@ -63,7 +63,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private bool _isGrounded;
     private HandGrabHandler[] _handGrabHandlers;
     private ItemRuntimeHost _itemRuntimeHost;
-    private ItemCharacterUseInteractor _itemUseInteractor;
+    private ItemFieldInteractionService _itemFieldInteractionService;
     private ItemCharacterHeldItemPresenter _heldItemPresenter;
     private Transform _animatedVisualRoot;
 
@@ -110,6 +110,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     {
         InitializeInternal();
         MarkItemBuffNetworkReady();
+        MarkItemWorldEffectNetworkReady();
 
         if (HasStateAuthority)
         {
@@ -165,6 +166,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             runtimeHost.SetOwnerTransform(transform);
 
         _itemRuntimeHost = runtimeHost;
+        EnsureItemWorldEffectBindings();
 
         if (_handGrabHandlers != null)
         {
@@ -175,17 +177,14 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             }
         }
 
-        _itemUseInteractor = GetComponent<ItemCharacterUseInteractor>();
-        if (_itemUseInteractor == null)
+        _itemFieldInteractionService = GetComponent<ItemFieldInteractionService>();
+        if (_itemFieldInteractionService == null)
         {
-            // 좌클릭 사용 입력이 항상 런타임 호스트로 연결되도록 인터랙터를 보장한다.
-            _itemUseInteractor = gameObject.AddComponent<ItemCharacterUseInteractor>();
+            _itemFieldInteractionService = gameObject.AddComponent<ItemFieldInteractionService>();
         }
 
-        _itemUseInteractor.SetRuntimeHost(runtimeHost);
-        _itemUseInteractor.SetOwnerRoot(transform);
-        _itemUseInteractor.SetUseItemKey(KeyCode.Mouse0);
-        _itemUseInteractor.SetUseLegacyInput(false);
+        _itemFieldInteractionService.SetRuntimeHost(runtimeHost);
+        _itemFieldInteractionService.SetOwnerTransform(transform);
 
         _heldItemPresenter = GetComponent<ItemCharacterHeldItemPresenter>();
         if (_heldItemPresenter == null)
@@ -206,65 +205,24 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         buffApplier.SetRuntimeHost(runtimeHost);
         buffApplier.SetCharacterRoot(transform);
 
-        // 사용/드롭 이벤트를 처리하는 씬 시스템이 같은 런타임 호스트를 바라보도록 맞춘다.
-        if (Runner == null || HasInputAuthority)
-            SynchronizeRuntimeHostForSceneSystems(runtimeHost);
     }
 
     private ItemRuntimeHost ResolveItemRuntimeHostForCharacter()
     {
-        var root = transform.root;
-        var hosts = FindObjectsOfType<ItemRuntimeHost>(true);
-        var hostCount = 0;
-        ItemRuntimeHost localHost = null;
-        ItemRuntimeHost gameplayRunnerHost = null;
-        ItemRuntimeHost fieldDropSpawnerHost = null;
-        ItemRuntimeHost ownerMatchedHost = null;
-        var ownerMatchedScore = int.MinValue;
-        ItemRuntimeHost singleFallback = null;
-        for (var i = 0; i < hosts.Length; i++)
-        {
-            var host = hosts[i];
-            if (host == null)
-                continue;
-
-            hostCount++;
-            if (singleFallback == null)
-                singleFallback = host;
-            if (host.gameObject == gameObject)
-                localHost = host;
-            if (gameplayRunnerHost == null && host.GetComponent<ItemGameplayRunner>() != null)
-                gameplayRunnerHost = host;
-            if (fieldDropSpawnerHost == null && host.GetComponent<ItemFieldDropSpawner>() != null)
-                fieldDropSpawnerHost = host;
-
-            var owner = host.OwnerTransform;
-            if (owner == root || (owner != null && owner.root == root))
-            {
-                var score = 0;
-                if (host.GetComponent<ItemGameplayRunner>() != null) score += 100;
-                if (host.GetComponent<ItemFieldDropSpawner>() != null) score += 80;
-                if (host.GetComponent<ItemFieldInteractionService>() != null) score += 50;
-                if (host.gameObject == gameObject) score += 10;
-
-                if (score > ownerMatchedScore)
-                {
-                    ownerMatchedScore = score;
-                    ownerMatchedHost = host;
-                }
-            }
-        }
-
-        if (ownerMatchedHost != null)
-            return ownerMatchedHost;
-        if (gameplayRunnerHost != null)
-            return gameplayRunnerHost;
-        if (fieldDropSpawnerHost != null)
-            return fieldDropSpawnerHost;
+        var localHost = GetComponent<ItemRuntimeHost>();
         if (localHost != null)
             return localHost;
 
-        return hostCount == 1 ? singleFallback : null;
+        var root = transform.root;
+        if (root != null && root != transform)
+        {
+            var rootHost = root.GetComponent<ItemRuntimeHost>();
+            if (rootHost != null)
+                return rootHost;
+        }
+
+        // 플레이어 아이템 상태는 캐릭터별로 분리되어야 하므로 씬 공용 호스트를 fallback으로 재사용하지 않는다.
+        return null;
     }
 
     private void RefreshRuntimeIntegrationIfNeeded()
@@ -280,35 +238,6 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         if (_itemRuntimeHost != resolved)
             EnsureItemRuntimeIntegration();
-    }
-
-    private void SynchronizeRuntimeHostForSceneSystems(ItemRuntimeHost runtimeHost)
-    {
-        if (runtimeHost == null)
-            return;
-
-        var spawners = FindObjectsOfType<ItemFieldDropSpawner>(true);
-        for (var i = 0; i < spawners.Length; i++)
-        {
-            var spawner = spawners[i];
-            if (spawner == null)
-                continue;
-
-            // 이미 연결된 스포너는 유지하고, 비연결 상태만 현재 호스트로 보강한다.
-            if (spawner.RuntimeHost == null)
-                spawner.SetRuntimeHost(runtimeHost);
-        }
-
-        // ItemScene 테스트 러너가 존재하면 동일 호스트로 이벤트를 받게 맞춘다.
-        var runners = FindObjectsOfType<ItemGameplayRunner>(true);
-        for (var i = 0; i < runners.Length; i++)
-        {
-            var runner = runners[i];
-            if (runner == null)
-                continue;
-
-            runner.SetRuntimeHost(runtimeHost);
-        }
     }
 
 }

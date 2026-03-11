@@ -122,9 +122,34 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         public bool TryPickupNearest(out string pickedItemId, out string reason)
         {
+            return TryPickupNearest(out pickedItemId, out _, out reason);
+        }
+
+        public bool TryPickupNearest(out string pickedItemId, out Vector3 pickupOrigin, out string reason)
+        {
             pickedItemId = string.Empty;
+            pickupOrigin = Vector3.zero;
             if (!ResolveAndWire(out reason))
             {
+                return false;
+            }
+
+            if (itemRuntimeHost == null)
+            {
+                reason = "ItemRuntimeHost missing.";
+                DebugLog($"Pickup failed: {reason}");
+                return false;
+            }
+
+            if (!EnsureRuntimeReady(out reason))
+            {
+                DebugLog($"Pickup failed: {reason}");
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(itemRuntimeHost.HeldItemId))
+            {
+                reason = "Held item already exists.";
                 return false;
             }
 
@@ -135,14 +160,34 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return false;
             }
 
+            pickupOrigin = ResolveOwnerTransform().position;
             return itemFieldPickupInteractor.TryPickupNearest(out pickedItemId, out reason);
         }
 
         public bool TryUseHeldItem(out string usedItemId, out string reason)
         {
+            return TryUseHeldItem(out usedItemId, out _, out reason);
+        }
+
+        public bool TryUseHeldItem(out string usedItemId, out Vector3 targetPosition, out string reason)
+        {
             usedItemId = string.Empty;
+            targetPosition = Vector3.zero;
             if (!ResolveAndWire(out reason))
             {
+                return false;
+            }
+
+            if (itemRuntimeHost == null)
+            {
+                reason = "ItemRuntimeHost missing.";
+                DebugLog($"Use failed: {reason}");
+                return false;
+            }
+
+            if (!EnsureRuntimeReady(out reason))
+            {
+                DebugLog($"Use failed: {reason}");
                 return false;
             }
 
@@ -153,13 +198,34 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return false;
             }
 
-            usedItemId = itemRuntimeHost != null ? itemRuntimeHost.HeldItemId : string.Empty;
-            return itemCharacterUseInteractor.TryUseHeldItem(out reason);
+            usedItemId = itemRuntimeHost.HeldItemId;
+            if (string.IsNullOrWhiteSpace(usedItemId))
+            {
+                reason = "No held item.";
+                DebugLog($"Use failed: {reason}");
+                return false;
+            }
+
+            targetPosition = itemCharacterUseInteractor.GetTargetPosition();
+            if (!itemRuntimeHost.TryUseHeldItem(targetPosition, out reason))
+            {
+                DebugLog($"Use failed: {reason}");
+                return false;
+            }
+
+            DebugLog($"Use succeeded: {usedItemId}");
+            return true;
         }
 
         public bool TryDropHeldItem(out string droppedItemId, out string reason)
         {
+            return TryDropHeldItem(out droppedItemId, out _, out reason);
+        }
+
+        public bool TryDropHeldItem(out string droppedItemId, out Vector3 dropSpawnPosition, out string reason)
+        {
             droppedItemId = string.Empty;
+            dropSpawnPosition = Vector3.zero;
             if (!ResolveAndWire(out reason))
             {
                 return false;
@@ -172,7 +238,21 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return false;
             }
 
+            if (!EnsureRuntimeReady(out reason))
+            {
+                DebugLog($"Drop failed: {reason}");
+                return false;
+            }
+
             droppedItemId = itemRuntimeHost.HeldItemId;
+            if (string.IsNullOrWhiteSpace(droppedItemId))
+            {
+                reason = "No held item.";
+                DebugLog($"Drop failed: {reason}");
+                return false;
+            }
+
+            dropSpawnPosition = ResolveDefaultDropSpawnPosition();
             var dropped = itemRuntimeHost.TryDropHeldItem(out reason);
             if (!dropped)
             {
@@ -195,11 +275,6 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             if (itemRuntimeHost == null)
             {
-                itemRuntimeHost = FindObjectOfType<ItemRuntimeHost>(true);
-            }
-
-            if (itemRuntimeHost == null)
-            {
                 reason = "ItemRuntimeHost missing.";
                 return false;
             }
@@ -215,6 +290,20 @@ namespace SSAFYPlayTime.Gameplay.Items
             EnsureReferences();
             WireDependencies();
             return true;
+        }
+
+        private bool EnsureRuntimeReady(out string reason)
+        {
+            if (itemRuntimeHost != null && (itemRuntimeHost.IsReady || itemRuntimeHost.Initialize()))
+            {
+                reason = string.Empty;
+                return true;
+            }
+
+            reason = itemRuntimeHost == null || string.IsNullOrWhiteSpace(itemRuntimeHost.LastError)
+                ? "Item runtime is not ready."
+                : itemRuntimeHost.LastError;
+            return false;
         }
 
         private void EnsureReferences()
@@ -294,6 +383,20 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             return transform;
+        }
+
+        private Vector3 ResolveDefaultDropSpawnPosition()
+        {
+            var owner = ResolveOwnerTransform();
+            var forward = owner != null ? owner.forward : transform.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.0001f)
+            {
+                forward = Vector3.forward;
+            }
+
+            forward.Normalize();
+            return (owner != null ? owner.position : transform.position) + forward * 0.9f + Vector3.up * 0.4f;
         }
 
         private bool HasSpawnAuthority()
