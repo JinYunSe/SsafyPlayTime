@@ -38,6 +38,7 @@ namespace SSAFYPlayTime
                 RefreshRoomList();
             }
 
+            SetLobbyStatus(string.Format(statusRoomsUpdatedFormat, _roomSnapshots.Count));
             LogRoomSnapshotSummary();
         }
 
@@ -147,6 +148,10 @@ namespace SSAFYPlayTime
             }
 
             _isInLobby = false;
+            if (lobbyPanel.activeSelf)
+            {
+                SetLobbyStatus(string.Format(statusDisconnectedFormat, shutdownReason));
+            }
             Debug.Log($"[Lobby] Runner shutdown: reason={shutdownReason}");
 
             // ShutdownRunnerAsync 또는 방 생성/입장 처리 중에 발생한 종료는
@@ -292,6 +297,7 @@ namespace SSAFYPlayTime
 
                 if (!TryCreateRunner(out var newRunner))
                 {
+                    SetLobbyStatus(statusHostMigrationInitFailed);
                     return;
                 }
 
@@ -311,6 +317,7 @@ namespace SSAFYPlayTime
 
                 if (!result.Ok)
                 {
+                    SetLobbyStatus(string.Format(statusHostMigrationFailedFormat, result.ShutdownReason));
                     Debug.LogWarning($"[Lobby] Host migration failed: {result.ShutdownReason}");
                     return;
                 }
@@ -520,11 +527,13 @@ namespace SSAFYPlayTime
             }
 
             bool isGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
+            var cameraYaw = Camera.main != null ? Camera.main.transform.eulerAngles.y : 0f;
 
             input.Set(new PlayerNetworkInput
             {
                 Move = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical")),
-                Jump = Input.GetKey(KeyCode.Space),
+                CameraYaw = cameraYaw,
+                Jump = Input.GetKeyDown(KeyCode.Space),
                 Punch = isPunch,
                 Drop = Input.GetKeyDown(KeyCode.F),
                 Throw = Input.GetMouseButtonDown(1),
