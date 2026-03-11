@@ -8,6 +8,7 @@ public struct PlayerNetworkInput : INetworkInput
 {
     // WASD / 조이스틱 이동 입력 (-1 ~ 1 범위의 X, Y 축)
     public Vector2 Move;
+    public float CameraYaw;
 
     // 점프 키(Space)
     public NetworkBool Jump;
