@@ -61,6 +61,10 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 normalized = normalized.Substring("Resources/".Length);
             }
+            else if (normalized.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = normalized.Substring("Assets/".Length);
+            }
             else
             {
                 return string.Empty;

@@ -22,6 +22,7 @@ public sealed partial class NetworkPlayer
         SynchronizeMotorPresentation();
         UpdateActiveRagdollJoints();
         ProcessInteractions(input);
+        SyncHeldItemNetworkState();
     }
 
     public void ApplyStunDamage(float stunDamage, float bodyPartMultiplier, float attackerVelocity, float impulseMagnitude)
@@ -173,7 +174,7 @@ public sealed partial class NetworkPlayer
 
     private void UpdateActiveRagdollJoints()
     {
-        if (!_isActiveRagdoll)
+        if (!_isActiveRagdoll || ShouldDisablePhysicsAnimationSync)
             return;
 
         for (var i = 0; i < syncPhysicsObjects.Length; i++)
@@ -256,15 +257,18 @@ public sealed partial class NetworkPlayer
         if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
             return;
 
-        if (mainJoint != null)
+        if (!ShouldDisablePhysicsAnimationSync && mainJoint != null)
         {
             var jd = mainJoint.slerpDrive;
             jd.positionSpring = 0;
             mainJoint.slerpDrive = jd;
         }
 
-        for (int i = 0; i < syncPhysicsObjects.Length; i++)
-            syncPhysicsObjects[i].MakeRagdoll();
+        if (!ShouldDisablePhysicsAnimationSync)
+        {
+            for (int i = 0; i < syncPhysicsObjects.Length; i++)
+                syncPhysicsObjects[i].MakeRagdoll();
+        }
 
         _isActiveRagdoll = false;
         _isGrabActive = false;
@@ -282,15 +286,18 @@ public sealed partial class NetworkPlayer
         if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
             return;
 
-        if (mainJoint != null)
+        if (!ShouldDisablePhysicsAnimationSync && mainJoint != null)
         {
             var jd = mainJoint.slerpDrive;
             jd.positionSpring = _startSlerpPositionSpring;
             mainJoint.slerpDrive = jd;
         }
 
-        for (int i = 0; i < syncPhysicsObjects.Length; i++)
-            syncPhysicsObjects[i].MakeActiveRagdoll();
+        if (!ShouldDisablePhysicsAnimationSync)
+        {
+            for (int i = 0; i < syncPhysicsObjects.Length; i++)
+                syncPhysicsObjects[i].MakeActiveRagdoll();
+        }
 
         _isActiveRagdoll = true;
         _isGrabActive = false;

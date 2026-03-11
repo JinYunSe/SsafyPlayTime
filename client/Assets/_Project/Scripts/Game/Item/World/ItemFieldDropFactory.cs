@@ -74,6 +74,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
             }
 
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
+
             if (string.Equals(definition.Master.ItemId, ItemIds.WaterMelonSword, System.StringComparison.Ordinal))
             {
                 ApplyScaleMultiplier(instance, WaterMelonSwordScaleMultiplier);
@@ -163,6 +165,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             effectInstance.transform.localRotation = Quaternion.identity;
             effectInstance.transform.localScale = Vector3.one * 0.7f;
             DisableColliders(effectInstance);
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(effectInstance);
             DisableUnsupportedDistortionRenderers(effectInstance);
         }
 

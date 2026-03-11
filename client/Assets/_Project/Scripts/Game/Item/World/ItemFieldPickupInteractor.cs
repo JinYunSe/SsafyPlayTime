@@ -73,11 +73,6 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 itemRuntimeHost = GetComponent<ItemRuntimeHost>();
             }
-
-            if (itemRuntimeHost == null)
-            {
-                itemRuntimeHost = FindObjectOfType<ItemRuntimeHost>();
-            }
         }
 
         public bool TryPickupNearest(out string pickedItemId, out string reason)
