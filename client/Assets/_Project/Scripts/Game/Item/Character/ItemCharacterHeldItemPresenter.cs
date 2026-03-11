@@ -49,7 +49,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private bool useDefaultFlamethrowerPose = true;
         [SerializeField] private Vector3 flamethrowerLocalPositionOffset = new Vector3(0.05f, 0.05f, 0.05f);
         [SerializeField] private Vector3 flamethrowerLocalEulerOffset = new Vector3(-90f, -90f, 90f);
-        [SerializeField] private Vector3 flamethrowerLocalScale = Vector3.one * 0.35f;
+        [SerializeField] private Vector3 flamethrowerLocalScale = Vector3.one * 0.7f;
 
         [Header("디버그")]
         [SerializeField] private bool enableDebugLog;
@@ -213,7 +213,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             // 한국어: hyekang 원본 WeaponEquipper의 강제 전방 정렬 방식을 화염방사기 손 장착에도 동일하게 적용한다.
             _spawnedHeldVisual.transform.position = handAnchor.TransformPoint(flamethrowerLocalPositionOffset);
             _spawnedHeldVisual.transform.rotation =
-                Quaternion.LookRotation(-searchRoot.forward, Vector3.up) *
+                Quaternion.LookRotation(searchRoot.forward, Vector3.up) *
                 Quaternion.Euler(flamethrowerLocalEulerOffset);
             _spawnedHeldVisual.transform.localScale = flamethrowerLocalScale;
         }

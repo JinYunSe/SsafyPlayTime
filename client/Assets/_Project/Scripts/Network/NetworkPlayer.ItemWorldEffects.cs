@@ -40,6 +40,7 @@ public sealed partial class NetworkPlayer
     [SerializeField] private float blackholeLaunchHeightOffset = 1.2f;
     [SerializeField] private float blackholeLaunchVisualDuration = 0.35f;
     [SerializeField] private float blackholeVisualScale = 0.7f;
+    [SerializeField] private float blackholeActivationScaleMultiplier = 3f;
     [SerializeField] private float blackholeVisualGroundOffset = 0.35f;
     [SerializeField] private float blackholeThrowSpeed = 8f;
     [SerializeField] private float blackholeThrowArc = 0.35f;
@@ -53,7 +54,7 @@ public sealed partial class NetworkPlayer
     [SerializeField] private float satelliteBeamHeight = 24f;
     [SerializeField] private float flamethrowerVisualForwardOffset = 0.7f;
     [SerializeField] private float flamethrowerVisualHeightOffset = 1.2f;
-    [SerializeField] private float flamethrowerVisualScale = 1f;
+    [SerializeField] private float flamethrowerVisualScale = 2f;
     [SerializeField] private Vector3 flamethrowerMuzzleLocalOffset = new(0f, 0f, 0.5f);
     [SerializeField] private Vector3 flamethrowerMuzzleLocalEulerOffset = Vector3.zero;
     [SerializeField] private bool enableItemWorldEffectLog;
@@ -419,7 +420,10 @@ public sealed partial class NetworkPlayer
             var bombRenderer = visualRoot.GetComponent<Renderer>();
             if (bombRenderer != null)
             {
-                bombRenderer.enabled = false;
+                // 한국어: 빌드에서는 내부 블랙홀 FX만으로는 발동이 거의 보이지 않는 경우가 있어
+                // 한국어: 발동 단계에서도 코어 구체를 완전히 끄지 않고 반투명 상태로 유지한다.
+                ApplyTransparentSphereVisual(visualRoot, new Color(0.07f, 0.07f, 0.08f, 0.6f));
+                bombRenderer.enabled = true;
             }
         }
 
@@ -434,6 +438,7 @@ public sealed partial class NetworkPlayer
             activeElapsed += Time.deltaTime;
             var ramp = Mathf.Clamp01(activeElapsed / expandDuration);
             var targetScale = Mathf.Max(0.4f, radius * Mathf.Max(0.08f, blackholeVisualScale * 0.22f));
+            targetScale *= Mathf.Max(1f, blackholeActivationScaleMultiplier);
             visualRoot.transform.localScale = Vector3.one * Mathf.Lerp(0.28f, targetScale, ramp);
             visualRoot.transform.Rotate(Vector3.up, 220f * Time.deltaTime, Space.World);
             visualRoot.transform.position = center;

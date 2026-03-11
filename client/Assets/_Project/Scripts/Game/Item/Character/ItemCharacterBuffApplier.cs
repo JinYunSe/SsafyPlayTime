@@ -391,9 +391,9 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return true;
             }
 
+            // 한국어: 투명화 본인 반투명 표시는 입력 권한을 가진 로컬 플레이어에게만 허용한다.
             return _networkPlayer.HasInputAuthority ||
-                   _networkPlayer.HasStateAuthority ||
-                   (_networkObject != null && (_networkObject.HasInputAuthority || _networkObject.HasStateAuthority));
+                   (_networkObject != null && _networkObject.HasInputAuthority);
         }
 
         private static void ApplyRendererAlpha(Renderer renderer, float alpha)
