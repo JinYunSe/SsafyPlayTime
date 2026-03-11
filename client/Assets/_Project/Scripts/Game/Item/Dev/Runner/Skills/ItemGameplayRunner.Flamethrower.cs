@@ -318,7 +318,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 #endif
 
-            _flamethrowerEffectPrefabCache = Resources.Load<GameObject>("Projectile 7 fire");
+            _flamethrowerEffectPrefabCache = Resources.Load<GameObject>("Hovl Studio/Toon projectiles/Prefabs/Projectile 7 fire");
             if (_flamethrowerEffectPrefabCache != null)
             {
                 return _flamethrowerEffectPrefabCache;
