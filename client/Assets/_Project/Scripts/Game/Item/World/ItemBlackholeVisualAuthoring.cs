@@ -25,7 +25,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         [Header("비주얼")]
         [SerializeField] private float shellAlpha = 0.4f;
-        [SerializeField] private Vector3 effectLocalScale = Vector3.one * 0.7f;
+        [SerializeField] private Vector3 effectLocalScale = Vector3.one * 0.6f;
 
         private void OnEnable()
         {
@@ -37,7 +37,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             shellAlpha = Mathf.Clamp01(shellAlpha);
             if (effectLocalScale.x <= 0f || effectLocalScale.y <= 0f || effectLocalScale.z <= 0f)
             {
-                effectLocalScale = Vector3.one * 0.7f;
+                effectLocalScale = Vector3.one * 0.6f;
             }
 
             RefreshVisual();
@@ -167,6 +167,12 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private GameObject LoadEffectPrefab()
         {
+            var runtimePrefab = Resources.Load<GameObject>(BlackholeEffectResourcePath);
+            if (runtimePrefab != null)
+            {
+                return runtimePrefab;
+            }
+
 #if UNITY_EDITOR
             var editorPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(BlackholeEffectAssetPath);
             if (editorPrefab != null)
@@ -174,7 +180,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return editorPrefab;
             }
 #endif
-            return Resources.Load<GameObject>(BlackholeEffectResourcePath);
+            return null;
         }
 
         private GameObject InstantiateEffect(GameObject effectPrefab)
