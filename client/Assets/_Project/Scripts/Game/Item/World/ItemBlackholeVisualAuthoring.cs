@@ -26,6 +26,8 @@ namespace SSAFYPlayTime.Gameplay.Items
         [Header("비주얼")]
         [SerializeField] private float shellAlpha = 0.4f;
         [SerializeField] private Vector3 effectLocalScale = Vector3.one * 0.6f;
+        [SerializeField] private Color effectTintColor = new(0.55f, 0.18f, 0.95f, 0.85f);
+        [SerializeField] private float effectEmissionMultiplier = 1.8f;
 
         private void OnEnable()
         {
@@ -163,6 +165,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             DisableColliders(effectRoot.gameObject);
             ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(effectRoot.gameObject);
             DisableUnsupportedDistortionRenderers(effectRoot.gameObject);
+            ApplyEffectTint(effectRoot.gameObject);
         }
 
         private GameObject LoadEffectPrefab()
@@ -243,6 +246,59 @@ namespace SSAFYPlayTime.Gameplay.Items
                         renderer.enabled = false;
                         break;
                     }
+                }
+            }
+        }
+
+        private void ApplyEffectTint(GameObject root)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            var renderers = root.GetComponentsInChildren<Renderer>(true);
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                var renderer = renderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                var materials = Application.isPlaying ? renderer.materials : renderer.sharedMaterials;
+                for (var m = 0; m < materials.Length; m++)
+                {
+                    var material = materials[m];
+                    if (material == null)
+                    {
+                        continue;
+                    }
+
+                    // 한국어: 블랙홀 이펙트는 빌드에서 fallback 머티리얼로 바뀌며 흰색이 되는 경우가 있어,
+                    // 한국어: 보라 계열 틴트와 emission을 다시 강제로 넣어 원본 분위기를 유지한다.
+                    if (material.HasProperty("_BaseColor"))
+                    {
+                        material.SetColor("_BaseColor", effectTintColor);
+                    }
+                    if (material.HasProperty("_Color"))
+                    {
+                        material.SetColor("_Color", effectTintColor);
+                    }
+                    if (material.HasProperty("_TintColor"))
+                    {
+                        material.SetColor("_TintColor", effectTintColor);
+                    }
+                    if (material.HasProperty("_EmissionColor"))
+                    {
+                        material.SetColor("_EmissionColor", effectTintColor * Mathf.Max(0f, effectEmissionMultiplier));
+                        material.EnableKeyword("_EMISSION");
+                    }
+                }
+
+                if (!Application.isPlaying)
+                {
+                    renderer.sharedMaterials = materials;
                 }
             }
         }
