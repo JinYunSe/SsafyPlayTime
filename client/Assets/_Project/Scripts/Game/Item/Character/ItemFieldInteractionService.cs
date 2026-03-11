@@ -91,6 +91,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             spawnedDrop = null;
             if (!ResolveAndWire(out reason))
             {
+                ItemRuntimeLog.Warn(itemId, $"필드 스폰 준비 실패: {reason}", this);
                 return false;
             }
 
@@ -98,6 +99,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 reason = "ItemFieldDropSpawner missing.";
                 DebugLog($"Spawn failed: {reason}");
+                ItemRuntimeLog.Warn(itemId, $"필드 스폰 실패: {reason}", this);
                 return false;
             }
 
@@ -105,6 +107,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 reason = "Item ID is empty.";
                 DebugLog($"Spawn failed: {reason}");
+                ItemRuntimeLog.Warn("Spawn", $"필드 스폰 실패: {reason}", this);
                 return false;
             }
 
@@ -112,11 +115,13 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 reason = $"Failed to spawn field item: {itemId}";
                 DebugLog($"Spawn failed: {reason}");
+                ItemRuntimeLog.Warn(itemId, $"필드 스폰 실패: pos={worldPosition}, reason={reason}", this);
                 return false;
             }
 
             reason = string.Empty;
             DebugLog($"Spawned field item: {itemId}");
+            ItemRuntimeLog.Info(itemId, $"필드 스폰 성공: pos={worldPosition}, drop={(spawnedDrop != null ? spawnedDrop.InstanceId : "null")}", this);
             return true;
         }
 
@@ -137,6 +142,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             pickupOrigin = Vector3.zero;
             if (!ResolveAndWire(out reason))
             {
+                ItemRuntimeLog.Warn("Pickup", $"필드 습득 준비 실패: {reason}", this);
                 return false;
             }
 
@@ -144,18 +150,21 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 reason = "ItemRuntimeHost missing.";
                 DebugLog($"Pickup failed: {reason}");
+                ItemRuntimeLog.Warn("Pickup", $"필드 습득 실패: {reason}", this);
                 return false;
             }
 
             if (!EnsureRuntimeReady(out reason))
             {
                 DebugLog($"Pickup failed: {reason}");
+                ItemRuntimeLog.Warn("Pickup", $"필드 습득 실패: {reason}", this);
                 return false;
             }
 
             if (!string.IsNullOrWhiteSpace(itemRuntimeHost.HeldItemId))
             {
                 reason = "Held item already exists.";
+                ItemRuntimeLog.Warn(itemRuntimeHost.HeldItemId, $"필드 습득 실패: {reason}", this);
                 return false;
             }
 
@@ -163,11 +172,20 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 reason = "ItemFieldPickupInteractor missing.";
                 DebugLog($"Pickup failed: {reason}");
+                ItemRuntimeLog.Warn("Pickup", $"필드 습득 실패: {reason}", this);
                 return false;
             }
 
             pickupOrigin = ResolveOwnerTransform().position;
-            return itemFieldPickupInteractor.TryPickupNearest(out pickedItemId, out pickedDropInstanceId, out reason);
+            var picked = itemFieldPickupInteractor.TryPickupNearest(out pickedItemId, out pickedDropInstanceId, out reason);
+            if (!picked)
+            {
+                ItemRuntimeLog.Warn("Pickup", $"필드 습득 실패: origin={pickupOrigin}, reason={reason}", this);
+                return false;
+            }
+
+            ItemRuntimeLog.Info(pickedItemId, $"필드 습득 성공: origin={pickupOrigin}, drop={pickedDropInstanceId}", this);
+            return true;
         }
 
         public bool TryUseHeldItem(out string usedItemId, out string reason)
@@ -181,6 +199,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             targetPosition = Vector3.zero;
             if (!ResolveAndWire(out reason))
             {
+                ItemRuntimeLog.Warn("Use", $"아이템 사용 준비 실패: {reason}", this);
                 return false;
             }
 
@@ -188,12 +207,14 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 reason = "ItemRuntimeHost missing.";
                 DebugLog($"Use failed: {reason}");
+                ItemRuntimeLog.Warn("Use", $"아이템 사용 실패: {reason}", this);
                 return false;
             }
 
             if (!EnsureRuntimeReady(out reason))
             {
                 DebugLog($"Use failed: {reason}");
+                ItemRuntimeLog.Warn("Use", $"아이템 사용 실패: {reason}", this);
                 return false;
             }
 
@@ -201,6 +222,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 reason = "ItemCharacterUseInteractor missing.";
                 DebugLog($"Use failed: {reason}");
+                ItemRuntimeLog.Warn("Use", $"아이템 사용 실패: {reason}", this);
                 return false;
             }
 
@@ -209,6 +231,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 reason = "No held item.";
                 DebugLog($"Use failed: {reason}");
+                ItemRuntimeLog.Warn("Use", $"아이템 사용 실패: {reason}", this);
                 return false;
             }
 
@@ -216,10 +239,12 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (!itemRuntimeHost.TryUseHeldItem(targetPosition, out reason))
             {
                 DebugLog($"Use failed: {reason}");
+                ItemRuntimeLog.Warn(usedItemId, $"아이템 사용 실패: target={targetPosition}, reason={reason}", this);
                 return false;
             }
 
             DebugLog($"Use succeeded: {usedItemId}");
+            ItemRuntimeLog.Info(usedItemId, $"아이템 사용 성공: target={targetPosition}", this);
             return true;
         }
 
@@ -234,6 +259,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             dropSpawnPosition = Vector3.zero;
             if (!ResolveAndWire(out reason))
             {
+                ItemRuntimeLog.Warn("Drop", $"아이템 드랍 준비 실패: {reason}", this);
                 return false;
             }
 
@@ -241,12 +267,14 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 reason = "ItemRuntimeHost missing.";
                 DebugLog($"Drop failed: {reason}");
+                ItemRuntimeLog.Warn("Drop", $"아이템 드랍 실패: {reason}", this);
                 return false;
             }
 
             if (!EnsureRuntimeReady(out reason))
             {
                 DebugLog($"Drop failed: {reason}");
+                ItemRuntimeLog.Warn("Drop", $"아이템 드랍 실패: {reason}", this);
                 return false;
             }
 
@@ -255,6 +283,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 reason = "No held item.";
                 DebugLog($"Drop failed: {reason}");
+                ItemRuntimeLog.Warn("Drop", $"아이템 드랍 실패: {reason}", this);
                 return false;
             }
 
@@ -263,10 +292,12 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (!dropped)
             {
                 DebugLog($"Drop failed: {reason}");
+                ItemRuntimeLog.Warn(droppedItemId, $"아이템 드랍 실패: spawn={dropSpawnPosition}, reason={reason}", this);
                 return false;
             }
 
             DebugLog($"Drop succeeded: {droppedItemId}");
+            ItemRuntimeLog.Info(droppedItemId, $"아이템 드랍 성공: spawn={dropSpawnPosition}", this);
             return true;
         }
 
