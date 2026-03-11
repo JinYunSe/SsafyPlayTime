@@ -43,6 +43,7 @@ namespace SSAFYPlayTime
         // OnHostMigration 시점에는 일부 플레이어만 재접속 완료됐으므로,
         // 이후 OnPlayerJoined에서 각 플레이어가 재접속할 때마다 이 테이블로 위치·캐릭터 데이터를 리매핑한다.
         private readonly Dictionary<string, int> _migrationOldPlayerIdByClientId = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, bool> _migrationReadyStateByClientId = new(StringComparer.OrdinalIgnoreCase);
 
         // 호스트 마이그레이션 진행 중 여부. true이면 OnSceneLoadStart에서 마이그레이션 데이터를 지우지 않는다.
         private bool _isMigrating;
@@ -397,6 +398,32 @@ namespace SSAFYPlayTime
 
             _migrationOldPlayerIdByClientId.Remove(clientId);
             RemapMigrationEntry(oldPlayerId, player.PlayerId);
+        }
+
+        internal void TryApplyMigrationReadyStateOnJoin(NetworkRunner runner, PlayerRef player)
+        {
+            var clientId = DecodeConnectionTokenClientId(runner.GetPlayerConnectionToken(player));
+            if (string.IsNullOrWhiteSpace(clientId) && player == runner.LocalPlayer)
+            {
+                EnsureLocalClientId();
+                clientId = _localClientId;
+            }
+
+            if (string.IsNullOrWhiteSpace(clientId))
+            {
+                return;
+            }
+
+            if (!_migrationReadyStateByClientId.TryGetValue(clientId, out var isReady))
+            {
+                return;
+            }
+
+            _readyStateByPlayerId[player.PlayerId] = isReady;
+            if (_roomParticipantsByPlayerId.TryGetValue(player.PlayerId, out var presence) && presence != null)
+            {
+                presence.IsReady = isReady;
+            }
         }
 
         private string GetMigrationClientId(NetworkRunner runner, PlayerRef player)
