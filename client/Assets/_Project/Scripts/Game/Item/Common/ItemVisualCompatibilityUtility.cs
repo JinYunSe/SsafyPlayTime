@@ -92,15 +92,15 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return true;
             }
 
-            if (!material.shader.isSupported)
-            {
-                return true;
-            }
-
             var shaderName = material.shader.name ?? string.Empty;
             if (shaderName.IndexOf("Hidden/InternalErrorShader", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return true;
+            }
+
+            if (material.shader.isSupported)
+            {
+                return false;
             }
 
             if (GraphicsSettings.currentRenderPipeline == null)
@@ -108,11 +108,15 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return false;
             }
 
-            return shaderName.StartsWith("Standard", StringComparison.OrdinalIgnoreCase) ||
-                   shaderName.StartsWith("Legacy Shaders/", StringComparison.OrdinalIgnoreCase) ||
-                   shaderName.StartsWith("Particles/", StringComparison.OrdinalIgnoreCase) ||
-                   shaderName.StartsWith("Mobile/", StringComparison.OrdinalIgnoreCase) ||
-                   shaderName.StartsWith("PolygonArsenal/", StringComparison.OrdinalIgnoreCase);
+            if (shaderName.StartsWith("Universal Render Pipeline/", StringComparison.OrdinalIgnoreCase) ||
+                shaderName.StartsWith("Hidden/Universal Render Pipeline/", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // 한국어: 아이템 시스템에서 로드하는 외부 이펙트는 빌드에서 커스텀 셰이더가 자주 깨지므로
+            // 한국어: URP 네임스페이스가 아니면 전부 안전한 URP 셰이더로 교체한다.
+            return true;
         }
 
         private static bool ShouldForceGlowFallback(Renderer renderer, Material source)
@@ -122,12 +126,20 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return false;
             }
 
+            if (source.shader != null && source.shader.isSupported)
+            {
+                return false;
+            }
+
             var rendererName = renderer.gameObject.name ?? string.Empty;
             var materialName = source.name ?? string.Empty;
             return rendererName.IndexOf("Glow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   rendererName.IndexOf("Trail", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    materialName.IndexOf("PolySpriteGlow", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    materialName.IndexOf("PolySolidGlow", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   materialName.IndexOf("PolySprite_AB", StringComparison.OrdinalIgnoreCase) >= 0;
+                   materialName.IndexOf("PolySprite", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   materialName.IndexOf("PolyProton", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   materialName.IndexOf("PolyTrail", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static bool ShouldPreferParticleFallback(Renderer renderer, Material source)
@@ -247,22 +259,24 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (forceLitOverride)
             {
                 return Shader.Find("Universal Render Pipeline/Lit") ??
-                       Shader.Find("Universal Render Pipeline/Simple Lit") ??
                        Shader.Find("Universal Render Pipeline/Unlit") ??
-                       Shader.Find("Standard");
+                       Shader.Find("Universal Render Pipeline/Simple Lit");
             }
 
             if (preferParticleShader)
             {
+                // 한국어: 빌드에서 파티클 전용 셰이더 variant가 빠지는 경우가 있어 Unlit만 사용한다.
                 return Shader.Find("Universal Render Pipeline/Particles/Unlit") ??
                        Shader.Find("Universal Render Pipeline/Particles/Lit") ??
+                       Shader.Find("Universal Render Pipeline/Particles/Simple Lit") ??
                        Shader.Find("Universal Render Pipeline/Unlit") ??
-                       Shader.Find("Standard");
+                       Shader.Find("Universal Render Pipeline/Lit") ??
+                       Shader.Find("Universal Render Pipeline/Simple Lit");
             }
 
             return Shader.Find("Universal Render Pipeline/Lit") ??
-                   Shader.Find("Universal Render Pipeline/Simple Lit") ??
-                   Shader.Find("Standard");
+                   Shader.Find("Universal Render Pipeline/Unlit") ??
+                   Shader.Find("Universal Render Pipeline/Simple Lit");
         }
 
         private static void CopySurfaceProperties(Material source, Material destination)
@@ -344,6 +358,24 @@ namespace SSAFYPlayTime.Gameplay.Items
                     destination.EnableKeyword("_EMISSION");
                 }
             }
+
+            var destinationShaderName = destination.shader != null ? destination.shader.name ?? string.Empty : string.Empty;
+            if (destinationShaderName.IndexOf("/Particles/", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (destination.HasProperty("_BaseColor"))
+                {
+                    destination.SetColor("_BaseColor", sourceColor);
+                }
+                if (destination.HasProperty("_Color"))
+                {
+                    destination.SetColor("_Color", sourceColor);
+                }
+                if (destination.HasProperty("_EmissionColor"))
+                {
+                    destination.SetColor("_EmissionColor", sourceColor * 1.5f);
+                    destination.EnableKeyword("_EMISSION");
+                }
+            }
         }
 
         private static Color ResolveSourceColor(Material source)
@@ -351,6 +383,13 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (source == null)
             {
                 return Color.white;
+            }
+
+            var shaderName = source.shader != null ? source.shader.name ?? string.Empty : string.Empty;
+            var isParticleLikeShader = shaderName.IndexOf("Particles", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (isParticleLikeShader && source.HasProperty("_TintColor"))
+            {
+                return source.GetColor("_TintColor");
             }
 
             if (source.HasProperty("_BaseColor"))
