@@ -1,3 +1,4 @@
+using Fusion;
 using SSAFYPlayTime.Gameplay.Items;
 using UnityEngine;
 
@@ -22,7 +23,7 @@ public sealed partial class NetworkPlayer
             TryProcessDrop();
 
         if (throwRequested)
-            TryProcessThrow();
+            TryProcessSecondaryAction(anyHolding);
 
         ResetInteractionTriggers();
         UpdateGrabbingAnimatorFlag();
@@ -80,7 +81,7 @@ public sealed partial class NetworkPlayer
         var didThrow = false;
         foreach (var handler in _handGrabHandlers)
         {
-            if (!handler.IsHolding)
+            if (handler == null || !handler.IsHoldingThrowableTarget)
                 continue;
 
             handler.Throw();
@@ -91,129 +92,93 @@ public sealed partial class NetworkPlayer
             animator.SetTrigger(H_Throw);
     }
 
+    private void TryProcessSecondaryAction(bool anyHolding)
+    {
+        if (anyHolding)
+        {
+            TryProcessThrow();
+            return;
+        }
+
+        TryPickupNearestFieldItemByKey();
+    }
+
     private void ResetInteractionTriggers()
     {
         _dropTriggered = false;
         _throwTriggered = false;
     }
 
+    private bool IsAnyHandHoldingThrowableTarget()
+    {
+        foreach (var handler in _handGrabHandlers)
+        {
+            if (handler != null && handler.IsHoldingThrowableTarget)
+                return true;
+        }
+
+        return false;
+    }
+
     private void UpdateGrabbingAnimatorFlag()
     {
-        if (animator != null)
-            animator.SetBool(H_IsGrabbing, IsAnyHandHoldingObject());
+        if (animator == null)
+            return;
+
+        var isCarrying = IsAnyHandHoldingThrowableTarget();
+        var isGrabbing = _isGrabActive && !isCarrying;
+
+        animator.SetBool(H_IsGrabbing, isGrabbing);
+        animator.SetBool("isCarrying", isCarrying);
     }
 
     private bool TryUseHeldItemByPrimaryClick()
     {
-        var runtimeHost = ResolveItemRuntimeHostForCharacter();
-
-        if (_itemUseInteractor == null)
-            _itemUseInteractor = GetComponent<ItemCharacterUseInteractor>();
-
-        if (_itemUseInteractor != null)
-        {
-            if (runtimeHost != null)
-                _itemUseInteractor.SetRuntimeHost(runtimeHost);
-
-            if (string.IsNullOrWhiteSpace(_itemUseInteractor.HeldItemId))
-                return false;
-
-            return _itemUseInteractor.TryUseHeldItem(out _);
-        }
-
-        if (runtimeHost == null)
+        if (!TryPrepareItemInteractionService(out _))
             return false;
 
-        if (!runtimeHost.IsReady && !runtimeHost.Initialize())
+        return _itemFieldInteractionService.TryUseHeldItem(out _, out _, out _);
+    }
+
+    private bool TryPickupNearestFieldItemByKey()
+    {
+        if (!TryPrepareItemInteractionService(out _))
             return false;
 
-        if (string.IsNullOrWhiteSpace(runtimeHost.HeldItemId))
+        if (!_itemFieldInteractionService.TryPickupNearest(out var pickedItemId, out var pickupOrigin, out _))
             return false;
 
-        var targetPosition = transform.position + transform.forward * 6f;
-        return runtimeHost.TryUseHeldItem(targetPosition, out _);
+        BroadcastPickedFieldDrop(pickedItemId, pickupOrigin);
+        return true;
     }
 
     private bool TryDropHeldItemByKey()
     {
-        var runtimeHost = ResolveItemRuntimeHostForCharacter();
-        if (runtimeHost == null)
+        if (!TryPrepareItemInteractionService(out var runtimeHost))
             return false;
 
-        if (!runtimeHost.IsReady && !runtimeHost.Initialize())
+        if (!_itemFieldInteractionService.TryDropHeldItem(out var droppedItemId, out var dropSpawnPosition, out _))
             return false;
 
-        if (string.IsNullOrWhiteSpace(runtimeHost.HeldItemId))
-            return false;
-
-        var droppedItemId = runtimeHost.HeldItemId;
-        var beforeDropCount = CountFieldDropsByItemId(droppedItemId);
-        if (!runtimeHost.TryDropHeldItem(out _))
-            return false;
-
-        EnsureFieldDropSpawnFallback(droppedItemId, runtimeHost, beforeDropCount);
+        EnsureFieldDropReplicaForDrop(droppedItemId, runtimeHost, dropSpawnPosition);
+        BroadcastDroppedFieldItem(droppedItemId, dropSpawnPosition);
         return true;
     }
 
-    private void EnsureFieldDropSpawnFallback(string droppedItemId, ItemRuntimeHost runtimeHost, int beforeDropCount)
+    private bool TryPrepareItemInteractionService(out ItemRuntimeHost runtimeHost)
     {
-        if (string.IsNullOrWhiteSpace(droppedItemId))
-            return;
+        runtimeHost = ResolveItemRuntimeHostForCharacter();
+        if (_itemFieldInteractionService == null)
+            _itemFieldInteractionService = GetComponent<ItemFieldInteractionService>();
 
-        var afterDropCount = CountFieldDropsByItemId(droppedItemId);
-        if (afterDropCount > beforeDropCount)
-            return;
+        if (_itemFieldInteractionService == null)
+            return false;
 
-        var spawners = FindObjectsOfType<ItemFieldDropSpawner>(true);
-        ItemFieldDropSpawner boundSpawner = null;
-        ItemFieldDropSpawner fallbackSpawner = null;
+        if (runtimeHost == null)
+            return false;
 
-        for (var i = 0; i < spawners.Length; i++)
-        {
-            var spawner = spawners[i];
-            if (spawner == null)
-                continue;
-
-            if (fallbackSpawner == null && spawner.RuntimeHost == null)
-                fallbackSpawner = spawner;
-
-            if (spawner.RuntimeHost == runtimeHost)
-                boundSpawner = spawner;
-        }
-
-        if (boundSpawner != null)
-            fallbackSpawner = boundSpawner;
-        else if (fallbackSpawner == null)
-        {
-            var spawnRoot = runtimeHost != null ? runtimeHost.gameObject : gameObject;
-            fallbackSpawner = spawnRoot.GetComponent<ItemFieldDropSpawner>();
-            if (fallbackSpawner == null)
-                fallbackSpawner = spawnRoot.AddComponent<ItemFieldDropSpawner>();
-        }
-
-        fallbackSpawner.SetRuntimeHost(runtimeHost);
-        var spawnPosition = transform.position + transform.forward * 0.9f + Vector3.up * 0.4f;
-        if (!fallbackSpawner.TrySpawnItem(droppedItemId, spawnPosition, out _))
-            Debug.LogWarning($"[NetworkPlayer] 드롭 폴백 스폰 실패: {droppedItemId}", this);
-    }
-
-    private static int CountFieldDropsByItemId(string itemId)
-    {
-        if (string.IsNullOrWhiteSpace(itemId))
-            return 0;
-
-        var drops = FindObjectsOfType<ItemFieldDrop>(true);
-        var count = 0;
-        for (var i = 0; i < drops.Length; i++)
-        {
-            var drop = drops[i];
-            if (drop == null || drop.IsPickedUp)
-                continue;
-
-            if (string.Equals(drop.ItemId, itemId, System.StringComparison.Ordinal))
-                count++;
-        }
-
-        return count;
+        _itemFieldInteractionService.SetRuntimeHost(runtimeHost);
+        _itemFieldInteractionService.SetOwnerTransform(transform);
+        return true;
     }
 }

@@ -237,6 +237,10 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 normalized = normalized.Substring("Resources/".Length);
             }
+            else if (normalized.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = normalized.Substring("Assets/".Length);
+            }
 
             var extension = Path.GetExtension(normalized);
             if (!string.IsNullOrWhiteSpace(extension))
@@ -281,8 +285,14 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return prefab != null;
             }
 #endif
+            var resourcesPath = NormalizeAssetKeyToResourcesPath(assetKey);
+            if (string.IsNullOrWhiteSpace(resourcesPath))
+            {
+                return false;
+            }
 
-            return false;
+            prefab = Resources.Load<GameObject>(resourcesPath);
+            return prefab != null;
         }
     }
 }

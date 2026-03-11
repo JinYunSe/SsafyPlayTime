@@ -1,0 +1,9 @@
+﻿sfxId,assetKey,mixerGroup,defaultVolume,loop,spatial,maxVoices,enabled,note
+SFX_ITEM_BLACKHOLE,Assets/2000 Game Sound FX/EXPLOSIONS - DESTRUCTION - (80)/EXPLOSION Bang Rumbling Long Deep 01.wav,Master/SFX,1.0,false,false,8,true,블랙홀 폭탄 사용음
+SFX_ITEM_GROWTH,Assets/2000 Game Sound FX/SUCCESS - CHIMES - (55)/SUCCESS CHIME Mystery Magic Mana Swell 02.wav,Master/SFX,1.0,false,false,8,true,커지는 아이템 사용음
+SFX_ITEM_SHRINK,Assets/2000 Game Sound FX/SUCCESS - CHIMES - (55)/SUCCESS CHIME Mystery Magic Spell Sparkle 04.wav,Master/SFX,1.0,false,false,8,true,작아지는 아이템 사용음
+SFX_ITEM_AMERICANO,Assets/2000 Game Sound FX/SUCCESS - CHIMES - (55)/SUCCESS CHIME Mystery Magic Spell Sparkle 01.wav,Master/SFX,1.0,false,false,8,true,아메리카노 사용음
+SFX_ITEM_FLAME,Assets/2000 Game Sound FX/WATER - BUBBLES - SPLASHES - (16)/WATER Bubbling Long Loop 01.wav,Master/SFX,0.9,true,true,4,true,화염 방사기 루프음
+SFX_ITEM_INVIS,Assets/2000 Game Sound FX/SUCCESS - CHIMES - (55)/SUCCESS CHIME Mystery Magic Mana Swell 05.wav,Master/SFX,1.0,false,false,8,true,투명화 아이템 사용음
+SFX_ITEM_SWING,Assets/2000 Game Sound FX/SWIPES - SLASHES - WHOOSHES - (58)/SWIPE Blade Slash Clang Swing 01.wav,Master/SFX,1.0,false,true,12,true,사무용 도구 휘두르기/타격음
+SFX_ITEM_SATELLITE,Assets/2000 Game Sound FX/EXPLOSIONS - DESTRUCTION - (80)/EXPLOSION Bang Blast 04.wav,Master/SFX,1.0,false,false,6,true,위성 폭격 호출음

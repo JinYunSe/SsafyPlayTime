@@ -103,6 +103,11 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private bool ShouldSkipCurrentScene()
         {
+            if (HasNetworkPlayersInActiveScene())
+            {
+                return true;
+            }
+
             if (runInItemScene)
             {
                 return false;
@@ -122,6 +127,29 @@ namespace SSAFYPlayTime.Gameplay.Items
             var path = activeScene.path ?? string.Empty;
             return path.EndsWith("/ItemScene.unity", System.StringComparison.OrdinalIgnoreCase) ||
                    path.EndsWith("\\ItemScene.unity", System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool HasNetworkPlayersInActiveScene()
+        {
+            var activeScene = SceneManager.GetActiveScene();
+            if (!activeScene.IsValid())
+            {
+                return false;
+            }
+
+            var players = FindObjectsOfType<NetworkPlayer>(true);
+            for (var i = 0; i < players.Length; i++)
+            {
+                var player = players[i];
+                if (player == null || player.gameObject.scene != activeScene)
+                {
+                    continue;
+                }
+
+                return true;
+            }
+
+            return false;
         }
 
         private static bool TryFindLocalCharacterRoot(out GameObject root)

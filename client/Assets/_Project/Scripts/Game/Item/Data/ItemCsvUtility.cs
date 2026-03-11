@@ -34,8 +34,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return false;
             }
 
-            resolvedPath = ResolvePath(relativeOrAbsolutePath);
-            if (!File.Exists(resolvedPath))
+            if (!TryResolveExistingPath(relativeOrAbsolutePath, out resolvedPath))
             {
                 error = $"{tableName} not found: {resolvedPath}";
                 return false;
@@ -74,6 +73,43 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             return Path.GetFullPath(Path.Combine(Application.dataPath, normalized));
+        }
+
+        private static bool TryResolveExistingPath(string relativeOrAbsolutePath, out string resolvedPath)
+        {
+            var normalized = (relativeOrAbsolutePath ?? string.Empty).Replace('\\', '/');
+            if (Path.IsPathRooted(normalized))
+            {
+                resolvedPath = Path.GetFullPath(normalized);
+                return File.Exists(resolvedPath);
+            }
+
+            if (normalized.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = normalized.Substring("Assets/".Length);
+            }
+
+            var candidates = new[]
+            {
+                Path.GetFullPath(Path.Combine(Application.dataPath, normalized)),
+                Path.GetFullPath(Path.Combine(Application.streamingAssetsPath, normalized)),
+                Path.GetFullPath(Path.Combine(Application.streamingAssetsPath, "Assets", normalized))
+            };
+
+            for (var i = 0; i < candidates.Length; i++)
+            {
+                var candidate = candidates[i];
+                if (!File.Exists(candidate))
+                {
+                    continue;
+                }
+
+                resolvedPath = candidate;
+                return true;
+            }
+
+            resolvedPath = candidates[0];
+            return false;
         }
 
         internal static string ReadNextDataLine(StringReader reader)

@@ -2,42 +2,46 @@ using UnityEngine;
 using SSAFYPlayTime.Gameplay.Items;
 
 /// <summary>
-/// 멀티플레이 대응 그랩 핸들러.
+/// 멀?�플?�이 ?�??그랩 ?�들??
 /// 
-/// 좌클릭 꾹 = 그랩 모드
-///   - 필드 아이템을 잡으면 물리 고정 대신 즉시 습득 처리
-///   - OnCollisionEnter에서 FixedJoint 생성 (물체 or 다른 플레이어)
-///   - 다른 플레이어가 active ragdoll → 붙잡아서 이동 방해
-///   - 다른 플레이어가 기절 → 아이템처럼 들고 다니다가 던지기 가능
-/// 좌클릭 연타 = 펀치 (HandGrabHandler 밖에서 NetworkPlayer가 처리)
+/// 좌클�?�?= 그랩 모드
+///   - ?�드 ?�이?�을 ?�으�?물리 고정 ?�??즉시 ?�득 처리
+///   - OnCollisionEnter?�서 FixedJoint ?�성 (물체 or ?�른 ?�레?�어)
+///   - ?�른 ?�레?�어가 active ragdoll ??붙잡?�서 ?�동 방해
+///   - ?�른 ?�레?�어가 기절 ???�이?�처???�고 ?�니?��? ?��?�?가??
+/// 좌클�??��? = ?��?(HandGrabHandler 밖에??NetworkPlayer가 처리)
 ///
-/// StateAuthority(호스트)에서만 물리 연산 실행.
+/// StateAuthority(?�스???�서�?물리 ?�산 ?�행.
 /// </summary>
 public class HandGrabHandler : MonoBehaviour
 {
     [SerializeField] Animator animator;
 
-    // 런타임에 생성되는 FixedJoint
+    // ?��??�에 ?�성?�는 FixedJoint
     FixedJoint fixedJoint;
 
-    // 이 손의 Rigidbody
+    // ???�의 Rigidbody
     Rigidbody rigidbody3D;
 
-    // 상위 NetworkPlayer 참조
+    // ?�위 NetworkPlayer 참조
     NetworkPlayer networkPlayer;
     ItemRuntimeHost itemRuntimeHost;
 
-    // 홀드 포인트 (인터페이스 호환)
+    // ?�???�인??(?�터?�이???�환)
     Transform _holdPoint;
 
-    // 잡힌 대상이 플레이어인지 추적
+    // ?�힌 ?�?�이 ?�레?�어?��? 추적
     NetworkPlayer _grabbedPlayer;
 
-    /// <summary>현재 무언가를 잡고 있는지</summary>
+    /// <summary>?�재 무언가�??�고 ?�는지</summary>
     public bool IsHolding => fixedJoint != null;
 
-    /// <summary>잡힌 대상이 기절한 플레이어인지</summary>
+    /// <summary>?�힌 ?�?�이 기절???�레?�어?��?</summary>
     public bool IsHoldingStunnedPlayer => _grabbedPlayer != null && !_grabbedPlayer.IsActiveRagdoll;
+
+    public bool IsHoldingConsciousPlayer => fixedJoint != null && _grabbedPlayer != null && _grabbedPlayer.IsActiveRagdoll;
+
+    public bool IsHoldingThrowableTarget => fixedJoint != null && (_grabbedPlayer == null || !_grabbedPlayer.IsActiveRagdoll);
 
     void Awake()
     {
@@ -51,14 +55,14 @@ public class HandGrabHandler : MonoBehaviour
             animator = GetComponentInParent<Animator>();
     }
 
-    /// <summary>홀드 포인트를 외부에서 지정 (기존 인터페이스 호환)</summary>
+    /// <summary>?�???�인?��? ?��??�서 지??(기존 ?�터?�이???�환)</summary>
     public void SetHoldPoint(Transform point)
     {
         _holdPoint = point;
     }
 
     /// <summary>
-    /// NetworkPlayer가 선택한 런타임 호스트를 공유받는다.
+    /// NetworkPlayer가 ?�택???��????�스?��? 공유받는??
     /// </summary>
     public void SetItemRuntimeHost(ItemRuntimeHost runtimeHost)
     {
@@ -66,62 +70,27 @@ public class HandGrabHandler : MonoBehaviour
     }
 
     /// <summary>
-    /// NetworkPlayer.FixedUpdateNetwork()에서 매 틱 호출 (호스트 전용).
-    /// 좌클릭 꾹(GrabHold) 상태에 따라 그랩 유지/해제.
+    /// NetworkPlayer.FixedUpdateNetwork()?�서 �????�출 (?�스???�용).
+    /// 좌클�?�?GrabHold) ?�태???�라 그랩 ?��?/?�제.
     /// </summary>
     public void UpdateState()
     {
         if (networkPlayer == null) return;
 
-        // 좌클릭 꾹(그랩 모드) 활성화 중
         if (networkPlayer.IsGrabActive)
+            return;
+
+        if (fixedJoint != null)
         {
-            if (animator != null)
-                animator.SetBool("isGrabbing", true);
-        }
-        else
-        {
-            // 좌클릭 뗌 → 그랩 해제
-            if (fixedJoint != null)
-            {
-                if (fixedJoint.connectedBody != null)
-                {
-                    float forceMultiplier;
-
-                    // 잡힌 대상이 기절한 플레이어 → 강하게 던짐 (아이템처럼)
-                    if (_grabbedPlayer != null)
-                    {
-                        float throwForce = !_grabbedPlayer.IsActiveRagdoll
-                            ? GetGrabThrowForceStunned()
-                            : GetGrabThrowForceNormal();
-
-                        forceMultiplier = throwForce;
-                    }
-                    else
-                    {
-                        forceMultiplier = 0.1f; // 일반 오브젝트
-                    }
-
-                    Vector3 throwDir = (networkPlayer.transform.forward + Vector3.up * 0.25f) * forceMultiplier;
-                    fixedJoint.connectedBody.AddForce(throwDir, ForceMode.Impulse);
-                }
-
-                Destroy(fixedJoint);
-                _grabbedPlayer = null;
-            }
-
-            if (animator != null)
-            {
-                animator.SetBool("isCarrying", false);
-                animator.SetBool("isGrabbing", false);
-            }
+            Destroy(fixedJoint);
+            _grabbedPlayer = null;
         }
     }
 
     /// <summary>
-    /// OverlapSphere 방식의 그랩 시도.
-    /// 네트워크 환경에서도 호스트에서만 호출.
-    /// 다른 플레이어도 잡기 대상에 포함.
+    /// OverlapSphere 방식??그랩 ?�도.
+    /// ?�트?�크 ?�경?�서???�스?�에?�만 ?�출.
+    /// ?�른 ?�레?�어???�기 ?�?�에 ?�함.
     /// </summary>
     public void TryGrab()
     {
@@ -155,7 +124,7 @@ public class HandGrabHandler : MonoBehaviour
 
         if (bestTarget != null)
         {
-            // 필드 아이템은 항상 습득 경로만 사용하고 물리 그랩으로 폴백하지 않는다.
+            // ?�드 ?�이?��? ??�� ?�득 경로�??�용?�고 물리 그랩?�로 ?�백?��? ?�는??
             if (IsFieldItemRigidbody(bestTarget))
             {
                 TryPickupFieldItem(bestTarget);
@@ -166,7 +135,7 @@ public class HandGrabHandler : MonoBehaviour
         }
     }
 
-    /// <summary>내려놓기 (F키)</summary>
+    /// <summary>?�려?�기 (F??</summary>
     public void Drop()
     {
         if (fixedJoint == null) return;
@@ -176,18 +145,13 @@ public class HandGrabHandler : MonoBehaviour
 
         Destroy(fixedJoint);
         _grabbedPlayer = null;
-
-        if (animator != null)
-        {
-            animator.SetBool("isCarrying", false);
-            animator.SetBool("isGrabbing", false);
-        }
     }
 
-    /// <summary>던지기 (우클릭)</summary>
+    /// <summary>?��?�?(?�클�?</summary>
     public void Throw()
     {
         if (fixedJoint == null) return;
+        if (_grabbedPlayer != null && _grabbedPlayer.IsActiveRagdoll) return;
 
         if (fixedJoint.connectedBody != null)
         {
@@ -208,18 +172,12 @@ public class HandGrabHandler : MonoBehaviour
 
         Destroy(fixedJoint);
         _grabbedPlayer = null;
-
-        if (animator != null)
-        {
-            animator.SetBool("isCarrying", false);
-            animator.SetBool("isGrabbing", false);
-        }
     }
 
     /// <summary>
-    /// 충돌 시 자동 그랩.
-    /// 좌클릭 꾹(GrabHold) 상태에서 충돌하면 FixedJoint 연결.
-    /// 다른 플레이어도 대상이 됨.
+    /// 충돌 ???�동 그랩.
+    /// 좌클�?�?GrabHold) ?�태?�서 충돌?�면 FixedJoint ?�결.
+    /// ?�른 ?�레?�어???�?�이 ??
     /// </summary>
     void OnCollisionEnter(Collision collision)
     {
@@ -228,7 +186,7 @@ public class HandGrabHandler : MonoBehaviour
 
     bool TryCarryObject(Collision collision)
     {
-        // StateAuthority만 실행
+        // StateAuthority�??�행
         if (networkPlayer != null && networkPlayer.Object != null
             && networkPlayer.Object.IsValid && !networkPlayer.HasStateAuthority)
             return false;
@@ -237,14 +195,14 @@ public class HandGrabHandler : MonoBehaviour
         if (networkPlayer != null && !networkPlayer.IsGrabActive) return false;
         if (fixedJoint != null) return false;
 
-        // 자기 자신 불가
+        // ?�기 ?�신 불�?
         if (networkPlayer != null && collision.transform.root == networkPlayer.transform)
             return false;
 
         if (!collision.collider.TryGetComponent(out Rigidbody otherRb))
             return false;
 
-        // 필드 아이템은 항상 습득 경로만 사용하고 물리 그랩으로 폴백하지 않는다.
+        // ?�드 ?�이?��? ??�� ?�득 경로�??�용?�고 물리 그랩?�로 ?�백?��? ?�는??
         if (IsFieldItemRigidbody(otherRb))
         {
             TryPickupFieldItem(otherRb);
@@ -273,7 +231,7 @@ public class HandGrabHandler : MonoBehaviour
 
         if (itemRuntimeHost == null)
         {
-            Debug.Log("[HandGrabHandler] 아이템 런타임 호스트를 찾지 못했습니다.", this);
+            Debug.Log("[HandGrabHandler] ?�이???��????�스?��? 찾�? 못했?�니??", this);
             return false;
         }
 
@@ -282,13 +240,13 @@ public class HandGrabHandler : MonoBehaviour
 
         if (!itemRuntimeHost.IsReady && !itemRuntimeHost.Initialize())
         {
-            Debug.Log($"[HandGrabHandler] 아이템 런타임 초기화 실패: {itemRuntimeHost.LastError}", this);
+            Debug.Log($"[HandGrabHandler] ?�이???��???초기???�패: {itemRuntimeHost.LastError}", this);
             return false;
         }
 
         if (!itemRuntimeHost.TryPickup(fieldDrop.ItemId, out var reason))
         {
-            // 이미 보유 중이면 이 대상은 소비한 것으로 간주해 물리 그랩 폴백을 막는다.
+            // ?��? 보유 중이�????�?��? ?�비??것으�?간주??물리 그랩 ?�백??막는??
             if (!string.IsNullOrWhiteSpace(reason) &&
                 reason.StartsWith("Already holding an item", System.StringComparison.Ordinal))
             {
@@ -296,17 +254,11 @@ public class HandGrabHandler : MonoBehaviour
             }
 
             if (!string.IsNullOrWhiteSpace(reason))
-                Debug.Log($"[HandGrabHandler] 아이템 습득 실패: {reason}", this);
+                Debug.Log($"[HandGrabHandler] ?�이???�득 ?�패: {reason}", this);
             return false;
         }
 
         fieldDrop.MarkPickedUp();
-
-        if (animator != null)
-        {
-            animator.SetBool("isCarrying", false);
-            animator.SetBool("isGrabbing", false);
-        }
 
         return true;
     }
@@ -371,14 +323,11 @@ public class HandGrabHandler : MonoBehaviour
         fixedJoint.autoConfigureConnectedAnchor = false;
         fixedJoint.connectedAnchor = targetRb.transform.InverseTransformPoint(worldAnchorPoint);
 
-        // 잡힌 대상이 다른 플레이어인지 체크
+        // ?�힌 ?�?�이 ?�른 ?�레?�어?��? 체크
         _grabbedPlayer = targetRb.transform.root.GetComponent<NetworkPlayer>();
-
-        if (animator != null)
-            animator.SetBool("isCarrying", true);
     }
 
-    // CSV 수치 헬퍼
+    // CSV ?�치 ?�퍼
     private float GetGrabThrowForceNormal()
     {
         return CombatSettings.Instance != null ? CombatSettings.Instance.grabThrowForceNormal : 10f;
@@ -389,3 +338,6 @@ public class HandGrabHandler : MonoBehaviour
         return CombatSettings.Instance != null ? CombatSettings.Instance.grabThrowForceStunned : 15f;
     }
 }
+
+
+
