@@ -452,6 +452,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(visualRoot);
+
             var colliders = visualRoot.GetComponentsInChildren<Collider>(true);
             for (var i = 0; i < colliders.Length; i++)
             {
@@ -462,10 +464,14 @@ namespace SSAFYPlayTime.Gameplay.Items
             for (var i = 0; i < bodies.Length; i++)
             {
                 var body = bodies[i];
+                if (!body.isKinematic)
+                {
+                    body.velocity = Vector3.zero;
+                    body.angularVelocity = Vector3.zero;
+                }
+
                 body.isKinematic = true;
                 body.useGravity = false;
-                body.velocity = Vector3.zero;
-                body.angularVelocity = Vector3.zero;
             }
         }
 

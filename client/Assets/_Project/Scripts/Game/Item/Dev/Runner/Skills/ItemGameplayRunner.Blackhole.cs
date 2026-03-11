@@ -207,6 +207,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 colliders[i].enabled = false;
             }
 
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
             DisableUnsupportedGrabPassRenderers(instance);
             ConfigureBlackholeOuterLayerVisual(instance);
         }
@@ -291,6 +292,11 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
             }
 #endif
+
+            if (TryLoadPrefabFromAssetPath(blackholeEffectPrefabAssetPath, out _blackholeEffectPrefabCache))
+            {
+                return _blackholeEffectPrefabCache;
+            }
 
             _blackholeEffectPrefabCache = Resources.Load<GameObject>("Effect_02_BlackHole");
             return _blackholeEffectPrefabCache;

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -585,6 +585,8 @@ namespace SSAFYPlayTime
         private void OnPrivateToggleChanged(bool isPrivate)
         {
             createPasswordInput.gameObject.SetActive(isPrivate);
+
+            ForceRebuildRoomModalLayout();
         }
 
         // _roomSnapshots 기준으로 방 목록 UI를 재구성한다. 기존 아이템을 제거하고 새로 생성한다.
@@ -1402,8 +1404,11 @@ namespace SSAFYPlayTime
                     continue;
                 }
 
-                rb.velocity = Vector3.zero;
-                rb.angularVelocity = Vector3.zero;
+                if (!rb.isKinematic)
+                {
+                    rb.velocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
+                }
                 rb.useGravity = false;
                 rb.isKinematic = true;
                 rb.detectCollisions = false;
@@ -2330,6 +2335,9 @@ namespace SSAFYPlayTime
             if (createValidationText != null)
             {
                 createValidationText.text = message;
+                createValidationText.gameObject.SetActive(!string.IsNullOrEmpty(message));
+
+                ForceRebuildRoomModalLayout();
             }
         }
 
@@ -2787,6 +2795,20 @@ namespace SSAFYPlayTime
                 }
 
                 if (editNicknameModal != null) editNicknameModal.SetActive(false);
+            }
+        }
+
+        private void ForceRebuildRoomModalLayout()
+        {
+            Canvas.ForceUpdateCanvases();
+
+            if (createRoomModal != null && createRoomModal.transform.childCount > 0)
+            {
+                var dialogRect = createRoomModal.transform.GetChild(0).GetComponent<RectTransform>();
+                if (dialogRect != null)
+                {
+                    UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate(dialogRect);
+                }
             }
         }
 
