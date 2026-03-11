@@ -5,41 +5,62 @@ using UnityEngine;
 
 public sealed partial class NetworkPlayer
 {
-    private void BroadcastPickedFieldDrop(string itemId, Vector3 origin)
+    private void BroadcastPickedFieldDrop(string itemId, string dropInstanceId, Vector3 origin)
     {
         if (Runner == null || !HasStateAuthority || string.IsNullOrWhiteSpace(itemId))
             return;
 
-        RPC_MarkNearestFieldDropPicked(itemId, origin);
+        RPC_MarkFieldDropPicked(itemId, dropInstanceId ?? string.Empty, origin);
     }
 
-    private void BroadcastDroppedFieldItem(string itemId, Vector3 worldPosition)
+    private void BroadcastDroppedFieldItem(string itemId, Vector3 worldPosition, string dropInstanceId)
     {
         if (Runner == null || !HasStateAuthority || string.IsNullOrWhiteSpace(itemId))
             return;
 
-        RPC_SpawnFieldDropReplica(itemId, worldPosition);
+        RPC_SpawnFieldDropReplica(itemId, worldPosition, dropInstanceId ?? string.Empty);
     }
 
-    private void EnsureFieldDropReplicaForDrop(string droppedItemId, ItemRuntimeHost runtimeHost, Vector3 spawnPosition)
+    private string CreateFieldDropReplicaId()
+    {
+        return Guid.NewGuid().ToString("N");
+    }
+
+    private void EnsureFieldDropReplicaForDrop(string droppedItemId, ItemRuntimeHost runtimeHost, Vector3 spawnPosition, string dropInstanceId)
     {
         if (string.IsNullOrWhiteSpace(droppedItemId))
             return;
 
+        if (!string.IsNullOrWhiteSpace(dropInstanceId))
+        {
+            var exactDrop = FindFieldDropByInstanceId(dropInstanceId);
+            if (exactDrop != null)
+                return;
+        }
+
         var existing = FindNearestFieldDropByItemId(droppedItemId, spawnPosition, 0.6f);
         if (existing != null)
+        {
+            if (!string.IsNullOrWhiteSpace(dropInstanceId))
+            {
+                existing.SetInstanceId(dropInstanceId);
+            }
+
             return;
+        }
 
         var spawner = ResolveFieldDropSpawner(runtimeHost);
         if (spawner == null)
         {
-            Debug.LogWarning($"[NetworkPlayer] 드롭 스포너를 찾지 못해 복제를 생략했다: {droppedItemId}", this);
+            Debug.LogWarning($"[NetworkPlayer] Field drop spawner missing for {droppedItemId}", this);
             return;
         }
 
         spawner.SetRuntimeHost(runtimeHost);
-        if (!spawner.TrySpawnItem(droppedItemId, spawnPosition, out _))
-            Debug.LogWarning($"[NetworkPlayer] 드롭 복제 스폰 실패: {droppedItemId}", this);
+        if (!spawner.TrySpawnItem(droppedItemId, spawnPosition, dropInstanceId, out _))
+        {
+            Debug.LogWarning($"[NetworkPlayer] Failed to spawn field drop replica for {droppedItemId}", this);
+        }
     }
 
     private ItemFieldDropSpawner ResolveFieldDropSpawner(ItemRuntimeHost runtimeHost)
@@ -70,6 +91,24 @@ public sealed partial class NetworkPlayer
         return spawnRoot.AddComponent<ItemFieldDropSpawner>();
     }
 
+    private static ItemFieldDrop FindFieldDropByInstanceId(string instanceId)
+    {
+        if (string.IsNullOrWhiteSpace(instanceId))
+            return null;
+
+        var drops = FindObjectsOfType<ItemFieldDrop>(true);
+        for (var i = 0; i < drops.Length; i++)
+        {
+            var drop = drops[i];
+            if (drop == null || !string.Equals(drop.InstanceId, instanceId, StringComparison.Ordinal))
+                continue;
+
+            return drop;
+        }
+
+        return null;
+    }
+
     private static ItemFieldDrop FindNearestFieldDropByItemId(string itemId, Vector3 origin, float maxDistance)
     {
         if (string.IsNullOrWhiteSpace(itemId))
@@ -81,7 +120,7 @@ public sealed partial class NetworkPlayer
         for (var i = 0; i < drops.Length; i++)
         {
             var drop = drops[i];
-            if (drop == null || drop.IsPickedUp || !string.Equals(drop.ItemId, itemId, System.StringComparison.Ordinal))
+            if (drop == null || drop.IsPickedUp || !string.Equals(drop.ItemId, itemId, StringComparison.Ordinal))
                 continue;
 
             var distance = (drop.transform.position - origin).sqrMagnitude;
@@ -96,18 +135,23 @@ public sealed partial class NetworkPlayer
     }
 
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
-    private void RPC_MarkNearestFieldDropPicked(string itemId, Vector3 origin)
+    private void RPC_MarkFieldDropPicked(string itemId, string dropInstanceId, Vector3 origin)
     {
         if (HasStateAuthority)
             return;
 
-        var drop = FindNearestFieldDropByItemId(itemId, origin, 3f);
+        var drop = FindFieldDropByInstanceId(dropInstanceId);
+        if (drop == null)
+        {
+            drop = FindNearestFieldDropByItemId(itemId, origin, 3f);
+        }
+
         if (drop != null)
             drop.MarkPickedUp();
     }
 
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
-    private void RPC_SpawnFieldDropReplica(string itemId, Vector3 worldPosition)
+    private void RPC_SpawnFieldDropReplica(string itemId, Vector3 worldPosition, string dropInstanceId)
     {
         if (HasStateAuthority || string.IsNullOrWhiteSpace(itemId))
             return;
@@ -116,10 +160,21 @@ public sealed partial class NetworkPlayer
         if (spawner == null)
             return;
 
-        var existing = FindNearestFieldDropByItemId(itemId, worldPosition, 0.6f);
-        if (existing != null)
+        var exactDrop = FindFieldDropByInstanceId(dropInstanceId);
+        if (exactDrop != null)
             return;
 
-        spawner.TrySpawnItem(itemId, worldPosition, out _);
+        var existing = FindNearestFieldDropByItemId(itemId, worldPosition, 0.6f);
+        if (existing != null)
+        {
+            if (!string.IsNullOrWhiteSpace(dropInstanceId))
+            {
+                existing.SetInstanceId(dropInstanceId);
+            }
+
+            return;
+        }
+
+        spawner.TrySpawnItem(itemId, worldPosition, dropInstanceId, out _);
     }
 }

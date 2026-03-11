@@ -9,7 +9,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 {
     internal static class ItemVisualCompatibilityUtility
     {
-        internal static void ApplyUrpMaterialFallback(GameObject root)
+        internal static void ApplyUrpMaterialFallback(GameObject root, bool forceLitOverride = false)
         {
             if (root == null)
             {
@@ -38,13 +38,13 @@ namespace SSAFYPlayTime.Gameplay.Items
                 for (var m = 0; m < materials.Length; m++)
                 {
                     var source = materials[m];
-                    if (!NeedsFallback(source) && !ShouldForceGlowFallback(renderer, source))
+                    if (!forceLitOverride && !NeedsFallback(source) && !ShouldForceGlowFallback(renderer, source))
                     {
                         continue;
                     }
 
                     var preferParticleShader = ShouldPreferParticleFallback(renderer, source);
-                    var fallbackShader = ResolveFallbackShader(renderer, source, preferParticleShader);
+                    var fallbackShader = ResolveFallbackShader(renderer, source, preferParticleShader, forceLitOverride);
                     if (fallbackShader == null)
                     {
                         continue;
@@ -59,6 +59,11 @@ namespace SSAFYPlayTime.Gameplay.Items
                     ConfigureTransparencyIfNeeded(source, fallback);
                     materials[m] = fallback;
                     replaced = true;
+                }
+
+                if (renderer is ParticleSystemRenderer particleRenderer)
+                {
+                    replaced |= ApplyParticleTrailMaterialFallback(particleRenderer, forceLitOverride);
                 }
 
                 if (replaced)
@@ -205,8 +210,48 @@ namespace SSAFYPlayTime.Gameplay.Items
             return true;
         }
 
-        private static Shader ResolveFallbackShader(Renderer renderer, Material source, bool preferParticleShader)
+        private static bool ApplyParticleTrailMaterialFallback(ParticleSystemRenderer particleRenderer, bool forceLitOverride)
         {
+            if (particleRenderer == null)
+            {
+                return false;
+            }
+
+            var trailMaterial = particleRenderer.trailMaterial;
+            if (!forceLitOverride &&
+                !NeedsFallback(trailMaterial) &&
+                !ShouldForceGlowFallback(particleRenderer, trailMaterial))
+            {
+                return false;
+            }
+
+            var fallbackShader = ResolveFallbackShader(particleRenderer, trailMaterial, true, forceLitOverride);
+            if (fallbackShader == null)
+            {
+                return false;
+            }
+
+            var fallback = new Material(fallbackShader)
+            {
+                name = $"{(trailMaterial != null ? trailMaterial.name : "MissingTrailMaterial")}_Compat"
+            };
+
+            CopySurfaceProperties(trailMaterial, fallback);
+            ConfigureTransparencyIfNeeded(trailMaterial, fallback);
+            particleRenderer.trailMaterial = fallback;
+            return true;
+        }
+
+        private static Shader ResolveFallbackShader(Renderer renderer, Material source, bool preferParticleShader, bool forceLitOverride)
+        {
+            if (forceLitOverride)
+            {
+                return Shader.Find("Universal Render Pipeline/Lit") ??
+                       Shader.Find("Universal Render Pipeline/Simple Lit") ??
+                       Shader.Find("Universal Render Pipeline/Unlit") ??
+                       Shader.Find("Standard");
+            }
+
             if (preferParticleShader)
             {
                 return Shader.Find("Universal Render Pipeline/Particles/Unlit") ??
