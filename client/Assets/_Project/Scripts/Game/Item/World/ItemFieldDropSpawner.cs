@@ -69,6 +69,11 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         public bool TrySpawnItem(string itemId, Vector3 worldPosition, out ItemFieldDrop spawnedDrop)
         {
+            return TrySpawnItem(itemId, worldPosition, string.Empty, out spawnedDrop);
+        }
+
+        public bool TrySpawnItem(string itemId, Vector3 worldPosition, string instanceId, out ItemFieldDrop spawnedDrop)
+        {
             spawnedDrop = null;
             if (string.IsNullOrWhiteSpace(itemId))
             {
@@ -92,6 +97,10 @@ namespace SSAFYPlayTime.Gameplay.Items
                 groundMask,
                 spawnHeightOffset);
             spawnedDrop = SpawnDefinition(definition, resolvedPosition, false, Vector3.zero);
+            if (spawnedDrop != null && !string.IsNullOrWhiteSpace(instanceId))
+            {
+                spawnedDrop.SetInstanceId(instanceId);
+            }
             return spawnedDrop != null;
         }
 

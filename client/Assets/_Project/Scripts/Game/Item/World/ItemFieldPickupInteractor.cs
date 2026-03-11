@@ -77,7 +77,13 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         public bool TryPickupNearest(out string pickedItemId, out string reason)
         {
+            return TryPickupNearest(out pickedItemId, out _, out reason);
+        }
+
+        public bool TryPickupNearest(out string pickedItemId, out string pickedDropInstanceId, out string reason)
+        {
             pickedItemId = string.Empty;
+            pickedDropInstanceId = string.Empty;
             reason = string.Empty;
             if (itemRuntimeHost == null)
             {
@@ -144,6 +150,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             pickedItemId = nearestDrop.ItemId;
+            pickedDropInstanceId = nearestDrop.InstanceId;
             nearestDrop.MarkPickedUp();
             FieldItemPickedUp?.Invoke(nearestDrop.ItemId, nearestDrop);
             DebugLog($"Picked up: {pickedItemId}");

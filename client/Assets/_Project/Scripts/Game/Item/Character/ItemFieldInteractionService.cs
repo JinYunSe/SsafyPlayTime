@@ -127,7 +127,13 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         public bool TryPickupNearest(out string pickedItemId, out Vector3 pickupOrigin, out string reason)
         {
+            return TryPickupNearest(out pickedItemId, out _, out pickupOrigin, out reason);
+        }
+
+        public bool TryPickupNearest(out string pickedItemId, out string pickedDropInstanceId, out Vector3 pickupOrigin, out string reason)
+        {
             pickedItemId = string.Empty;
+            pickedDropInstanceId = string.Empty;
             pickupOrigin = Vector3.zero;
             if (!ResolveAndWire(out reason))
             {
@@ -161,7 +167,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             pickupOrigin = ResolveOwnerTransform().position;
-            return itemFieldPickupInteractor.TryPickupNearest(out pickedItemId, out reason);
+            return itemFieldPickupInteractor.TryPickupNearest(out pickedItemId, out pickedDropInstanceId, out reason);
         }
 
         public bool TryUseHeldItem(out string usedItemId, out string reason)

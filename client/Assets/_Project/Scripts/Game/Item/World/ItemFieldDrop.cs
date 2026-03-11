@@ -16,18 +16,33 @@ namespace SSAFYPlayTime.Gameplay.Items
     public sealed class ItemFieldDrop : MonoBehaviour
     {
         [SerializeField] private string itemId = string.Empty;
+        [SerializeField] private string instanceId = string.Empty;
         [SerializeField] private bool destroyOnPickup = true;
         [SerializeField] private bool disableCollidersOnPickup = true;
 
         private bool _pickedUp;
 
         public string ItemId => itemId;
+        public string InstanceId => instanceId;
         public bool IsPickedUp => _pickedUp;
         public event Action<ItemFieldDrop> PickedUp;
+
+        private void Awake()
+        {
+            EnsureInstanceId();
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(gameObject);
+        }
 
         public void SetItemId(string value)
         {
             itemId = value ?? string.Empty;
+        }
+
+        public void SetInstanceId(string value)
+        {
+            instanceId = string.IsNullOrWhiteSpace(value)
+                ? BuildDeterministicInstanceId()
+                : value;
         }
 
         public bool CanBePickedUp()
@@ -60,6 +75,46 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             gameObject.SetActive(false);
+        }
+
+        private void EnsureInstanceId()
+        {
+            if (!string.IsNullOrWhiteSpace(instanceId))
+            {
+                return;
+            }
+
+            instanceId = BuildDeterministicInstanceId();
+        }
+
+        private string BuildDeterministicInstanceId()
+        {
+            var scenePath = gameObject.scene.IsValid() ? gameObject.scene.path : string.Empty;
+            var hierarchyPath = BuildHierarchyPath(transform);
+            if (!string.IsNullOrWhiteSpace(scenePath) && !string.IsNullOrWhiteSpace(hierarchyPath))
+            {
+                return $"{scenePath}:{hierarchyPath}";
+            }
+
+            return Guid.NewGuid().ToString("N");
+        }
+
+        private static string BuildHierarchyPath(Transform target)
+        {
+            if (target == null)
+            {
+                return string.Empty;
+            }
+
+            var path = target.name;
+            var current = target.parent;
+            while (current != null)
+            {
+                path = $"{current.name}/{path}";
+                current = current.parent;
+            }
+
+            return path;
         }
     }
 }
