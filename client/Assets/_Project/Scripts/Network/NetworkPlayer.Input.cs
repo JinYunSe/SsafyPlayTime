@@ -3,6 +3,11 @@ using UnityEngine;
 
 public sealed partial class NetworkPlayer
 {
+    private float ResolveCameraYaw()
+    {
+        return Camera.main != null ? Camera.main.transform.eulerAngles.y : transform.eulerAngles.y;
+    }
+
     private void Update()
     {
         ApplyReplicatedHeldItemPresentation();
@@ -85,6 +90,7 @@ public sealed partial class NetworkPlayer
         return new PlayerNetworkInput
         {
             Move = _sandboxInput,
+            CameraYaw = ResolveCameraYaw(),
             Jump = _sandboxJump,
             Punch = _leftClickUseTriggered,
             Drop = _dropTriggered,
