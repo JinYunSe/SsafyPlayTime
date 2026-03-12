@@ -121,8 +121,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   itemId: ITEM_BLACKHOLE_BOMB
+  instanceId: 
   destroyOnPickup: 1
   disableCollidersOnPickup: 1
+  runtimeInitialized: 0
 --- !u!114 &7838653867194396386
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -136,7 +138,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   shellAlpha: 0.4
-  effectLocalScale: {x: 0.6, y: 0.6, z: 0.6}
+  effectLocalScale: {x: 1.2, y: 1.2, z: 1.2}
+  effectTintColor: {r: 0.55, g: 0.18, b: 0.95, a: 0.85}
+  effectEmissionMultiplier: 1.8
+  shellMaterial: {fileID: 2100000, guid: 1765564a423762f46b9e6bcfc399cad7, type: 2}
+  outerLayerMaterial: {fileID: 2100000, guid: 8439c8fc99b050a41b1fe6a3a377559a, type: 2}
+  glowMaterial: {fileID: 2100000, guid: b1e9c4b4d9c24f7ea1c6d3b4f6a7b8c9, type: 2}
+  spriteMaterial: {fileID: 2100000, guid: c2f0a5c5e0d34a8fb2d7e4c5a7b8c9d0, type: 2}
+  solidMaterial: {fileID: 2100000, guid: d3a1b6d6f1e45b90c3e8f5d6b8c9d0e1, type: 2}
 --- !u!1001 &478213741743302759
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -154,12 +163,12 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 0}
+      objectReference: {fileID: 2100000, guid: 8439c8fc99b050a41b1fe6a3a377559a, type: 2}
     - target: {fileID: 4686379108935336100, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.data[1]
       value: 
-      objectReference: {fileID: 0}
+      objectReference: {fileID: 2100000, guid: 8439c8fc99b050a41b1fe6a3a377559a, type: 2}
     - target: {fileID: 4687703638559184048, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.size
@@ -169,12 +178,12 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: 6ccdc8326c83d48ea962619d0f6626e6, type: 2}
+      objectReference: {fileID: 2100000, guid: b1e9c4b4d9c24f7ea1c6d3b4f6a7b8c9, type: 2}
     - target: {fileID: 4687703638559184048, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.data[1]
       value: 
-      objectReference: {fileID: 0}
+      objectReference: {fileID: 2100000, guid: d3a1b6d6f1e45b90c3e8f5d6b8c9d0e1, type: 2}
     - target: {fileID: 4687850901955369162, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.size
@@ -184,41 +193,41 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 0}
+      objectReference: {fileID: 2100000, guid: b1e9c4b4d9c24f7ea1c6d3b4f6a7b8c9, type: 2}
     - target: {fileID: 4687850901955369162, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.data[1]
       value: 
-      objectReference: {fileID: 0}
+      objectReference: {fileID: 2100000, guid: b1e9c4b4d9c24f7ea1c6d3b4f6a7b8c9, type: 2}
     - target: {fileID: 4687936959075061660, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.size
-      value: 1
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 4687936959075061660, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 0}
+      objectReference: {fileID: 2100000, guid: c2f0a5c5e0d34a8fb2d7e4c5a7b8c9d0, type: 2}
     - target: {fileID: 4687936959075061660, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.data[1]
       value: 
-      objectReference: {fileID: 0}
+      objectReference: {fileID: 2100000, guid: d3a1b6d6f1e45b90c3e8f5d6b8c9d0e1, type: 2}
     - target: {fileID: 4883250842768799222, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_LocalScale.x
-      value: 0.7
+      value: 0.6
       objectReference: {fileID: 0}
     - target: {fileID: 4883250842768799222, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_LocalScale.y
-      value: 0.7
+      value: 0.6
       objectReference: {fileID: 0}
     - target: {fileID: 4883250842768799222, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_LocalScale.z
-      value: 0.7
+      value: 0.6
       objectReference: {fileID: 0}
     - target: {fileID: 4883250842768799222, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
@@ -278,28 +287,33 @@ PrefabInstance:
     - target: {fileID: 5908527952244329289, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.size
-      value: 1
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 5908527952244329289, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 0}
+      objectReference: {fileID: 2100000, guid: c2f0a5c5e0d34a8fb2d7e4c5a7b8c9d0, type: 2}
     - target: {fileID: 5908527952244329289, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.data[1]
       value: 
+      objectReference: {fileID: 2100000, guid: d3a1b6d6f1e45b90c3e8f5d6b8c9d0e1, type: 2}
+    - target: {fileID: 5908527953393908627, guid: 75f5ad6880835f54a861b2b0b26203a0,
+        type: 3}
+      propertyPath: m_Materials.Array.size
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 5908527953393908627, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 0}
+      objectReference: {fileID: 2100000, guid: c2f0a5c5e0d34a8fb2d7e4c5a7b8c9d0, type: 2}
     - target: {fileID: 5908527953393908627, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.data[1]
       value: 
-      objectReference: {fileID: 0}
+      objectReference: {fileID: 2100000, guid: d3a1b6d6f1e45b90c3e8f5d6b8c9d0e1, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
