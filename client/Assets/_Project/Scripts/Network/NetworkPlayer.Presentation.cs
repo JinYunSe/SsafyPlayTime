@@ -6,6 +6,7 @@ public sealed partial class NetworkPlayer
     public override void Render()
     {
         UpdateAnimationParameters();
+        ApplyReplicatedAnimationEvent();
 
         if (!HasStateAuthority && Object != null && Object.IsValid)
             InterpolateRemoteBoneRotations();
@@ -62,5 +63,65 @@ public sealed partial class NetworkPlayer
         animator.enabled = true;
         animator.Rebind();
         animator.Update(0f);
+    }
+
+    private void InitializeAnimationEventState()
+    {
+        if (Runner == null || Object == null || !Object.IsValid)
+        {
+            _lastConsumedAnimationEventSequence = 0;
+            return;
+        }
+
+        _lastConsumedAnimationEventSequence = NetworkedAnimationEventSequence;
+    }
+
+    private void ApplyReplicatedAnimationEvent()
+    {
+        if (animator == null || Runner == null || Object == null || !Object.IsValid)
+            return;
+
+        if (_lastConsumedAnimationEventSequence < 0)
+        {
+            _lastConsumedAnimationEventSequence = NetworkedAnimationEventSequence;
+            return;
+        }
+
+        if (NetworkedAnimationEventSequence == _lastConsumedAnimationEventSequence)
+            return;
+
+        _lastConsumedAnimationEventSequence = NetworkedAnimationEventSequence;
+
+        switch ((AnimationEventType)NetworkedAnimationEventType)
+        {
+            case AnimationEventType.Punch:
+                animator.SetTrigger(H_Punch);
+                break;
+            case AnimationEventType.Throw:
+                animator.SetTrigger(H_Throw);
+                break;
+            case AnimationEventType.GetHit:
+                animator.SetTrigger(H_GetHit);
+                break;
+            case AnimationEventType.StunFall:
+                animator.SetTrigger(H_StunFall);
+                break;
+            case AnimationEventType.StunRecover:
+                animator.SetTrigger(H_StunRecover);
+                break;
+        }
+    }
+
+    private void RaiseAnimationEvent(AnimationEventType eventType, int triggerHash)
+    {
+        if (animator != null)
+            animator.SetTrigger(triggerHash);
+
+        if (Runner == null || Object == null || !Object.IsValid)
+            return;
+
+        NetworkedAnimationEventType = (int)eventType;
+        NetworkedAnimationEventSequence = unchecked(NetworkedAnimationEventSequence + 1);
+        _lastConsumedAnimationEventSequence = NetworkedAnimationEventSequence;
     }
 }
