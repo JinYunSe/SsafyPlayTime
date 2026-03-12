@@ -39,8 +39,7 @@ public sealed partial class NetworkPlayer
         var finalStunDamage = stunDamage * bodyPartMultiplier * ResolveStunStateMultiplier();
         var accumulated = AddStunDamage(finalStunDamage);
 
-        if (animator != null)
-            animator.SetTrigger(H_GetHit);
+        RaiseAnimationEvent(AnimationEventType.GetHit, H_GetHit);
 
         var threshold = CombatSettings.Instance != null
             ? CombatSettings.Instance.knockoutThreshold
@@ -283,8 +282,7 @@ public sealed partial class NetworkPlayer
         SetStunTimeRemaining(duration);
         SetAccumulatedStun(0f);
 
-        if (animator != null)
-            animator.SetTrigger(H_StunFall);
+        RaiseAnimationEvent(AnimationEventType.StunFall, H_StunFall);
 
         Debug.Log($"[Combat] 기절! 시간: {duration:F1}초");
     }
@@ -314,8 +312,7 @@ public sealed partial class NetworkPlayer
         SetStunTimeRemaining(0f);
         SetAccumulatedStun(0f);
 
-        if (animator != null)
-            animator.SetTrigger(H_StunRecover);
+        RaiseAnimationEvent(AnimationEventType.StunRecover, H_StunRecover);
 
         Debug.Log("[Combat] 회복! (2초간 취약 상태)");
     }

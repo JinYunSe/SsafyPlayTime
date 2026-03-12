@@ -51,7 +51,7 @@ namespace SSAFYPlayTime
 
         private enum CharacterKind
         {
-            Statty = 0,
+            Ssaty = 0,
             AlG = 1,
             Fit = 2,
             Wise = 3,
@@ -127,13 +127,15 @@ namespace SSAFYPlayTime
         [SerializeField] private GameObject playerTwoReadyBadge;
         [SerializeField] private GameObject playerThreeReadyBadge;
         [SerializeField] private GameObject playerFourReadyBadge;
-        [SerializeField] private GameObject stattyCharacterRoot;
+        [FormerlySerializedAs("stattyCharacterRoot")]
+        [SerializeField] private GameObject ssatyCharacterRoot;
         [SerializeField] private GameObject alGCharacterRoot;
         [SerializeField] private GameObject fitCharacterRoot;
         [SerializeField] private GameObject wiseCharacterRoot;
         [SerializeField] private GameObject randomCharacterRoot;
         [SerializeField] private GameObject characterSelectionPanel;
-        [SerializeField] private Button selectStattyCharacterButton;
+        [FormerlySerializedAs("selectStattyCharacterButton")]
+        [SerializeField] private Button selectSsatyCharacterButton;
         [SerializeField] private Button selectAlGCharacterButton;
         [SerializeField] private Button selectFitCharacterButton;
         [SerializeField] private Button selectWiseCharacterButton;
@@ -171,7 +173,7 @@ namespace SSAFYPlayTime
         [Header("Slot Particle Rotation Y Overrides (degrees, Slot1~4)")]
         [SerializeField] private float[] slotParticleRotationYOffsets = { 180f, 180f, 180f, 180f };
 
-        [Header("Character Kind Overrides (Statty=0, AlG=1, Fit=2, Wise=3, Random=4)")]
+        [Header("Character Kind Overrides (Ssaty=0, AlG=1, Fit=2, Wise=3, Random=4)")]
         [SerializeField] private Vector3[] characterKindPositionOffsets =
         {
             Vector3.zero,
@@ -393,12 +395,12 @@ namespace SSAFYPlayTime
                 { nameof(playerTwoReadyBadge), playerTwoReadyBadge },
                 { nameof(playerThreeReadyBadge), playerThreeReadyBadge },
                 { nameof(playerFourReadyBadge), playerFourReadyBadge },
-                { nameof(stattyCharacterRoot), stattyCharacterRoot },
+                { nameof(ssatyCharacterRoot), ssatyCharacterRoot },
                 { nameof(alGCharacterRoot), alGCharacterRoot },
                 { nameof(fitCharacterRoot), fitCharacterRoot },
                 { nameof(wiseCharacterRoot), wiseCharacterRoot },
                 { nameof(characterSelectionPanel), characterSelectionPanel },
-                { nameof(selectStattyCharacterButton), selectStattyCharacterButton },
+                { nameof(selectSsatyCharacterButton), selectSsatyCharacterButton },
                 { nameof(selectAlGCharacterButton), selectAlGCharacterButton },
                 { nameof(selectFitCharacterButton), selectFitCharacterButton },
                 { nameof(selectWiseCharacterButton), selectWiseCharacterButton },
@@ -480,9 +482,9 @@ namespace SSAFYPlayTime
                 readyButton.onClick.AddListener(OnReadyButtonClicked);
             }
 
-            if (selectStattyCharacterButton != null)
+            if (selectSsatyCharacterButton != null)
             {
-                selectStattyCharacterButton.onClick.AddListener(OnSelectStattyCharacter);
+                selectSsatyCharacterButton.onClick.AddListener(OnSelectSsatyCharacter);
             }
 
             if (selectAlGCharacterButton != null)
@@ -1034,7 +1036,7 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            var templates = new[] { stattyCharacterRoot, alGCharacterRoot, fitCharacterRoot, wiseCharacterRoot, randomCharacterRoot };
+            var templates = new[] { ssatyCharacterRoot, alGCharacterRoot, fitCharacterRoot, wiseCharacterRoot, randomCharacterRoot };
             var nameSlots = GetNameSlots();
             if (templates.Take(4).Any(t => t == null) || nameSlots.Any(t => t == null))
             {
@@ -1050,7 +1052,7 @@ namespace SSAFYPlayTime
                     var template = templates[option];
                     if (template == null) continue;
                     // 씬에 미리 배치된 오브젝트가 있으면 Instantiate 없이 재사용한다.
-                    // 이름 규칙: "{템플릿명}_Slot{슬롯번호}" (예: "StattyCharacter_Slot1")
+                    // 이름 규칙: "{템플릿명}_Slot{슬롯번호}" (예: "SsatyCharacterUI_Slot1")
                     var prePlacedName = $"{template.name}_Slot{slot + 1}";
                     var prePlaced = runtimeRoot.Find(prePlacedName);
 
@@ -1625,7 +1627,7 @@ namespace SSAFYPlayTime
             ApplySelectedCharacterForSlot(slotIndex, true);
         }
 
-        public void OnSelectStattyCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Statty);
+        public void OnSelectSsatyCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Ssaty);
         public void OnSelectAlGCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.AlG);
         public void OnSelectFitCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Fit);
         public void OnSelectWiseCharacter() => SetLocalPlayerSelectedCharacter((int)CharacterKind.Wise);
@@ -1886,9 +1888,11 @@ namespace SSAFYPlayTime
         // 캐릭터 이름 문자열을 CharacterKind 인덱스로 변환한다. 매칭 실패 시 -1을 반환한다.
         private static int CharacterNameToIndex(string characterName)
         {
-            if (string.Equals(characterName, "StattyCharacter", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(characterName, "StattyCharacter", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(characterName, "SsatyCharacter", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(characterName, "Character_ssaty_humanoid", StringComparison.OrdinalIgnoreCase))
             {
-                return (int)CharacterKind.Statty;
+                return (int)CharacterKind.Ssaty;
             }
 
             if (string.Equals(characterName, "AI.gCharacter", StringComparison.OrdinalIgnoreCase))
@@ -1914,7 +1918,7 @@ namespace SSAFYPlayTime
         {
             return SanitizeCharacterIndexOrNone(characterIndex) switch
             {
-                (int)CharacterKind.Statty => stattyCharacterRoot,
+                (int)CharacterKind.Ssaty => ssatyCharacterRoot,
                 (int)CharacterKind.AlG => alGCharacterRoot,
                 (int)CharacterKind.Fit => fitCharacterRoot,
                 (int)CharacterKind.Wise => wiseCharacterRoot,
@@ -2650,7 +2654,7 @@ namespace SSAFYPlayTime
         private void EnsureCharacterSelectionUi()
         {
             if (characterSelectionPanel == null ||
-                selectStattyCharacterButton == null ||
+                selectSsatyCharacterButton == null ||
                 selectAlGCharacterButton == null ||
                 selectFitCharacterButton == null ||
                 selectWiseCharacterButton == null ||
@@ -2691,10 +2695,10 @@ namespace SSAFYPlayTime
                 }
             }
 
-            if (selectStattyCharacterButton != null)
+            if (selectSsatyCharacterButton != null)
             {
-                TrySetButtonInteractable(selectStattyCharacterButton,
-                    canSelect && localSelected != (int)CharacterKind.Statty && !takenByOthers.Contains((int)CharacterKind.Statty));
+                TrySetButtonInteractable(selectSsatyCharacterButton,
+                    canSelect && localSelected != (int)CharacterKind.Ssaty && !takenByOthers.Contains((int)CharacterKind.Ssaty));
             }
 
             if (selectAlGCharacterButton != null)

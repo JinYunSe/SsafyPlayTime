@@ -479,10 +479,10 @@ namespace SSAFYPlayTime
                     : -1;
             }
 
-            // 그래도 미확정이면 기본 캐릭터(Statty)로 스폰한다.
+            // 그래도 미확정이면 기본 캐릭터(Ssaty)로 스폰한다.
             if (selectedCharacter < 0)
             {
-                selectedCharacter = (int)CharacterKind.Statty;
+                selectedCharacter = (int)CharacterKind.Ssaty;
             }
 
             if (_spawnedGameplayNetworkCharacters.TryGetValue(player.PlayerId, out var existingSpawned))

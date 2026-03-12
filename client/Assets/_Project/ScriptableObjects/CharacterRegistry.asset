@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2b38186d59998b742ae27ea2f1f577b0, type: 3}
   m_Name: CharacterRegistry
   m_EditorClassIdentifier: 
-  stattyPrefab: {fileID: 1956676462428397128, guid: 6eca31580e4c07c4aba3c9143a9c442a,
+  ssatyPrefab: {fileID: 3956258201537901134, guid: 5ac1945e571cbc04bb3cad2a9a03432d,
     type: 3}
   alGPrefab: {fileID: 1374861913022154523, guid: a5f473317a93f6140b652209b04625b7,
     type: 3}

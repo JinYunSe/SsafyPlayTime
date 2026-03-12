@@ -33,8 +33,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     // ─── 네트워크 동기화 변수 ───
     [Networked] private float NetworkedMoveSpeed { get; set; }
     [Networked] private int NetworkedMotorState { get; set; }
+    [Networked] private int NetworkedAnimationEventSequence { get; set; }
+    [Networked] private int NetworkedAnimationEventType { get; set; }
 
-    // 스폰 시 확정된 캐릭터 종류(0=Statty, 1=AlG, 2=Fit, 3=Wise).
+    // 스폰 시 확정된 캐릭터 종류(0=Ssaty, 1=AlG, 2=Fit, 3=Wise).
     // ? 선택도 스폰 전 onBeforeSpawned에서 실제 배정값으로 기록된다.
     // 호스트 마이그레이션 캡처 시 roster 수신 여부와 무관하게 실제 외형을 보존하기 위해 사용한다.
     [Networked] public int CharacterTypeIndex { get; set; } = -1;
@@ -55,6 +57,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     // ─── 로컬 변수 ───
     private float _localMoveSpeed;
     private int _localMotorState;
+    private int _lastConsumedAnimationEventSequence = -1;
     private Vector2 _sandboxInput;
     private bool _sandboxJump;
 
@@ -108,6 +111,16 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private static readonly int H_StunFall = Animator.StringToHash("StunFall");
     private static readonly int H_StunRecover = Animator.StringToHash("StunRecover");
 
+    private enum AnimationEventType
+    {
+        None = 0,
+        Punch = 1,
+        Throw = 2,
+        GetHit = 3,
+        StunFall = 4,
+        StunRecover = 5
+    }
+
     private void Awake()
     {
         InitializeInternal();
@@ -135,6 +148,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             NetworkedIsActiveRagdoll = true;
             AccumulatedStunDamage = 0f;
             StunTimeRemaining = 0f;
+            NetworkedAnimationEventSequence = 0;
+            NetworkedAnimationEventType = (int)AnimationEventType.None;
         }
 
         if (!HasStateAuthority)
@@ -144,6 +159,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         }
 
         ConfigureLocalOwnershipPresentation();
+        InitializeAnimationEventState();
     }
 
     private void InitializeInternal()
