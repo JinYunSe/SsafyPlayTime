@@ -210,10 +210,10 @@ namespace SSAFYPlayTime.Gameplay.Items
                     ? itemRuntimeHost.OwnerTransform
                     : transform;
 
-            // 한국어: hyekang 원본 WeaponEquipper의 강제 전방 정렬 방식을 화염방사기 손 장착에도 동일하게 적용한다.
+            // 한국어: hyekang 원본 WeaponEquipper의 강제 전방 정렬 방식을 그대로 적용해 총구가 캐릭터 전방을 보게 맞춘다.
             _spawnedHeldVisual.transform.position = handAnchor.TransformPoint(flamethrowerLocalPositionOffset);
             _spawnedHeldVisual.transform.rotation =
-                Quaternion.LookRotation(searchRoot.forward, Vector3.up) *
+                Quaternion.LookRotation(-searchRoot.forward, Vector3.up) *
                 Quaternion.Euler(flamethrowerLocalEulerOffset);
             _spawnedHeldVisual.transform.localScale = flamethrowerLocalScale;
         }
