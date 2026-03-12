@@ -78,7 +78,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private bool applyFlamethrowerPushForce = true;
         [SerializeField] private float flamethrowerDamageRangeMultiplier = 0.5f;
         [SerializeField] private string flamethrowerEffectPrefabAssetPath =
-            "Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile 7 fire.prefab";
+            "Assets/Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky.prefab";
         [SerializeField] private float flamethrowerEffectScale = 1f;
 
         [Header("위성 폭격")]

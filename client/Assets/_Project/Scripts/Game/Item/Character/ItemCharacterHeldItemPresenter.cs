@@ -46,6 +46,10 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private bool watermelonSwordUseMaxOnPrimaryAxis;
         [SerializeField] private bool watermelonSwordFlipGripDirection;
         [SerializeField] private Vector3 watermelonSwordGripFineTune = new Vector3(0f, 0.02f, 0f);
+        [SerializeField] private bool useDefaultFlamethrowerPose = true;
+        [SerializeField] private Vector3 flamethrowerLocalPositionOffset = new Vector3(0.05f, 0.05f, 0.05f);
+        [SerializeField] private Vector3 flamethrowerLocalEulerOffset = new Vector3(-90f, -90f, 90f);
+        [SerializeField] private Vector3 flamethrowerLocalScale = Vector3.one * 0.7f;
 
         [Header("디버그")]
         [SerializeField] private bool enableDebugLog;
@@ -81,6 +85,11 @@ namespace SSAFYPlayTime.Gameplay.Items
         {
             UnbindEvents();
             ClearHeldVisual();
+        }
+
+        private void LateUpdate()
+        {
+            UpdateHeldVisualFollow();
         }
 
         public void SetRuntimeHost(ItemRuntimeHost runtimeHost)
@@ -145,12 +154,14 @@ namespace SSAFYPlayTime.Gameplay.Items
             ClearHeldVisual();
             if (string.IsNullOrWhiteSpace(heldItemId))
             {
+                ItemRuntimeLog.Info("HeldVisual", "손 장착 해제");
                 return;
             }
 
             if (!TryGetItemDefinition(heldItemId, out var definition))
             {
                 DebugLog($"Held visual skipped: missing definition for {heldItemId}");
+                ItemRuntimeLog.Warn(heldItemId, "손 장착 비주얼 실패: 아이템 정의를 찾지 못함", this);
                 return;
             }
 
@@ -159,6 +170,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (prefab == null)
             {
                 DebugLog($"Held visual skipped: prefab missing for {heldItemId}");
+                ItemRuntimeLog.Warn(heldItemId, $"손 장착 비주얼 실패: prefab 누락 path={definition.Master.PrefabPath}", this);
                 return;
             }
 
@@ -166,10 +178,54 @@ namespace SSAFYPlayTime.Gameplay.Items
             _spawnedHeldVisual.name = $"HeldItem_{heldItemId}";
             var isWatermelonSword = string.Equals(heldItemId, ItemIds.WaterMelonSword, StringComparison.Ordinal);
             // 수박칼은 조건과 무관하게 Lit 셰이더로 강제 교체해 마젠타를 방지한다.
-            ApplyUrpMaterialFallbackForHeldVisual(_spawnedHeldVisual, isWatermelonSword);
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_spawnedHeldVisual, isWatermelonSword);
+            DisableNonHeldVisualEffects(heldItemId, _spawnedHeldVisual);
             ApplyPose(heldItemId, _spawnedHeldVisual.transform);
             DisablePhysicsForHeldVisual(_spawnedHeldVisual);
             DebugLog($"Held visual attached: {heldItemId}");
+            ItemRuntimeLog.Info(heldItemId, $"손 장착 비주얼 생성: prefab={definition.Master.PrefabPath}, anchor={handAnchor.name}", this);
+        }
+
+        private void UpdateHeldVisualFollow()
+        {
+            if (_spawnedHeldVisual == null)
+            {
+                return;
+            }
+
+            if (!string.Equals(ResolveCurrentHeldItemId(), ItemIds.Flamethrower, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var handAnchor = ResolveHandAnchor();
+            if (handAnchor == null)
+            {
+                return;
+            }
+
+            var searchRoot = characterRoot != null
+                ? characterRoot
+                : itemRuntimeHost != null && itemRuntimeHost.OwnerTransform != null
+                    ? itemRuntimeHost.OwnerTransform
+                    : transform;
+
+            // 한국어: hyekang 원본 WeaponEquipper의 강제 전방 정렬 방식을 그대로 적용해 총구가 캐릭터 전방을 보게 맞춘다.
+            _spawnedHeldVisual.transform.position = handAnchor.TransformPoint(flamethrowerLocalPositionOffset);
+            _spawnedHeldVisual.transform.rotation =
+                Quaternion.LookRotation(-searchRoot.forward, Vector3.up) *
+                Quaternion.Euler(flamethrowerLocalEulerOffset);
+            _spawnedHeldVisual.transform.localScale = flamethrowerLocalScale;
+        }
+
+        private string ResolveCurrentHeldItemId()
+        {
+            if (!string.IsNullOrWhiteSpace(_replicatedHeldItemId))
+            {
+                return _replicatedHeldItemId;
+            }
+
+            return itemRuntimeHost != null ? itemRuntimeHost.HeldItemId : string.Empty;
         }
 
         private void ApplyPose(string heldItemId, Transform visualTransform)
@@ -196,6 +252,14 @@ namespace SSAFYPlayTime.Gameplay.Items
                 // 역수로 보이지 않도록 기본 오일러에 보정 회전을 더한다.
                 euler = watermelonSwordLocalEulerOffset + watermelonSwordAdditionalEulerOffset;
                 scale = watermelonSwordLocalScale * Mathf.Max(0.01f, watermelonSwordHeldScaleMultiplier);
+            }
+            else if (useDefaultFlamethrowerPose &&
+                     string.Equals(heldItemId, ItemIds.Flamethrower, StringComparison.Ordinal))
+            {
+                // 한국어: 화염방사기는 테스트 씬 장착값을 기본 손 위치 보정으로 사용한다.
+                position = flamethrowerLocalPositionOffset;
+                euler = flamethrowerLocalEulerOffset;
+                scale = flamethrowerLocalScale;
             }
 
             if (watermelonSwordAutoGripSnap &&
@@ -342,6 +406,16 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
             }
 
+            var animator = searchRoot.GetComponentInChildren<Animator>(true);
+            if (animator != null)
+            {
+                var bone = animator.GetBoneTransform(HumanBodyBones.RightHand);
+                if (bone != null)
+                {
+                    return bone;
+                }
+            }
+
             return searchRoot;
         }
 
@@ -370,6 +444,43 @@ namespace SSAFYPlayTime.Gameplay.Items
 
                 body.isKinematic = true;
                 body.useGravity = false;
+            }
+        }
+
+        private static void DisableNonHeldVisualEffects(string heldItemId, GameObject visualRoot)
+        {
+            if (visualRoot == null)
+            {
+                return;
+            }
+
+            var isBlackhole = string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal);
+            var isSatellite = string.Equals(heldItemId, ItemIds.SatelliteStrike, StringComparison.Ordinal);
+            if (!isBlackhole && !isSatellite)
+            {
+                return;
+            }
+
+            var particles = visualRoot.GetComponentsInChildren<ParticleSystem>(true);
+            for (var i = 0; i < particles.Length; i++)
+            {
+                var particle = particles[i];
+                if (particle == null)
+                {
+                    continue;
+                }
+
+                particle.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                particle.gameObject.SetActive(false);
+            }
+
+            var lights = visualRoot.GetComponentsInChildren<Light>(true);
+            for (var i = 0; i < lights.Length; i++)
+            {
+                if (lights[i] != null)
+                {
+                    lights[i].enabled = false;
+                }
             }
         }
 
@@ -406,8 +517,8 @@ namespace SSAFYPlayTime.Gameplay.Items
 
                     var fallbackShader =
                         Shader.Find("Universal Render Pipeline/Lit") ??
-                        Shader.Find("Universal Render Pipeline/Simple Lit") ??
-                        Shader.Find("Standard");
+                        Shader.Find("Universal Render Pipeline/Unlit") ??
+                        Shader.Find("Universal Render Pipeline/Simple Lit");
                     if (fallbackShader == null)
                     {
                         continue;
