@@ -2253,15 +2253,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   cooldown: 1
-  throwForce: 25
+  throwForce: 40
   spawnForwardOffset: 2
   hitLayer:
     serializedVersion: 2
     m_Bits: 119
-  cubePrefabOffline: {fileID: 1598737658758947845, guid: 995ba31159099da4fb992ac8a087d96d,
+  cubePrefabOffline: {fileID: 6305299146749309899, guid: 69e3bb26418f7204bac367779d5d5f06,
     type: 3}
   cubePrefabOnline:
-    RawGuidValue: 995ba31159099da4fb992ac8a087d96d
+    RawGuidValue: 69e3bb26418f7204bac367779d5d5f06
 --- !u!114 &1931735248
 MonoBehaviour:
   m_ObjectHideFlags: 0
