@@ -1,7 +1,9 @@
 using System.Collections;
+using System.Collections.Generic;
 using Fusion;
 using SSAFYPlayTime.Gameplay.Items;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public sealed partial class NetworkPlayer
 {
@@ -50,6 +52,9 @@ public sealed partial class NetworkPlayer
     [SerializeField] private float blackholePlayerPullMultiplier = 1.5f;
     [SerializeField] private float blackholeItemPullMultiplier = 1.5f;
     [SerializeField] private float blackholePlayerEscapeDamping = 0.2f;
+    [SerializeField] private bool enableReplicatedBlackholeTargetOutline = true;
+    [SerializeField] private Color replicatedBlackholeTargetOutlineColor = new(0.72f, 0.56f, 1f, 0.9f);
+    [SerializeField] private float replicatedBlackholeTargetOutlineScaleMultiplier = 1.045f;
     [SerializeField] private float satelliteProjectileTravelSec = 0.35f;
     [SerializeField] private float satelliteBeamHeight = 24f;
     [SerializeField] private float flamethrowerVisualForwardOffset = 0.7f;
@@ -83,6 +88,8 @@ public sealed partial class NetworkPlayer
     private ParticleSystem[] _replicatedFlamethrowerParticles = System.Array.Empty<ParticleSystem>();
     private float _nextItemGameplayRunnerLookupTime;
     private bool _cachedHasItemGameplayRunner;
+    private Material _replicatedBlackholeTargetOutlineMaterial;
+    private readonly Dictionary<Transform, ReplicatedBlackholeOutlineState> _replicatedBlackholeOutlineStates = new();
 
     [Networked] private int NetworkedBlackholeSeq { get; set; }
     [Networked] private Vector3 NetworkedBlackholeCenter { get; set; }
@@ -106,10 +113,17 @@ public sealed partial class NetworkPlayer
     [Networked] private float NetworkedFlamethrowerRange { get; set; }
     [Networked] private float NetworkedFlamethrowerRadius { get; set; }
 
+    private sealed class ReplicatedBlackholeOutlineState
+    {
+        public int RefCount;
+        public readonly List<GameObject> ProxyObjects = new();
+    }
+
     private void OnDisable()
     {
         UnbindItemWorldEffectEvents();
         StopActiveItemWorldEffectCoroutines();
+        ReleaseAllReplicatedBlackholeTargetOutlines();
     }
 
     private void MarkItemWorldEffectNetworkReady()
@@ -355,6 +369,7 @@ public sealed partial class NetworkPlayer
         }
 
         StopReplicatedFlamethrowerVisual();
+        ReleaseAllReplicatedBlackholeTargetOutlines();
     }
 
     private IEnumerator CoReplicatedBlackhole(BlackholeSkillRequest request, bool applyGameplay)
@@ -364,6 +379,8 @@ public sealed partial class NetworkPlayer
         var center = request.Center;
         var throwForward = ResolveReplicatedThrowForward(request.Center);
         var throwDirection = (throwForward + Vector3.up * blackholeThrowArc).normalized;
+        var outlinedTargets = new HashSet<Transform>();
+        var outlinedTargetsThisFrame = new HashSet<Transform>();
         var bombCollider = visualRoot != null ? visualRoot.GetComponent<Collider>() : null;
         if (bombCollider == null && visualRoot != null)
         {
@@ -445,10 +462,36 @@ public sealed partial class NetworkPlayer
 
             if (applyGameplay)
             {
-                ApplyBlackholeGameplay(center, radius, force, ramp);
+                ApplyBlackholeGameplay(center, radius, force, ramp, outlinedTargets, outlinedTargetsThisFrame);
+
+                if (outlinedTargets.Count > 0)
+                {
+                    var releaseBuffer = new List<Transform>();
+                    foreach (var target in outlinedTargets)
+                    {
+                        if (target == null || !outlinedTargetsThisFrame.Contains(target))
+                        {
+                            releaseBuffer.Add(target);
+                        }
+                    }
+
+                    for (var i = 0; i < releaseBuffer.Count; i++)
+                    {
+                        var target = releaseBuffer[i];
+                        ReleaseReplicatedBlackholeOutlineForTarget(target);
+                        outlinedTargets.Remove(target);
+                    }
+                }
+
+                outlinedTargetsThisFrame.Clear();
             }
 
             yield return null;
+        }
+
+        foreach (var target in outlinedTargets)
+        {
+            ReleaseReplicatedBlackholeOutlineForTarget(target);
         }
 
         Destroy(visualRoot);
@@ -556,7 +599,13 @@ public sealed partial class NetworkPlayer
         _activeReplicatedSatelliteRoutine = null;
     }
 
-    private void ApplyBlackholeGameplay(Vector3 center, float radius, float force, float ramp)
+    private void ApplyBlackholeGameplay(
+        Vector3 center,
+        float radius,
+        float force,
+        float ramp,
+        HashSet<Transform> outlinedTargets,
+        HashSet<Transform> outlinedTargetsThisFrame)
     {
         var overlapCount = Physics.OverlapSphereNonAlloc(
             center,
@@ -586,6 +635,15 @@ public sealed partial class NetworkPlayer
                 continue;
             }
 
+            if (outlinedTargetsThisFrame != null && root != null && outlinedTargetsThisFrame.Add(root))
+            {
+                if (outlinedTargets != null && !outlinedTargets.Contains(root))
+                {
+                    ApplyReplicatedBlackholeOutlineForTarget(root);
+                    outlinedTargets.Add(root);
+                }
+            }
+
             var distance = Mathf.Max(toCenter.magnitude, 0.35f);
             var pullMultiplier = root != null && root.CompareTag("Player")
                 ? Mathf.Max(0.05f, blackholePlayerPullMultiplier)
@@ -600,6 +658,301 @@ public sealed partial class NetworkPlayer
 
             body.AddForce(toCenter.normalized * pullStrength, ForceMode.Acceleration);
         }
+    }
+
+    private void ApplyReplicatedBlackholeOutlineForTarget(Transform root)
+    {
+        if (!enableReplicatedBlackholeTargetOutline || root == null)
+        {
+            return;
+        }
+
+        if (_replicatedBlackholeOutlineStates.TryGetValue(root, out var existingState))
+        {
+            existingState.RefCount++;
+            return;
+        }
+
+        var state = new ReplicatedBlackholeOutlineState
+        {
+            RefCount = 1
+        };
+
+        CreateReplicatedBlackholeOutlineProxies(root, state);
+        if (state.ProxyObjects.Count == 0)
+        {
+            return;
+        }
+
+        _replicatedBlackholeOutlineStates[root] = state;
+    }
+
+    private void ReleaseReplicatedBlackholeOutlineForTarget(Transform root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        if (!_replicatedBlackholeOutlineStates.TryGetValue(root, out var state))
+        {
+            return;
+        }
+
+        state.RefCount--;
+        if (state.RefCount > 0)
+        {
+            return;
+        }
+
+        DestroyReplicatedBlackholeOutlineState(state);
+        _replicatedBlackholeOutlineStates.Remove(root);
+    }
+
+    private void ReleaseAllReplicatedBlackholeTargetOutlines()
+    {
+        if (_replicatedBlackholeOutlineStates.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var pair in _replicatedBlackholeOutlineStates)
+        {
+            DestroyReplicatedBlackholeOutlineState(pair.Value);
+        }
+
+        _replicatedBlackholeOutlineStates.Clear();
+    }
+
+    private void CreateReplicatedBlackholeOutlineProxies(Transform root, ReplicatedBlackholeOutlineState state)
+    {
+        if (root == null || state == null)
+        {
+            return;
+        }
+
+        var outlineMaterial = GetOrCreateReplicatedBlackholeTargetOutlineMaterial();
+        if (outlineMaterial == null)
+        {
+            return;
+        }
+
+        var renderers = root.GetComponentsInChildren<Renderer>(true);
+        for (var i = 0; i < renderers.Length; i++)
+        {
+            var renderer = renderers[i];
+            if (!ShouldCreateReplicatedBlackholeOutlineProxy(renderer))
+            {
+                continue;
+            }
+
+            GameObject proxyObject = null;
+            if (renderer is SkinnedMeshRenderer skinnedMeshRenderer)
+            {
+                proxyObject = CreateReplicatedBlackholeOutlineProxyForSkinnedRenderer(skinnedMeshRenderer, outlineMaterial);
+            }
+            else if (renderer is MeshRenderer meshRenderer)
+            {
+                proxyObject = CreateReplicatedBlackholeOutlineProxyForMeshRenderer(meshRenderer, outlineMaterial);
+            }
+
+            if (proxyObject != null)
+            {
+                state.ProxyObjects.Add(proxyObject);
+            }
+        }
+    }
+
+    private GameObject CreateReplicatedBlackholeOutlineProxyForMeshRenderer(MeshRenderer renderer, Material outlineMaterial)
+    {
+        if (renderer == null || outlineMaterial == null)
+        {
+            return null;
+        }
+
+        if (!renderer.TryGetComponent<MeshFilter>(out var meshFilter) || meshFilter.sharedMesh == null)
+        {
+            return null;
+        }
+
+        var proxy = new GameObject($"{renderer.gameObject.name}_BlackholeOutline");
+        proxy.transform.SetParent(renderer.transform, false);
+        proxy.transform.localPosition = Vector3.zero;
+        proxy.transform.localRotation = Quaternion.identity;
+        proxy.transform.localScale = Vector3.one * Mathf.Max(1f, replicatedBlackholeTargetOutlineScaleMultiplier);
+        proxy.layer = renderer.gameObject.layer;
+
+        var proxyFilter = proxy.AddComponent<MeshFilter>();
+        proxyFilter.sharedMesh = meshFilter.sharedMesh;
+
+        var proxyRenderer = proxy.AddComponent<MeshRenderer>();
+        proxyRenderer.sharedMaterials = BuildReplicatedBlackholeOutlineMaterialArray(meshFilter.sharedMesh.subMeshCount, outlineMaterial);
+        ConfigureReplicatedBlackholeOutlineRenderer(proxyRenderer);
+        return proxy;
+    }
+
+    private GameObject CreateReplicatedBlackholeOutlineProxyForSkinnedRenderer(SkinnedMeshRenderer renderer, Material outlineMaterial)
+    {
+        if (renderer == null || outlineMaterial == null || renderer.sharedMesh == null)
+        {
+            return null;
+        }
+
+        var proxy = new GameObject($"{renderer.gameObject.name}_BlackholeOutline");
+        proxy.transform.SetParent(renderer.transform, false);
+        proxy.transform.localPosition = Vector3.zero;
+        proxy.transform.localRotation = Quaternion.identity;
+        proxy.transform.localScale = Vector3.one * Mathf.Max(1f, replicatedBlackholeTargetOutlineScaleMultiplier);
+        proxy.layer = renderer.gameObject.layer;
+
+        var proxyFilter = proxy.AddComponent<MeshFilter>();
+        var proxyRenderer = proxy.AddComponent<MeshRenderer>();
+        proxyRenderer.sharedMaterials = BuildReplicatedBlackholeOutlineMaterialArray(renderer.sharedMesh.subMeshCount, outlineMaterial);
+        ConfigureReplicatedBlackholeOutlineRenderer(proxyRenderer);
+
+        var proxyUpdater = proxy.AddComponent<BlackholeSkinnedOutlineProxy>();
+        proxyUpdater.Initialize(renderer, proxyFilter);
+        return proxy;
+    }
+
+    private static Material[] BuildReplicatedBlackholeOutlineMaterialArray(int subMeshCount, Material outlineMaterial)
+    {
+        var count = Mathf.Max(1, subMeshCount);
+        var materials = new Material[count];
+        for (var i = 0; i < count; i++)
+        {
+            materials[i] = outlineMaterial;
+        }
+
+        return materials;
+    }
+
+    private static void ConfigureReplicatedBlackholeOutlineRenderer(Renderer renderer)
+    {
+        if (renderer == null)
+        {
+            return;
+        }
+
+        renderer.shadowCastingMode = ShadowCastingMode.Off;
+        renderer.receiveShadows = false;
+        renderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
+        renderer.lightProbeUsage = LightProbeUsage.Off;
+        renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
+        renderer.allowOcclusionWhenDynamic = false;
+    }
+
+    private bool ShouldCreateReplicatedBlackholeOutlineProxy(Renderer renderer)
+    {
+        if (renderer == null || !renderer.enabled)
+        {
+            return false;
+        }
+
+        if (renderer is not MeshRenderer && renderer is not SkinnedMeshRenderer)
+        {
+            return false;
+        }
+
+        var owner = renderer.gameObject;
+        if (owner == null)
+        {
+            return false;
+        }
+
+        var objectName = owner.name ?? string.Empty;
+        if (objectName.IndexOf("BlackholeOutline", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+            objectName.IndexOf("Item_BlackholeFx", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+            objectName.IndexOf("OuterLayer", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return false;
+        }
+
+        return owner.GetComponentInParent<ParticleSystem>() == null &&
+               owner.GetComponentInParent<LineRenderer>() == null &&
+               owner.GetComponentInParent<TrailRenderer>() == null;
+    }
+
+    private Material GetOrCreateReplicatedBlackholeTargetOutlineMaterial()
+    {
+        if (_replicatedBlackholeTargetOutlineMaterial != null)
+        {
+            return _replicatedBlackholeTargetOutlineMaterial;
+        }
+
+        var shader =
+            Shader.Find("Universal Render Pipeline/Unlit") ??
+            Shader.Find("Universal Render Pipeline/Lit") ??
+            Shader.Find("Universal Render Pipeline/Simple Lit");
+        if (shader == null)
+        {
+            return null;
+        }
+
+        _replicatedBlackholeTargetOutlineMaterial = new Material(shader)
+        {
+            name = "Item_Blackhole_TargetOutline_Replicated",
+            hideFlags = HideFlags.DontSave
+        };
+
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_BaseColor"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetColor("_BaseColor", replicatedBlackholeTargetOutlineColor);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_Color"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetColor("_Color", replicatedBlackholeTargetOutlineColor);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_Surface"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetFloat("_Surface", 1f);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_Blend"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetFloat("_Blend", 0f);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_SrcBlend"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_DstBlend"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_ZWrite"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetFloat("_ZWrite", 0f);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_Cull"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetFloat("_Cull", (float)CullMode.Front);
+        }
+
+        _replicatedBlackholeTargetOutlineMaterial.SetOverrideTag("RenderType", "Transparent");
+        _replicatedBlackholeTargetOutlineMaterial.renderQueue = (int)RenderQueue.Transparent + 40;
+        _replicatedBlackholeTargetOutlineMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        _replicatedBlackholeTargetOutlineMaterial.EnableKeyword("_ALPHABLEND_ON");
+        _replicatedBlackholeTargetOutlineMaterial.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        return _replicatedBlackholeTargetOutlineMaterial;
+    }
+
+    private static void DestroyReplicatedBlackholeOutlineState(ReplicatedBlackholeOutlineState state)
+    {
+        if (state == null)
+        {
+            return;
+        }
+
+        for (var i = 0; i < state.ProxyObjects.Count; i++)
+        {
+            var proxy = state.ProxyObjects[i];
+            if (proxy != null)
+            {
+                Destroy(proxy);
+            }
+        }
+
+        state.ProxyObjects.Clear();
     }
 
     private void ApplyBlackholeEscapeDamping(Rigidbody body, Vector3 toCenterDir)
@@ -1436,12 +1789,18 @@ public sealed partial class NetworkPlayer
             return;
         }
 
-        ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(target, true);
-
         var renderer = target.GetComponent<Renderer>();
         if (renderer == null)
         {
             return;
+        }
+
+        var sharedMaterial = renderer.sharedMaterial;
+        if (sharedMaterial == null ||
+            sharedMaterial.shader == null ||
+            !sharedMaterial.shader.isSupported)
+        {
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(target, true);
         }
 
         var material = renderer.material;
