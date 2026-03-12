@@ -1,16 +1,40 @@
 using System.Collections;
+using System.Collections.Generic;
 using Fusion;
 using SSAFYPlayTime.Gameplay.Items;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public sealed partial class NetworkPlayer
 {
     private const string ReplicatedBlackholeVisualName = "Item_Blackhole_Replicated";
     private const string ReplicatedBlackholeFxName = "Item_BlackholeFx";
+    private const string ReplicatedBlackholeShellName = "Item_BlackholeShell";
     private const string ReplicatedSatelliteVisualName = "Item_SatelliteStrike_Replicated";
     private const string ReplicatedSatelliteChargeName = "Item_SatelliteStrike_Charge";
     private const string ReplicatedSatelliteBeamName = "Item_SatelliteStrike_Beam";
+    private const string ReplicatedFlamethrowerFxName = "Item_FlamethrowerFx_Replicated";
+    private const string BlackholeVisualAssetPath = "Assets/_Project/Prefabs/Items/BlackholeBomb.prefab";
+    private const string BlackholeVisualResourcePath = "_Project/Prefabs/Items/BlackholeBomb";
     private const string BlackholeEffectResourcePath = "Effect_02_BlackHole";
+    private const string FlamethrowerEffectAssetPath = "Assets/Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky.prefab";
+    private const string FlamethrowerEffectResourcePath = "Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky";
+    private const string SatelliteProjectileAssetPath =
+        "Assets/Polygon Arsenal/Prefabs/Combat/Missiles/Sci-Fi/Antimatter/AntimatterMissileBlue.prefab";
+    private const string SatelliteProjectileResourcePath =
+        "Polygon Arsenal/Prefabs/Combat/Missiles/Sci-Fi/Antimatter/AntimatterMissileBlue";
+    private const string SatelliteChargeupAssetPath =
+        "Assets/Polygon Arsenal/Prefabs/Interactive/BeamUp/Chargeup/BeamupChargeupBlue.prefab";
+    private const string SatelliteChargeupResourcePath =
+        "Polygon Arsenal/Prefabs/Interactive/BeamUp/Chargeup/BeamupChargeupBlue";
+    private const string SatelliteCloudAssetPath =
+        "Assets/Polygon Arsenal/Prefabs/Interactive/BeamUp/Cloud/BeamupCloudBlue.prefab";
+    private const string SatelliteCloudResourcePath =
+        "Polygon Arsenal/Prefabs/Interactive/BeamUp/Cloud/BeamupCloudBlue";
+    private const string SatelliteCylinderAssetPath =
+        "Assets/Polygon Arsenal/Prefabs/Interactive/BeamUp/Cylinder/BeamupCylinderBlue.prefab";
+    private const string SatelliteCylinderResourcePath =
+        "Polygon Arsenal/Prefabs/Interactive/BeamUp/Cylinder/BeamupCylinderBlue";
 
     [Header("Item World Effects")]
     [SerializeField] private LayerMask itemWorldEffectMask = ~0;
@@ -18,13 +42,26 @@ public sealed partial class NetworkPlayer
     [SerializeField] private float blackholeLaunchHeightOffset = 1.2f;
     [SerializeField] private float blackholeLaunchVisualDuration = 0.35f;
     [SerializeField] private float blackholeVisualScale = 0.7f;
+    [SerializeField] private float blackholeActivationScaleMultiplier = 3f;
+    [SerializeField] private float blackholeVisualGroundOffset = 0.35f;
+    [SerializeField] private float blackholeThrowSpeed = 8f;
+    [SerializeField] private float blackholeThrowArc = 0.35f;
+    [SerializeField] private bool enableReplicatedBlackholeSecondaryFx;
     [SerializeField] private float blackholePullStrengthMultiplier = 2.25f;
     [SerializeField] private float blackholeExpandSpeedMultiplier = 1.5f;
     [SerializeField] private float blackholePlayerPullMultiplier = 1.5f;
     [SerializeField] private float blackholeItemPullMultiplier = 1.5f;
     [SerializeField] private float blackholePlayerEscapeDamping = 0.2f;
+    [SerializeField] private bool enableReplicatedBlackholeTargetOutline = true;
+    [SerializeField] private Color replicatedBlackholeTargetOutlineColor = new(0.72f, 0.56f, 1f, 0.9f);
+    [SerializeField] private float replicatedBlackholeTargetOutlineScaleMultiplier = 1.045f;
     [SerializeField] private float satelliteProjectileTravelSec = 0.35f;
     [SerializeField] private float satelliteBeamHeight = 24f;
+    [SerializeField] private float flamethrowerVisualForwardOffset = 0.7f;
+    [SerializeField] private float flamethrowerVisualHeightOffset = 1.2f;
+    [SerializeField] private float flamethrowerVisualScale = 2f;
+    [SerializeField] private Vector3 flamethrowerMuzzleLocalOffset = new(0f, 0f, 0.5f);
+    [SerializeField] private Vector3 flamethrowerMuzzleLocalEulerOffset = Vector3.zero;
     [SerializeField] private bool enableItemWorldEffectLog;
 
     private readonly Collider[] _replicatedBlackholeOverlapBuffer = new Collider[256];
@@ -36,9 +73,23 @@ public sealed partial class NetworkPlayer
     private ItemRuntimeHost _itemWorldEffectBoundHost;
     private int _lastAppliedBlackholeSeq;
     private int _lastAppliedSatelliteStrikeSeq;
+    private int _lastAppliedFlamethrowerTickSeq;
+    private int _lastAppliedFlamethrowerStopSeq;
     private Coroutine _activeReplicatedBlackholeRoutine;
     private Coroutine _activeReplicatedSatelliteRoutine;
+    private GameObject _blackholeVisualPrefabCache;
     private GameObject _blackholeEffectPrefabCache;
+    private GameObject _flamethrowerEffectPrefabCache;
+    private GameObject _satelliteProjectilePrefabCache;
+    private GameObject _satelliteChargeupPrefabCache;
+    private GameObject _satelliteCloudPrefabCache;
+    private GameObject _satelliteCylinderPrefabCache;
+    private GameObject _replicatedFlamethrowerFxRoot;
+    private ParticleSystem[] _replicatedFlamethrowerParticles = System.Array.Empty<ParticleSystem>();
+    private float _nextItemGameplayRunnerLookupTime;
+    private bool _cachedHasItemGameplayRunner;
+    private Material _replicatedBlackholeTargetOutlineMaterial;
+    private readonly Dictionary<Transform, ReplicatedBlackholeOutlineState> _replicatedBlackholeOutlineStates = new();
 
     [Networked] private int NetworkedBlackholeSeq { get; set; }
     [Networked] private Vector3 NetworkedBlackholeCenter { get; set; }
@@ -54,11 +105,25 @@ public sealed partial class NetworkPlayer
     [Networked] private float NetworkedSatelliteStrikeForce { get; set; }
     [Networked] private float NetworkedSatelliteStrikeBaseDamage { get; set; }
     [Networked] private float NetworkedSatelliteStrikeStunDamage { get; set; }
+    [Networked] private NetworkBool NetworkedFlamethrowerActive { get; set; }
+    [Networked] private int NetworkedFlamethrowerTickSeq { get; set; }
+    [Networked] private int NetworkedFlamethrowerStopSeq { get; set; }
+    [Networked] private Vector3 NetworkedFlamethrowerOrigin { get; set; }
+    [Networked] private Vector3 NetworkedFlamethrowerForward { get; set; }
+    [Networked] private float NetworkedFlamethrowerRange { get; set; }
+    [Networked] private float NetworkedFlamethrowerRadius { get; set; }
+
+    private sealed class ReplicatedBlackholeOutlineState
+    {
+        public int RefCount;
+        public readonly List<GameObject> ProxyObjects = new();
+    }
 
     private void OnDisable()
     {
         UnbindItemWorldEffectEvents();
         StopActiveItemWorldEffectCoroutines();
+        ReleaseAllReplicatedBlackholeTargetOutlines();
     }
 
     private void MarkItemWorldEffectNetworkReady()
@@ -83,6 +148,9 @@ public sealed partial class NetworkPlayer
         _itemWorldEffectBoundHost = _itemRuntimeHost;
         _itemWorldEffectBoundHost.BlackholeRequested += HandleBlackholeRequested;
         _itemWorldEffectBoundHost.SatelliteStrikeRequested += HandleSatelliteStrikeRequested;
+        _itemWorldEffectBoundHost.FlamethrowerStarted += HandleFlamethrowerStarted;
+        _itemWorldEffectBoundHost.FlamethrowerTicked += HandleFlamethrowerTicked;
+        _itemWorldEffectBoundHost.FlamethrowerStopped += HandleFlamethrowerStopped;
         _itemWorldEffectEventsBound = true;
     }
 
@@ -97,6 +165,9 @@ public sealed partial class NetworkPlayer
 
         _itemWorldEffectBoundHost.BlackholeRequested -= HandleBlackholeRequested;
         _itemWorldEffectBoundHost.SatelliteStrikeRequested -= HandleSatelliteStrikeRequested;
+        _itemWorldEffectBoundHost.FlamethrowerStarted -= HandleFlamethrowerStarted;
+        _itemWorldEffectBoundHost.FlamethrowerTicked -= HandleFlamethrowerTicked;
+        _itemWorldEffectBoundHost.FlamethrowerStopped -= HandleFlamethrowerStopped;
         _itemWorldEffectBoundHost = null;
         _itemWorldEffectEventsBound = false;
     }
@@ -113,6 +184,7 @@ public sealed partial class NetworkPlayer
     {
         if (!CanWriteItemWorldEffectState())
         {
+            ItemRuntimeLog.Warn(ItemIds.BlackholeBomb, "블랙홀 네트워크 기록 실패: StateAuthority 없음", this);
             return;
         }
 
@@ -122,6 +194,7 @@ public sealed partial class NetworkPlayer
         NetworkedBlackholeRadius = request.Radius;
         NetworkedBlackholeForce = request.Force;
         NetworkedBlackholeSeq++;
+        ItemRuntimeLog.Info(ItemIds.BlackholeBomb, $"블랙홀 네트워크 기록: seq={NetworkedBlackholeSeq}, center={request.Center}, radius={request.Radius:0.00}", this);
 
         StartReplicatedBlackhole(request, applyGameplay: true);
     }
@@ -130,6 +203,7 @@ public sealed partial class NetworkPlayer
     {
         if (!CanWriteItemWorldEffectState())
         {
+            ItemRuntimeLog.Warn(ItemIds.SatelliteStrike, "위성 네트워크 기록 실패: StateAuthority 없음", this);
             return;
         }
 
@@ -141,8 +215,65 @@ public sealed partial class NetworkPlayer
         NetworkedSatelliteStrikeBaseDamage = request.BaseDamage;
         NetworkedSatelliteStrikeStunDamage = request.StunDamage;
         NetworkedSatelliteStrikeSeq++;
+        ItemRuntimeLog.Info(ItemIds.SatelliteStrike, $"위성 네트워크 기록: seq={NetworkedSatelliteStrikeSeq}, center={request.Center}, radius={request.Radius:0.00}", this);
 
         StartReplicatedSatelliteStrike(request, applyGameplay: true);
+    }
+
+    private void HandleFlamethrowerStarted(string itemId, float endAtSec)
+    {
+        if (!CanWriteItemWorldEffectState())
+        {
+            ItemRuntimeLog.Warn(itemId, "화염 시작 네트워크 기록 실패: StateAuthority 없음", this);
+            return;
+        }
+
+        NetworkedFlamethrowerActive = true;
+        ItemRuntimeLog.Info(itemId, $"화염 시작 네트워크 기록: endAt={endAtSec:0.00}", this);
+        if (ShouldDriveFlamethrowerVisualLocally())
+        {
+            EnsureReplicatedFlamethrowerVisual();
+            PlayReplicatedFlamethrowerParticles();
+        }
+    }
+
+    private void HandleFlamethrowerTicked(FlamethrowerTickRequest request)
+    {
+        if (!CanWriteItemWorldEffectState())
+        {
+            ItemRuntimeLog.Warn(ItemIds.Flamethrower, "화염 틱 네트워크 기록 실패: StateAuthority 없음", this);
+            return;
+        }
+
+        NetworkedFlamethrowerActive = true;
+        NetworkedFlamethrowerOrigin = request.Origin;
+        NetworkedFlamethrowerForward = request.Forward;
+        NetworkedFlamethrowerRange = request.Range;
+        NetworkedFlamethrowerRadius = request.Radius;
+        NetworkedFlamethrowerTickSeq++;
+        ItemRuntimeLog.Info(ItemIds.Flamethrower, $"화염 틱 네트워크 기록: seq={NetworkedFlamethrowerTickSeq}, origin={request.Origin}, range={request.Range:0.00}, radius={request.Radius:0.00}", this);
+
+        if (ShouldDriveFlamethrowerVisualLocally())
+        {
+            ApplyReplicatedFlamethrowerTick(request.Origin, request.Forward, request.Range, request.Radius);
+        }
+    }
+
+    private void HandleFlamethrowerStopped(string itemId)
+    {
+        if (!CanWriteItemWorldEffectState())
+        {
+            ItemRuntimeLog.Warn(itemId, "화염 종료 네트워크 기록 실패: StateAuthority 없음", this);
+            return;
+        }
+
+        NetworkedFlamethrowerActive = false;
+        NetworkedFlamethrowerStopSeq++;
+        ItemRuntimeLog.Info(itemId, $"화염 종료 네트워크 기록: seq={NetworkedFlamethrowerStopSeq}", this);
+        if (ShouldDriveFlamethrowerVisualLocally())
+        {
+            StopReplicatedFlamethrowerVisual();
+        }
     }
 
     private void ApplyReplicatedWorldItemEffects()
@@ -155,6 +286,7 @@ public sealed partial class NetworkPlayer
         if (NetworkedBlackholeSeq > 0 && _lastAppliedBlackholeSeq != NetworkedBlackholeSeq)
         {
             _lastAppliedBlackholeSeq = NetworkedBlackholeSeq;
+            ItemRuntimeLog.Info(ItemIds.BlackholeBomb, $"원격 블랙홀 반영: seq={NetworkedBlackholeSeq}, center={NetworkedBlackholeCenter}, radius={NetworkedBlackholeRadius:0.00}", this);
             StartReplicatedBlackhole(
                 new BlackholeSkillRequest(
                     NetworkedBlackholeCenter,
@@ -168,6 +300,7 @@ public sealed partial class NetworkPlayer
         if (NetworkedSatelliteStrikeSeq > 0 && _lastAppliedSatelliteStrikeSeq != NetworkedSatelliteStrikeSeq)
         {
             _lastAppliedSatelliteStrikeSeq = NetworkedSatelliteStrikeSeq;
+            ItemRuntimeLog.Info(ItemIds.SatelliteStrike, $"원격 위성 반영: seq={NetworkedSatelliteStrikeSeq}, center={NetworkedSatelliteStrikeCenter}, radius={NetworkedSatelliteStrikeRadius:0.00}", this);
             StartReplicatedSatelliteStrike(
                 new SatelliteStrikeRequest(
                     NetworkedSatelliteStrikeCenter,
@@ -180,6 +313,24 @@ public sealed partial class NetworkPlayer
                     NetworkedSatelliteStrikeBaseDamage,
                     NetworkedSatelliteStrikeStunDamage),
                 applyGameplay: false);
+        }
+
+        if (NetworkedFlamethrowerActive && _lastAppliedFlamethrowerTickSeq != NetworkedFlamethrowerTickSeq)
+        {
+            _lastAppliedFlamethrowerTickSeq = NetworkedFlamethrowerTickSeq;
+            ItemRuntimeLog.Info(ItemIds.Flamethrower, $"원격 화염 틱 반영: seq={NetworkedFlamethrowerTickSeq}, origin={NetworkedFlamethrowerOrigin}", this);
+            ApplyReplicatedFlamethrowerTick(
+                NetworkedFlamethrowerOrigin,
+                NetworkedFlamethrowerForward,
+                NetworkedFlamethrowerRange,
+                NetworkedFlamethrowerRadius);
+        }
+
+        if (!NetworkedFlamethrowerActive && _lastAppliedFlamethrowerStopSeq != NetworkedFlamethrowerStopSeq)
+        {
+            _lastAppliedFlamethrowerStopSeq = NetworkedFlamethrowerStopSeq;
+            ItemRuntimeLog.Info(ItemIds.Flamethrower, $"원격 화염 종료 반영: seq={NetworkedFlamethrowerStopSeq}", this);
+            StopReplicatedFlamethrowerVisual();
         }
     }
 
@@ -216,42 +367,83 @@ public sealed partial class NetworkPlayer
             StopCoroutine(_activeReplicatedSatelliteRoutine);
             _activeReplicatedSatelliteRoutine = null;
         }
+
+        StopReplicatedFlamethrowerVisual();
+        ReleaseAllReplicatedBlackholeTargetOutlines();
     }
 
     private IEnumerator CoReplicatedBlackhole(BlackholeSkillRequest request, bool applyGameplay)
     {
         var startPosition = transform.position + Vector3.up * blackholeLaunchHeightOffset + transform.forward * blackholeLaunchForwardOffset;
+        var visualRoot = CreateReplicatedBlackholeVisual(startPosition);
         var center = request.Center;
-        var launchDuration = Mathf.Min(Mathf.Max(0.05f, blackholeLaunchVisualDuration), Mathf.Max(0.05f, request.DelaySec));
-        var visualRoot = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        visualRoot.name = ReplicatedBlackholeVisualName;
-        visualRoot.transform.position = startPosition;
-        visualRoot.transform.localScale = Vector3.one * 0.45f;
-
-        var rootCollider = visualRoot.GetComponent<Collider>();
-        if (rootCollider != null)
+        var throwForward = ResolveReplicatedThrowForward(request.Center);
+        var throwDirection = (throwForward + Vector3.up * blackholeThrowArc).normalized;
+        var outlinedTargets = new HashSet<Transform>();
+        var outlinedTargetsThisFrame = new HashSet<Transform>();
+        var bombCollider = visualRoot != null ? visualRoot.GetComponent<Collider>() : null;
+        if (bombCollider == null && visualRoot != null)
         {
-            rootCollider.enabled = false;
+            bombCollider = visualRoot.AddComponent<SphereCollider>();
         }
 
-        ApplyTransparentSphereVisual(visualRoot, new Color(0.07f, 0.07f, 0.08f, 0.14f));
-        TryAttachReplicatedBlackholeFx(visualRoot.transform);
-
-        var elapsedLaunch = 0f;
-        while (elapsedLaunch < launchDuration)
+        if (bombCollider != null)
         {
-            elapsedLaunch += Time.deltaTime;
-            var t = Mathf.Clamp01(elapsedLaunch / launchDuration);
-            visualRoot.transform.position = Vector3.Lerp(startPosition, center, t);
-            yield return null;
+            bombCollider.enabled = true;
         }
 
-        if (request.DelaySec > launchDuration)
+        var bombBody = visualRoot != null ? visualRoot.GetComponent<Rigidbody>() : null;
+        if (bombBody == null && visualRoot != null)
         {
-            yield return new WaitForSeconds(request.DelaySec - launchDuration);
+            bombBody = visualRoot.AddComponent<Rigidbody>();
         }
 
-        visualRoot.transform.position = center;
+        if (bombBody != null)
+        {
+            bombBody.mass = 4f;
+            bombBody.drag = 0.3f;
+            bombBody.angularDrag = 0.1f;
+            bombBody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            bombBody.interpolation = RigidbodyInterpolation.Interpolate;
+            bombBody.isKinematic = false;
+            bombBody.useGravity = true;
+            bombBody.velocity = Vector3.zero;
+            bombBody.angularVelocity = Vector3.zero;
+            bombBody.AddForce(throwDirection * blackholeThrowSpeed, ForceMode.VelocityChange);
+            bombBody.AddTorque(UnityEngine.Random.onUnitSphere * 4f, ForceMode.VelocityChange);
+        }
+
+        var delaySec = Mathf.Max(0f, request.DelaySec);
+        if (delaySec > 0f)
+        {
+            yield return new WaitForSeconds(delaySec);
+        }
+
+        center = visualRoot != null ? visualRoot.transform.position : request.Center;
+        if (bombBody != null)
+        {
+            bombBody.velocity = Vector3.zero;
+            bombBody.angularVelocity = Vector3.zero;
+            bombBody.isKinematic = true;
+        }
+
+        if (bombCollider != null)
+        {
+            bombCollider.enabled = false;
+        }
+
+        if (visualRoot != null)
+        {
+            var bombRenderer = visualRoot.GetComponent<Renderer>();
+            if (bombRenderer != null)
+            {
+                // 한국어: 빌드에서는 내부 블랙홀 FX만으로는 발동이 거의 보이지 않는 경우가 있어
+                // 한국어: 발동 단계에서도 코어 구체를 완전히 끄지 않고 반투명 상태로 유지한다.
+                ApplyTransparentSphereVisual(visualRoot, new Color(0.07f, 0.07f, 0.08f, 0.6f));
+                bombRenderer.enabled = true;
+            }
+        }
+
         var duration = Mathf.Max(0.1f, request.DurationSec);
         var radius = Mathf.Max(0.1f, request.Radius);
         var force = Mathf.Max(0f, request.Force);
@@ -262,15 +454,44 @@ public sealed partial class NetworkPlayer
         {
             activeElapsed += Time.deltaTime;
             var ramp = Mathf.Clamp01(activeElapsed / expandDuration);
-            visualRoot.transform.localScale = Vector3.one * Mathf.Lerp(0.45f, radius * 2f, ramp);
+            var targetScale = Mathf.Max(0.4f, radius * Mathf.Max(0.08f, blackholeVisualScale * 0.22f));
+            targetScale *= Mathf.Max(1f, blackholeActivationScaleMultiplier);
+            visualRoot.transform.localScale = Vector3.one * Mathf.Lerp(0.28f, targetScale, ramp);
             visualRoot.transform.Rotate(Vector3.up, 220f * Time.deltaTime, Space.World);
+            visualRoot.transform.position = center;
 
             if (applyGameplay)
             {
-                ApplyBlackholeGameplay(center, radius, force, ramp);
+                ApplyBlackholeGameplay(center, radius, force, ramp, outlinedTargets, outlinedTargetsThisFrame);
+
+                if (outlinedTargets.Count > 0)
+                {
+                    var releaseBuffer = new List<Transform>();
+                    foreach (var target in outlinedTargets)
+                    {
+                        if (target == null || !outlinedTargetsThisFrame.Contains(target))
+                        {
+                            releaseBuffer.Add(target);
+                        }
+                    }
+
+                    for (var i = 0; i < releaseBuffer.Count; i++)
+                    {
+                        var target = releaseBuffer[i];
+                        ReleaseReplicatedBlackholeOutlineForTarget(target);
+                        outlinedTargets.Remove(target);
+                    }
+                }
+
+                outlinedTargetsThisFrame.Clear();
             }
 
             yield return null;
+        }
+
+        foreach (var target in outlinedTargets)
+        {
+            ReleaseReplicatedBlackholeOutlineForTarget(target);
         }
 
         Destroy(visualRoot);
@@ -281,34 +502,60 @@ public sealed partial class NetworkPlayer
     {
         var center = ResolveSatelliteGroundCenter(request.Center);
         var launchOrigin = transform.position + Vector3.up * blackholeLaunchHeightOffset + transform.forward * blackholeLaunchForwardOffset;
-        var projectile = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        projectile.name = ReplicatedSatelliteVisualName;
-        projectile.transform.position = launchOrigin;
-        projectile.transform.localScale = Vector3.one * 0.3f;
-        ApplyTransparentSphereVisual(projectile, new Color(0.95f, 0.3f, 0.3f, 0.7f));
-        DisableCollider(projectile);
-
-        var travelSec = Mathf.Max(0.05f, satelliteProjectileTravelSec);
+        var projectile = CreateReplicatedSatelliteProjectile(launchOrigin);
+        var throwForward = ResolveReplicatedThrowForward(request.Center);
+        var throwDirection = (throwForward + Vector3.up * blackholeThrowArc).normalized;
+        var velocity = throwDirection * Mathf.Max(0.1f, blackholeThrowSpeed);
+        var gravity = Physics.gravity;
         var travelElapsed = 0f;
-        while (travelElapsed < travelSec)
+        var current = launchOrigin;
+
+        while (travelElapsed < 3f)
         {
-            travelElapsed += Time.deltaTime;
-            var t = Mathf.Clamp01(travelElapsed / travelSec);
-            projectile.transform.position = Vector3.Lerp(launchOrigin, center + Vector3.up * 0.2f, t);
+            var step = Mathf.Max(0.001f, Time.deltaTime);
+            travelElapsed += step;
+            var nextVelocity = velocity + gravity * step;
+            var next = current + velocity * step;
+            var move = next - current;
+            var distance = move.magnitude;
+
+            if (distance > 0.0001f &&
+                Physics.SphereCast(
+                    current,
+                    0.18f,
+                    move.normalized,
+                    out var hit,
+                    distance,
+                    itemWorldEffectMask,
+                    QueryTriggerInteraction.Ignore))
+            {
+                center = hit.point + hit.normal.normalized * 0.02f;
+                if (projectile != null)
+                {
+                    projectile.transform.position = center;
+                }
+                break;
+            }
+
+            if (projectile != null)
+            {
+                projectile.transform.position = next;
+                var lookDirection = nextVelocity.sqrMagnitude > 0.0001f ? nextVelocity.normalized : velocity.normalized;
+                if (lookDirection.sqrMagnitude > 0.0001f)
+                {
+                    projectile.transform.rotation = Quaternion.LookRotation(lookDirection, Vector3.up);
+                }
+            }
+
+            current = next;
+            velocity = nextVelocity;
+            center = ResolveSatelliteGroundCenter(current);
             yield return null;
         }
 
         Destroy(projectile);
 
-        var charge = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        charge.name = ReplicatedSatelliteChargeName;
-        charge.transform.position = center + Vector3.up * 0.05f;
-        charge.transform.localScale = new Vector3(
-            Mathf.Max(0.35f, request.Radius * 0.2f),
-            0.05f,
-            Mathf.Max(0.35f, request.Radius * 0.2f));
-        ApplyTransparentSphereVisual(charge, new Color(0.35f, 0.7f, 1f, 0.35f));
-        DisableCollider(charge);
+        var charge = CreateReplicatedSatelliteCharge(center, request.Radius);
 
         if (request.WarningSec > 0f)
         {
@@ -317,15 +564,7 @@ public sealed partial class NetworkPlayer
 
         Destroy(charge);
 
-        var beam = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        beam.name = ReplicatedSatelliteBeamName;
-        beam.transform.position = center + Vector3.up * (satelliteBeamHeight * 0.5f);
-        beam.transform.localScale = new Vector3(
-            Mathf.Max(0.35f, request.Radius * 0.28f),
-            satelliteBeamHeight * 0.5f,
-            Mathf.Max(0.35f, request.Radius * 0.28f));
-        ApplyTransparentSphereVisual(beam, new Color(0.35f, 0.7f, 1f, 0.45f));
-        DisableCollider(beam);
+        var beam = CreateReplicatedSatelliteBeam(center, request.Radius);
 
         var duration = Mathf.Max(0.1f, request.DurationSec);
         var tickInterval = 0.25f;
@@ -360,7 +599,13 @@ public sealed partial class NetworkPlayer
         _activeReplicatedSatelliteRoutine = null;
     }
 
-    private void ApplyBlackholeGameplay(Vector3 center, float radius, float force, float ramp)
+    private void ApplyBlackholeGameplay(
+        Vector3 center,
+        float radius,
+        float force,
+        float ramp,
+        HashSet<Transform> outlinedTargets,
+        HashSet<Transform> outlinedTargetsThisFrame)
     {
         var overlapCount = Physics.OverlapSphereNonAlloc(
             center,
@@ -390,6 +635,15 @@ public sealed partial class NetworkPlayer
                 continue;
             }
 
+            if (outlinedTargetsThisFrame != null && root != null && outlinedTargetsThisFrame.Add(root))
+            {
+                if (outlinedTargets != null && !outlinedTargets.Contains(root))
+                {
+                    ApplyReplicatedBlackholeOutlineForTarget(root);
+                    outlinedTargets.Add(root);
+                }
+            }
+
             var distance = Mathf.Max(toCenter.magnitude, 0.35f);
             var pullMultiplier = root != null && root.CompareTag("Player")
                 ? Mathf.Max(0.05f, blackholePlayerPullMultiplier)
@@ -404,6 +658,301 @@ public sealed partial class NetworkPlayer
 
             body.AddForce(toCenter.normalized * pullStrength, ForceMode.Acceleration);
         }
+    }
+
+    private void ApplyReplicatedBlackholeOutlineForTarget(Transform root)
+    {
+        if (!enableReplicatedBlackholeTargetOutline || root == null)
+        {
+            return;
+        }
+
+        if (_replicatedBlackholeOutlineStates.TryGetValue(root, out var existingState))
+        {
+            existingState.RefCount++;
+            return;
+        }
+
+        var state = new ReplicatedBlackholeOutlineState
+        {
+            RefCount = 1
+        };
+
+        CreateReplicatedBlackholeOutlineProxies(root, state);
+        if (state.ProxyObjects.Count == 0)
+        {
+            return;
+        }
+
+        _replicatedBlackholeOutlineStates[root] = state;
+    }
+
+    private void ReleaseReplicatedBlackholeOutlineForTarget(Transform root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        if (!_replicatedBlackholeOutlineStates.TryGetValue(root, out var state))
+        {
+            return;
+        }
+
+        state.RefCount--;
+        if (state.RefCount > 0)
+        {
+            return;
+        }
+
+        DestroyReplicatedBlackholeOutlineState(state);
+        _replicatedBlackholeOutlineStates.Remove(root);
+    }
+
+    private void ReleaseAllReplicatedBlackholeTargetOutlines()
+    {
+        if (_replicatedBlackholeOutlineStates.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var pair in _replicatedBlackholeOutlineStates)
+        {
+            DestroyReplicatedBlackholeOutlineState(pair.Value);
+        }
+
+        _replicatedBlackholeOutlineStates.Clear();
+    }
+
+    private void CreateReplicatedBlackholeOutlineProxies(Transform root, ReplicatedBlackholeOutlineState state)
+    {
+        if (root == null || state == null)
+        {
+            return;
+        }
+
+        var outlineMaterial = GetOrCreateReplicatedBlackholeTargetOutlineMaterial();
+        if (outlineMaterial == null)
+        {
+            return;
+        }
+
+        var renderers = root.GetComponentsInChildren<Renderer>(true);
+        for (var i = 0; i < renderers.Length; i++)
+        {
+            var renderer = renderers[i];
+            if (!ShouldCreateReplicatedBlackholeOutlineProxy(renderer))
+            {
+                continue;
+            }
+
+            GameObject proxyObject = null;
+            if (renderer is SkinnedMeshRenderer skinnedMeshRenderer)
+            {
+                proxyObject = CreateReplicatedBlackholeOutlineProxyForSkinnedRenderer(skinnedMeshRenderer, outlineMaterial);
+            }
+            else if (renderer is MeshRenderer meshRenderer)
+            {
+                proxyObject = CreateReplicatedBlackholeOutlineProxyForMeshRenderer(meshRenderer, outlineMaterial);
+            }
+
+            if (proxyObject != null)
+            {
+                state.ProxyObjects.Add(proxyObject);
+            }
+        }
+    }
+
+    private GameObject CreateReplicatedBlackholeOutlineProxyForMeshRenderer(MeshRenderer renderer, Material outlineMaterial)
+    {
+        if (renderer == null || outlineMaterial == null)
+        {
+            return null;
+        }
+
+        if (!renderer.TryGetComponent<MeshFilter>(out var meshFilter) || meshFilter.sharedMesh == null)
+        {
+            return null;
+        }
+
+        var proxy = new GameObject($"{renderer.gameObject.name}_BlackholeOutline");
+        proxy.transform.SetParent(renderer.transform, false);
+        proxy.transform.localPosition = Vector3.zero;
+        proxy.transform.localRotation = Quaternion.identity;
+        proxy.transform.localScale = Vector3.one * Mathf.Max(1f, replicatedBlackholeTargetOutlineScaleMultiplier);
+        proxy.layer = renderer.gameObject.layer;
+
+        var proxyFilter = proxy.AddComponent<MeshFilter>();
+        proxyFilter.sharedMesh = meshFilter.sharedMesh;
+
+        var proxyRenderer = proxy.AddComponent<MeshRenderer>();
+        proxyRenderer.sharedMaterials = BuildReplicatedBlackholeOutlineMaterialArray(meshFilter.sharedMesh.subMeshCount, outlineMaterial);
+        ConfigureReplicatedBlackholeOutlineRenderer(proxyRenderer);
+        return proxy;
+    }
+
+    private GameObject CreateReplicatedBlackholeOutlineProxyForSkinnedRenderer(SkinnedMeshRenderer renderer, Material outlineMaterial)
+    {
+        if (renderer == null || outlineMaterial == null || renderer.sharedMesh == null)
+        {
+            return null;
+        }
+
+        var proxy = new GameObject($"{renderer.gameObject.name}_BlackholeOutline");
+        proxy.transform.SetParent(renderer.transform, false);
+        proxy.transform.localPosition = Vector3.zero;
+        proxy.transform.localRotation = Quaternion.identity;
+        proxy.transform.localScale = Vector3.one * Mathf.Max(1f, replicatedBlackholeTargetOutlineScaleMultiplier);
+        proxy.layer = renderer.gameObject.layer;
+
+        var proxyFilter = proxy.AddComponent<MeshFilter>();
+        var proxyRenderer = proxy.AddComponent<MeshRenderer>();
+        proxyRenderer.sharedMaterials = BuildReplicatedBlackholeOutlineMaterialArray(renderer.sharedMesh.subMeshCount, outlineMaterial);
+        ConfigureReplicatedBlackholeOutlineRenderer(proxyRenderer);
+
+        var proxyUpdater = proxy.AddComponent<BlackholeSkinnedOutlineProxy>();
+        proxyUpdater.Initialize(renderer, proxyFilter);
+        return proxy;
+    }
+
+    private static Material[] BuildReplicatedBlackholeOutlineMaterialArray(int subMeshCount, Material outlineMaterial)
+    {
+        var count = Mathf.Max(1, subMeshCount);
+        var materials = new Material[count];
+        for (var i = 0; i < count; i++)
+        {
+            materials[i] = outlineMaterial;
+        }
+
+        return materials;
+    }
+
+    private static void ConfigureReplicatedBlackholeOutlineRenderer(Renderer renderer)
+    {
+        if (renderer == null)
+        {
+            return;
+        }
+
+        renderer.shadowCastingMode = ShadowCastingMode.Off;
+        renderer.receiveShadows = false;
+        renderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
+        renderer.lightProbeUsage = LightProbeUsage.Off;
+        renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
+        renderer.allowOcclusionWhenDynamic = false;
+    }
+
+    private bool ShouldCreateReplicatedBlackholeOutlineProxy(Renderer renderer)
+    {
+        if (renderer == null || !renderer.enabled)
+        {
+            return false;
+        }
+
+        if (renderer is not MeshRenderer && renderer is not SkinnedMeshRenderer)
+        {
+            return false;
+        }
+
+        var owner = renderer.gameObject;
+        if (owner == null)
+        {
+            return false;
+        }
+
+        var objectName = owner.name ?? string.Empty;
+        if (objectName.IndexOf("BlackholeOutline", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+            objectName.IndexOf("Item_BlackholeFx", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+            objectName.IndexOf("OuterLayer", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return false;
+        }
+
+        return owner.GetComponentInParent<ParticleSystem>() == null &&
+               owner.GetComponentInParent<LineRenderer>() == null &&
+               owner.GetComponentInParent<TrailRenderer>() == null;
+    }
+
+    private Material GetOrCreateReplicatedBlackholeTargetOutlineMaterial()
+    {
+        if (_replicatedBlackholeTargetOutlineMaterial != null)
+        {
+            return _replicatedBlackholeTargetOutlineMaterial;
+        }
+
+        var shader =
+            Shader.Find("Universal Render Pipeline/Unlit") ??
+            Shader.Find("Universal Render Pipeline/Lit") ??
+            Shader.Find("Universal Render Pipeline/Simple Lit");
+        if (shader == null)
+        {
+            return null;
+        }
+
+        _replicatedBlackholeTargetOutlineMaterial = new Material(shader)
+        {
+            name = "Item_Blackhole_TargetOutline_Replicated",
+            hideFlags = HideFlags.DontSave
+        };
+
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_BaseColor"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetColor("_BaseColor", replicatedBlackholeTargetOutlineColor);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_Color"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetColor("_Color", replicatedBlackholeTargetOutlineColor);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_Surface"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetFloat("_Surface", 1f);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_Blend"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetFloat("_Blend", 0f);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_SrcBlend"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_DstBlend"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_ZWrite"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetFloat("_ZWrite", 0f);
+        }
+        if (_replicatedBlackholeTargetOutlineMaterial.HasProperty("_Cull"))
+        {
+            _replicatedBlackholeTargetOutlineMaterial.SetFloat("_Cull", (float)CullMode.Front);
+        }
+
+        _replicatedBlackholeTargetOutlineMaterial.SetOverrideTag("RenderType", "Transparent");
+        _replicatedBlackholeTargetOutlineMaterial.renderQueue = (int)RenderQueue.Transparent + 40;
+        _replicatedBlackholeTargetOutlineMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        _replicatedBlackholeTargetOutlineMaterial.EnableKeyword("_ALPHABLEND_ON");
+        _replicatedBlackholeTargetOutlineMaterial.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        return _replicatedBlackholeTargetOutlineMaterial;
+    }
+
+    private static void DestroyReplicatedBlackholeOutlineState(ReplicatedBlackholeOutlineState state)
+    {
+        if (state == null)
+        {
+            return;
+        }
+
+        for (var i = 0; i < state.ProxyObjects.Count; i++)
+        {
+            var proxy = state.ProxyObjects[i];
+            if (proxy != null)
+            {
+                Destroy(proxy);
+            }
+        }
+
+        state.ProxyObjects.Clear();
     }
 
     private void ApplyBlackholeEscapeDamping(Rigidbody body, Vector3 toCenterDir)
@@ -508,9 +1057,629 @@ public sealed partial class NetworkPlayer
         return requestedCenter + Vector3.up * 0.02f;
     }
 
+    private Vector3 ResolveReplicatedThrowForward(Vector3 targetPosition)
+    {
+        var forward = targetPosition - transform.position;
+        forward.y = 0f;
+        if (forward.sqrMagnitude <= 0.0001f)
+        {
+            forward = transform.forward;
+            forward.y = 0f;
+        }
+
+        if (forward.sqrMagnitude <= 0.0001f)
+        {
+            return Vector3.forward;
+        }
+
+        return forward.normalized;
+    }
+
+    private GameObject CreateReplicatedBlackholeVisual(Vector3 startPosition)
+    {
+        var prefab = TryLoadReplicatedBlackholeVisualPrefab();
+        if (prefab != null)
+        {
+            var instance = Instantiate(prefab, startPosition, Quaternion.identity);
+            instance.name = ReplicatedBlackholeVisualName;
+            PrepareReplicatedVisualInstance(instance, false);
+            RefreshReplicatedPrefabVisual(instance);
+            PlayAllParticles(instance);
+            ItemRuntimeLog.Info(ItemIds.BlackholeBomb, $"블랙홀 비주얼 프리팹 사용: {prefab.name}", this);
+            return instance;
+        }
+
+        var fallback = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        fallback.name = ReplicatedBlackholeVisualName;
+        fallback.transform.position = startPosition;
+        fallback.transform.localScale = Vector3.one * 0.28f;
+        DisableCollider(fallback);
+        ApplyTransparentSphereVisual(fallback, new Color(0.07f, 0.07f, 0.08f, 0.14f));
+        TryAttachReplicatedBlackholeFx(fallback.transform);
+        EnsureVisibleBlackholeShell(fallback.transform);
+        ItemRuntimeLog.Warn(ItemIds.BlackholeBomb, "블랙홀 비주얼 프리팹 로드 실패: primitive fallback 사용", this);
+        return fallback;
+    }
+
+    private void EnsureVisibleBlackholeShell(Transform parent)
+    {
+        if (parent == null)
+        {
+            return;
+        }
+
+        var shell = parent.Find(ReplicatedBlackholeShellName);
+        if (shell == null)
+        {
+            var shellObject = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            shellObject.name = ReplicatedBlackholeShellName;
+            shellObject.transform.SetParent(parent, false);
+            shellObject.transform.localPosition = Vector3.zero;
+            shellObject.transform.localRotation = Quaternion.identity;
+            shellObject.transform.localScale = Vector3.one * 0.28f;
+            DisableCollider(shellObject);
+            ApplyTransparentSphereVisual(shellObject, new Color(0.08f, 0.08f, 0.1f, 0.32f));
+            ItemRuntimeLog.InfoOnce("BlackholeShellCreated", ItemIds.BlackholeBomb, "블랙홀 가시 셸 생성", this);
+            return;
+        }
+
+        shell.localPosition = Vector3.zero;
+        shell.localRotation = Quaternion.identity;
+        shell.localScale = Vector3.one * 0.28f;
+        ApplyTransparentSphereVisual(shell.gameObject, new Color(0.08f, 0.08f, 0.1f, 0.32f));
+    }
+
+    private GameObject CreateReplicatedSatelliteProjectile(Vector3 startPosition)
+    {
+        var prefab = TryLoadReplicatedSatelliteProjectilePrefab();
+        if (prefab != null)
+        {
+            var instance = Instantiate(prefab, startPosition, prefab.transform.rotation);
+            instance.name = ReplicatedSatelliteVisualName;
+            PrepareReplicatedVisualInstance(instance, false);
+            RefreshReplicatedPrefabVisual(instance);
+            PlayAllParticles(instance);
+            ItemRuntimeLog.Info(ItemIds.SatelliteStrike, $"위성 투사체 프리팹 사용: {prefab.name}", this);
+            return instance;
+        }
+
+        var fallback = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        fallback.name = ReplicatedSatelliteVisualName;
+        fallback.transform.position = startPosition;
+        fallback.transform.localScale = Vector3.one * 0.3f;
+        DisableCollider(fallback);
+        ApplyTransparentSphereVisual(fallback, new Color(0.95f, 0.3f, 0.3f, 0.7f));
+        ItemRuntimeLog.Warn(ItemIds.SatelliteStrike, "위성 투사체 프리팹 로드 실패: primitive fallback 사용", this);
+        return fallback;
+    }
+
+    private GameObject CreateReplicatedSatelliteCharge(Vector3 center, float radius)
+    {
+        var root = new GameObject(ReplicatedSatelliteChargeName);
+        root.transform.position = center + Vector3.up * 0.05f;
+
+        var attached =
+            TryAttachReplicatedEffectChild(root.transform, TryLoadReplicatedSatelliteChargeupPrefab(), "Chargeup", Vector3.one * Mathf.Max(1f, radius * 0.35f)) |
+            TryAttachReplicatedEffectChild(root.transform, TryLoadReplicatedSatelliteCloudPrefab(), "Cloud", Vector3.one * Mathf.Max(1f, radius * 0.3f));
+        if (attached)
+        {
+            ItemRuntimeLog.Info(ItemIds.SatelliteStrike, "위성 차징 이펙트 프리팹 사용", this);
+            return root;
+        }
+
+        var fallback = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        fallback.name = ReplicatedSatelliteChargeName;
+        fallback.transform.SetParent(root.transform, false);
+        fallback.transform.localPosition = Vector3.zero;
+        fallback.transform.localScale = new Vector3(
+            Mathf.Max(0.35f, radius * 0.2f),
+            0.05f,
+            Mathf.Max(0.35f, radius * 0.2f));
+        DisableCollider(fallback);
+        ApplyTransparentSphereVisual(fallback, new Color(0.35f, 0.7f, 1f, 0.35f));
+        ItemRuntimeLog.Warn(ItemIds.SatelliteStrike, "위성 차징 이펙트 로드 실패: cylinder fallback 사용", this);
+        return root;
+    }
+
+    private GameObject CreateReplicatedSatelliteBeam(Vector3 center, float radius)
+    {
+        var root = new GameObject(ReplicatedSatelliteBeamName);
+        root.transform.position = center;
+
+        var attachedCloud = TryAttachReplicatedEffectChild(
+            root.transform,
+            TryLoadReplicatedSatelliteCloudPrefab(),
+            "Cloud",
+            Vector3.one * Mathf.Max(1f, radius * 0.3f));
+        var attachedBeam = TryAttachReplicatedEffectChild(
+            root.transform,
+            TryLoadReplicatedSatelliteCylinderPrefab(),
+            "Beam",
+            Vector3.one * Mathf.Max(1f, radius * 0.3f));
+        if (attachedCloud || attachedBeam)
+        {
+            ItemRuntimeLog.Info(ItemIds.SatelliteStrike, "위성 빔 이펙트 프리팹 사용", this);
+            return root;
+        }
+
+        var fallback = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        fallback.name = ReplicatedSatelliteBeamName;
+        fallback.transform.SetParent(root.transform, false);
+        fallback.transform.position = center + Vector3.up * (satelliteBeamHeight * 0.5f);
+        fallback.transform.localScale = new Vector3(
+            Mathf.Max(0.35f, radius * 0.28f),
+            satelliteBeamHeight * 0.5f,
+            Mathf.Max(0.35f, radius * 0.28f));
+        DisableCollider(fallback);
+        ApplyTransparentSphereVisual(fallback, new Color(0.35f, 0.7f, 1f, 0.45f));
+        ItemRuntimeLog.Warn(ItemIds.SatelliteStrike, "위성 빔 이펙트 로드 실패: cylinder fallback 사용", this);
+        return root;
+    }
+
+    private void PrepareReplicatedVisualInstance(GameObject instance, bool attachBlackholeFx)
+    {
+        if (instance == null)
+        {
+            return;
+        }
+
+        DisableColliders(instance);
+        DisableBehaviours(instance);
+        ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
+        if (attachBlackholeFx)
+        {
+            TryAttachReplicatedBlackholeFx(instance.transform);
+        }
+    }
+
+    private static void RefreshReplicatedPrefabVisual(GameObject instance)
+    {
+        if (instance == null)
+        {
+            return;
+        }
+
+        var blackholeAuthoring = instance.GetComponent<ItemBlackholeVisualAuthoring>();
+        if (blackholeAuthoring != null)
+        {
+            blackholeAuthoring.RefreshVisual();
+        }
+    }
+
+    private bool TryAttachReplicatedEffectChild(Transform parent, GameObject prefab, string childName, Vector3 localScale)
+    {
+        if (parent == null || prefab == null)
+        {
+            return false;
+        }
+
+        var instance = Instantiate(prefab, parent);
+        instance.name = childName;
+        instance.transform.localPosition = Vector3.zero;
+        instance.transform.localRotation = prefab.transform.rotation;
+        instance.transform.localScale = Vector3.Scale(prefab.transform.localScale, localScale);
+        PrepareReplicatedVisualInstance(instance, false);
+        RefreshReplicatedPrefabVisual(instance);
+        PlayAllParticles(instance);
+        return true;
+    }
+
+    private void UpdateReplicatedFlamethrowerVisualFollow()
+    {
+        if (Object == null || !Object.IsValid || !NetworkedFlamethrowerActive || _replicatedFlamethrowerFxRoot == null)
+        {
+            return;
+        }
+
+        if (!ShouldDriveFlamethrowerVisualLocally())
+        {
+            return;
+        }
+
+        var forward = NetworkedFlamethrowerForward.sqrMagnitude > 0.0001f
+            ? NetworkedFlamethrowerForward.normalized
+            : transform.forward;
+        var origin = transform.position + Vector3.up * flamethrowerVisualHeightOffset + forward * flamethrowerVisualForwardOffset;
+        ApplyReplicatedFlamethrowerTick(origin, forward, NetworkedFlamethrowerRange, NetworkedFlamethrowerRadius);
+    }
+
+    private void ApplyReplicatedFlamethrowerTick(Vector3 origin, Vector3 forward, float range, float radius)
+    {
+        if (!ShouldDriveFlamethrowerVisualLocally())
+        {
+            return;
+        }
+
+        EnsureReplicatedFlamethrowerVisual();
+        if (_replicatedFlamethrowerFxRoot == null)
+        {
+            return;
+        }
+
+        var safeForward = forward.sqrMagnitude > 0.0001f ? forward.normalized : transform.forward;
+        AttachReplicatedFlamethrowerVisualToAnchor(origin, safeForward);
+        TuneReplicatedFlamethrowerParticles(range, radius);
+        PlayReplicatedFlamethrowerParticles();
+    }
+
+    private void EnsureReplicatedFlamethrowerVisual()
+    {
+        if (_replicatedFlamethrowerFxRoot != null)
+        {
+            return;
+        }
+
+        var prefab = TryLoadReplicatedFlamethrowerEffectPrefab();
+        if (prefab != null)
+        {
+            _replicatedFlamethrowerFxRoot = Instantiate(prefab, ResolveFlamethrowerEffectAnchor());
+            _replicatedFlamethrowerFxRoot.name = ReplicatedFlamethrowerFxName;
+            _replicatedFlamethrowerFxRoot.transform.localPosition = Vector3.zero;
+            _replicatedFlamethrowerFxRoot.transform.localRotation = Quaternion.identity;
+            _replicatedFlamethrowerFxRoot.transform.localScale = Vector3.one * Mathf.Max(0.01f, flamethrowerVisualScale);
+            DisableColliders(_replicatedFlamethrowerFxRoot);
+            DisableBehaviours(_replicatedFlamethrowerFxRoot);
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_replicatedFlamethrowerFxRoot);
+            _replicatedFlamethrowerParticles = _replicatedFlamethrowerFxRoot.GetComponentsInChildren<ParticleSystem>(true);
+            ConfigureReplicatedFlamethrowerParticles();
+            ItemRuntimeLog.Info(ItemIds.Flamethrower, $"화염 이펙트 프리팹 사용: {prefab.name}", this);
+            return;
+        }
+
+        var fx = new GameObject(ReplicatedFlamethrowerFxName);
+        fx.transform.SetParent(ResolveFlamethrowerEffectAnchor(), false);
+        var particle = fx.AddComponent<ParticleSystem>();
+        _replicatedFlamethrowerFxRoot = fx;
+        _replicatedFlamethrowerParticles = new[] { particle };
+
+        var main = particle.main;
+        main.loop = true;
+        main.playOnAwake = false;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(0.18f, 0.32f);
+        main.startSpeed = new ParticleSystem.MinMaxCurve(6f, 9f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.18f);
+        main.startColor = new ParticleSystem.MinMaxGradient(
+            new Color(1f, 0.9f, 0.4f, 0.9f),
+            new Color(1f, 0.35f, 0.1f, 0.55f));
+
+        var emission = particle.emission;
+        emission.rateOverTime = 200f;
+
+        var shape = particle.shape;
+        shape.shapeType = ParticleSystemShapeType.Cone;
+        shape.angle = 24f;
+        shape.radius = 0.12f;
+        shape.length = 0.6f;
+        shape.randomDirectionAmount = 0.2f;
+        ItemRuntimeLog.Warn(ItemIds.Flamethrower, "화염 이펙트 프리팹 로드 실패: 기본 파티클 fallback 생성", this);
+    }
+
+    private GameObject TryLoadReplicatedFlamethrowerEffectPrefab()
+    {
+        if (_flamethrowerEffectPrefabCache != null)
+        {
+            return _flamethrowerEffectPrefabCache;
+        }
+
+        _flamethrowerEffectPrefabCache = _replicatedEffectPrefabResolver.Resolve(FlamethrowerEffectAssetPath);
+        if (_flamethrowerEffectPrefabCache != null)
+        {
+            ItemRuntimeLog.InfoOnce("FlamethrowerEffectAsset", ItemIds.Flamethrower, $"화염 이펙트 에셋 로드 성공: {FlamethrowerEffectAssetPath}", this);
+            return _flamethrowerEffectPrefabCache;
+        }
+
+        _flamethrowerEffectPrefabCache = Resources.Load<GameObject>(FlamethrowerEffectResourcePath);
+        if (_flamethrowerEffectPrefabCache != null)
+        {
+            ItemRuntimeLog.InfoOnce("FlamethrowerEffectResource", ItemIds.Flamethrower, $"화염 이펙트 리소스 로드 성공: {FlamethrowerEffectResourcePath}", this);
+        }
+        else
+        {
+            ItemRuntimeLog.WarnOnce("FlamethrowerEffectMissing", ItemIds.Flamethrower, $"화염 이펙트 로드 실패: asset={FlamethrowerEffectAssetPath}, resource={FlamethrowerEffectResourcePath}", this);
+        }
+        return _flamethrowerEffectPrefabCache;
+    }
+
+    private Transform ResolveFlamethrowerEffectAnchor()
+    {
+        if (_heldItemPresenter != null && _heldItemPresenter.CurrentHeldVisualRoot != null)
+        {
+            return _heldItemPresenter.CurrentHeldVisualRoot;
+        }
+
+        return transform;
+    }
+
+    private void AttachReplicatedFlamethrowerVisualToAnchor(Vector3 origin, Vector3 forward)
+    {
+        if (_replicatedFlamethrowerFxRoot == null)
+        {
+            return;
+        }
+
+        var anchor = ResolveFlamethrowerEffectAnchor();
+        if (_replicatedFlamethrowerFxRoot.transform.parent != anchor)
+        {
+            _replicatedFlamethrowerFxRoot.transform.SetParent(anchor, false);
+        }
+
+        var hasHeldFlamethrower =
+            _heldItemPresenter != null &&
+            _heldItemPresenter.CurrentHeldVisualRoot != null &&
+            anchor == _heldItemPresenter.CurrentHeldVisualRoot;
+
+        if (hasHeldFlamethrower)
+        {
+            // 한국어: hyekang 원본처럼 총구 이펙트를 무기 자식으로 붙여 총구 위치를 유지한다.
+            _replicatedFlamethrowerFxRoot.transform.localPosition = flamethrowerMuzzleLocalOffset;
+            _replicatedFlamethrowerFxRoot.transform.localRotation = Quaternion.Euler(flamethrowerMuzzleLocalEulerOffset);
+            _replicatedFlamethrowerFxRoot.transform.localScale = Vector3.one * Mathf.Max(0.01f, flamethrowerVisualScale);
+            return;
+        }
+
+        _replicatedFlamethrowerFxRoot.transform.position = origin;
+        _replicatedFlamethrowerFxRoot.transform.rotation = Quaternion.LookRotation(forward, Vector3.up);
+        _replicatedFlamethrowerFxRoot.transform.localScale = Vector3.one * Mathf.Max(0.01f, flamethrowerVisualScale);
+    }
+
+    private GameObject TryLoadReplicatedBlackholeVisualPrefab()
+    {
+        if (_blackholeVisualPrefabCache != null)
+        {
+            return _blackholeVisualPrefabCache;
+        }
+
+        _blackholeVisualPrefabCache = _replicatedEffectPrefabResolver.Resolve(BlackholeVisualAssetPath);
+        if (_blackholeVisualPrefabCache != null)
+        {
+            ItemRuntimeLog.InfoOnce("BlackholeVisualAsset", ItemIds.BlackholeBomb, $"블랙홀 에셋 로드 성공: {BlackholeVisualAssetPath}", this);
+            return _blackholeVisualPrefabCache;
+        }
+
+        _blackholeVisualPrefabCache = Resources.Load<GameObject>(BlackholeVisualResourcePath);
+        if (_blackholeVisualPrefabCache != null)
+        {
+            ItemRuntimeLog.InfoOnce("BlackholeVisualResource", ItemIds.BlackholeBomb, $"블랙홀 리소스 로드 성공: {BlackholeVisualResourcePath}", this);
+        }
+        else
+        {
+            ItemRuntimeLog.WarnOnce("BlackholeVisualMissing", ItemIds.BlackholeBomb, $"블랙홀 비주얼 로드 실패: asset={BlackholeVisualAssetPath}, resource={BlackholeVisualResourcePath}", this);
+        }
+        return _blackholeVisualPrefabCache;
+    }
+
+    private GameObject TryLoadReplicatedSatelliteProjectilePrefab()
+    {
+        if (_satelliteProjectilePrefabCache != null)
+        {
+            return _satelliteProjectilePrefabCache;
+        }
+
+        _satelliteProjectilePrefabCache = _replicatedEffectPrefabResolver.Resolve(SatelliteProjectileAssetPath);
+        if (_satelliteProjectilePrefabCache != null)
+        {
+            ItemRuntimeLog.InfoOnce("SatelliteProjectileAsset", ItemIds.SatelliteStrike, $"위성 투사체 에셋 로드 성공: {SatelliteProjectileAssetPath}", this);
+            return _satelliteProjectilePrefabCache;
+        }
+
+        _satelliteProjectilePrefabCache = Resources.Load<GameObject>(SatelliteProjectileResourcePath);
+        if (_satelliteProjectilePrefabCache != null)
+        {
+            ItemRuntimeLog.InfoOnce("SatelliteProjectileResource", ItemIds.SatelliteStrike, $"위성 투사체 리소스 로드 성공: {SatelliteProjectileResourcePath}", this);
+        }
+        else
+        {
+            ItemRuntimeLog.WarnOnce("SatelliteProjectileMissing", ItemIds.SatelliteStrike, $"위성 투사체 로드 실패: asset={SatelliteProjectileAssetPath}, resource={SatelliteProjectileResourcePath}", this);
+        }
+        return _satelliteProjectilePrefabCache;
+    }
+
+    private GameObject TryLoadReplicatedSatelliteChargeupPrefab()
+    {
+        if (_satelliteChargeupPrefabCache != null)
+        {
+            return _satelliteChargeupPrefabCache;
+        }
+
+        _satelliteChargeupPrefabCache = _replicatedEffectPrefabResolver.Resolve(SatelliteChargeupAssetPath);
+        if (_satelliteChargeupPrefabCache != null)
+        {
+            ItemRuntimeLog.InfoOnce("SatelliteChargeAsset", ItemIds.SatelliteStrike, $"위성 차징 에셋 로드 성공: {SatelliteChargeupAssetPath}", this);
+            return _satelliteChargeupPrefabCache;
+        }
+
+        _satelliteChargeupPrefabCache = Resources.Load<GameObject>(SatelliteChargeupResourcePath);
+        if (_satelliteChargeupPrefabCache != null)
+        {
+            ItemRuntimeLog.InfoOnce("SatelliteChargeResource", ItemIds.SatelliteStrike, $"위성 차징 리소스 로드 성공: {SatelliteChargeupResourcePath}", this);
+        }
+        else
+        {
+            ItemRuntimeLog.WarnOnce("SatelliteChargeMissing", ItemIds.SatelliteStrike, $"위성 차징 로드 실패: asset={SatelliteChargeupAssetPath}, resource={SatelliteChargeupResourcePath}", this);
+        }
+        return _satelliteChargeupPrefabCache;
+    }
+
+    private GameObject TryLoadReplicatedSatelliteCloudPrefab()
+    {
+        if (_satelliteCloudPrefabCache != null)
+        {
+            return _satelliteCloudPrefabCache;
+        }
+
+        _satelliteCloudPrefabCache = _replicatedEffectPrefabResolver.Resolve(SatelliteCloudAssetPath);
+        if (_satelliteCloudPrefabCache != null)
+        {
+            ItemRuntimeLog.InfoOnce("SatelliteCloudAsset", ItemIds.SatelliteStrike, $"위성 클라우드 에셋 로드 성공: {SatelliteCloudAssetPath}", this);
+            return _satelliteCloudPrefabCache;
+        }
+
+        _satelliteCloudPrefabCache = Resources.Load<GameObject>(SatelliteCloudResourcePath);
+        if (_satelliteCloudPrefabCache != null)
+        {
+            ItemRuntimeLog.InfoOnce("SatelliteCloudResource", ItemIds.SatelliteStrike, $"위성 클라우드 리소스 로드 성공: {SatelliteCloudResourcePath}", this);
+        }
+        else
+        {
+            ItemRuntimeLog.WarnOnce("SatelliteCloudMissing", ItemIds.SatelliteStrike, $"위성 클라우드 로드 실패: asset={SatelliteCloudAssetPath}, resource={SatelliteCloudResourcePath}", this);
+        }
+        return _satelliteCloudPrefabCache;
+    }
+
+    private GameObject TryLoadReplicatedSatelliteCylinderPrefab()
+    {
+        if (_satelliteCylinderPrefabCache != null)
+        {
+            return _satelliteCylinderPrefabCache;
+        }
+
+        _satelliteCylinderPrefabCache = _replicatedEffectPrefabResolver.Resolve(SatelliteCylinderAssetPath);
+        if (_satelliteCylinderPrefabCache != null)
+        {
+            ItemRuntimeLog.InfoOnce("SatelliteCylinderAsset", ItemIds.SatelliteStrike, $"위성 빔 에셋 로드 성공: {SatelliteCylinderAssetPath}", this);
+            return _satelliteCylinderPrefabCache;
+        }
+
+        _satelliteCylinderPrefabCache = Resources.Load<GameObject>(SatelliteCylinderResourcePath);
+        if (_satelliteCylinderPrefabCache != null)
+        {
+            ItemRuntimeLog.InfoOnce("SatelliteCylinderResource", ItemIds.SatelliteStrike, $"위성 빔 리소스 로드 성공: {SatelliteCylinderResourcePath}", this);
+        }
+        else
+        {
+            ItemRuntimeLog.WarnOnce("SatelliteCylinderMissing", ItemIds.SatelliteStrike, $"위성 빔 로드 실패: asset={SatelliteCylinderAssetPath}, resource={SatelliteCylinderResourcePath}", this);
+        }
+        return _satelliteCylinderPrefabCache;
+    }
+
+    private bool ShouldDriveFlamethrowerVisualLocally()
+    {
+        return Object != null && Object.IsValid;
+    }
+
+    private bool HasActiveItemGameplayRunnerInScene()
+    {
+        if (Time.unscaledTime < _nextItemGameplayRunnerLookupTime)
+        {
+            return _cachedHasItemGameplayRunner;
+        }
+
+        _nextItemGameplayRunnerLookupTime = Time.unscaledTime + 1f;
+        var runners = FindObjectsOfType<ItemGameplayRunner>(true);
+        for (var i = 0; i < runners.Length; i++)
+        {
+            var runner = runners[i];
+            if (runner == null || !runner.isActiveAndEnabled)
+            {
+                continue;
+            }
+
+            _cachedHasItemGameplayRunner = true;
+            return true;
+        }
+
+        _cachedHasItemGameplayRunner = false;
+        return false;
+    }
+
+    private void ConfigureReplicatedFlamethrowerParticles()
+    {
+        if (_replicatedFlamethrowerParticles == null || _replicatedFlamethrowerParticles.Length == 0)
+        {
+            return;
+        }
+
+        for (var i = 0; i < _replicatedFlamethrowerParticles.Length; i++)
+        {
+            var particle = _replicatedFlamethrowerParticles[i];
+            if (particle == null)
+            {
+                continue;
+            }
+
+            var main = particle.main;
+            main.loop = true;
+            main.playOnAwake = false;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+        }
+    }
+
+    private void TuneReplicatedFlamethrowerParticles(float range, float radius)
+    {
+        if (_replicatedFlamethrowerParticles == null || _replicatedFlamethrowerParticles.Length == 0)
+        {
+            return;
+        }
+
+        var safeRange = Mathf.Max(0.5f, range);
+        var safeRadius = Mathf.Max(0.1f, radius);
+        var speed = Mathf.Max(4f, safeRange * 2.2f);
+        var lifetime = Mathf.Max(0.08f, safeRange / Mathf.Max(0.01f, speed));
+        var minSize = Mathf.Max(0.08f, safeRadius * 0.35f);
+        var maxSize = Mathf.Max(0.16f, safeRadius * 0.65f);
+
+        for (var i = 0; i < _replicatedFlamethrowerParticles.Length; i++)
+        {
+            var particle = _replicatedFlamethrowerParticles[i];
+            if (particle == null)
+            {
+                continue;
+            }
+
+            var main = particle.main;
+            main.startSpeed = new ParticleSystem.MinMaxCurve(speed * 0.75f, speed);
+            main.startLifetime = new ParticleSystem.MinMaxCurve(lifetime * 0.8f, lifetime * 1.2f);
+            main.startSize = new ParticleSystem.MinMaxCurve(minSize, maxSize);
+
+            var shape = particle.shape;
+            if (shape.enabled && shape.shapeType == ParticleSystemShapeType.Cone)
+            {
+                shape.length = Mathf.Max(0.1f, safeRange * 0.2f);
+            }
+        }
+    }
+
+    private void PlayReplicatedFlamethrowerParticles()
+    {
+        if (_replicatedFlamethrowerParticles == null)
+        {
+            return;
+        }
+
+        for (var i = 0; i < _replicatedFlamethrowerParticles.Length; i++)
+        {
+            var particle = _replicatedFlamethrowerParticles[i];
+            if (particle != null && !particle.isPlaying)
+            {
+                particle.Play(true);
+            }
+        }
+    }
+
+    private void StopReplicatedFlamethrowerVisual()
+    {
+        if (_replicatedFlamethrowerParticles != null)
+        {
+            for (var i = 0; i < _replicatedFlamethrowerParticles.Length; i++)
+            {
+                var particle = _replicatedFlamethrowerParticles[i];
+                if (particle != null)
+                {
+                    particle.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                }
+            }
+        }
+    }
+
     private void TryAttachReplicatedBlackholeFx(Transform parent)
     {
         if (parent == null || parent.Find(ReplicatedBlackholeFxName) != null)
+        {
+            return;
+        }
+
+        if (!enableReplicatedBlackholeSecondaryFx)
         {
             return;
         }
@@ -526,6 +1695,7 @@ public sealed partial class NetworkPlayer
 
         if (_blackholeEffectPrefabCache == null)
         {
+            ItemRuntimeLog.WarnOnce("BlackholeFxMissing", ItemIds.BlackholeBomb, $"블랙홀 부가 이펙트 로드 실패: resource={BlackholeEffectResourcePath}", this);
             return;
         }
 
@@ -535,11 +1705,66 @@ public sealed partial class NetworkPlayer
         instance.transform.localRotation = Quaternion.identity;
         instance.transform.localScale = Vector3.one * Mathf.Max(0.001f, blackholeVisualScale);
         ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
+        PlayAllParticles(instance);
+        ItemRuntimeLog.InfoOnce("BlackholeFxLoaded", ItemIds.BlackholeBomb, $"블랙홀 부가 이펙트 로드 성공: {instance.name}", this);
 
         var colliders = instance.GetComponentsInChildren<Collider>(true);
         for (var i = 0; i < colliders.Length; i++)
         {
             colliders[i].enabled = false;
+        }
+    }
+
+    private static void DisableColliders(GameObject root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        var colliders = root.GetComponentsInChildren<Collider>(true);
+        for (var i = 0; i < colliders.Length; i++)
+        {
+            colliders[i].enabled = false;
+        }
+    }
+
+    private static void PlayAllParticles(GameObject root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        var particles = root.GetComponentsInChildren<ParticleSystem>(true);
+        for (var i = 0; i < particles.Length; i++)
+        {
+            var particle = particles[i];
+            if (particle == null)
+            {
+                continue;
+            }
+
+            particle.gameObject.SetActive(true);
+            particle.Play(true);
+        }
+    }
+
+    private static void DisableBehaviours(GameObject root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        var behaviours = root.GetComponents<MonoBehaviour>();
+        for (var i = 0; i < behaviours.Length; i++)
+        {
+            var behaviour = behaviours[i];
+            if (behaviour != null)
+            {
+                behaviour.enabled = false;
+            }
         }
     }
 
@@ -568,6 +1793,14 @@ public sealed partial class NetworkPlayer
         if (renderer == null)
         {
             return;
+        }
+
+        var sharedMaterial = renderer.sharedMaterial;
+        if (sharedMaterial == null ||
+            sharedMaterial.shader == null ||
+            !sharedMaterial.shader.isSupported)
+        {
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(target, true);
         }
 
         var material = renderer.material;

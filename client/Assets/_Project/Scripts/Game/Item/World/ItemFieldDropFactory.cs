@@ -5,9 +5,6 @@
  * - 필드 공통 규칙을 바꾸면 모든 아이템 획득 흐름에 영향이 가므로 개별 아이템 예외와 분리해서 수정해야 한다.
  */
 using UnityEngine;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
 
 namespace SSAFYPlayTime.Gameplay.Items
 {
@@ -16,19 +13,13 @@ namespace SSAFYPlayTime.Gameplay.Items
     /// </summary>
     public sealed class ItemFieldDropFactory
     {
-        private const string BlackholeFieldEffectAssetPath =
-            "Assets/Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple.prefab";
-        private const float WaterMelonSwordScaleMultiplier = 1.3f;
-        private const float GrowthFieldVisualScaleMultiplier = 0.5f;
         private const float GrowthFieldColliderRadius = 0.16f;
-        private const float ShrinkFieldVisualScaleMultiplier = 1.45f;
         private const float ShrinkFieldColliderRadius = 0.18f;
         private const float ConsumableFieldDrag = 1.75f;
         private const float ConsumableFieldAngularDrag = 12f;
         private const float EquipmentFieldDrag = 0.15f;
         private const float EquipmentFieldAngularDrag = 0.35f;
         private readonly IItemFieldPrefabResolver _prefabResolver;
-        private GameObject _blackholeEffectPrefabCache;
 
         public ItemFieldDropFactory(IItemFieldPrefabResolver prefabResolver)
         {
@@ -74,31 +65,6 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
             }
 
-            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
-
-            if (string.Equals(definition.Master.ItemId, ItemIds.WaterMelonSword, System.StringComparison.Ordinal))
-            {
-                ApplyScaleMultiplier(instance, WaterMelonSwordScaleMultiplier);
-                ApplyUrpMaterialFallback(instance);
-            }
-
-            if (string.Equals(definition.Master.ItemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal))
-            {
-                ConfigureBlackholeVisual(instance);
-            }
-
-            if (string.Equals(definition.Master.ItemId, ItemIds.Growth, System.StringComparison.Ordinal))
-            {
-                // 헬스 아이콘은 필드에서 과하게 크게 보여 절반 수준으로 줄여 맞춘다.
-                ApplyScaleMultiplier(instance, GrowthFieldVisualScaleMultiplier);
-            }
-
-            if (string.Equals(definition.Master.ItemId, ItemIds.Shrink, System.StringComparison.Ordinal))
-            {
-                // 스피드 아이콘은 파티클 중심 비주얼이 작아 필드에서만 체급을 조금 키운다.
-                ApplyScaleMultiplier(instance, ShrinkFieldVisualScaleMultiplier);
-            }
-
             instance.name = $"FieldItem_{definition.Master.ItemId}";
             var fieldDrop = instance.GetComponent<ItemFieldDrop>();
             if (fieldDrop == null)
@@ -107,20 +73,48 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             fieldDrop.SetItemId(definition.Master.ItemId);
-            EnsureCollider(instance, definition);
-            EnsureDynamicRigidbody(instance, definition);
+            fieldDrop.EnsureRuntimeSetup();
             return fieldDrop;
         }
 
-        private void ConfigureBlackholeVisual(GameObject root)
+        internal static void ApplyFieldDropRuntimeSetup(GameObject instance, string itemId)
+        {
+            if (instance == null)
+            {
+                return;
+            }
+
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
+
+            if (string.Equals(itemId, ItemIds.WaterMelonSword, System.StringComparison.Ordinal))
+            {
+                ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance, true);
+            }
+
+            if (string.Equals(itemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal))
+            {
+                ConfigureBlackholeVisual(instance);
+            }
+
+            EnsureCollider(instance, itemId);
+            EnsureDynamicRigidbody(instance, itemId);
+        }
+
+        private static void ConfigureBlackholeVisual(GameObject root)
         {
             if (root == null)
             {
                 return;
             }
 
+            var authoring = root.GetComponent<ItemBlackholeVisualAuthoring>();
+            if (authoring != null)
+            {
+                authoring.RefreshVisual();
+                return;
+            }
+
             ApplyBlackholeShellTransparency(root);
-            AttachOrRefreshBlackholeEffect(root.transform);
         }
 
         private GameObject CreateBlackholeFieldDropRoot(Vector3 position, Transform parent)
@@ -135,38 +129,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             ApplyBlackholeShellTransparency(root);
 
-            AttachOrRefreshBlackholeEffect(root.transform);
-
             return root;
-        }
-
-        private void AttachOrRefreshBlackholeEffect(Transform blackholeRoot)
-        {
-            if (blackholeRoot == null)
-            {
-                return;
-            }
-
-            var effectPrefab = TryLoadBlackholeFieldEffectPrefab();
-            if (effectPrefab == null)
-            {
-                return;
-            }
-
-            var existing = blackholeRoot.Find("Item_BlackholeFx");
-            if (existing != null)
-            {
-                Object.Destroy(existing.gameObject);
-            }
-
-            var effectInstance = Object.Instantiate(effectPrefab, blackholeRoot);
-            effectInstance.name = "Item_BlackholeFx";
-            effectInstance.transform.localPosition = Vector3.zero;
-            effectInstance.transform.localRotation = Quaternion.identity;
-            effectInstance.transform.localScale = Vector3.one * 0.7f;
-            DisableColliders(effectInstance);
-            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(effectInstance);
-            DisableUnsupportedDistortionRenderers(effectInstance);
         }
 
         private static void ApplyBlackholeShellTransparency(GameObject root)
@@ -233,24 +196,6 @@ namespace SSAFYPlayTime.Gameplay.Items
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         }
 
-        private GameObject TryLoadBlackholeFieldEffectPrefab()
-        {
-            if (_blackholeEffectPrefabCache != null)
-            {
-                return _blackholeEffectPrefabCache;
-            }
-
-#if UNITY_EDITOR
-            _blackholeEffectPrefabCache = AssetDatabase.LoadAssetAtPath<GameObject>(BlackholeFieldEffectAssetPath);
-            if (_blackholeEffectPrefabCache != null)
-            {
-                return _blackholeEffectPrefabCache;
-            }
-#endif
-            _blackholeEffectPrefabCache = Resources.Load<GameObject>("Effect_02_BlackHole");
-            return _blackholeEffectPrefabCache;
-        }
-
         private static void DisableColliders(GameObject root)
         {
             if (root == null)
@@ -309,7 +254,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
         }
 
-        private static void EnsureCollider(GameObject target, ItemDefinition definition)
+        private static void EnsureCollider(GameObject target, string itemId)
         {
             if (target.GetComponentInChildren<Collider>() != null)
             {
@@ -317,28 +262,28 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             var sphereCollider = target.AddComponent<SphereCollider>();
-            if (definition != null &&
-                string.Equals(definition.Master.ItemId, ItemIds.Growth, System.StringComparison.Ordinal))
+            if (string.Equals(itemId, ItemIds.Growth, System.StringComparison.Ordinal))
             {
                 // 헬스 아이콘은 파티클 외곽이 넓어 기본 구체 콜라이더가 과하게 크게 느껴져 전용 반경을 쓴다.
                 sphereCollider.radius = GrowthFieldColliderRadius;
                 return;
             }
 
-            if (definition != null &&
-                string.Equals(definition.Master.ItemId, ItemIds.Shrink, System.StringComparison.Ordinal))
+            if (string.Equals(itemId, ItemIds.Shrink, System.StringComparison.Ordinal))
             {
                 // 스피드 아이콘은 기본 구체 콜라이더가 시각 대비 지나치게 크게 느껴져 전용 반경을 쓴다.
                 sphereCollider.radius = ShrinkFieldColliderRadius;
             }
         }
 
-        private static void EnsureDynamicRigidbody(GameObject target, ItemDefinition definition)
+        private static void EnsureDynamicRigidbody(GameObject target, string itemId)
         {
             if (target == null)
             {
                 return;
             }
+
+            PrepareDynamicColliders(target);
 
             var body = target.GetComponent<Rigidbody>();
             if (body == null)
@@ -355,7 +300,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             body.velocity = Vector3.zero;
             body.angularVelocity = Vector3.zero;
 
-            if (definition != null && definition.Master.ItemType == ItemType.Consumable)
+            if (IsConsumableItem(itemId))
             {
                 // 소비형 아이콘은 구르기보다 제자리에 안정적으로 멈추는 쪽이 플레이 감각에 맞다.
                 body.drag = ConsumableFieldDrag;
@@ -374,15 +319,111 @@ namespace SSAFYPlayTime.Gameplay.Items
             body.WakeUp();
         }
 
-        private static void ApplyScaleMultiplier(GameObject target, float multiplier)
+        private static void PrepareDynamicColliders(GameObject target)
         {
             if (target == null)
             {
                 return;
             }
 
-            var safeMultiplier = Mathf.Max(0.01f, multiplier);
-            target.transform.localScale *= safeMultiplier;
+            var meshColliders = target.GetComponentsInChildren<MeshCollider>(true);
+            if (meshColliders.Length == 0)
+            {
+                return;
+            }
+
+            if (TryReplaceMeshCollidersWithBoxCollider(target, meshColliders))
+            {
+                return;
+            }
+
+            for (var i = 0; i < meshColliders.Length; i++)
+            {
+                var meshCollider = meshColliders[i];
+                if (meshCollider == null || meshCollider.convex)
+                {
+                    continue;
+                }
+
+                // 한국어: 동적 리지드바디와 함께 쓸 수 있도록 메시 콜라이더를 볼록 형태로 맞춘다.
+                meshCollider.enabled = false;
+                meshCollider.convex = true;
+            }
+        }
+
+        private static bool TryReplaceMeshCollidersWithBoxCollider(GameObject target, MeshCollider[] meshColliders)
+        {
+            if (target == null || meshColliders == null || meshColliders.Length == 0)
+            {
+                return false;
+            }
+
+            var renderers = target.GetComponentsInChildren<Renderer>(true);
+            if (renderers == null || renderers.Length == 0)
+            {
+                return false;
+            }
+
+            var hasBounds = false;
+            var worldBounds = default(Bounds);
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                var renderer = renderers[i];
+                if (renderer == null || !renderer.enabled)
+                {
+                    continue;
+                }
+
+                if (!hasBounds)
+                {
+                    worldBounds = renderer.bounds;
+                    hasBounds = true;
+                    continue;
+                }
+
+                worldBounds.Encapsulate(renderer.bounds);
+            }
+
+            if (!hasBounds)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < meshColliders.Length; i++)
+            {
+                var meshCollider = meshColliders[i];
+                if (meshCollider != null)
+                {
+                    meshCollider.enabled = false;
+                    Object.Destroy(meshCollider);
+                }
+            }
+
+            var boxCollider = target.GetComponent<BoxCollider>();
+            if (boxCollider == null)
+            {
+                boxCollider = target.AddComponent<BoxCollider>();
+            }
+
+            var localCenter = target.transform.InverseTransformPoint(worldBounds.center);
+            var localSize = target.transform.InverseTransformVector(worldBounds.size);
+            localSize = new Vector3(
+                Mathf.Max(0.1f, Mathf.Abs(localSize.x)),
+                Mathf.Max(0.1f, Mathf.Abs(localSize.y)),
+                Mathf.Max(0.1f, Mathf.Abs(localSize.z)));
+
+            // 한국어: 빌드에서 읽기 불가 메시 충돌이 터지는 장비류는 단순 박스 콜라이더로 대체한다.
+            boxCollider.center = localCenter;
+            boxCollider.size = localSize;
+            return true;
+        }
+
+        private static bool IsConsumableItem(string itemId)
+        {
+            return string.Equals(itemId, ItemIds.Growth, System.StringComparison.Ordinal) ||
+                   string.Equals(itemId, ItemIds.Shrink, System.StringComparison.Ordinal) ||
+                   string.Equals(itemId, ItemIds.Invisibility, System.StringComparison.Ordinal) ||
+                   string.Equals(itemId, ItemIds.Americano, System.StringComparison.Ordinal);
         }
 
         private static void ApplyUrpMaterialFallback(GameObject root)
@@ -413,8 +454,8 @@ namespace SSAFYPlayTime.Gameplay.Items
 
                     var fallbackShader =
                         Shader.Find("Universal Render Pipeline/Lit") ??
-                        Shader.Find("Universal Render Pipeline/Simple Lit") ??
-                        Shader.Find("Standard");
+                        Shader.Find("Universal Render Pipeline/Unlit") ??
+                        Shader.Find("Universal Render Pipeline/Simple Lit");
                     if (fallbackShader == null)
                     {
                         continue;

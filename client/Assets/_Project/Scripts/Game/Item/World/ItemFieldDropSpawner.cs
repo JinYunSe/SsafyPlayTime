@@ -5,6 +5,7 @@
  * - 필드 공통 규칙을 바꾸면 모든 아이템 획득 흐름에 영향이 가므로 개별 아이템 예외와 분리해서 수정해야 한다.
  */
 using System;
+using Fusion;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Gameplay.Items
@@ -18,6 +19,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [Header("참조")]
         [SerializeField] private ItemRuntimeHost itemRuntimeHost;
         [SerializeField] private Transform spawnCenter;
+        [SerializeField] private Transform spawnRoot;
 
         [SerializeField] private float spawnHeightOffset = 0.2f;
 
@@ -36,6 +38,8 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private readonly ItemFieldCatalogProvider _catalogProvider = new();
         private ItemFieldDropFactory _dropFactory;
+        private NetworkRunner _runnerCache;
+        private float _nextRunnerLookupTime;
 
         public event Action<ItemFieldDrop> FieldDropSpawned;
         public ItemRuntimeHost RuntimeHost => itemRuntimeHost;
@@ -69,6 +73,11 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         public bool TrySpawnItem(string itemId, Vector3 worldPosition, out ItemFieldDrop spawnedDrop)
         {
+            return TrySpawnItem(itemId, worldPosition, string.Empty, out spawnedDrop);
+        }
+
+        public bool TrySpawnItem(string itemId, Vector3 worldPosition, string instanceId, out ItemFieldDrop spawnedDrop)
+        {
             spawnedDrop = null;
             if (string.IsNullOrWhiteSpace(itemId))
             {
@@ -92,6 +101,10 @@ namespace SSAFYPlayTime.Gameplay.Items
                 groundMask,
                 spawnHeightOffset);
             spawnedDrop = SpawnDefinition(definition, resolvedPosition, false, Vector3.zero);
+            if (spawnedDrop != null && !string.IsNullOrWhiteSpace(instanceId))
+            {
+                spawnedDrop.SetInstanceId(instanceId);
+            }
             return spawnedDrop != null;
         }
 
@@ -136,6 +149,12 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private void HandleItemDropped(string itemId, ItemDropReason reason)
         {
+            if (ShouldSkipRuntimeDropSpawn())
+            {
+                DebugLog($"Skip runtime drop spawn in network mode: {itemId}");
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(itemId))
             {
                 return;
@@ -182,7 +201,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                 InitializeFactory();
             }
 
-            var fieldDrop = _dropFactory.Create(definition, position, transform);
+            var parent = spawnRoot;
+            var fieldDrop = _dropFactory.Create(definition, position, parent);
             if (fieldDrop == null)
             {
                 return null;
@@ -241,6 +261,44 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             return transform.position;
+        }
+
+        private bool ShouldSkipRuntimeDropSpawn()
+        {
+            if (!TryGetRunner(out var runner))
+            {
+                return false;
+            }
+
+            // 한국어: 네트워크 플레이 중에는 NetworkPlayer 복제 경로가 드랍 생성을 담당하므로
+            // ItemDropped 이벤트 기반 자동 스폰은 막아서 로컬 중복 생성을 방지한다.
+            return runner != null && runner.IsRunning;
+        }
+
+        private bool TryGetRunner(out NetworkRunner runner)
+        {
+            if (_runnerCache != null && _runnerCache.IsRunning)
+            {
+                runner = _runnerCache;
+                return true;
+            }
+
+            if (Time.unscaledTime < _nextRunnerLookupTime)
+            {
+                runner = null;
+                return false;
+            }
+
+            _nextRunnerLookupTime = Time.unscaledTime + 1f;
+            _runnerCache = FindObjectOfType<NetworkRunner>(true);
+            if (_runnerCache != null && _runnerCache.IsRunning)
+            {
+                runner = _runnerCache;
+                return true;
+            }
+
+            runner = null;
+            return false;
         }
 
         private void DebugLog(string message)

@@ -46,6 +46,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private void OnBlackholeRequested(BlackholeSkillRequest request)
         {
+            ItemRuntimeLog.Info(ItemIds.BlackholeBomb, $"러너 블랙홀 수신: center={request.Center}, delay={request.DelaySec:0.00}, radius={request.Radius:0.00}", this);
             Coroutine routine = null;
             routine = StartCoroutine(CoBlackholeSkillTracked(request, () =>
             {
@@ -69,6 +70,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private void OnSatelliteStrikeRequested(SatelliteStrikeRequest request)
         {
+            ItemRuntimeLog.Info(ItemIds.SatelliteStrike, $"러너 위성 수신: center={request.Center}, origin={request.Origin}, radius={request.Radius:0.00}", this);
             Coroutine routine = null;
             routine = StartCoroutine(CoSatelliteStrikeTracked(request, () =>
             {
@@ -89,10 +91,12 @@ namespace SSAFYPlayTime.Gameplay.Items
             StopFlamethrowerParticle();
             StopAllLoopingSfx();
             LogStatus($"Flamethrower stopped: {itemId}");
+            ItemRuntimeLog.Info(itemId, "러너 화염 종료 수신", this);
         }
 
         private void OnFlamethrowerTicked(FlamethrowerTickRequest request)
         {
+            ItemRuntimeLog.Info(ItemIds.Flamethrower, $"러너 화염 틱 수신: origin={request.Origin}, range={request.Range:0.00}, radius={request.Radius:0.00}", this);
             TickFlamethrower(in request);
         }
 

@@ -19,12 +19,14 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (string.IsNullOrWhiteSpace(_heldItemId))
             {
                 reason = "No held item.";
+                ItemRuntimeLog.Warn("Use", $"사용 거부: {reason}");
                 return false;
             }
 
             if (!_catalog.TryGetDefinition(_heldItemId, out var def))
             {
                 reason = $"Held item is missing in catalog: {_heldItemId}";
+                ItemRuntimeLog.Error(_heldItemId, $"카탈로그 누락: {reason}");
                 return false;
             }
 
@@ -35,6 +37,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             PlayUsePresentation(def, ownerPosition);
+            ItemRuntimeLog.Info(def.Master.ItemId, $"사용 요청 시작: owner={ownerPosition}, forward={ownerForward}, target={targetPosition}");
             var context = new ItemUseModuleContext(this, def, ownerPosition, ownerForward, targetPosition);
             var result = _useModuleRegistry.TryUse(def.Master.ItemId, context);
             if (!result.Success)
@@ -42,6 +45,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 reason = string.IsNullOrWhiteSpace(result.Reason)
                     ? $"Failed to use item module: {def.Master.ItemId}"
                     : result.Reason;
+                ItemRuntimeLog.Warn(def.Master.ItemId, $"사용 모듈 실패: {reason}");
                 return false;
             }
 
@@ -50,6 +54,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 ConsumeHeldItem(def);
             }
 
+            ItemRuntimeLog.Info(def.Master.ItemId, $"사용 요청 완료: consume={result.ConsumeHeldItem}");
             return true;
         }
 
@@ -61,13 +66,17 @@ namespace SSAFYPlayTime.Gameplay.Items
                 Mathf.Max(0f, def.Master.DurationSec),
                 Mathf.Max(0f, def.Master.Range),
                 Mathf.Max(0f, def.Master.Force));
+            ItemRuntimeLog.Info(def.Master.ItemId, $"블랙홀 요청: center={request.Center}, delay={request.DelaySec:0.00}, duration={request.DurationSec:0.00}, radius={request.Radius:0.00}");
             _bridge.OnBlackholeRequested(request);
         }
 
         internal void UseSatelliteStrike(ItemDefinition def, Vector3 ownerPosition, Vector3 ownerForward, Vector3 targetPosition)
         {
+            // 한국어: 위성 레이저는 블랙홀과 같은 투척 감각으로 처리한다.
+            // 한국어: 조준점 좌표를 즉시 확정하지 않고, 전방으로 던진 뒤 실제 착지 지점에서 발동한다.
+            var fallbackCenter = ownerPosition + ownerForward * 6f;
             var request = new SatelliteStrikeRequest(
-                targetPosition,
+                fallbackCenter,
                 ownerPosition,
                 ownerForward,
                 Mathf.Max(0f, def.Master.WarningTimeSec),
@@ -76,6 +85,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 Mathf.Max(0f, def.Master.Force),
                 Mathf.Max(0f, def.Master.BaseDamage),
                 Mathf.Max(0f, def.Master.StunDamage));
+            ItemRuntimeLog.Info(def.Master.ItemId, $"위성 레이저 요청: origin={ownerPosition}, forward={ownerForward}, fallbackCenter={fallbackCenter}, warning={request.WarningSec:0.00}");
             _bridge.OnSatelliteStrikeRequested(request);
         }
 
@@ -83,6 +93,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         {
             if (_isFlamethrowerActive)
             {
+                ItemRuntimeLog.Info(def.Master.ItemId, "화염방사기 종료 요청");
                 StopFlamethrowerIfNeeded();
                 return;
             }
@@ -92,6 +103,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             _equipmentEndAt = now + maxUseSec;
             _nextFlamethrowerTickAt = now;
             _isFlamethrowerActive = true;
+            ItemRuntimeLog.Info(def.Master.ItemId, $"화염방사기 시작: now={now:0.00}, endAt={_equipmentEndAt:0.00}");
             _bridge.OnFlamethrowerStart(def.Master.ItemId, _equipmentEndAt);
         }
 
@@ -108,6 +120,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 DefaultWatermelonSwordActiveDuration,
                 DefaultWatermelonSwordHealthDamage,
                 DefaultWatermelonSwordStunDamage);
+            ItemRuntimeLog.Info(def.Master.ItemId, $"근접 사용 요청: activeDuration={request.ActiveDurationSec:0.00}, hp={request.HealthDamage:0.00}, stun={request.StunDamage:0.00}");
             _bridge.OnMeleeSwingRequested(request);
         }
 
@@ -147,6 +160,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 Mathf.Max(0f, flameDef.Master.Force),
                 Mathf.Max(0f, flameDef.Master.BaseDamage),
                 Mathf.Max(0f, flameDef.Master.StunDamage));
+            ItemRuntimeLog.Info(flameDef.Master.ItemId, $"화염 틱: origin={request.Origin}, forward={request.Forward}, range={request.Range:0.00}, radius={request.Radius:0.00}");
             _bridge.OnFlamethrowerTick(request);
         }
 
@@ -160,6 +174,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             _isFlamethrowerActive = false;
             _equipmentEndAt = 0f;
             _nextFlamethrowerTickAt = 0f;
+            ItemRuntimeLog.Info(ItemIds.Flamethrower, "화염방사기 종료 확정");
             _bridge.OnFlamethrowerStop(ItemIds.Flamethrower);
         }
 
@@ -179,6 +194,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         {
             var consumedId = def.Master.ItemId;
             SetHeldItem(string.Empty);
+            ItemRuntimeLog.Info(consumedId, "소비형 아이템 소모 처리");
             _bridge.OnItemConsumed(consumedId);
         }
     }

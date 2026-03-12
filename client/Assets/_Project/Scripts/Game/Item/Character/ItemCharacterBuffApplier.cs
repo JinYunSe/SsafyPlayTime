@@ -164,6 +164,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             _localSnapshot = BuildSnapshot(activeBuffMask);
             PublishSnapshot(_localSnapshot);
             ApplySnapshot(_localSnapshot, forceApply: true);
+            ItemRuntimeLog.Info("Consumable", $"버프 적용 요청: mask={activeBuffMask}, growth={buffState.GrowthRemainSec:0.0}, shrink={buffState.ShrinkRemainSec:0.0}, superArmor={buffState.SuperArmorRemainSec:0.0}, invis={buffState.InvisibilityRemainSec:0.0}", this);
             DebugLog(
                 $"Consumable snapshot updated: mask={activeBuffMask}, growth={buffState.GrowthRemainSec:0.0}, shrink={buffState.ShrinkRemainSec:0.0}, superArmor={buffState.SuperArmorRemainSec:0.0}, invis={buffState.InvisibilityRemainSec:0.0}");
         }
@@ -390,9 +391,9 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return true;
             }
 
+            // 한국어: 투명화 본인 반투명 표시는 입력 권한을 가진 로컬 플레이어에게만 허용한다.
             return _networkPlayer.HasInputAuthority ||
-                   _networkPlayer.HasStateAuthority ||
-                   (_networkObject != null && (_networkObject.HasInputAuthority || _networkObject.HasStateAuthority));
+                   (_networkObject != null && _networkObject.HasInputAuthority);
         }
 
         private static void ApplyRendererAlpha(Renderer renderer, float alpha)
@@ -528,6 +529,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (prefab == null)
             {
                 DebugLog($"Effect prefab missing: {prefabPath}");
+                ItemRuntimeLog.Warn(objectName, $"보조 이펙트 프리팹 누락: path={prefabPath}", this);
                 return null;
             }
 
@@ -535,6 +537,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             instance.name = objectName;
             ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
             DisableRuntimePhysics(instance);
+            ItemRuntimeLog.Info(objectName, $"보조 이펙트 생성: path={prefabPath}", this);
             return instance;
         }
 

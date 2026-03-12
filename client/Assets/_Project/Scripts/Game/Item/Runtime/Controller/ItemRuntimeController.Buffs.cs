@@ -37,6 +37,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         {
             if (def == null)
             {
+                ItemRuntimeLog.Warn(buffMask.ToString(), "버프 활성화 실패: definition is null");
                 return;
             }
 
@@ -47,6 +48,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             _activeBuffMask |= buffMask;
             SetBuffEndTime(buffMask, _bridge.Now + Mathf.Max(0f, def.Master.DurationSec));
+            ItemRuntimeLog.Info(def.Master.ItemId, $"버프 활성화: mask={buffMask}, duration={Mathf.Max(0f, def.Master.DurationSec):0.00}, activeMask={_activeBuffMask}");
             NotifyBuffStateChanged();
         }
 
@@ -78,6 +80,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             ClearBuff(buffMask);
+            ItemRuntimeLog.Info(buffMask.ToString(), $"버프 만료: now={now:0.00}, activeMask={_activeBuffMask}");
             return true;
         }
 
@@ -146,6 +149,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 Mathf.Max(0f, _shrinkEndAt - now),
                 Mathf.Max(0f, _superArmorEndAt - now),
                 Mathf.Max(0f, _invisibilityEndAt - now));
+            ItemRuntimeLog.Info("BuffState", $"버프 상태 전파: mask={_activeBuffMask}, growth={state.GrowthRemainSec:0.0}, shrink={state.ShrinkRemainSec:0.0}, superArmor={state.SuperArmorRemainSec:0.0}, invis={state.InvisibilityRemainSec:0.0}");
             _bridge.OnBuffStateChanged(_activeBuffMask, state);
         }
     }
