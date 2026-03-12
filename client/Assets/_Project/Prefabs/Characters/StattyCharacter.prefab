@@ -604,10 +604,28 @@ MonoBehaviour:
   config: {fileID: 11400000, guid: 75abf164104853249b9f62f7cd147f60, type: 2}
   fallbackAnimatorController: {fileID: 9100000, guid: af287cd08f427c94e857b321ec368695,
     type: 2}
+  useAnimatedVisualOnly: 1
+  disablePhysicsAnimationSync: 1
   holdPoint: {fileID: 0}
+  _CharacterTypeIndex: -1
   _BoneRotations: []
   _NetworkedIsActiveRagdoll:
     _value: 0
+  itemWorldEffectMask:
+    serializedVersion: 2
+    m_Bits: 119
+  blackholeLaunchForwardOffset: 0.7
+  blackholeLaunchHeightOffset: 1.2
+  blackholeLaunchVisualDuration: 0.35
+  blackholeVisualScale: 0.7
+  blackholePullStrengthMultiplier: 2.25
+  blackholeExpandSpeedMultiplier: 1.5
+  blackholePlayerPullMultiplier: 1.5
+  blackholeItemPullMultiplier: 1.5
+  blackholePlayerEscapeDamping: 0.2
+  satelliteProjectileTravelSec: 0.35
+  satelliteBeamHeight: 24
+  enableItemWorldEffectLog: 0
 --- !u!114 &415537193144372740
 MonoBehaviour:
   m_ObjectHideFlags: 0
