@@ -108,11 +108,10 @@ public class HandGrabHandler : MonoBehaviour
 
         foreach (var hit in hits)
         {
-            if (networkPlayer != null && hit.transform.root == networkPlayer.transform)
-                continue;
-
             Rigidbody rb = hit.attachedRigidbody;
             if (rb == null) continue;
+            if (ShouldIgnoreGrabTarget(rb))
+                continue;
 
             float dist = Vector3.Distance(transform.position, rb.position);
             if (dist < bestDist)
@@ -196,10 +195,9 @@ public class HandGrabHandler : MonoBehaviour
         if (fixedJoint != null) return false;
 
         // ?�기 ?�신 불�?
-        if (networkPlayer != null && collision.transform.root == networkPlayer.transform)
-            return false;
-
         if (!collision.collider.TryGetComponent(out Rigidbody otherRb))
+            return false;
+        if (ShouldIgnoreGrabTarget(otherRb))
             return false;
 
         // ?�드 ?�이?��? ??�� ?�득 경로�??�용?�고 물리 그랩?�로 ?�백?��? ?�는??
@@ -318,6 +316,9 @@ public class HandGrabHandler : MonoBehaviour
 
     private void AttachGrab(Rigidbody targetRb, Vector3 worldAnchorPoint)
     {
+        if (ShouldIgnoreGrabTarget(targetRb))
+            return;
+
         fixedJoint = gameObject.AddComponent<FixedJoint>();
         fixedJoint.connectedBody = targetRb;
         fixedJoint.autoConfigureConnectedAnchor = false;
@@ -336,6 +337,23 @@ public class HandGrabHandler : MonoBehaviour
     private float GetGrabThrowForceStunned()
     {
         return CombatSettings.Instance != null ? CombatSettings.Instance.grabThrowForceStunned : 15f;
+    }
+
+    private bool ShouldIgnoreGrabTarget(Rigidbody targetRb)
+    {
+        if (targetRb == null)
+            return true;
+
+        if (targetRb == rigidbody3D)
+            return true;
+
+        if (targetRb.transform == transform || targetRb.transform.IsChildOf(transform))
+            return true;
+
+        if (networkPlayer == null)
+            return false;
+
+        return targetRb.transform.root == networkPlayer.transform;
     }
 }
 

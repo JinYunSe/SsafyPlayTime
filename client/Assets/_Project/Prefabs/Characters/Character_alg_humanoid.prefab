@@ -1256,10 +1256,33 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   rigidbody3D: {fileID: 4052563539032939794}
-  networkRigidbody3D: {fileID: 0}
   mainJoint: {fileID: 302432753506698213}
   animator: {fileID: 4712887848948331770}
-  _networkPhysicsSyncedRotations: []
+  syncPhysicsObjects: []
+  config: {fileID: 0}
+  fallbackAnimatorController: {fileID: 0}
+  useAnimatedVisualOnly: 1
+  disablePhysicsAnimationSync: 1
+  holdPoint: {fileID: 0}
+  _CharacterTypeIndex: -1
+  _BoneRotations: []
+  _NetworkedIsActiveRagdoll:
+    _value: 0
+  itemWorldEffectMask:
+    serializedVersion: 2
+    m_Bits: 119
+  blackholeLaunchForwardOffset: 0.7
+  blackholeLaunchHeightOffset: 1.2
+  blackholeLaunchVisualDuration: 0.35
+  blackholeVisualScale: 0.7
+  blackholePullStrengthMultiplier: 2.25
+  blackholeExpandSpeedMultiplier: 1.5
+  blackholePlayerPullMultiplier: 1.5
+  blackholeItemPullMultiplier: 1.5
+  blackholePlayerEscapeDamping: 0.2
+  satelliteProjectileTravelSec: 0.35
+  satelliteBeamHeight: 24
+  enableItemWorldEffectLog: 0
 --- !u!1 &4782881735265580161
 GameObject:
   m_ObjectHideFlags: 0
