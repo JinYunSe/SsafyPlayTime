@@ -1,23 +1,21 @@
-using System.Collections;
-using System.Collections.Generic;
+using Fusion;
 using UnityEngine;
 
-public class MovingWalk : MonoBehaviour
+public class MovingWalk : NetworkBehaviour
 {
     public Vector3 direction = Vector3.forward; // 이동 방향
     public float speed = 2.0f; // 이동 속도
 
     private void OnCollisionStay(Collision collision)
     {
-        // 닿아 있는 오브젝트의 Rigidbody를 가져옵니다.
         Rigidbody rb = collision.rigidbody;
+        if (rb == null)
+            return;
 
-        if (rb != null)
-        {
-            // 현재 위치에서 방향 * 속도 * 시간만큼 이동시킵니다.
-            // MovePosition을 써야 물리 엔진이 자연스럽게 인식합니다.
-            Vector3 moveAmount = direction.normalized * speed * Time.fixedDeltaTime;
-            rb.MovePosition(rb.position + moveAmount);
-        }
+        // 클라이언트도 동일한 DeltaTime으로 힘을 예측해야 호스트 보정 없이 부드러운 이동이 가능
+        // HasStateAuthority 체크를 하면 클라이언트가 예측을 못해 위치가 뚝뚝 튀게 됨
+        var dt = Runner != null ? Runner.DeltaTime : Time.fixedDeltaTime;
+        Vector3 moveAmount = direction.normalized * speed * dt;
+        rb.MovePosition(rb.position + moveAmount);
     }
 }

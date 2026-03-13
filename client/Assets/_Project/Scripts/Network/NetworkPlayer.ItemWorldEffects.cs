@@ -75,6 +75,7 @@ public sealed partial class NetworkPlayer
     private int _lastAppliedSatelliteStrikeSeq;
     private int _lastAppliedFlamethrowerTickSeq;
     private int _lastAppliedFlamethrowerStopSeq;
+    private int _lastAppliedMeleeSwingSeq;
     private Coroutine _activeReplicatedBlackholeRoutine;
     private Coroutine _activeReplicatedSatelliteRoutine;
     private GameObject _blackholeVisualPrefabCache;
@@ -112,6 +113,8 @@ public sealed partial class NetworkPlayer
     [Networked] private Vector3 NetworkedFlamethrowerForward { get; set; }
     [Networked] private float NetworkedFlamethrowerRange { get; set; }
     [Networked] private float NetworkedFlamethrowerRadius { get; set; }
+    [Networked] private int NetworkedMeleeSwingSeq { get; set; }
+    [Networked] private float NetworkedMeleeSwingDuration { get; set; }
 
     private sealed class ReplicatedBlackholeOutlineState
     {
@@ -124,6 +127,7 @@ public sealed partial class NetworkPlayer
         UnbindItemWorldEffectEvents();
         StopActiveItemWorldEffectCoroutines();
         ReleaseAllReplicatedBlackholeTargetOutlines();
+        StopReplicatedFlamethrowerVisual();
     }
 
     private void MarkItemWorldEffectNetworkReady()
@@ -151,6 +155,9 @@ public sealed partial class NetworkPlayer
         _itemWorldEffectBoundHost.FlamethrowerStarted += HandleFlamethrowerStarted;
         _itemWorldEffectBoundHost.FlamethrowerTicked += HandleFlamethrowerTicked;
         _itemWorldEffectBoundHost.FlamethrowerStopped += HandleFlamethrowerStopped;
+        _itemWorldEffectBoundHost.ItemConsumed += HandleItemConsumed;
+        _itemWorldEffectBoundHost.ItemDropped += HandleRuntimeItemDropped;
+        _itemWorldEffectBoundHost.MeleeSwingRequested += HandleMeleeSwingRequested;
         _itemWorldEffectEventsBound = true;
     }
 
@@ -168,6 +175,9 @@ public sealed partial class NetworkPlayer
         _itemWorldEffectBoundHost.FlamethrowerStarted -= HandleFlamethrowerStarted;
         _itemWorldEffectBoundHost.FlamethrowerTicked -= HandleFlamethrowerTicked;
         _itemWorldEffectBoundHost.FlamethrowerStopped -= HandleFlamethrowerStopped;
+        _itemWorldEffectBoundHost.ItemConsumed -= HandleItemConsumed;
+        _itemWorldEffectBoundHost.ItemDropped -= HandleRuntimeItemDropped;
+        _itemWorldEffectBoundHost.MeleeSwingRequested -= HandleMeleeSwingRequested;
         _itemWorldEffectBoundHost = null;
         _itemWorldEffectEventsBound = false;
     }
@@ -276,6 +286,31 @@ public sealed partial class NetworkPlayer
         }
     }
 
+    private void HandleItemConsumed(string itemId)
+    {
+        if (!CanWriteItemWorldEffectState())
+        {
+            ItemRuntimeLog.Warn(itemId, "아이템 소비 네트워크 기록 실패: StateAuthority 없음", this);
+            return;
+        }
+
+        ItemRuntimeLog.Info(itemId, "아이템 소비 RPC 브로드캐스트", this);
+        BroadcastItemConsumed(itemId);
+    }
+
+    private void HandleMeleeSwingRequested(MeleeSwingRequest request)
+    {
+        if (!CanWriteItemWorldEffectState())
+        {
+            ItemRuntimeLog.Warn(request.ItemId, "근접 스윙 네트워크 기록 실패: StateAuthority 없음", this);
+            return;
+        }
+
+        NetworkedMeleeSwingDuration = request.ActiveDurationSec;
+        NetworkedMeleeSwingSeq++;
+        ItemRuntimeLog.Info(request.ItemId, $"근접 스윙 네트워크 기록: seq={NetworkedMeleeSwingSeq}, duration={request.ActiveDurationSec:0.00}", this);
+    }
+
     private void ApplyReplicatedWorldItemEffects()
     {
         if (Object == null || !Object.IsValid || HasStateAuthority)
@@ -332,6 +367,25 @@ public sealed partial class NetworkPlayer
             ItemRuntimeLog.Info(ItemIds.Flamethrower, $"원격 화염 종료 반영: seq={NetworkedFlamethrowerStopSeq}", this);
             StopReplicatedFlamethrowerVisual();
         }
+
+        if (NetworkedMeleeSwingSeq > 0 && _lastAppliedMeleeSwingSeq != NetworkedMeleeSwingSeq)
+        {
+            _lastAppliedMeleeSwingSeq = NetworkedMeleeSwingSeq;
+            ItemRuntimeLog.Info(ItemIds.WaterMelonSword, $"원격 근접 스윙 반영: seq={NetworkedMeleeSwingSeq}, duration={NetworkedMeleeSwingDuration:0.00}", this);
+            TriggerReplicatedMeleeSwing();
+        }
+    }
+
+    private void TriggerReplicatedMeleeSwing()
+    {
+        var handler = GetComponentInChildren<ItemCharacterMeleeSwingHandler>(true);
+        if (handler == null)
+        {
+            ItemRuntimeLog.Warn(ItemIds.WaterMelonSword, "원격 근접 스윙 실패: ItemCharacterMeleeSwingHandler 없음", this);
+            return;
+        }
+
+        handler.TriggerReplicatedSwing(NetworkedMeleeSwingDuration);
     }
 
     private void StartReplicatedBlackhole(BlackholeSkillRequest request, bool applyGameplay)
@@ -448,11 +502,11 @@ public sealed partial class NetworkPlayer
         var radius = Mathf.Max(0.1f, request.Radius);
         var force = Mathf.Max(0f, request.Force);
         var expandDuration = Mathf.Max(0.05f, duration / Mathf.Max(0.1f, blackholeExpandSpeedMultiplier));
-        var activeElapsed = 0f;
+        var blackholeStartTime = Time.time;
 
-        while (activeElapsed < duration)
+        while (Time.time - blackholeStartTime < duration)
         {
-            activeElapsed += Time.deltaTime;
+            var activeElapsed = Time.time - blackholeStartTime;
             var ramp = Mathf.Clamp01(activeElapsed / expandDuration);
             var targetScale = Mathf.Max(0.4f, radius * Mathf.Max(0.08f, blackholeVisualScale * 0.22f));
             targetScale *= Mathf.Max(1f, blackholeActivationScaleMultiplier);
@@ -507,13 +561,12 @@ public sealed partial class NetworkPlayer
         var throwDirection = (throwForward + Vector3.up * blackholeThrowArc).normalized;
         var velocity = throwDirection * Mathf.Max(0.1f, blackholeThrowSpeed);
         var gravity = Physics.gravity;
-        var travelElapsed = 0f;
+        var travelStartTime = Time.time;
         var current = launchOrigin;
 
-        while (travelElapsed < 3f)
+        while (Time.time - travelStartTime < 3f)
         {
             var step = Mathf.Max(0.001f, Time.deltaTime);
-            travelElapsed += step;
             var nextVelocity = velocity + gravity * step;
             var next = current + velocity * step;
             var move = next - current;

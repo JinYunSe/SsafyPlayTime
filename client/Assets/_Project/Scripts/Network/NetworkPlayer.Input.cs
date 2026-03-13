@@ -42,6 +42,7 @@ public sealed partial class NetworkPlayer
         SynchronizeNetworkSimulationState();
         UpdateGrabHandlers();
         ClampOutOfBoundsCharacter();
+        TickFieldDropPositionSync();
     }
 
     private void PollLocalInputState()
