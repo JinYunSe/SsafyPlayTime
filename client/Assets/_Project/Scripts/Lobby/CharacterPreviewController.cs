@@ -14,14 +14,16 @@ namespace SSAFYPlayTime
         private const int CharacterOptionCount = 4;
 
         [Header("Character Templates")]
-        [SerializeField] private GameObject stattyCharacterRoot;
+        [FormerlySerializedAs("stattyCharacterRoot")]
+        [SerializeField] private GameObject ssatyCharacterRoot;
         [SerializeField] private GameObject alGCharacterRoot;
         [SerializeField] private GameObject fitCharacterRoot;
         [SerializeField] private GameObject wiseCharacterRoot;
 
         [Header("Selection UI")]
         [SerializeField] private GameObject characterSelectionPanel;
-        [SerializeField] private Button selectStattyCharacterButton;
+        [FormerlySerializedAs("selectStattyCharacterButton")]
+        [SerializeField] private Button selectSsatyCharacterButton;
         [SerializeField] private Button selectAlGCharacterButton;
         [SerializeField] private Button selectFitCharacterButton;
         [SerializeField] private Button selectWiseCharacterButton;
@@ -164,9 +166,9 @@ namespace SSAFYPlayTime
             TrySetGameObjectActive(characterSelectionPanel, canSelect);
             var selected = SanitizeCharacterIndexOrNone(localPlayerSelectedCharacterIndex);
 
-            if (selectStattyCharacterButton != null)
+            if (selectSsatyCharacterButton != null)
             {
-                TrySetButtonInteractable(selectStattyCharacterButton,
+                TrySetButtonInteractable(selectSsatyCharacterButton,
                     canSelect && selected != 0 && (takenByOthers == null || !takenByOthers.Contains(0)));
             }
 
@@ -191,7 +193,7 @@ namespace SSAFYPlayTime
 
         // ── Character select button callbacks ────────────────────────────────────
 
-        public void OnSelectStattyCharacter() => CharacterSelected?.Invoke(0);
+        public void OnSelectSsatyCharacter() => CharacterSelected?.Invoke(0);
         public void OnSelectAlGCharacter() => CharacterSelected?.Invoke(1);
         public void OnSelectFitCharacter() => CharacterSelected?.Invoke(2);
         public void OnSelectWiseCharacter() => CharacterSelected?.Invoke(3);
@@ -200,9 +202,9 @@ namespace SSAFYPlayTime
 
         private void BindButtonEvents()
         {
-            if (selectStattyCharacterButton != null)
+            if (selectSsatyCharacterButton != null)
             {
-                selectStattyCharacterButton.onClick.AddListener(OnSelectStattyCharacter);
+                selectSsatyCharacterButton.onClick.AddListener(OnSelectSsatyCharacter);
             }
 
             if (selectAlGCharacterButton != null)
@@ -228,7 +230,7 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            var templates = new[] { stattyCharacterRoot, alGCharacterRoot, fitCharacterRoot, wiseCharacterRoot };
+            var templates = new[] { ssatyCharacterRoot, alGCharacterRoot, fitCharacterRoot, wiseCharacterRoot };
             var nameSlots = _nameSlots;
             if (nameSlots == null || templates.Any(t => t == null) || nameSlots.Any(t => t == null))
             {

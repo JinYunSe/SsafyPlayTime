@@ -42,8 +42,8 @@ public sealed partial class NetworkPlayer
 
     private void TryProcessPrimaryAction(bool anyHolding)
     {
-        if (!TryUseHeldItemByPrimaryClick() && !anyHolding && animator != null)
-            animator.SetTrigger(H_Punch);
+        if (!TryUseHeldItemByPrimaryClick() && !anyHolding)
+            RaiseAnimationEvent(AnimationEventType.Punch, H_Punch);
     }
 
     private void TryProcessGrab()
@@ -88,8 +88,8 @@ public sealed partial class NetworkPlayer
             didThrow = true;
         }
 
-        if (didThrow && animator != null)
-            animator.SetTrigger(H_Throw);
+        if (didThrow)
+            RaiseAnimationEvent(AnimationEventType.Throw, H_Throw);
     }
 
     private void TryProcessSecondaryAction(bool anyHolding)
