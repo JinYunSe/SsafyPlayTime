@@ -1,8 +1,7 @@
-using System.Collections;
-using System.Collections.Generic;
+using Fusion;
 using UnityEngine;
 
-public class PlatformRotator : MonoBehaviour
+public class PlatformRotator : NetworkBehaviour
 {
     public enum RotationAxis { X, Y, Z }
 
@@ -12,18 +11,35 @@ public class PlatformRotator : MonoBehaviour
     // Rigidbody 컴포넌트를 Inspector에서 할당해야 합니다.
     public Rigidbody rb;
 
-    void FixedUpdate() // 기존 Update 대신 FixedUpdate 사용
+    [Networked] private float NetworkedAngle { get; set; }
+
+    public override void FixedUpdateNetwork()
     {
-        float rotationValue = rotationSpeed * Time.fixedDeltaTime;
+        if (HasStateAuthority)
+            NetworkedAngle += rotationSpeed * Runner.DeltaTime;
 
-        // 쿼터니언을 사용하여 회전값 계산
-        Quaternion deltaRotation = Quaternion.AngleAxis(rotationValue, GetAxisVector());
-
-        // 물리 엔진을 통해 회전 적용
-        rb.MoveRotation(rb.rotation * deltaRotation);
+        rb.MoveRotation(Quaternion.AngleAxis(NetworkedAngle, GetAxisVector()));
     }
 
-    Vector3 GetAxisVector()
+    public override void Render()
+    {
+        // 틱 사이 렌더 프레임을 Alpha(0~1)로 외삽해 부드럽게 회전 표시
+        // 등속 회전이라 외삽이 정확하며 다음 틱 도착 시 오차 없음
+        var alpha = new NetworkBehaviourBufferInterpolator(this).Alpha;
+        var renderAngle = NetworkedAngle + rotationSpeed * Runner.DeltaTime * alpha;
+        rb.MoveRotation(Quaternion.AngleAxis(renderAngle, GetAxisVector()));
+    }
+
+    // NetworkObject가 없는 경우(씬에 미배치) 폴백
+    private void FixedUpdate()
+    {
+        if (Runner != null)
+            return;
+
+        rb.MoveRotation(rb.rotation * Quaternion.AngleAxis(rotationSpeed * Time.fixedDeltaTime, GetAxisVector()));
+    }
+
+    private Vector3 GetAxisVector()
     {
         switch (rotationAxis)
         {

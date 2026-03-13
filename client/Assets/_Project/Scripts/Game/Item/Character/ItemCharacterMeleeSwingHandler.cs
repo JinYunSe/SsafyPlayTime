@@ -199,6 +199,35 @@ namespace SSAFYPlayTime.Gameplay.Items
             DebugLog($"Watermelon sword swing start: duration={duration:F2}, hp={_currentHealthDamage:F1}, stun={_currentStunDamage:F1}");
         }
 
+        /// <summary>
+        /// 원격 복제 스윙. 데미지 판정 없이 hitbox 비주얼만 활성화한다.
+        /// 실제 데미지는 ApplyStunDamage 내부의 StateAuthority 체크로 자연스럽게 차단된다.
+        /// </summary>
+        public void TriggerReplicatedSwing(float duration)
+        {
+            ResolveReferences();
+            if (!EnsureHitbox())
+            {
+                DebugLog("Replicated swing skipped: held watermelon sword visual is missing.");
+                return;
+            }
+
+            // 원격은 데미지를 0으로 고정해 중복 판정을 방지한다.
+            _currentHealthDamage = 0f;
+            _currentStunDamage = 0f;
+            var swingDuration = duration > 0f ? duration : Mathf.Max(0.05f, defaultSwingDurationSec);
+
+            _isSwingActive = true;
+            _swingEndAtSec = Time.time + swingDuration;
+            _hitTargetRootIds.Clear();
+            if (_hitboxCollider != null)
+            {
+                _hitboxCollider.enabled = true;
+            }
+
+            DebugLog($"Replicated watermelon sword swing: duration={swingDuration:F2}");
+        }
+
         private bool EnsureHitbox()
         {
             var visualRoot = heldItemPresenter != null ? heldItemPresenter.CurrentHeldVisualRoot : null;
