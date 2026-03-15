@@ -61,6 +61,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private GameObject _shieldEffectInstance;
         private GameObject _dustEffectInstance;
+        private Transform _animatedVisualRoot;
         private Vector3 _baseVisualScale = Vector3.one;
         private float _baseDrag;
         private float _baseAngularDrag;
@@ -358,6 +359,11 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 var renderer = renderers[i];
                 if (renderer == null)
+                {
+                    continue;
+                }
+
+                if (!IsUnderAnimatedVisualRoot(renderer.transform))
                 {
                     continue;
                 }
@@ -683,6 +689,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             _networkPlayer = characterRoot != null ? characterRoot.GetComponent<NetworkPlayer>() : null;
             _networkObject = characterRoot != null ? characterRoot.GetComponent<NetworkObject>() : null;
             _rootRigidbody = characterRoot != null ? characterRoot.GetComponent<Rigidbody>() : null;
+            _animatedVisualRoot = FindAnimatedVisualRoot();
         }
 
         private void CacheBaseState()
@@ -747,6 +754,35 @@ namespace SSAFYPlayTime.Gameplay.Items
                     _cachedColliders.Add(snapshot);
                 }
             }
+        }
+
+        private Transform FindAnimatedVisualRoot()
+        {
+            if (visualRoot == null)
+            {
+                return null;
+            }
+
+            for (var i = 0; i < visualRoot.childCount; i++)
+            {
+                var child = visualRoot.GetChild(i);
+                if (child.name.Contains("Animated") || child.name == "_AnimationDriver")
+                {
+                    return child;
+                }
+            }
+
+            return null;
+        }
+
+        private bool IsUnderAnimatedVisualRoot(Transform target)
+        {
+            if (_animatedVisualRoot == null)
+            {
+                return true;
+            }
+
+            return target == _animatedVisualRoot || target.IsChildOf(_animatedVisualRoot);
         }
 
         private void DebugLog(string message)
