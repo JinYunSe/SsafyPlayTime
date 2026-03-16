@@ -4,7 +4,7 @@ using UnityEngine;
 
 public class Tornado : MonoBehaviour
 {
-    [Header("Force Settings")]
+    /*[Header("Force Settings")]
     public float pullStrength = 10f;    // 중심으로 당기는 힘
     public float rotationSpeed = 15f;  // 회전 속도
     public float liftForce = 20f;      // 위로 띄우는 힘
@@ -64,5 +64,65 @@ public class Tornado : MonoBehaviour
             // 영역을 벗어나면 저항을 원래대로 (보통 0)
             rb.drag = 0.05f;
         }
+    }*/
+
+    [Header("Tornado Settings")]
+    public float liftSpeed = 5f;
+    public float spinSpeed = 300f;
+
+    [Header("Launch Settings")]
+    public float launchUpForce = 10f;    // 위로 솟구치는 힘
+    public float launchOutForce = 10f;   // 바깥으로 밀어내는 힘
+
+    private Collider tornadoCollider;
+
+    private void Awake() => tornadoCollider = GetComponent<Collider>();
+
+    private void OnTriggerStay(Collider other)
+    {
+        Rigidbody rb = other.GetComponent<Rigidbody>();
+        if (rb == null)
+            return;
+
+        float topY = tornadoCollider.bounds.max.y;
+
+        // 1. 사출 판정 (꼭대기 근처)
+        if (other.transform.position.y >= topY - 0.8f)
+        {
+            DoArcadeLaunch(rb);
+        }
+        else
+        {
+            // 2. 상승 및 회전 (물리 힘보다는 직접 위치 조작 느낌으로)
+            // 중심 방향 벡터
+            Vector3 centerDir = (transform.position - other.transform.position);
+            centerDir.y = 0;
+
+            // 중심으로 당기면서 위로 올림
+            rb.velocity = new Vector3(centerDir.x * 2f, liftSpeed, centerDir.z * 2f);
+
+            // 비주얼 회전
+            other.transform.Rotate(0, spinSpeed * Time.deltaTime, 0);
+        }
+    }
+
+    private void DoArcadeLaunch(Rigidbody rb)
+    {
+        // [핵심] 기존의 모든 관성과 회전속도를 0으로 초기화!
+        // 이게 없으면 이전의 회전 관성 때문에 조종이 안 됩니다.
+        rb.velocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+
+        // 사출 방향 (캐릭터가 바라보는 방향 혹은 중심의 바깥 방향)
+        Vector3 exitDir = (rb.transform.position - transform.position).normalized;
+        exitDir.y = 0;
+
+        // 새로운 깔끔한 힘 부여
+        Vector3 finalForce = (Vector3.up * launchUpForce) + (exitDir * launchOutForce);
+        rb.AddForce(finalForce, ForceMode.Impulse);
+
+        // [플레이어 제어권 강화]
+        // 여기서 플레이어의 이동 스크립트에 "나 지금 날아가는 중이야!"라고 신호를 보냅니다.
+        // 예: other.GetComponent<PlayerController>().EnableAirBoost(1.0f);
     }
 }
