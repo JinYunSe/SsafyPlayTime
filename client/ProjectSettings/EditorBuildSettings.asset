@@ -11,10 +11,10 @@ EditorBuildSettings:
   - enabled: 0
     path: Assets/_Project/Scenes/SampleScene.unity
     guid: 8074f36d43eef5d49b895940fa268655
-  - enabled: 0
+  - enabled: 1
     path: Assets/_Project/Scenes/GameScene.unity
     guid: 6e7ebca16e8287145b3955e886dfa821
-  - enabled: 1
+  - enabled: 0
     path: Assets/_Project/Scenes/GhostThrow.unity
     guid: a728dbd4e29213049911aabb56fff3cb
   m_configObjects: {}
