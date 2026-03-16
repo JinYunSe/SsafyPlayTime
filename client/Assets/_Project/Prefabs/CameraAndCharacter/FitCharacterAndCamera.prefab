@@ -1627,13 +1627,26 @@ MonoBehaviour:
   blackholeLaunchHeightOffset: 1.2
   blackholeLaunchVisualDuration: 0.35
   blackholeVisualScale: 0.7
+  blackholeActivationScaleMultiplier: 3
+  blackholeVisualGroundOffset: 0.35
+  blackholeThrowSpeed: 8
+  blackholeThrowArc: 0.35
+  enableReplicatedBlackholeSecondaryFx: 0
   blackholePullStrengthMultiplier: 2.25
   blackholeExpandSpeedMultiplier: 1.5
   blackholePlayerPullMultiplier: 1.5
   blackholeItemPullMultiplier: 1.5
   blackholePlayerEscapeDamping: 0.2
+  enableReplicatedBlackholeTargetOutline: 1
+  replicatedBlackholeTargetOutlineColor: {r: 0.72, g: 0.56, b: 1, a: 0.9}
+  replicatedBlackholeTargetOutlineScaleMultiplier: 1.045
   satelliteProjectileTravelSec: 0.35
   satelliteBeamHeight: 24
+  flamethrowerVisualForwardOffset: 0.7
+  flamethrowerVisualHeightOffset: 1.2
+  flamethrowerVisualScale: 2
+  flamethrowerMuzzleLocalOffset: {x: 0, y: 0, z: 0.5}
+  flamethrowerMuzzleLocalEulerOffset: {x: 0, y: 0, z: 0}
   enableItemWorldEffectLog: 0
 --- !u!114 &5717514986857467016
 MonoBehaviour:
