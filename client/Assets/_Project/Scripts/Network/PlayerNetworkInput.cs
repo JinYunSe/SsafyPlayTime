@@ -22,8 +22,11 @@ public struct PlayerNetworkInput : INetworkInput
     // 우클릭 클릭 = 던지기 / 어퍼컷
     public NetworkBool Throw;
 
-    // 좌클릭 꾹 = 그랩 홀드
-    public NetworkBool GrabHold;
+    // 좌클릭 꾹 = 왼손 그랩 홀드
+    public NetworkBool LeftGrabHold;
+
+    // 우클릭 꾹 = 오른손 그랩 홀드
+    public NetworkBool RightGrabHold;
 
     // 마우스 휠 클릭 = 박치기 (Phase C에서 구현)
     public NetworkBool Headbutt;

@@ -2,8 +2,9 @@ using UnityEngine;
 using RootMotion.Dynamics;
 
 /// <summary>
-/// 멀티플레이 준비: PuppetMaster 상태/이벤트 동기화 추상화 레이어
-/// TARGET 프로젝트에서는 Fusion RPC로 SendState/ReceiveState를 교체하면 됨.
+/// PuppetMaster 상태/이벤트 동기화 레이어.
+/// StateAuthority에서 PuppetMaster 상태를 캡처해 NetworkPlayer의 Networked 속성으로 전송.
+/// 원격 클라이언트에서는 Networked 속성을 읽어 로컬 PuppetMaster에 적용.
 /// </summary>
 public class PuppetStateSync : MonoBehaviour
 {
@@ -16,6 +17,7 @@ public class PuppetStateSync : MonoBehaviour
     [SerializeField] float syncInterval = 0.1f;
 
     float _nextSyncTime;
+    NetworkPlayer _networkPlayer;
     PuppetSyncState _lastSentState;
 
     public struct PuppetSyncState
@@ -36,20 +38,35 @@ public class PuppetStateSync : MonoBehaviour
             behaviourPuppet = GetComponentInChildren<BehaviourPuppet>();
         if (lifecycleManager == null)
             lifecycleManager = GetComponent<PuppetLifecycleManager>();
+        _networkPlayer = GetComponentInParent<NetworkPlayer>();
     }
 
     void Update()
     {
         if (puppetMaster == null) return;
-        if (Time.time < _nextSyncTime) return;
-        _nextSyncTime = Time.time + syncInterval;
+        // Fusion Spawned 전에는 Networked 속성/HasStateAuthority 접근 불가
+        if (_networkPlayer == null) return;
+        if (_networkPlayer.Object == null || !_networkPlayer.Object.IsValid) return;
 
-        var currentState = CaptureState();
-
-        if (HasStateChanged(currentState, _lastSentState))
+        // StateAuthority: 상태 캡처 → NetworkPlayer Networked 속성에 기록
+        if (_networkPlayer.HasStateAuthority)
         {
-            SendState(currentState);
-            _lastSentState = currentState;
+            if (Time.time < _nextSyncTime) return;
+            _nextSyncTime = Time.time + syncInterval;
+
+            var currentState = CaptureState();
+            if (HasStateChanged(currentState, _lastSentState))
+            {
+                _networkPlayer.WritePuppetSyncState(currentState.pinWeight, currentState.muscleWeight);
+                _lastSentState = currentState;
+            }
+        }
+        // 원격 클라이언트: Networked 속성 읽어 로컬 PuppetMaster에 적용
+        else if (!_networkPlayer.HasStateAuthority)
+        {
+            _networkPlayer.ReadPuppetSyncState(out var pinW, out var muscleW);
+            puppetMaster.pinWeight = pinW;
+            puppetMaster.muscleWeight = muscleW;
         }
     }
 
@@ -72,14 +89,6 @@ public class PuppetStateSync : MonoBehaviour
                a.mode != b.mode ||
                Vector3.SqrMagnitude(a.position - b.position) > 0.01f ||
                Mathf.Abs(a.pinWeight - b.pinWeight) > 0.05f;
-    }
-
-    /// <summary>
-    /// 상태 전송 — Fusion 도입 시 Runner.SendRpc로 교체
-    /// </summary>
-    void SendState(PuppetSyncState state)
-    {
-        // TODO: Fusion RPC로 교체
     }
 
     public void ReceiveState(PuppetSyncState state)

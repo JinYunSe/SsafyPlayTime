@@ -53,6 +53,14 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     // 액티브 래그돌 상태
     [Networked] public NetworkBool NetworkedIsActiveRagdoll { get; set; }
 
+    // ─── 그랩 상태 동기화 ───
+    [Networked] public NetworkBool NetworkedLeftGrabHolding { get; set; }
+    [Networked] public NetworkBool NetworkedRightGrabHolding { get; set; }
+
+    // ─── PuppetMaster 상태 동기화 ───
+    [Networked] private float NetworkedPuppetPinWeight { get; set; }
+    [Networked] private float NetworkedPuppetMuscleWeight { get; set; }
+
     // ─── 기절 시스템 ───
     // stunDamage 누적치 (임계값 초과 시 기절)
     [Networked] private float AccumulatedStunDamage { get; set; }
@@ -86,12 +94,49 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private PuppetMaster _puppetMaster;
     private BehaviourPuppet _behaviourPuppet;
     private Transform _targetRoot;
+    private SSAFYPlayTime.Character.BodyPartPhysicsManager _bodyPartPhysicsManager;
 
     private bool _isActiveRagdoll = true;
     public bool IsActiveRagdoll => _isActiveRagdoll;
 
     private bool _isGrabActive;
+    private bool _isLeftGrabActive;
+    private bool _isRightGrabActive;
     public bool IsGrabActive => _isGrabActive;
+
+    public bool IsHandGrabActive(HandGrabHandler.HandSide side)
+    {
+        return side == HandGrabHandler.HandSide.Left ? _isLeftGrabActive : _isRightGrabActive;
+    }
+
+    /// <summary>Spawned 이후에만 Networked 속성 접근 가능 여부.</summary>
+    private bool IsNetworkReady => Runner != null && Object != null && Object.IsValid;
+
+    /// <summary>
+    /// PuppetStateSync(StateAuthority)에서 호출 — Networked 속성에 기록.
+    /// </summary>
+    public void WritePuppetSyncState(float pinWeight, float muscleWeight)
+    {
+        if (!IsNetworkReady || !HasStateAuthority) return;
+        NetworkedPuppetPinWeight = pinWeight;
+        NetworkedPuppetMuscleWeight = muscleWeight;
+    }
+
+    /// <summary>
+    /// PuppetStateSync(원격 클라이언트)에서 호출 — Networked 속성에서 읽기.
+    /// Spawned 전이면 기본값(1,1)을 반환한다.
+    /// </summary>
+    public void ReadPuppetSyncState(out float pinWeight, out float muscleWeight)
+    {
+        if (!IsNetworkReady)
+        {
+            pinWeight = 1f;
+            muscleWeight = 1f;
+            return;
+        }
+        pinWeight = NetworkedPuppetPinWeight;
+        muscleWeight = NetworkedPuppetMuscleWeight;
+    }
 
     // 원격 클라이언트 애니메이션 드라이버용 접근자
     public float GetNetworkedMoveSpeed() => Runner != null && Object != null && Object.IsValid ? NetworkedMoveSpeed : _localMoveSpeed;
@@ -110,6 +155,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private bool _leftMouseConsumedAsGrab;
     private bool _leftClickUseTriggered;
     private const float GRAB_HOLD_THRESHOLD = 0.15f;
+
+    // 우클릭 꾹 vs 연타 판별 (우클릭 꾹 = 오른손 그랩, 짧게 = 던지기)
+    private bool _rightMouseDown;
+    private float _rightMouseDownTime;
+    private bool _rightMouseConsumedAsGrab;
 
     // 로컬 트리거
     private bool _dropTriggered;
@@ -190,6 +240,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         _puppetMaster = GetComponentInChildren<PuppetMaster>(true);
         _behaviourPuppet = GetComponentInChildren<BehaviourPuppet>(true);
         _targetRoot = _puppetMaster != null ? _puppetMaster.targetRoot : null;
+        _bodyPartPhysicsManager = GetComponentInChildren<SSAFYPlayTime.Character.BodyPartPhysicsManager>(true);
 
         _handGrabHandlers = GetComponentsInChildren<HandGrabHandler>(true);
         EnsureItemRuntimeIntegration();
