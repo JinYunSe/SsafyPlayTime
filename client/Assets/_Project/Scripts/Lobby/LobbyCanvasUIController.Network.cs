@@ -158,7 +158,8 @@ namespace SSAFYPlayTime
                 Debug.Log("[Lobby] Shutdown in progress, skip recovery.");
                 return;
             }
-
+            
+            CleanupRunnerAfterGameEndHostExit();
         }
 
         void INetworkRunnerCallbacks.OnConnectedToServer(NetworkRunner runner) { }
@@ -178,7 +179,8 @@ namespace SSAFYPlayTime
                 Debug.Log("[Lobby] Shutdown in progress, skip disconnect recovery.");
                 return;
             }
-
+            
+            CleanupRunnerAfterGameEndHostExit();
         }
 
         void INetworkRunnerCallbacks.OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token)
@@ -203,6 +205,12 @@ namespace SSAFYPlayTime
         {
             if (runner != _runner)
             {
+                return;
+            }
+
+            if (IsActiveSceneNamed("GameEndScene") && !_gameEndReturnTransitionStarted)
+            {
+                Debug.Log("[Lobby] Ignore host migration while waiting for GameEndScene button choice.");
                 return;
             }
 
@@ -518,6 +526,14 @@ namespace SSAFYPlayTime
             return oldToNewPlayerIds;
         }
 
+        // GameEndScene에서 순위 UI 표시를 위해 PlayerId로 닉네임을 조회한다.
+        public string GetParticipantNickname(int playerId)
+        {
+            if (_roomParticipantsByPlayerId.TryGetValue(playerId, out var p) && p != null && !string.IsNullOrEmpty(p.Nickname))
+                return p.Nickname;
+            return $"Player{playerId}";
+        }
+
         private bool _netLeftMouseDown;
         private float _netLeftMouseDownTime;
         private bool _netLeftMouseConsumedAsGrab;
@@ -667,7 +683,10 @@ namespace SSAFYPlayTime
                 {
                     UpdateRoomPanel();
                 }
+
+                return;
             }
+
         }
 
         void INetworkRunnerCallbacks.OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
