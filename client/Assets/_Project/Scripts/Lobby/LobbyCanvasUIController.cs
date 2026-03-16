@@ -207,6 +207,7 @@ namespace SSAFYPlayTime
         [Header("In-Game Panel (GameScene)")]
         [SerializeField] private GameObject gamePanel;
         [SerializeField] private Button leaveGameButton;
+        [SerializeField] private GameHUD gameHUDPrefab;
 
         [Header("Character Preview (optional)")]
         [SerializeField] private CharacterPreviewController characterPreview;
