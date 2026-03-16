@@ -1,4 +1,5 @@
 using Fusion;
+using RootMotion.Dynamics;
 using SSAFYPlayTime.Character;
 using SSAFYPlayTime.Gameplay.Items;
 using System.Collections;
@@ -42,6 +43,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     // 호스트 마이그레이션 캡처 시 roster 수신 여부와 무관하게 실제 외형을 보존하기 위해 사용한다.
     [Networked] public int CharacterTypeIndex { get; set; } = -1;
 
+    // 스프린트 상태 동기화 (원격 클라이언트 애니메이션용)
+    [Networked] private NetworkBool NetworkedIsSprinting { get; set; }
+
     // 관절 회전값 네트워크 배열
     [Networked, Capacity(15)]
     public NetworkArray<Quaternion> BoneRotations { get; }
@@ -78,11 +82,21 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private readonly List<Transform> _detachedCameraRoots = new();
     private bool _cameraHierarchyDetached;
 
+    // PuppetMaster 통합
+    private PuppetMaster _puppetMaster;
+    private BehaviourPuppet _behaviourPuppet;
+    private Transform _targetRoot;
+
     private bool _isActiveRagdoll = true;
     public bool IsActiveRagdoll => _isActiveRagdoll;
 
     private bool _isGrabActive;
     public bool IsGrabActive => _isGrabActive;
+
+    // 원격 클라이언트 애니메이션 드라이버용 접근자
+    public float GetNetworkedMoveSpeed() => Runner != null && Object != null && Object.IsValid ? NetworkedMoveSpeed : _localMoveSpeed;
+    public int GetNetworkedMotorState() => Runner != null && Object != null && Object.IsValid ? NetworkedMotorState : _localMotorState;
+    public bool GetNetworkedIsSprinting() => Runner != null && Object != null && Object.IsValid ? (bool)NetworkedIsSprinting : false;
 
     // 기절 관련
     private float _startSlerpPositionSpring;
@@ -161,6 +175,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         ConfigureLocalOwnershipPresentation();
         InitializeAnimationEventState();
+        InitializeAnimationDriverNetworkMode();
 
         // Issue 8: 호스트 마이그레이션 시 새 호스트의 자신 캐릭터 Spawned에서 드롭 아이템 위치를 재동기화한다.
         if (HasStateAuthority && HasInputAuthority && Runner != null && Runner.IsServer)
@@ -171,6 +186,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     {
         if (syncPhysicsObjects == null || syncPhysicsObjects.Length == 0)
             syncPhysicsObjects = GetComponentsInChildren<SyncPhysicsObject>(true);
+
+        _puppetMaster = GetComponentInChildren<PuppetMaster>(true);
+        _behaviourPuppet = GetComponentInChildren<BehaviourPuppet>(true);
+        _targetRoot = _puppetMaster != null ? _puppetMaster.targetRoot : null;
 
         _handGrabHandlers = GetComponentsInChildren<HandGrabHandler>(true);
         EnsureItemRuntimeIntegration();
@@ -280,6 +299,17 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         if (_itemRuntimeHost != resolved)
             EnsureItemRuntimeIntegration();
+    }
+
+    private void InitializeAnimationDriverNetworkMode()
+    {
+        var driver = GetComponent<PartyMonsterAnimationDriver>();
+        if (driver == null)
+            return;
+
+        // 원격 클라이언트(InputAuthority가 아닌 캐릭터)에서는 로컬 입력 대신 네트워크 데이터로 애니메이션 구동
+        var isRemote = Runner != null && !HasInputAuthority;
+        driver.SetRemoteProxy(isRemote);
     }
 
     private void ConfigureLocalOwnershipPresentation()

@@ -1,3 +1,4 @@
+using RootMotion.Dynamics;
 using UnityEngine;
 
 public sealed partial class NetworkPlayer
@@ -87,10 +88,21 @@ public sealed partial class NetworkPlayer
 
     private void SimulateLocomotion(PlayerNetworkInput input, float dt)
     {
+        // PuppetMaster BehaviourPuppet가 Puppet 상태가 아니면(넘어짐/일어남 중) 이동 무시
+        if (_behaviourPuppet != null && _behaviourPuppet.state != BehaviourPuppet.State.Puppet)
+            return;
+
         var buffApplier = ResolveItemBuffApplier();
         var moveSpeedMultiplier = buffApplier != null ? buffApplier.CurrentMoveSpeedMultiplier : 1f;
         var gravityMultiplier = buffApplier != null ? buffApplier.CurrentGravityMultiplier : 1f;
         var jumpMultiplier = buffApplier != null ? buffApplier.CurrentJumpMultiplier : 1f;
+
+        // 스프린트 속도 배율 적용
+        if (input.Sprint)
+        {
+            var sprintMultiplier = config != null ? config.sprintSpeedMultiplier : 1.8f;
+            moveSpeedMultiplier *= sprintMultiplier;
+        }
 
         _isGrounded = _groundProbe.IsGrounded(
             rigidbody3D.position,
@@ -120,6 +132,10 @@ public sealed partial class NetworkPlayer
 
         var normalizedMoveSpeed = Mathf.Abs(alignedVelocity) * 0.4f;
         SetMotorPresentationState(normalizedMoveSpeed, (int)_stateMachine.CurrentState);
+
+        // 원격 클라이언트 애니메이션용 스프린트 상태 동기화
+        if (Runner != null && Object != null && Object.IsValid)
+            NetworkedIsSprinting = input.Sprint;
     }
 
     private void RotateTowardInput(Vector3 moveDirection, float inputMagnitude, float dt)
@@ -127,12 +143,26 @@ public sealed partial class NetworkPlayer
         if (inputMagnitude <= 0.001f || moveDirection.sqrMagnitude <= 0.0001f)
             return;
 
-        var visualDirection = new Vector3(-moveDirection.x, 0f, moveDirection.z);
-        var desired = Quaternion.LookRotation(visualDirection.normalized, transform.up);
-        mainJoint.targetRotation = Quaternion.RotateTowards(
-            mainJoint.targetRotation,
-            desired,
-            dt * config.rotateSpeedDeg);
+        if (_targetRoot != null)
+        {
+            // PuppetMaster 모드: targetRoot(애니메이션 스켈레톤)를 직접 회전.
+            // PuppetMaster가 이 타겟 포즈를 따라가므로 joint를 직접 건드리지 않는다.
+            var desired = Quaternion.LookRotation(moveDirection.normalized, Vector3.up);
+            _targetRoot.rotation = Quaternion.RotateTowards(
+                _targetRoot.rotation,
+                desired,
+                dt * config.rotateSpeedDeg);
+        }
+        else
+        {
+            // PuppetMaster 없는 커스텀 래그돌: 기존 ConfigurableJoint 방식
+            var visualDirection = new Vector3(-moveDirection.x, 0f, moveDirection.z);
+            var desired = Quaternion.LookRotation(visualDirection.normalized, transform.up);
+            mainJoint.targetRotation = Quaternion.RotateTowards(
+                mainJoint.targetRotation,
+                desired,
+                dt * config.rotateSpeedDeg);
+        }
     }
 
     private void ApplyMovementForce(Vector3 moveDirection, float inputMagnitude, float alignedVelocity, float moveSpeedMultiplier)

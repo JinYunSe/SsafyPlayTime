@@ -29,6 +29,11 @@ public sealed partial class NetworkPlayer
         UpdateGrabbingAnimatorFlag();
     }
 
+    /// <summary>
+    /// PartyMonsterAnimationDriver에서 그랩 애니메이션 동기화에 사용.
+    /// </summary>
+    public bool IsAnyHandHolding => IsAnyHandHoldingObject();
+
     private bool IsAnyHandHoldingObject()
     {
         foreach (var handler in _handGrabHandlers)
@@ -156,9 +161,13 @@ public sealed partial class NetworkPlayer
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
     private void RPC_NotifyItemUsed(string itemId)
     {
-        // 한국어: 이 RPC는 "사용했다"는 신호만 전달한다.
-        // held item 제거는 소비형 아이템만 해당하므로 RPC_NotifyItemConsumed가 담당한다.
-        // 개별 이펙트(블랙홀/위성/화염방사기)는 각자의 Networked 변수로 처리된다.
+        // StateAuthority에서는 이미 로컬에서 처리됨
+        if (HasStateAuthority)
+            return;
+
+        // 원격 클라이언트에서 들고 있는 아이템 시각 표현 제거
+        _lastReplicatedHeldItemId = string.Empty;
+        _heldItemPresenter?.SetReplicatedHeldItemId(string.Empty);
     }
 
     private bool HasHeldRuntimeItem()
