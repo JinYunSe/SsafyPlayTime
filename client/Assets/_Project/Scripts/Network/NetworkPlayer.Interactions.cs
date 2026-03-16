@@ -272,10 +272,9 @@ public sealed partial class NetworkPlayer
         if (!TryPrepareItemInteractionService(out _))
             return false;
 
-        if (!_itemFieldInteractionService.TryPickupNearest(out var pickedItemId, out var pickedDropInstanceId, out var pickupOrigin, out _))
+        if (!_itemFieldInteractionService.TryPickupNearest(out _, out _, out _, out _))
             return false;
 
-        BroadcastPickedFieldDrop(pickedItemId, pickedDropInstanceId, pickupOrigin);
         return true;
     }
 
@@ -287,11 +286,7 @@ public sealed partial class NetworkPlayer
         if (!_itemFieldInteractionService.TryDropHeldItem(out var droppedItemId, out var dropSpawnPosition, out _))
             return false;
 
-        var dropInstanceId = CreateFieldDropReplicaId();
-        EnsureFieldDropReplicaForDrop(droppedItemId, runtimeHost, dropSpawnPosition, dropInstanceId);
-        BroadcastDroppedFieldItem(droppedItemId, dropSpawnPosition, dropInstanceId);
-        TrackDroppedFieldItem(dropInstanceId);
-        return true;
+        return TrySpawnNetworkedFieldDrop(droppedItemId, dropSpawnPosition, runtimeHost, out _);
     }
 
     /// <summary>

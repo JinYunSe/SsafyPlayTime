@@ -13,6 +13,9 @@ GameObject:
   - component: {fileID: 3986873922298126410}
   - component: {fileID: 5145489613006201310}
   - component: {fileID: 5708011643106894030}
+  - component: {fileID: 2214626203294727662}
+  - component: {fileID: 4791969612845323987}
+  - component: {fileID: 1553987141787097155}
   m_Layer: 0
   m_Name: WaterMelonSword
   m_TagString: Untagged
@@ -120,5 +123,56 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   itemId: ITEM_WATERMELON_SWORD
+  instanceId: 
   destroyOnPickup: 1
   disableCollidersOnPickup: 1
+  runtimeInitialized: 0
+--- !u!114 &2214626203294727662
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3416242799107576982}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  SortKey: 2738120092
+  ObjectInterest: 1
+  Flags: 262145
+  NestedObjects: []
+  NetworkedBehaviours:
+  - {fileID: 4791969612845323987}
+  - {fileID: 1553987141787097155}
+  ForceRemoteRenderTimeframe: 0
+--- !u!114 &4791969612845323987
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3416242799107576982}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 158639473, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _stateAuthorityChangeErrorCorrectionDelta: 0
+  SyncScale: 0
+  SyncParent: 0
+  _autoAOIOverride: 1
+  DisableSharedModeInterpolation: 0
+--- !u!114 &1553987141787097155
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3416242799107576982}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b8c40f9d12c1ec4e8ab43c8ccfc83a5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
