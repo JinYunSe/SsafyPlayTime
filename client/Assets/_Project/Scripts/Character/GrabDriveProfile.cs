@@ -41,6 +41,30 @@ namespace SSAFYPlayTime.Character
         [Tooltip("양손 잡기 시 spring/breakForce 배율")]
         public float dualGrabMultiplier = 2.5f;
 
+        [Header("Player Grab Override (사람-사람 그랩 전용)")]
+        [Tooltip("활성화하면 사람을 잡을 때 별도 수치 사용")]
+        public bool usePlayerGrabOverride = true;
+        [Tooltip("사람을 잡을 때 spring (기본보다 약하게)")]
+        public float playerGrabSpring = 500f;
+        [Tooltip("사람을 잡을 때 breakForce (기본보다 약하게 — 빠지기 쉬움)")]
+        public float playerGrabBreakForce = 1200f;
+        [Tooltip("사람을 잡을 때 최대 늘어남 거리 (기본보다 넓게)")]
+        public float playerGrabLinearLimit = 0.5f;
+
+        [Header("Object Grab Override (오브젝트 그랩 전용)")]
+        [Tooltip("활성화하면 오브젝트를 잡을 때 별도 수치 사용")]
+        public bool useObjectGrabOverride = true;
+        [Tooltip("오브젝트를 잡을 때 spring (단단히)")]
+        public float objectGrabSpring = 1200f;
+        [Tooltip("오브젝트를 잡을 때 breakForce (잘 안 빠짐)")]
+        public float objectGrabBreakForce = 3000f;
+        [Tooltip("오브젝트를 잡을 때 최대 늘어남 거리 (짧게)")]
+        public float objectGrabLinearLimit = 0.15f;
+
+        [Header("Weakening Curve (잡힌 시간에 따른 약화)")]
+        [Tooltip("잡힌 상태가 지속될수록 breakForce가 줄어드는 커브 (x=시간초, y=0~1 배율)")]
+        public AnimationCurve weakeningCurve = AnimationCurve.Linear(0f, 1f, 5f, 0.4f);
+
         [Header("Opponent Weaken")]
         public float grabbedPinWeight = 0.3f;
         public float grabbedMuscleWeight = 0.3f;
@@ -48,15 +72,21 @@ namespace SSAFYPlayTime.Character
         [Header("Throw")]
         public float throwUpComponent = 0.4f;
 
+        /// <summary>그랩 타겟 유형</summary>
+        public enum GrabTargetType { Default, Player, Object }
+
         /// <summary>ConfigurableJoint용 드라이브 생성</summary>
-        public JointDrive CreateGrabDrive(bool isDualGrab = false)
+        public JointDrive CreateGrabDrive(bool isDualGrab = false, GrabTargetType targetType = GrabTargetType.Default)
         {
             var mult = isDualGrab ? dualGrabMultiplier : 1f;
+            var spring = ResolveSpring(targetType);
+            var maxF = ResolveBreakForce(targetType);
+
             return new JointDrive
             {
-                positionSpring = grabSpring * mult,
+                positionSpring = spring * mult,
                 positionDamper = grabDamper,
-                maximumForce = maximumForce * mult
+                maximumForce = maxF * mult
             };
         }
 
@@ -70,12 +100,47 @@ namespace SSAFYPlayTime.Character
             };
         }
 
-        public SoftJointLimit CreateLinearLimit()
+        public SoftJointLimit CreateLinearLimit(GrabTargetType targetType = GrabTargetType.Default)
         {
             return new SoftJointLimit
             {
-                limit = linearLimit
+                limit = ResolveLinearLimit(targetType)
             };
+        }
+
+        /// <summary>잡힌 시간 경과에 따라 약화된 breakForce 반환</summary>
+        public float EvaluateWeakenedBreakForce(GrabTargetType targetType, float holdDuration)
+        {
+            var baseForce = ResolveBreakForce(targetType);
+            var curveValue = weakeningCurve != null ? weakeningCurve.Evaluate(holdDuration) : 1f;
+            return baseForce * Mathf.Clamp01(curveValue);
+        }
+
+        private float ResolveSpring(GrabTargetType targetType)
+        {
+            if (targetType == GrabTargetType.Player && usePlayerGrabOverride)
+                return playerGrabSpring;
+            if (targetType == GrabTargetType.Object && useObjectGrabOverride)
+                return objectGrabSpring;
+            return grabSpring;
+        }
+
+        private float ResolveBreakForce(GrabTargetType targetType)
+        {
+            if (targetType == GrabTargetType.Player && usePlayerGrabOverride)
+                return playerGrabBreakForce;
+            if (targetType == GrabTargetType.Object && useObjectGrabOverride)
+                return objectGrabBreakForce;
+            return maximumForce;
+        }
+
+        private float ResolveLinearLimit(GrabTargetType targetType)
+        {
+            if (targetType == GrabTargetType.Player && usePlayerGrabOverride)
+                return playerGrabLinearLimit;
+            if (targetType == GrabTargetType.Object && useObjectGrabOverride)
+                return objectGrabLinearLimit;
+            return linearLimit;
         }
     }
 }

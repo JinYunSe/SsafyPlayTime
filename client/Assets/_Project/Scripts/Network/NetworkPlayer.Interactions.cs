@@ -16,7 +16,7 @@ public sealed partial class NetworkPlayer
         if (input.Punch && (HasHeldRuntimeItem() || !_isGrabActive))
             TryProcessPrimaryAction(anyHolding);
 
-        if (_isGrabActive && !anyHolding)
+        if (_isGrabActive)
             TryProcessGrab();
 
         if (dropRequested)
@@ -31,8 +31,17 @@ public sealed partial class NetworkPlayer
 
     /// <summary>
     /// PartyMonsterAnimationDriver에서 그랩 애니메이션 동기화에 사용.
+    /// 원격 클라이언트에서는 Networked 속성을 참조한다.
     /// </summary>
-    public bool IsAnyHandHolding => IsAnyHandHoldingObject();
+    public bool IsAnyHandHolding
+    {
+        get
+        {
+            if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
+                return NetworkedLeftGrabHolding || NetworkedRightGrabHolding;
+            return IsAnyHandHoldingObject();
+        }
+    }
 
     private bool IsAnyHandHoldingObject()
     {
@@ -58,9 +67,10 @@ public sealed partial class NetworkPlayer
             if (handler.IsHolding)
                 continue;
 
+            if (!IsHandGrabActive(handler.Side))
+                continue;
+
             handler.TryGrab();
-            if (handler.IsHolding)
-                break;
         }
     }
 

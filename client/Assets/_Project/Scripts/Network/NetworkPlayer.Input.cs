@@ -55,11 +55,10 @@ public sealed partial class NetworkPlayer
         }
 
         UpdatePrimaryClickState();
+        UpdateSecondaryClickState();
 
         if (Input.GetKeyDown(KeyCode.F))
             _dropTriggered = true;
-        if (Input.GetMouseButtonDown(1))
-            _throwTriggered = true;
     }
 
     private void UpdatePrimaryClickState()
@@ -86,6 +85,30 @@ public sealed partial class NetworkPlayer
         _leftMouseDown = false;
     }
 
+    private void UpdateSecondaryClickState()
+    {
+        if (Input.GetMouseButtonDown(1))
+        {
+            _rightMouseDown = true;
+            _rightMouseDownTime = Time.time;
+            _rightMouseConsumedAsGrab = false;
+        }
+
+        if (Input.GetMouseButton(1) && _rightMouseDown)
+        {
+            if (Time.time - _rightMouseDownTime >= GRAB_HOLD_THRESHOLD && !_rightMouseConsumedAsGrab)
+                _rightMouseConsumedAsGrab = true;
+        }
+
+        if (!Input.GetMouseButtonUp(1))
+            return;
+
+        if (!_rightMouseConsumedAsGrab && Time.time - _rightMouseDownTime < GRAB_HOLD_THRESHOLD)
+            _throwTriggered = true;
+
+        _rightMouseDown = false;
+    }
+
     private PlayerNetworkInput BuildSandboxInput()
     {
         return new PlayerNetworkInput
@@ -96,7 +119,8 @@ public sealed partial class NetworkPlayer
             Punch = _leftClickUseTriggered,
             Drop = _dropTriggered,
             Throw = _throwTriggered,
-            GrabHold = _leftMouseDown && _leftMouseConsumedAsGrab,
+            LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab,
+            RightGrabHold = _rightMouseDown && _rightMouseConsumedAsGrab,
             Headbutt = Input.GetMouseButtonDown(2),
             Sprint = Input.GetKey(KeyCode.LeftShift)
         };
@@ -120,6 +144,27 @@ public sealed partial class NetworkPlayer
     {
         foreach (var handler in _handGrabHandlers)
             handler.UpdateState();
+
+        SyncGrabNetworkState();
+    }
+
+    private void SyncGrabNetworkState()
+    {
+        if (Runner == null || !Object.IsValid || !HasStateAuthority)
+            return;
+
+        bool leftHolding = false, rightHolding = false;
+        foreach (var handler in _handGrabHandlers)
+        {
+            if (!handler.IsHolding) continue;
+            if (handler.Side == HandGrabHandler.HandSide.Left)
+                leftHolding = true;
+            else
+                rightHolding = true;
+        }
+
+        NetworkedLeftGrabHolding = leftHolding;
+        NetworkedRightGrabHolding = rightHolding;
     }
 
     private void ClampOutOfBoundsCharacter()
