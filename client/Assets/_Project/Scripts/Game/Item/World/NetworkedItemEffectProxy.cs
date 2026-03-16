@@ -19,6 +19,7 @@ namespace SSAFYPlayTime.Gameplay.Items
     public sealed class NetworkedItemEffectProxy : NetworkBehaviour
     {
         private static readonly Quaternion BlackholeVisualLocalRotation = Quaternion.Euler(-90f, 0f, 0f);
+        private static readonly Quaternion SatelliteVisualLocalRotation = Quaternion.Euler(-90f, 0f, 0f);
 
         private const string BlackholeVisualAssetPath = "Assets/_Project/Prefabs/Items/BlackholeBomb.prefab";
         private const string BlackholeVisualResourcePath = "_Project/Prefabs/Items/BlackholeBomb";
@@ -308,9 +309,17 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private Quaternion ResolveVisualLocalRotation()
         {
-            return EffectKind == NetworkedItemEffectKind.Blackhole
-                ? BlackholeVisualLocalRotation
-                : Quaternion.identity;
+            switch (EffectKind)
+            {
+                case NetworkedItemEffectKind.Blackhole:
+                    return BlackholeVisualLocalRotation;
+                case NetworkedItemEffectKind.SatelliteProjectile:
+                case NetworkedItemEffectKind.SatelliteCharge:
+                case NetworkedItemEffectKind.SatelliteBeam:
+                    return SatelliteVisualLocalRotation;
+                default:
+                    return Quaternion.identity;
+            }
         }
 
         private void RefreshBlackholePrefabVisual(GameObject instance)
