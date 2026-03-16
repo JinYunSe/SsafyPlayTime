@@ -204,6 +204,7 @@ namespace SSAFYPlayTime
         [SerializeField] private Button readyButton;
         [SerializeField] private TMP_Text readyButtonText;
         [SerializeField] private string gameplaySceneName = string.Empty;
+        [SerializeField] private string launcherSceneName = "LauncherScene";
         [Header("In-Game Panel (GameScene)")]
         [SerializeField] private GameObject gamePanel;
         [SerializeField] private Button leaveGameButton;
@@ -300,6 +301,14 @@ namespace SSAFYPlayTime
         // 모든 UI 참조는 Inspector에서 SerializeField로 직접 할당해야 한다.
         private void Start()
         {
+            // LauncherScene 재로드 시 DontDestroyOnLoad 인스턴스가 이미 존재하면 새 인스턴스를 제거한다.
+            var existing = FindObjectsByType<LobbyCanvasUIController>(FindObjectsSortMode.None);
+            if (existing.Length > 1)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
             AutoBindReadyBadges();
             if (!ValidateInitialReferences())
             {
@@ -956,6 +965,37 @@ namespace SSAFYPlayTime
             ShowLobbyPanel();
             await EnsureLobbyRunnerAsync();
             RefreshRoomList();
+        }
+
+        // GameEndScene → 같은 방으로 돌아가기: Fusion 세션 유지, 방 대기 패널 표시
+        public void ReturnToRoomFromGameEnd()
+        {
+            ShowRoomPanel();
+            UpdateRoomPanel();
+
+            if (_runner != null && _runner.IsRunning &&
+                TryResolveGameplaySceneName(launcherSceneName, out var resolvedScene))
+            {
+                try { _runner.LoadScene(resolvedScene, LoadSceneMode.Single, LocalPhysicsMode.None, true); }
+                catch (Exception e) { Debug.LogWarning($"[Lobby] ReturnToRoom LoadScene failed: {e.Message}"); }
+            }
+        }
+
+        // GameEndScene → 처음으로(로비): 세션 종료 후 로비 패널 표시
+        public async void ReturnToLobbyFromGameEnd()
+        {
+            _currentRoomName = string.Empty;
+            _currentRoomOwner = "-";
+            _currentOwnerPlayerId = -1;
+            _currentRoomIsPrivate = false;
+            _localSelectedCharacterIndex = -1;
+            _localIsReady = false;
+
+            await ShutdownRunnerAsync();
+            ShowLobbyPanel();
+
+            if (TryResolveGameplaySceneName(launcherSceneName, out var resolvedScene))
+                SceneManager.LoadScene(resolvedScene);
         }
 
         // 현재 방 이름·공개 여부·플레이어 슬롯·게임 시작 버튼 활성 상태를 갱신한다.
