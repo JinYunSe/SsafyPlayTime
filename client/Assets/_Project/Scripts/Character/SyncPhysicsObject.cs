@@ -46,7 +46,7 @@ public class SyncPhysicsObject : MonoBehaviour
     // syncAnimation이 false이면 아무 동작도 하지 않는다.
     public void UpdateJointFromAnimation()
     {
-        if (!syncAnimation)
+        if (!syncAnimation || animatedRigidbody3D == null || joint == null)
             return;
 
         ConfigurableJointExtensions.SetTargetRotationLocal(joint, animatedRigidbody3D.transform.localRotation, startLocalRotation);

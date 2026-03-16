@@ -19,7 +19,12 @@
       "mcp__UnityMCP__manage_asset",
       "mcp__UnityMCP__manage_prefabs",
       "mcp__UnityMCP__manage_gameobject",
-      "mcp__UnityMCP__manage_animation"
+      "mcp__UnityMCP__manage_animation",
+      "Bash(find C:UsersadminDesktoptempS14P21D104clientAssets_ProjectScripts -type f -name *PuppetStateSync* -o -name *HandGrabHandler* -o -name *NetworkPlayer*)",
+      "Bash(grep -E \"\\\\.\\(cs\\)$\")",
+      "Bash(find C:UsersadminDesktoptempS14P21D104clientAssets_ProjectScripts -type f \\\\\\(-name *Puppet* -o -name *Ragdoll* \\\\\\))",
+      "Bash(find C:UsersadminDesktoptempS14P21D104clientAssets_ProjectScripts -type f -name *PartyMonster* -o -name *AnimationDriver*)",
+      "mcp__unityMCP__refresh_unity"
     ]
   }
 }

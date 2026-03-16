@@ -134,8 +134,14 @@ public sealed partial class NetworkPlayer
 
     private void SynchronizeNetworkSimulationState()
     {
-        for (int i = 0; i < syncPhysicsObjects.Length; i++)
-            BoneRotations.Set(i, syncPhysicsObjects[i].transform.localRotation);
+        if (syncPhysicsObjects != null)
+        {
+            for (int i = 0; i < syncPhysicsObjects.Length; i++)
+            {
+                if (syncPhysicsObjects[i] != null)
+                    BoneRotations.Set(i, syncPhysicsObjects[i].transform.localRotation);
+            }
+        }
 
         NetworkedIsActiveRagdoll = _isActiveRagdoll;
     }

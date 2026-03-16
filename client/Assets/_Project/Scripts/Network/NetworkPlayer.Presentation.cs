@@ -29,7 +29,23 @@ public sealed partial class NetworkPlayer
         ApplyReplicatedAnimationEvent();
 
         if (!HasStateAuthority && Object != null && Object.IsValid)
+        {
             InterpolateRemoteBoneRotations();
+            SyncRemoteActiveRagdollState();
+        }
+    }
+
+    /// <summary>
+    /// 원격 클라이언트에서 호스트의 IsActiveRagdoll 상태를 로컬에 반영.
+    /// 기절(false) / 회복(true) 전환을 원격에서도 인식하도록 한다.
+    /// </summary>
+    private void SyncRemoteActiveRagdollState()
+    {
+        bool networkedActive = NetworkedIsActiveRagdoll;
+        if (_isActiveRagdoll != networkedActive)
+        {
+            _isActiveRagdoll = networkedActive;
+        }
     }
 
     private void LateUpdate()
@@ -40,9 +56,13 @@ public sealed partial class NetworkPlayer
 
     private void InterpolateRemoteBoneRotations()
     {
+        if (syncPhysicsObjects == null || syncPhysicsObjects.Length == 0)
+            return;
+
         var interpolator = new NetworkBehaviourBufferInterpolator(this);
         for (int i = 0; i < syncPhysicsObjects.Length; i++)
         {
+            if (syncPhysicsObjects[i] == null) continue;
             syncPhysicsObjects[i].transform.localRotation = Quaternion.Slerp(
                 syncPhysicsObjects[i].transform.localRotation,
                 BoneRotations.Get(i),
@@ -262,6 +282,15 @@ public sealed partial class NetworkPlayer
                 break;
             case AnimationEventType.Throw:
                 PlayPMLockedAction(PM_ThrowState, PM_ThrowLockDuration);
+                break;
+            case AnimationEventType.GetHit:
+                if (animator != null) animator.SetTrigger(H_GetHit);
+                break;
+            case AnimationEventType.StunFall:
+                if (animator != null) animator.SetTrigger(H_StunFall);
+                break;
+            case AnimationEventType.StunRecover:
+                if (animator != null) animator.SetTrigger(H_StunRecover);
                 break;
         }
     }

@@ -57,7 +57,10 @@ public sealed partial class NetworkPlayer
     private void TryProcessPrimaryAction(bool anyHolding)
     {
         if (!TryUseHeldItemByPrimaryClick() && !anyHolding)
+        {
             RaiseAnimationEvent(AnimationEventType.Punch, H_Punch);
+            ExecutePunchHitDetection();
+        }
     }
 
     private void TryProcessGrab()
@@ -210,6 +213,15 @@ public sealed partial class NetworkPlayer
         BroadcastDroppedFieldItem(droppedItemId, dropSpawnPosition, dropInstanceId);
         TrackDroppedFieldItem(dropInstanceId);
         return true;
+    }
+
+    /// <summary>
+    /// HandGrabHandler에서 손 물리 그랩으로 필드 아이템을 주웠을 때 호출.
+    /// 키 기반 픽업과 동일한 네트워크 브로드캐스트 경로를 탄다.
+    /// </summary>
+    internal void NotifyHandGrabPickedFieldDrop(string itemId, string dropInstanceId, Vector3 origin)
+    {
+        BroadcastPickedFieldDrop(itemId, dropInstanceId, origin);
     }
 
     private bool TryPrepareItemInteractionService(out ItemRuntimeHost runtimeHost)

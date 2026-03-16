@@ -357,4 +357,62 @@ public sealed partial class NetworkPlayer
 
         Debug.Log("[Combat] 회복! (2초간 취약 상태)");
     }
+
+    // ─── 맨손 펀치 히트 판정 ───
+
+    // CSV PUNCH 수치 폴백 (CombatSettings에서 로드 실패 시)
+    private const string PunchCombatStatId = "PUNCH";
+    private const float FallbackPunchStunDamage = 12f;
+    private const float FallbackPunchKnockbackForce = 4f;
+    private const float PunchHitRadius = 1.2f;
+    private const float PunchHitForwardOffset = 0.5f;
+    private int _punchCooldownUntilTick;
+
+    internal void ExecutePunchHitDetection()
+    {
+        // 호스트에서만 판정
+        if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
+            return;
+
+        // 쿨다운 체크 (Fusion tick 기반 — 재시뮬레이션에서도 결정적)
+        var cooldown = 0.4f;
+        var stat = CombatSettings.Instance?.GetAttackStat(PunchCombatStatId);
+        if (stat.HasValue) cooldown = stat.Value.CooldownSec;
+
+        var currentTick = Runner != null ? Runner.Tick.Raw : (int)(Time.time / Time.fixedDeltaTime);
+        var tickRate = Runner != null ? (int)Runner.Config.Simulation.TickRate : 60;
+        var cooldownTicks = Mathf.Max(1, Mathf.RoundToInt(cooldown * tickRate));
+        if (currentTick < _punchCooldownUntilTick)
+            return;
+        _punchCooldownUntilTick = currentTick + cooldownTicks;
+
+        // CSV에서 수치 읽기
+        var stunDamage = stat.HasValue ? stat.Value.StunDamage : FallbackPunchStunDamage;
+        var knockbackForce = stat.HasValue ? stat.Value.KnockbackForce : FallbackPunchKnockbackForce;
+
+        // 캐릭터 전방 OverlapSphere로 피격 대상 탐색
+        var forward = _targetRoot != null ? _targetRoot.forward : transform.forward;
+        var origin = transform.position + forward * PunchHitForwardOffset + Vector3.up * 0.3f;
+        var hits = Physics.OverlapSphere(origin, PunchHitRadius);
+
+        foreach (var hit in hits)
+        {
+            if (hit == null) continue;
+
+            var victimPlayer = hit.transform.root.GetComponent<NetworkPlayer>();
+            if (victimPlayer == null || victimPlayer == this) continue;
+            if (!victimPlayer.IsActiveRagdoll) continue;
+
+            // 피격 처리
+            victimPlayer.ApplyStunDamage(stunDamage, 1.0f, 0f, 0f);
+
+            // 넉백
+            var knockbackDir = (victimPlayer.transform.position - transform.position).normalized + Vector3.up * 0.3f;
+            var victimRb = victimPlayer.rigidbody3D;
+            if (victimRb != null && !victimRb.isKinematic)
+                victimRb.AddForce(knockbackDir.normalized * knockbackForce, ForceMode.Impulse);
+
+            break; // 1번의 펀치에 1명만 타격
+        }
+    }
 }

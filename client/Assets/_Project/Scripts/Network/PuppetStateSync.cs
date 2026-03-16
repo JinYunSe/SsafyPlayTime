@@ -19,6 +19,8 @@ public class PuppetStateSync : MonoBehaviour
     float _nextSyncTime;
     NetworkPlayer _networkPlayer;
     PuppetSyncState _lastSentState;
+    int _lastAppliedPuppetState = -1;
+    int _lastAppliedPuppetMode = -1;
 
     public struct PuppetSyncState
     {
@@ -57,16 +59,55 @@ public class PuppetStateSync : MonoBehaviour
             var currentState = CaptureState();
             if (HasStateChanged(currentState, _lastSentState))
             {
-                _networkPlayer.WritePuppetSyncState(currentState.pinWeight, currentState.muscleWeight);
+                _networkPlayer.WritePuppetSyncState(
+                    currentState.pinWeight,
+                    currentState.muscleWeight,
+                    (int)currentState.state,
+                    (int)currentState.mode);
                 _lastSentState = currentState;
             }
         }
         // 원격 클라이언트: Networked 속성 읽어 로컬 PuppetMaster에 적용
-        else if (!_networkPlayer.HasStateAuthority)
+        else
         {
-            _networkPlayer.ReadPuppetSyncState(out var pinW, out var muscleW);
+            _networkPlayer.ReadPuppetSyncState(out var pinW, out var muscleW, out var pState, out var pMode);
             puppetMaster.pinWeight = pinW;
             puppetMaster.muscleWeight = muscleW;
+
+            // PuppetMaster.State 동기화 (Alive ↔ Dead)
+            if (pState != _lastAppliedPuppetState)
+            {
+                _lastAppliedPuppetState = pState;
+                var targetState = (PuppetMaster.State)pState;
+                if (puppetMaster.state != targetState)
+                {
+                    if (targetState == PuppetMaster.State.Dead && lifecycleManager != null)
+                        lifecycleManager.Die();
+                    else if (targetState == PuppetMaster.State.Alive)
+                        puppetMaster.state = PuppetMaster.State.Alive;
+                }
+            }
+
+            // PuppetMaster.Mode 동기화 (Active ↔ Kinematic ↔ Disabled)
+            if (pMode != _lastAppliedPuppetMode)
+            {
+                _lastAppliedPuppetMode = pMode;
+                var targetMode = (PuppetMaster.Mode)pMode;
+                if (puppetMaster.mode != targetMode)
+                    puppetMaster.mode = targetMode;
+            }
+
+            // IsActiveRagdoll 상태 반영 — 원격에서도 기절/회복 상태를 알 수 있도록
+            if (_networkPlayer.NetworkedIsActiveRagdoll != _networkPlayer.IsActiveRagdoll)
+            {
+                // NetworkPlayer 내부 _isActiveRagdoll은 private이므로
+                // BehaviourPuppet 상태로 간접 제어
+                if (!_networkPlayer.NetworkedIsActiveRagdoll && behaviourPuppet != null)
+                {
+                    // 기절 상태: puppet 모드에서 빠져나감
+                    // pinWeight/muscleWeight가 0으로 내려가면 자연스럽게 넘어짐
+                }
+            }
         }
     }
 
@@ -88,7 +129,8 @@ public class PuppetStateSync : MonoBehaviour
         return a.state != b.state ||
                a.mode != b.mode ||
                Vector3.SqrMagnitude(a.position - b.position) > 0.01f ||
-               Mathf.Abs(a.pinWeight - b.pinWeight) > 0.05f;
+               Mathf.Abs(a.pinWeight - b.pinWeight) > 0.05f ||
+               Mathf.Abs(a.muscleWeight - b.muscleWeight) > 0.05f;
     }
 
     public void ReceiveState(PuppetSyncState state)

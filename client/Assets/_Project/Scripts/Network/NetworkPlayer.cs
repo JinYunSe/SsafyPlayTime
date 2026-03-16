@@ -60,6 +60,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     // ─── PuppetMaster 상태 동기화 ───
     [Networked] private float NetworkedPuppetPinWeight { get; set; }
     [Networked] private float NetworkedPuppetMuscleWeight { get; set; }
+    [Networked] private int NetworkedPuppetState { get; set; }  // PuppetMaster.State (Alive=0, Dead=1)
+    [Networked] private int NetworkedPuppetMode { get; set; }   // PuppetMaster.Mode (Active=0, Kinematic=1, Disabled=2)
 
     // ─── 기절 시스템 ───
     // stunDamage 누적치 (임계값 초과 시 기절)
@@ -115,27 +117,33 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     /// <summary>
     /// PuppetStateSync(StateAuthority)에서 호출 — Networked 속성에 기록.
     /// </summary>
-    public void WritePuppetSyncState(float pinWeight, float muscleWeight)
+    public void WritePuppetSyncState(float pinWeight, float muscleWeight, int puppetState, int puppetMode)
     {
         if (!IsNetworkReady || !HasStateAuthority) return;
         NetworkedPuppetPinWeight = pinWeight;
         NetworkedPuppetMuscleWeight = muscleWeight;
+        NetworkedPuppetState = puppetState;
+        NetworkedPuppetMode = puppetMode;
     }
 
     /// <summary>
     /// PuppetStateSync(원격 클라이언트)에서 호출 — Networked 속성에서 읽기.
-    /// Spawned 전이면 기본값(1,1)을 반환한다.
+    /// Spawned 전이면 기본값(1,1, Alive, Active)을 반환한다.
     /// </summary>
-    public void ReadPuppetSyncState(out float pinWeight, out float muscleWeight)
+    public void ReadPuppetSyncState(out float pinWeight, out float muscleWeight, out int puppetState, out int puppetMode)
     {
         if (!IsNetworkReady)
         {
             pinWeight = 1f;
             muscleWeight = 1f;
+            puppetState = 0; // Alive
+            puppetMode = 0;  // Active
             return;
         }
         pinWeight = NetworkedPuppetPinWeight;
         muscleWeight = NetworkedPuppetMuscleWeight;
+        puppetState = NetworkedPuppetState;
+        puppetMode = NetworkedPuppetMode;
     }
 
     // 원격 클라이언트 애니메이션 드라이버용 접근자
@@ -239,6 +247,25 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         _puppetMaster = GetComponentInChildren<PuppetMaster>(true);
         _behaviourPuppet = GetComponentInChildren<BehaviourPuppet>(true);
+
+        // PuppetMaster가 있는데 syncPhysicsObjects가 비어 있으면
+        // muscle의 물리 뼈에서 SyncPhysicsObject를 자동 생성하여 BoneRotations 동기화를 활성화한다.
+        if (_puppetMaster != null && (syncPhysicsObjects == null || syncPhysicsObjects.Length == 0)
+            && _puppetMaster.muscles != null && _puppetMaster.muscles.Length > 0)
+        {
+            var muscleCount = Mathf.Min(_puppetMaster.muscles.Length, 15); // BoneRotations Capacity
+            syncPhysicsObjects = new SyncPhysicsObject[muscleCount];
+            for (int i = 0; i < muscleCount; i++)
+            {
+                var muscle = _puppetMaster.muscles[i];
+                if (muscle.joint == null) continue;
+                var boneGo = muscle.joint.gameObject;
+                var sync = boneGo.GetComponent<SyncPhysicsObject>();
+                if (sync == null)
+                    sync = boneGo.AddComponent<SyncPhysicsObject>();
+                syncPhysicsObjects[i] = sync;
+            }
+        }
         _targetRoot = _puppetMaster != null ? _puppetMaster.targetRoot : null;
         _bodyPartPhysicsManager = GetComponentInChildren<SSAFYPlayTime.Character.BodyPartPhysicsManager>(true);
 
