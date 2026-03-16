@@ -124,6 +124,9 @@ public sealed partial class NetworkPlayer
 
         _lastReplicatedHeldItemId = string.Empty;
         _heldItemPresenter?.SetReplicatedHeldItemId(string.Empty);
+
+        // 바닥 드롭 제거는 픽업 시 BroadcastPickedFieldDrop(instanceId 기반)에서 처리.
+        // 소비 시점에 itemId로 다시 찾으면 동일 아이템이 여럿일 때 잘못된 드롭을 제거할 수 있다.
     }
 
     private void BroadcastPickedFieldDrop(string itemId, string dropInstanceId, Vector3 origin)

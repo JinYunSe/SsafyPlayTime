@@ -345,6 +345,11 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
     bool CanDriveAnimation()
     {
+        // 원격 프록시는 로컬 BehaviourPuppet 상태와 무관하게 항상 애니메이션 구동
+        // (래그돌 상태는 네트워크 데이터로 제어)
+        if (isRemoteProxy)
+            return true;
+
         return behaviourPuppet == null || behaviourPuppet.state == BehaviourPuppet.State.Puppet;
     }
 

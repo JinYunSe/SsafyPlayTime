@@ -276,7 +276,11 @@ public class HandGrabHandler : MonoBehaviour
             return false;
         }
 
-        if (!itemRuntimeHost.TryPickup(fieldDrop.ItemId, out var reason))
+        var pickedItemId = fieldDrop.ItemId;
+        var pickupOrigin = fieldDrop.transform.position;
+        var dropInstanceId = fieldDrop.InstanceId;
+
+        if (!itemRuntimeHost.TryPickup(pickedItemId, out var reason))
         {
             if (!string.IsNullOrWhiteSpace(reason) &&
                 reason.StartsWith("Already holding an item", System.StringComparison.Ordinal))
@@ -290,6 +294,11 @@ public class HandGrabHandler : MonoBehaviour
         }
 
         fieldDrop.MarkPickedUp();
+
+        // 키 기반 픽업과 동일하게 네트워크 브로드캐스트 — 원격 클라이언트에서도 드롭 제거
+        if (networkPlayer != null)
+            networkPlayer.NotifyHandGrabPickedFieldDrop(pickedItemId, dropInstanceId ?? string.Empty, pickupOrigin);
+
         return true;
     }
 
