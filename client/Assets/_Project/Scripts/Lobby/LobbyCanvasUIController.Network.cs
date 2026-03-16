@@ -527,6 +527,8 @@ namespace SSAFYPlayTime
         // 좌클릭 짧게 떼기 = 아이템 사용(Punch 비트 재사용), 좌클릭 꾹(0.15초 이상) = GrabHold
         void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input)
         {
+            if (!GameStartCountdown.InputEnabled) return;
+
             bool isPunch = false;
 
             // 좌클릭 상태 추적
@@ -725,6 +727,10 @@ namespace SSAFYPlayTime
 
                 // 게임씬 전환 시 로비 UI 캐릭터 미리보기 전부 숨김
                 HideAllCharacterSlots();
+
+                // GameHUD 인스턴스 생성 (모든 클라이언트에서 실행)
+                if (gameHUDPrefab != null && FindObjectOfType<GameHUD>() == null)
+                    Instantiate(gameHUDPrefab);
 
                 if (runner.IsServer)
                 {
