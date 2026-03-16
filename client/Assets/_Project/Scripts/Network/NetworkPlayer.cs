@@ -161,6 +161,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         ConfigureLocalOwnershipPresentation();
         InitializeAnimationEventState();
+        RememberSafeTransform(transform.position, transform.rotation);
 
         // Issue 8: 호스트 마이그레이션 시 새 호스트의 자신 캐릭터 Spawned에서 드롭 아이템 위치를 재동기화한다.
         if (HasStateAuthority && HasInputAuthority && Runner != null && Runner.IsServer)
