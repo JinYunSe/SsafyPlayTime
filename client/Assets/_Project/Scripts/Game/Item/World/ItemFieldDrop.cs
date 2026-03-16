@@ -5,6 +5,7 @@
  * - 필드 공통 규칙을 바꾸면 모든 아이템 획득 흐름에 영향이 가므로 개별 아이템 예외와 분리해서 수정해야 한다.
  */
 using System;
+using Fusion;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Gameplay.Items
@@ -24,7 +25,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private bool _pickedUp;
 
         public string ItemId => itemId;
-        public string InstanceId => instanceId;
+        public string InstanceId => ResolveRuntimeInstanceId();
         public bool IsPickedUp => _pickedUp;
         public event Action<ItemFieldDrop> PickedUp;
 
@@ -89,6 +90,19 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             if (destroyOnPickup)
             {
+                var networkObject = GetComponent<NetworkObject>();
+                if (networkObject != null && networkObject.Runner != null && networkObject.Id.IsValid)
+                {
+                    if (networkObject.HasStateAuthority)
+                    {
+                        networkObject.Runner.Despawn(networkObject);
+                        return;
+                    }
+
+                    gameObject.SetActive(false);
+                    return;
+                }
+
                 Destroy(gameObject);
                 return;
             }
@@ -116,6 +130,17 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             return Guid.NewGuid().ToString("N");
+        }
+
+        private string ResolveRuntimeInstanceId()
+        {
+            var networkObject = GetComponent<NetworkObject>();
+            if (networkObject != null && networkObject.Id.IsValid)
+            {
+                return networkObject.Id.Raw.ToString();
+            }
+
+            return instanceId;
         }
 
         private static string BuildHierarchyPath(Transform target)
