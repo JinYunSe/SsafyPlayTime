@@ -11,6 +11,7 @@ namespace SSAFYPlayTime.Character
         public float maxSpeed = 3f;          // 최대 이동 속도 (m/s)
         public float acceleration = 30f;     // 이동 가속도
         public float rotateSpeedDeg = 300f;  // 회전 속도 (도/초)
+        public float sprintSpeedMultiplier = 1.8f; // 스프린트 속도 배율
 
         [Header("Jump/Gravity")]
         public float jumpImpulse = 20f;      // 점프 시 순간 충격량 (Impulse 모드)
