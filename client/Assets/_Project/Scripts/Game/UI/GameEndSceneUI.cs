@@ -12,6 +12,9 @@ public class GameEndSceneUI : MonoBehaviour
 
     private void Start()
     {
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+
         var lobby = FindAnyObjectByType<LobbyCanvasUIController>();
         if (lobby == null)
         {

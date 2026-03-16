@@ -315,6 +315,8 @@ namespace SSAFYPlayTime
                 enabled = false;
                 return;
             }
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
             EnsurePersistentAcrossScenes();
             EnsureLocalClientId();
             RuntimeLogOverlay.EnsureInstance();
