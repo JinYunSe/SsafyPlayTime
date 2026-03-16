@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace SSAFYPlayTime
 {
@@ -8,7 +9,8 @@ namespace SSAFYPlayTime
     public sealed class CharacterRegistry : ScriptableObject
     {
         [Header("Gameplay Prefabs (NetworkObject 포함)")]
-        [SerializeField] private GameObject stattyPrefab;
+        [FormerlySerializedAs("stattyPrefab")]
+        [SerializeField] private GameObject ssatyPrefab;
         [SerializeField] private GameObject alGPrefab;
         [SerializeField] private GameObject fitPrefab;
         [SerializeField] private GameObject wisePrefab;
@@ -18,7 +20,7 @@ namespace SSAFYPlayTime
         {
             return characterIndex switch
             {
-                0 => stattyPrefab,
+                0 => ssatyPrefab,
                 1 => alGPrefab,
                 2 => fitPrefab,
                 3 => wisePrefab,

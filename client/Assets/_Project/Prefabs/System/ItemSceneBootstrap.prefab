@@ -111,8 +111,7 @@ MonoBehaviour:
   applyFlamethrowerDamageToDummy: 1
   applyFlamethrowerPushForce: 1
   flamethrowerDamageRangeMultiplier: 0.5
-  flamethrowerEffectPrefabAssetPath: Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile
-    7 fire.prefab
+  flamethrowerEffectPrefabAssetPath: Assets/Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky.prefab
   flamethrowerEffectScale: 1
   satelliteProjectilePrefabAssetPath: Assets/Polygon Arsenal/Prefabs/Combat/Missiles/Sci-Fi/Antimatter/AntimatterMissileBlue.prefab
   satelliteBeamChargeupPrefabAssetPath: Assets/Polygon Arsenal/Prefabs/Interactive/BeamUp/Chargeup/BeamupChargeupBlue.prefab

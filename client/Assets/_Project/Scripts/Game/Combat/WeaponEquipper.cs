@@ -1,3 +1,4 @@
+using Fusion;
 using UnityEngine;
 
 namespace S14P21D104.Character
@@ -115,8 +116,17 @@ namespace S14P21D104.Character
             }
         }
 
+        private bool IsLocalPlayer()
+        {
+            var netObj = GetComponentInParent<NetworkObject>();
+            return netObj == null || netObj.HasInputAuthority;
+        }
+
         private void Update()
         {
+            if (!IsLocalPlayer())
+                return;
+
             if (_equippedWeapon != null)
             {
                 if (Input.GetKeyDown(KeyCode.F))

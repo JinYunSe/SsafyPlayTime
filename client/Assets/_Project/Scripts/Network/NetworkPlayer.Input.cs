@@ -12,6 +12,7 @@ public sealed partial class NetworkPlayer
     {
         ApplyReplicatedHeldItemPresentation();
         ApplyReplicatedWorldItemEffects();
+        UpdateReplicatedFlamethrowerVisualFollow();
 
         if (Object != null && Object.IsValid && !HasInputAuthority)
             return;
@@ -41,6 +42,7 @@ public sealed partial class NetworkPlayer
         SynchronizeNetworkSimulationState();
         UpdateGrabHandlers();
         ClampOutOfBoundsCharacter();
+        TickFieldDropPositionSync();
     }
 
     private void PollLocalInputState()

@@ -235,9 +235,8 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             var shader =
                 Shader.Find("Universal Render Pipeline/Unlit") ??
-                Shader.Find("Universal Render Pipeline/Particles/Unlit") ??
-                Shader.Find("Particles/Standard Unlit") ??
-                Shader.Find("Standard");
+                Shader.Find("Universal Render Pipeline/Lit") ??
+                Shader.Find("Universal Render Pipeline/Simple Lit");
             if (shader == null)
             {
                 return null;

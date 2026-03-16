@@ -102,12 +102,16 @@ public sealed partial class NetworkPlayer
 
     private void ApplyReplicatedHeldItemPresentation()
     {
-        if (Object == null || !Object.IsValid || HasStateAuthority)
+        if (Object == null || !Object.IsValid)
         {
             return;
         }
 
-        var heldItemId = NetworkedHeldItemId.ToString();
+        var runtimeHeldItemId = _itemRuntimeHost != null ? _itemRuntimeHost.HeldItemId ?? string.Empty : string.Empty;
+        var replicatedHeldItemId = NetworkedHeldItemId.ToString();
+        var heldItemId = !string.IsNullOrWhiteSpace(runtimeHeldItemId)
+            ? runtimeHeldItemId
+            : replicatedHeldItemId;
         if (string.Equals(_lastReplicatedHeldItemId, heldItemId, System.StringComparison.Ordinal))
         {
             return;
