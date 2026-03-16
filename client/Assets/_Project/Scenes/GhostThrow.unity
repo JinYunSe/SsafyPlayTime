@@ -2159,6 +2159,7 @@ GameObject:
   - component: {fileID: 1931735248}
   - component: {fileID: 1931735247}
   - component: {fileID: 1931735249}
+  - component: {fileID: 1931735250}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -2253,15 +2254,19 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   cooldown: 1
-  throwForce: 40
+  throwForce: 20
   spawnForwardOffset: 2
   hitLayer:
     serializedVersion: 2
     m_Bits: 119
-  cubePrefabOffline: {fileID: 6305299146749309899, guid: 69e3bb26418f7204bac367779d5d5f06,
+  cubePrefabOffline: {fileID: 2247541176841469660, guid: d967a8594241ca54d96fa911a702b77e,
     type: 3}
   cubePrefabOnline:
-    RawGuidValue: 69e3bb26418f7204bac367779d5d5f06
+    RawGuidValue: d967a8594241ca54d96fa911a702b77e
+  bananaPrefabOffline: {fileID: 1407451490957870, guid: 3ce32ffa6ccf60e4ab65d9e396f43433,
+    type: 3}
+  bananaPrefabOnline:
+    RawGuidValue: 3ce32ffa6ccf60e4ab65d9e396f43433
 --- !u!114 &1931735248
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2322,6 +2327,24 @@ MonoBehaviour:
     m_MipBias: 0
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
+--- !u!114 &1931735250
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1931735243}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  SortKey: 1894759278
+  ObjectInterest: 1
+  Flags: 262145
+  NestedObjects: []
+  NetworkedBehaviours: []
+  ForceRemoteRenderTimeframe: 0
 --- !u!1 &1932431741
 GameObject:
   m_ObjectHideFlags: 0
