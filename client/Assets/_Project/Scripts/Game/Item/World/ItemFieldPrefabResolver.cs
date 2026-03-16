@@ -30,6 +30,16 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return null;
             }
 
+            var resourcePath = NormalizeToResourcesPath(prefabPath);
+            if (!string.IsNullOrWhiteSpace(resourcePath))
+            {
+                var runtimePrefab = Resources.Load<GameObject>(resourcePath);
+                if (runtimePrefab != null)
+                {
+                    return runtimePrefab;
+                }
+            }
+
 #if UNITY_EDITOR
             if (prefabPath.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
             {
@@ -40,7 +50,6 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
             }
 #endif
-            var resourcePath = NormalizeToResourcesPath(prefabPath);
             if (string.IsNullOrWhiteSpace(resourcePath))
             {
                 return null;

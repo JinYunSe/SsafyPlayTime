@@ -501,11 +501,9 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return _blackholeOuterLayerFallbackMaterial;
             }
             var fallbackShader =
-                Shader.Find("Universal Render Pipeline/Particles/Unlit") ??
                 Shader.Find("Universal Render Pipeline/Unlit") ??
-                Shader.Find("Particles/Standard Unlit") ??
-                Shader.Find("Legacy Shaders/Particles/Alpha Blended") ??
-                Shader.Find("Standard");
+                Shader.Find("Universal Render Pipeline/Lit") ??
+                Shader.Find("Universal Render Pipeline/Simple Lit");
             if (fallbackShader == null)
             {
                 return null;

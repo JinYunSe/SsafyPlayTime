@@ -13,7 +13,7 @@ public sealed partial class NetworkPlayer
         var throwRequested = input.Throw || _throwTriggered;
         var anyHolding = IsAnyHandHoldingObject();
 
-        if (input.Punch && !_isGrabActive)
+        if (input.Punch && (HasHeldRuntimeItem() || !_isGrabActive))
             TryProcessPrimaryAction(anyHolding);
 
         if (_isGrabActive && !anyHolding)
@@ -42,8 +42,8 @@ public sealed partial class NetworkPlayer
 
     private void TryProcessPrimaryAction(bool anyHolding)
     {
-        if (!TryUseHeldItemByPrimaryClick() && !anyHolding && animator != null)
-            animator.SetTrigger(H_Punch);
+        if (!TryUseHeldItemByPrimaryClick() && !anyHolding)
+            RaiseAnimationEvent(AnimationEventType.Punch, H_Punch);
     }
 
     private void TryProcessGrab()
@@ -88,8 +88,8 @@ public sealed partial class NetworkPlayer
             didThrow = true;
         }
 
-        if (didThrow && animator != null)
-            animator.SetTrigger(H_Throw);
+        if (didThrow)
+            RaiseAnimationEvent(AnimationEventType.Throw, H_Throw);
     }
 
     private void TryProcessSecondaryAction(bool anyHolding)
@@ -137,7 +137,33 @@ public sealed partial class NetworkPlayer
         if (!TryPrepareItemInteractionService(out _))
             return false;
 
-        return _itemFieldInteractionService.TryUseHeldItem(out _, out _, out _);
+        var itemIdBeforeUse = _itemRuntimeHost?.HeldItemId ?? string.Empty;
+        if (!_itemFieldInteractionService.TryUseHeldItem(out _, out _, out _))
+            return false;
+
+        BroadcastItemUsed(itemIdBeforeUse);
+        return true;
+    }
+
+    private void BroadcastItemUsed(string itemId)
+    {
+        if (Runner == null || !HasStateAuthority || string.IsNullOrWhiteSpace(itemId))
+            return;
+
+        RPC_NotifyItemUsed(itemId);
+    }
+
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_NotifyItemUsed(string itemId)
+    {
+        // 한국어: 이 RPC는 "사용했다"는 신호만 전달한다.
+        // held item 제거는 소비형 아이템만 해당하므로 RPC_NotifyItemConsumed가 담당한다.
+        // 개별 이펙트(블랙홀/위성/화염방사기)는 각자의 Networked 변수로 처리된다.
+    }
+
+    private bool HasHeldRuntimeItem()
+    {
+        return _itemRuntimeHost != null && !string.IsNullOrWhiteSpace(_itemRuntimeHost.HeldItemId);
     }
 
     private bool TryPickupNearestFieldItemByKey()
@@ -145,10 +171,10 @@ public sealed partial class NetworkPlayer
         if (!TryPrepareItemInteractionService(out _))
             return false;
 
-        if (!_itemFieldInteractionService.TryPickupNearest(out var pickedItemId, out var pickupOrigin, out _))
+        if (!_itemFieldInteractionService.TryPickupNearest(out var pickedItemId, out var pickedDropInstanceId, out var pickupOrigin, out _))
             return false;
 
-        BroadcastPickedFieldDrop(pickedItemId, pickupOrigin);
+        BroadcastPickedFieldDrop(pickedItemId, pickedDropInstanceId, pickupOrigin);
         return true;
     }
 
@@ -160,8 +186,10 @@ public sealed partial class NetworkPlayer
         if (!_itemFieldInteractionService.TryDropHeldItem(out var droppedItemId, out var dropSpawnPosition, out _))
             return false;
 
-        EnsureFieldDropReplicaForDrop(droppedItemId, runtimeHost, dropSpawnPosition);
-        BroadcastDroppedFieldItem(droppedItemId, dropSpawnPosition);
+        var dropInstanceId = CreateFieldDropReplicaId();
+        EnsureFieldDropReplicaForDrop(droppedItemId, runtimeHost, dropSpawnPosition, dropInstanceId);
+        BroadcastDroppedFieldItem(droppedItemId, dropSpawnPosition, dropInstanceId);
+        TrackDroppedFieldItem(dropInstanceId);
         return true;
     }
 
