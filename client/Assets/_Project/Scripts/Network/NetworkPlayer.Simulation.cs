@@ -6,6 +6,12 @@ public sealed partial class NetworkPlayer
     private float _localAccumulatedStun;
     private float _localStunTimeRemaining;
 
+    // Coyote time + Jump buffer
+    private float _coyoteTimeRemaining;
+    private float _jumpBufferRemaining;
+    private const float COYOTE_TIME = 0.1f;
+    private const float JUMP_BUFFER_TIME = 0.1f;
+
     private void DoPhysicsStep(PlayerNetworkInput input, float dt)
     {
         if (config == null || rigidbody3D == null || mainJoint == null)
@@ -88,7 +94,41 @@ public sealed partial class NetworkPlayer
         if (remaining <= 0f)
             ForceRecover();
 
+        // 기절 중 물리 뼈(메인 리지드바디)가 잡기 조인트 등에 의해 끌려갈 수 있으므로
+        // 루트 트랜스폼을 메인 리지드바디 위치에 맞춘다.
+        // 이렇게 해야 NetworkTransform이 원격 클라이언트에 올바른 위치를 전달한다.
+        SyncRootToPhysicsBody();
+
         return true;
+    }
+
+    /// <summary>
+    /// 기절/레그돌 상태에서 실제 물리 뼈(pelvis) 위치를 루트 트랜스폼에 반영.
+    /// 잡기 조인트로 끌려가는 건 PuppetMaster muscle 뼈이므로,
+    /// rigidbody3D(루트)가 아닌 muscles[0](pelvis/hips)를 기준으로 해야 한다.
+    /// </summary>
+    private void SyncRootToPhysicsBody()
+    {
+        // PuppetMaster muscles[0] = pelvis/hips 뼈, 잡기로 끌려갈 때 실제로 이동하는 대상
+        if (_puppetMaster != null && _puppetMaster.muscles != null && _puppetMaster.muscles.Length > 0)
+        {
+            var pelvisMuscle = _puppetMaster.muscles[0];
+            if (pelvisMuscle.joint != null)
+            {
+                var pelvisPos = pelvisMuscle.joint.transform.position;
+                if ((pelvisPos - transform.position).sqrMagnitude > 0.01f)
+                    transform.position = pelvisPos;
+                return;
+            }
+        }
+
+        // PuppetMaster 없는 폴백: 루트 리지드바디 기준
+        if (rigidbody3D != null && !rigidbody3D.isKinematic)
+        {
+            var physicsPos = rigidbody3D.position;
+            if ((physicsPos - transform.position).sqrMagnitude > 0.01f)
+                transform.position = physicsPos;
+        }
     }
 
     private void SimulateLocomotion(PlayerNetworkInput input, float dt)
@@ -109,16 +149,23 @@ public sealed partial class NetworkPlayer
             moveSpeedMultiplier *= sprintMultiplier;
         }
 
+        var wasGrounded = _isGrounded;
         _isGrounded = _groundProbe.IsGrounded(
             rigidbody3D.position,
             transform,
             config.groundProbeRadius,
             config.groundProbeDistance);
 
-        if (!_isGrounded)
+        // Coyote time: 착지 직후 떨어지면 짧은 유예 시간 동안 점프 허용
+        if (_isGrounded)
+            _coyoteTimeRemaining = COYOTE_TIME;
+        else
+        {
+            _coyoteTimeRemaining -= dt;
             rigidbody3D.AddForce(
                 Vector3.down * config.extraGravity * Mathf.Max(0.05f, gravityMultiplier),
                 ForceMode.Acceleration);
+        }
 
         var moveInput = new Vector3(input.Move.x, 0f, input.Move.y);
         var cameraRelativeMove = Quaternion.Euler(0f, input.CameraYaw, 0f) * moveInput;
@@ -184,13 +231,25 @@ public sealed partial class NetworkPlayer
 
     private void ApplyJumpIfPossible(bool jumpPressed, float jumpMultiplier)
     {
-        if (!_isGrounded || !jumpPressed)
+        // Jump buffer: 공중에서 점프 입력 → 착지 직후 자동 점프
+        if (jumpPressed)
+            _jumpBufferRemaining = JUMP_BUFFER_TIME;
+        else
+            _jumpBufferRemaining -= Runner != null ? Runner.DeltaTime : Time.fixedDeltaTime;
+
+        // Coyote time과 jump buffer 양쪽 모두 유효해야 점프
+        bool canJump = _coyoteTimeRemaining > 0f && _jumpBufferRemaining > 0f;
+        if (!canJump)
             return;
 
         rigidbody3D.AddForce(
             Vector3.up * config.jumpImpulse * Mathf.Max(0.05f, jumpMultiplier),
             ForceMode.Impulse);
         _stateMachine.SetJump();
+
+        // 소비: 더블점프 방지
+        _coyoteTimeRemaining = 0f;
+        _jumpBufferRemaining = 0f;
     }
 
     private void SynchronizeMotorPresentation()
@@ -380,7 +439,7 @@ public sealed partial class NetworkPlayer
         if (stat.HasValue) cooldown = stat.Value.CooldownSec;
 
         var currentTick = Runner != null ? Runner.Tick.Raw : (int)(Time.time / Time.fixedDeltaTime);
-        var tickRate = Runner != null ? (int)Runner.Config.Simulation.TickRate : 60;
+        var tickRate = Runner != null ? (int)Runner.TickRate : 60;
         var cooldownTicks = Mathf.Max(1, Mathf.RoundToInt(cooldown * tickRate));
         if (currentTick < _punchCooldownUntilTick)
             return;

@@ -28,24 +28,89 @@ public sealed partial class NetworkPlayer
         UpdateAnimationParameters();
         ApplyReplicatedAnimationEvent();
 
-        if (!HasStateAuthority && Object != null && Object.IsValid)
+        if (Object == null || !Object.IsValid)
+            return;
+
+        // ── 플레이어 타입별 3분기 ──
+        if (HasStateAuthority)
         {
+            // AuthorityOwner: 물리 시뮬레이션이 직접 뼈를 구동 → 보간 불필요
+            return;
+        }
+
+        if (HasInputAuthority)
+        {
+            // OwnerProxy: 상태 동기화는 항상 받되, 뼈 보간은 confirmed ragdoll일 때만
+            SyncConfirmedOwnerState();
+            // grab/carry 애니메이터 파라미터를 호스트 확정 상태에서 동기화
+            // (UpdateGrabbingAnimatorFlag는 StateAuthority에서만 실행되므로)
+            SyncGrabbingAnimatorFromNetwork();
+        }
+        else
+        {
+            // RemoteProxy: 순수 원격 — 항상 뼈 보간 + 상태 동기화
             InterpolateRemoteBoneRotations();
             SyncRemoteActiveRagdollState();
+            // grab/carry 애니메이터 파라미터 동기화
+            SyncGrabbingAnimatorFromNetwork();
         }
     }
 
     /// <summary>
+    /// OwnerProxy 전용 — 호스트에서 확정된 상태를 받되, 뼈 보간은 조건부.
+    /// 평소: 로컬 애니메이터/PuppetMaster가 비주얼 구동 (뼈 보간 OFF)
+    /// 기절/잡힘: 호스트 물리 결과를 따라야 하므로 뼈 보간 ON
+    /// </summary>
+    private void SyncConfirmedOwnerState()
+    {
+        // 1) 액티브 래그돌 상태 전환은 항상 수신 (기절/회복)
+        SyncRemoteActiveRagdollState();
+
+        // 2) 내가 기절(ragdoll) 또는 잡힌 상태일 때만 뼈 보간 적용
+        //    → 호스트가 물리로 끌고 있는 결과를 따라가야 하므로
+        bool isInConfirmedRagdoll = !_isActiveRagdoll || NetworkedIsBeingGrabbed;
+        if (isInConfirmedRagdoll)
+            InterpolateRemoteBoneRotations();
+    }
+
+    /// <summary>
     /// 원격 클라이언트에서 호스트의 IsActiveRagdoll 상태를 로컬에 반영.
-    /// 기절(false) / 회복(true) 전환을 원격에서도 인식하도록 한다.
+    /// 기절(false→래그돌) / 회복(true→액티브 래그돌) 전환 시
+    /// SyncPhysicsObject의 관절 스프링도 실제로 전환한다.
     /// </summary>
     private void SyncRemoteActiveRagdollState()
     {
         bool networkedActive = NetworkedIsActiveRagdoll;
-        if (_isActiveRagdoll != networkedActive)
+        if (_isActiveRagdoll == networkedActive)
+            return;
+
+        bool wasStunned = !_isActiveRagdoll;   // 이전 상태
+        bool isRecovering = networkedActive;    // 새 상태
+
+        _isActiveRagdoll = networkedActive;
+
+        // SyncPhysicsObject 관절 스프링 전환 (원격 프록시도 관절 상태를 맞춰야 뼈 회전 보간이 자연스럽다)
+        if (syncPhysicsObjects != null)
         {
-            _isActiveRagdoll = networkedActive;
+            for (int i = 0; i < syncPhysicsObjects.Length; i++)
+            {
+                if (syncPhysicsObjects[i] == null) continue;
+                if (isRecovering)
+                    syncPhysicsObjects[i].MakeActiveRagdoll();
+                else
+                    syncPhysicsObjects[i].MakeRagdoll();
+            }
         }
+
+        // BodyPartPhysicsManager 상태 전환
+        if (_bodyPartPhysicsManager != null)
+        {
+            _bodyPartPhysicsManager.SetState(isRecovering
+                ? SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState.Recovering
+                : SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState.Stunned);
+        }
+
+        Debug.Log($"[Remote] ActiveRagdoll 전환: {(isRecovering ? "회복" : "기절")}");
     }
 
     private void LateUpdate()
@@ -60,6 +125,23 @@ public sealed partial class NetworkPlayer
             return;
 
         var interpolator = new NetworkBehaviourBufferInterpolator(this);
+
+        // Hips(muscles[0]) 절대 위치 보간 — 잡기로 끌려갈 때 원격에서 위치 추적
+        // Human Fall Flat 방식: 루트 뼈 절대 위치를 직접 동기화
+        if (syncPhysicsObjects.Length > 0 && syncPhysicsObjects[0] != null)
+        {
+            var hipsTarget = NetworkedHipsPosition;
+            var hipsCurrent = syncPhysicsObjects[0].transform.position;
+
+            // 텔레포트 방지: 거리가 너무 크면 즉시 스냅 (HFF 방식, sqrMag > 15)
+            if ((hipsTarget - hipsCurrent).sqrMagnitude > 15f)
+                syncPhysicsObjects[0].transform.position = hipsTarget;
+            else
+                syncPhysicsObjects[0].transform.position = Vector3.Lerp(
+                    hipsCurrent, hipsTarget, interpolator.Alpha);
+        }
+
+        // 뼈 회전 보간
         for (int i = 0; i < syncPhysicsObjects.Length; i++)
         {
             if (syncPhysicsObjects[i] == null) continue;
@@ -200,6 +282,14 @@ public sealed partial class NetworkPlayer
         _lastConsumedAnimationEventSequence = NetworkedAnimationEventSequence;
 
         var eventType = (AnimationEventType)NetworkedAnimationEventType;
+
+        // 피호스트 로컬 플레이어: 펀치/던지기는 HandleInput()에서 이미 로컬 예측 재생했으므로
+        // 네트워크 이벤트에서 중복 재생 방지. 기절/피격 등 비예측 이벤트만 적용.
+        if (HasInputAuthority && !HasStateAuthority)
+        {
+            if (eventType == AnimationEventType.Punch || eventType == AnimationEventType.Throw)
+                return;
+        }
 
         // PartyMonsterAnimationDriver가 있으면 드라이버를 통해 애니메이션 이벤트 적용
         if (_hasExternalAnimationDriver && _externalAnimationDriver != null)

@@ -50,12 +50,27 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [Networked, Capacity(15)]
     public NetworkArray<Quaternion> BoneRotations { get; }
 
+    // Hips(muscles[0]) 절대 위치 — 잡기로 끌려갈 때 원격에서 위치 추적용
+    // Human Fall Flat 방식: 루트 뼈 절대 위치 + 나머지 뼈 상대 회전
+    [Networked] public Vector3 NetworkedHipsPosition { get; set; }
+
     // 액티브 래그돌 상태
     [Networked] public NetworkBool NetworkedIsActiveRagdoll { get; set; }
 
     // ─── 그랩 상태 동기화 ───
     [Networked] public NetworkBool NetworkedLeftGrabHolding { get; set; }
     [Networked] public NetworkBool NetworkedRightGrabHolding { get; set; }
+
+    // ─── 그랩 관계 동기화 (OwnerProxy 예측 + 원격 표시용) ───
+    [Networked] public NetworkId LeftGrabTargetId { get; set; }
+    [Networked] public NetworkId RightGrabTargetId { get; set; }
+    [Networked] public Vector3 LeftGrabAnchorLocal { get; set; }
+    [Networked] public Vector3 RightGrabAnchorLocal { get; set; }
+    [Networked] public NetworkBool LeftGrabConfirmed { get; set; }
+    [Networked] public NetworkBool RightGrabConfirmed { get; set; }
+
+    // ─── OwnerProxy용 — 내가 다른 플레이어에게 잡힌 상태 ───
+    [Networked] public NetworkBool NetworkedIsBeingGrabbed { get; set; }
 
     // ─── PuppetMaster 상태 동기화 ───
     [Networked] private float NetworkedPuppetPinWeight { get; set; }
@@ -101,6 +116,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private bool _isActiveRagdoll = true;
     public bool IsActiveRagdoll => _isActiveRagdoll;
 
+    // OwnerProxy 잡힘 상태 레퍼런스 카운트
+    private int _beingGrabbedRefCount;
+
     private bool _isGrabActive;
     private bool _isLeftGrabActive;
     private bool _isRightGrabActive;
@@ -113,6 +131,66 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     /// <summary>Spawned 이후에만 Networked 속성 접근 가능 여부.</summary>
     private bool IsNetworkReady => Runner != null && Object != null && Object.IsValid;
+
+    // ─── OwnerProxy 플레이어 타입 판별 ───
+    /// <summary>AuthorityOwner: 호스트 로컬 캐릭터</summary>
+    private bool IsAuthorityOwner => HasStateAuthority && HasInputAuthority;
+    /// <summary>OwnerProxy: 피호스트 로컬 캐릭터 (입력은 있으나 물리 시뮬 권한 없음)</summary>
+    private bool IsOwnerProxy => HasInputAuthority && !HasStateAuthority;
+    /// <summary>RemoteProxy: 순수 원격 캐릭터 (타인의 캐릭터)</summary>
+    private bool IsRemoteProxy => !HasInputAuthority && !HasStateAuthority;
+
+    /// <summary>
+    /// 다른 플레이어의 HandGrabHandler가 이 캐릭터를 잡았/놓았을 때 호출.
+    /// 호스트(StateAuthority)에서만 NetworkedIsBeingGrabbed를 갱신한다.
+    /// </summary>
+    public void SetGrabbedByOther(bool grabbed)
+    {
+        _beingGrabbedRefCount += grabbed ? 1 : -1;
+        _beingGrabbedRefCount = Mathf.Max(0, _beingGrabbedRefCount);
+        if (IsNetworkReady && HasStateAuthority)
+            NetworkedIsBeingGrabbed = _beingGrabbedRefCount > 0;
+    }
+
+    /// <summary>
+    /// HandGrabHandler에서 조인트 생성 시 호출 — grab 관계를 네트워크에 기록.
+    /// </summary>
+    public void ReportGrabAttached(HandGrabHandler.HandSide side, NetworkId targetId, Vector3 anchorLocal)
+    {
+        if (!HasStateAuthority) return;
+        if (side == HandGrabHandler.HandSide.Left)
+        {
+            LeftGrabTargetId = targetId;
+            LeftGrabAnchorLocal = anchorLocal;
+            LeftGrabConfirmed = true;
+        }
+        else
+        {
+            RightGrabTargetId = targetId;
+            RightGrabAnchorLocal = anchorLocal;
+            RightGrabConfirmed = true;
+        }
+    }
+
+    /// <summary>
+    /// HandGrabHandler에서 조인트 해제 시 호출 — grab 관계를 네트워크에서 제거.
+    /// </summary>
+    public void ReportGrabDetached(HandGrabHandler.HandSide side)
+    {
+        if (!HasStateAuthority) return;
+        if (side == HandGrabHandler.HandSide.Left)
+        {
+            LeftGrabTargetId = default;
+            LeftGrabAnchorLocal = Vector3.zero;
+            LeftGrabConfirmed = false;
+        }
+        else
+        {
+            RightGrabTargetId = default;
+            RightGrabAnchorLocal = Vector3.zero;
+            RightGrabConfirmed = false;
+        }
+    }
 
     /// <summary>
     /// PuppetStateSync(StateAuthority)에서 호출 — Networked 속성에 기록.
@@ -385,9 +463,16 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (driver == null)
             return;
 
-        // 원격 클라이언트(InputAuthority가 아닌 캐릭터)에서는 로컬 입력 대신 네트워크 데이터로 애니메이션 구동
-        var isRemote = Runner != null && !HasInputAuthority;
+        // StateAuthority가 없는 모든 캐릭터는 네트워크 데이터 기반 애니메이션을 사용.
+        // 피호스트 로컬 플레이어(HasInputAuthority=true, HasStateAuthority=false)도
+        // 자기 캐릭터를 직접 시뮬하지 않으므로, 네트워크 속도/이벤트 기반으로 구동해야 한다.
+        // 이전: !HasInputAuthority → 피호스트 로컬 플레이어가 로컬 rigidbody 기반으로 잘못 분기됨
+        var isRemote = Runner != null && !HasStateAuthority;
         driver.SetRemoteProxy(isRemote);
+
+        // 피호스트 로컬 플레이어: 입력은 즉시 예측 연출, 로코모션만 네트워크 기반
+        var isLocalWithoutAuth = Runner != null && HasInputAuthority && !HasStateAuthority;
+        driver.SetLocalWithoutAuthority(isLocalWithoutAuth);
     }
 
     private void ConfigureLocalOwnershipPresentation()
@@ -441,6 +526,12 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         if (!isLocalOwner)
             return;
+
+        // 로컬 오너 메인 Rigidbody에 보간 활성화.
+        // 물리 이동(AddForce)과 LateUpdate 카메라 추적 사이의 프레임 불일치로 인한
+        // 카메라 떨림(jitter)을 해소한다. 원격 프록시는 kinematic이므로 불필요.
+        if (rigidbody3D != null)
+            rigidbody3D.interpolation = RigidbodyInterpolation.Interpolate;
 
         foreach (var camera in FindObjectsOfType<Camera>(true))
         {
