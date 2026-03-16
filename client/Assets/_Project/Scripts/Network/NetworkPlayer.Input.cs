@@ -3,6 +3,11 @@ using UnityEngine;
 
 public sealed partial class NetworkPlayer
 {
+    private Vector3 _lastSafePosition;
+    private Quaternion _lastSafeRotation = Quaternion.identity;
+    private bool _hasLastSafeTransform;
+    private float _nextOutOfBoundsRecoverAt;
+
     private float ResolveCameraYaw()
     {
         return Camera.main != null ? Camera.main.transform.eulerAngles.y : transform.eulerAngles.y;
@@ -42,7 +47,6 @@ public sealed partial class NetworkPlayer
         SynchronizeNetworkSimulationState();
         UpdateGrabHandlers();
         ClampOutOfBoundsCharacter();
-        TickFieldDropPositionSync();
     }
 
     private void PollLocalInputState()
@@ -122,17 +126,68 @@ public sealed partial class NetworkPlayer
             handler.UpdateState();
     }
 
+    private void RememberSafeTransform(Vector3 position, Quaternion rotation)
+    {
+        if (!float.IsFinite(position.x) || !float.IsFinite(position.y) || !float.IsFinite(position.z))
+            return;
+        if (position.y < -5f)
+            return;
+
+        _lastSafePosition = position;
+        _lastSafeRotation = rotation;
+        _hasLastSafeTransform = true;
+    }
+
+    private bool TryResolveRecoveryTransform(out Vector3 position, out Quaternion rotation)
+    {
+        if (_hasLastSafeTransform)
+        {
+            position = _lastSafePosition;
+            rotation = _lastSafeRotation;
+            return true;
+        }
+
+        var spawnGroup = FindObjectOfType<SpawnPointGroup>();
+        if (spawnGroup != null && spawnGroup.transform.childCount > 0)
+        {
+            var index = Random.Range(0, spawnGroup.transform.childCount);
+            var point = spawnGroup.transform.GetChild(index);
+            if (point != null)
+            {
+                position = point.position;
+                rotation = point.rotation;
+                return true;
+            }
+        }
+
+        position = new Vector3(transform.position.x, 1f, transform.position.z);
+        rotation = transform.rotation;
+        return false;
+    }
+
     private void ClampOutOfBoundsCharacter()
     {
         if (transform.position.y >= -10)
             return;
 
-        rigidbody3D.position = Vector3.zero;
+        var now = Runner != null ? (float)Runner.SimulationTime : Time.time;
+        if (now < _nextOutOfBoundsRecoverAt)
+            return;
+
+        _nextOutOfBoundsRecoverAt = now + 0.5f;
+
+        if (!TryResolveRecoveryTransform(out var recoveryPosition, out var recoveryRotation))
+            recoveryRotation = transform.rotation;
+
+        rigidbody3D.position = recoveryPosition;
+        rigidbody3D.rotation = recoveryRotation;
+        transform.SetPositionAndRotation(recoveryPosition, recoveryRotation);
         if (rigidbody3D != null && !rigidbody3D.isKinematic)
         {
             rigidbody3D.velocity = Vector3.zero;
             rigidbody3D.angularVelocity = Vector3.zero;
         }
+        RememberSafeTransform(recoveryPosition, recoveryRotation);
         ForceRecover();
     }
 }

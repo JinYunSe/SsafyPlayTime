@@ -98,6 +98,9 @@ public sealed partial class NetworkPlayer
             config.groundProbeRadius,
             config.groundProbeDistance);
 
+        if (_isGrounded)
+            RememberSafeTransform(rigidbody3D.position, transform.rotation);
+
         if (!_isGrounded)
             rigidbody3D.AddForce(
                 Vector3.down * config.extraGravity * Mathf.Max(0.05f, gravityMultiplier),
