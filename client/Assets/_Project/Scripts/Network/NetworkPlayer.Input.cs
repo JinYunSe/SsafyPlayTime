@@ -143,6 +143,14 @@ public sealed partial class NetworkPlayer
             }
         }
 
+        // Hips(muscles[0]) 절대 위치 동기화 — 잡기/끌기 시 원격 위치 추적
+        if (_puppetMaster != null && _puppetMaster.muscles != null && _puppetMaster.muscles.Length > 0)
+        {
+            var hipsMuscle = _puppetMaster.muscles[0];
+            if (hipsMuscle.joint != null)
+                NetworkedHipsPosition = hipsMuscle.joint.transform.position;
+        }
+
         NetworkedIsActiveRagdoll = _isActiveRagdoll;
     }
 

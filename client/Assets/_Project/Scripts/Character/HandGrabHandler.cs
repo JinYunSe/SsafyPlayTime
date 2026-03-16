@@ -1,3 +1,4 @@
+using Fusion;
 using UnityEngine;
 using RootMotion.Dynamics;
 using SSAFYPlayTime.Character;
@@ -86,6 +87,7 @@ public class HandGrabHandler : MonoBehaviour
     void OnJointBreak(float breakForceAmount)
     {
         RestoreGrabbedPuppet();
+        NotifyGrabReleased();
         _fixedJoint = null;
         _configurableJoint = null;
         _grabbedPlayer = null;
@@ -121,6 +123,7 @@ public class HandGrabHandler : MonoBehaviour
         if (IsHolding)
         {
             RestoreGrabbedPuppet();
+            NotifyGrabReleased();
             DestroyActiveJoint();
             _grabbedPlayer = null;
             _grabbedPuppet = null;
@@ -177,6 +180,7 @@ public class HandGrabHandler : MonoBehaviour
             connected.AddForce(Vector3.up * 0.5f, ForceMode.Impulse);
 
         RestoreGrabbedPuppet();
+        NotifyGrabReleased();
         DestroyActiveJoint();
         _grabbedPlayer = null;
         _grabbedPuppet = null;
@@ -201,6 +205,7 @@ public class HandGrabHandler : MonoBehaviour
             force = 10f;
 
         RestoreGrabbedPuppet();
+        NotifyGrabReleased();
         DestroyActiveJoint();
         _grabbedPlayer = null;
         _grabbedPuppet = null;
@@ -384,6 +389,18 @@ public class HandGrabHandler : MonoBehaviour
 
         _grabbedPlayer = targetPlayer;
         WeakenGrabbedPuppet(targetRb);
+
+        // OwnerProxy용 grab 관계 보고: 누구를 잡았는지 + 앵커
+        if (networkPlayer != null)
+        {
+            var targetNetObj = targetRb.transform.root.GetComponent<Fusion.NetworkObject>();
+            var netId = targetNetObj != null ? targetNetObj.Id : default;
+            networkPlayer.ReportGrabAttached(handSide, netId, localAnchor);
+        }
+
+        // 잡힌 상대에게 알림 (OwnerProxy 뼈 보간 전환용)
+        if (_grabbedPlayer != null)
+            _grabbedPlayer.SetGrabbedByOther(true);
     }
 
     private void AttachFixedJoint(Rigidbody targetRb, Vector3 localAnchor)
@@ -582,6 +599,18 @@ public class HandGrabHandler : MonoBehaviour
                 h._configurableJoint.breakTorque = grabProfile.maximumForce * dualMult;
             }
         }
+    }
+
+    /// <summary>
+    /// grab 해제 시 NetworkPlayer에 관계 해제 + 잡힌 상대에게 알림.
+    /// OnJointBreak / UpdateState release / Drop / Throw 모든 경로에서 호출.
+    /// </summary>
+    private void NotifyGrabReleased()
+    {
+        if (networkPlayer != null)
+            networkPlayer.ReportGrabDetached(handSide);
+        if (_grabbedPlayer != null)
+            _grabbedPlayer.SetGrabbedByOther(false);
     }
 
     private bool ShouldIgnoreGrabTarget(Rigidbody targetRb)

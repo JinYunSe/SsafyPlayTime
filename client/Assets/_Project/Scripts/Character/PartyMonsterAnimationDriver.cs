@@ -48,6 +48,8 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
     // 네트워크: 원격 프록시 모드 (로컬 입력 대신 네트워크 데이터로 애니메이션 구동)
     bool isRemoteProxy;
+    // 피호스트 로컬 플레이어: 입력은 읽지만 로코모션은 네트워크 기반
+    bool isLocalWithoutAuthority;
 
     void Reset()
     {
@@ -90,9 +92,22 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         if (isRemoteProxy)
         {
-            SyncGrabAnimation();
-            if (!IsActionLocked())
-                UpdateLocomotionFromNetwork();
+            if (isLocalWithoutAuthority)
+            {
+                // 피호스트 로컬 플레이어: 입력은 읽어서 즉시 예측 연출,
+                // 로코모션은 네트워크 기반 (자기 rigidbody는 시뮬 안 하므로)
+                SyncGrabAnimation();
+                HandleInput();
+                if (!IsActionLocked())
+                    UpdateLocomotionFromNetwork();
+            }
+            else
+            {
+                // 순수 원격 프록시: 모든 것이 네트워크 데이터 기반
+                SyncGrabAnimation();
+                if (!IsActionLocked())
+                    UpdateLocomotionFromNetwork();
+            }
             return;
         }
 
@@ -111,6 +126,15 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     public void SetRemoteProxy(bool value)
     {
         isRemoteProxy = value;
+    }
+
+    /// <summary>
+    /// 피호스트 로컬 플레이어 모드 설정.
+    /// 로코모션은 네트워크 기반이지만, 입력(펀치/잡기)은 로컬에서 읽어 즉시 예측 연출한다.
+    /// </summary>
+    public void SetLocalWithoutAuthority(bool value)
+    {
+        isLocalWithoutAuthority = value;
     }
 
     public void PlayAttack()

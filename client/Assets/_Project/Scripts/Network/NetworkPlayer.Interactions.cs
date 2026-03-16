@@ -150,6 +150,85 @@ public sealed partial class NetworkPlayer
         animator.SetBool("isCarrying", isCarrying);
     }
 
+    // ─── OwnerProxy grab 예측 타이머 ───
+    private float _grabPredictionStart = -1f;
+    private const float GRAB_PREDICTION_TIMEOUT = 0.4f;
+
+    /// <summary>
+    /// 비권한 클라이언트(OwnerProxy / RemoteProxy)에서
+    /// 호스트가 확정한 grab/carry 상태를 animator에 반영한다.
+    /// StateAuthority에서는 UpdateGrabbingAnimatorFlag()가 직접 처리하므로 호출 불필요.
+    ///
+    /// OwnerProxy는 로컬 grab 입력을 즉시 예측 반영하되,
+    /// 호스트가 LeftGrabConfirmed/RightGrabConfirmed를 확정하지 않으면
+    /// GRAB_PREDICTION_TIMEOUT 후 롤백한다.
+    /// </summary>
+    internal void SyncGrabbingAnimatorFromNetwork()
+    {
+        if (animator == null) return;
+
+        bool confirmedHolding = NetworkedLeftGrabHolding || NetworkedRightGrabHolding;
+
+        // OwnerProxy 예측: 로컬 입력 즉시 반영 → 호스트 미확정 시 타임아웃 롤백
+        bool localPredicting = HasInputAuthority && !HasStateAuthority
+            && ((_leftMouseDown && _leftMouseConsumedAsGrab) || (_rightMouseDown && _rightMouseConsumedAsGrab));
+
+        bool showGrab;
+        if (localPredicting && !confirmedHolding)
+        {
+            // 로컬에서 잡으려 하는데 호스트가 아직 확정하지 않음
+            if (_grabPredictionStart < 0f)
+                _grabPredictionStart = Time.time;
+            showGrab = Time.time - _grabPredictionStart < GRAB_PREDICTION_TIMEOUT;
+        }
+        else
+        {
+            _grabPredictionStart = -1f;
+            showGrab = confirmedHolding || localPredicting;
+        }
+
+        // Carry 판별: 확정된 grab 대상이 기절 상태이면 carrying
+        bool isCarrying = showGrab && IsConfirmedGrabTargetStunned();
+        bool isGrabbing = showGrab && !isCarrying;
+
+        animator.SetBool(H_IsGrabbing, isGrabbing);
+        animator.SetBool("isCarrying", isCarrying);
+    }
+
+    /// <summary>
+    /// 네트워크 확정된 grab 대상(LeftGrabTargetId/RightGrabTargetId)을 조회하여
+    /// 대상이 기절(stunned) 상태인지 판별한다.
+    /// grab 관계 필드의 실질적 소비자 — carry vs grab 구분에 사용.
+    /// </summary>
+    private bool IsConfirmedGrabTargetStunned()
+    {
+        if (Runner == null) return false;
+
+        if (LeftGrabConfirmed && LeftGrabTargetId.IsValid)
+        {
+            var targetObj = Runner.FindObject(LeftGrabTargetId);
+            if (targetObj != null)
+            {
+                var targetPlayer = targetObj.GetComponent<NetworkPlayer>();
+                if (targetPlayer != null && !targetPlayer.IsActiveRagdoll)
+                    return true;
+            }
+        }
+
+        if (RightGrabConfirmed && RightGrabTargetId.IsValid)
+        {
+            var targetObj = Runner.FindObject(RightGrabTargetId);
+            if (targetObj != null)
+            {
+                var targetPlayer = targetObj.GetComponent<NetworkPlayer>();
+                if (targetPlayer != null && !targetPlayer.IsActiveRagdoll)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
     private bool TryUseHeldItemByPrimaryClick()
     {
         if (!TryPrepareItemInteractionService(out _))

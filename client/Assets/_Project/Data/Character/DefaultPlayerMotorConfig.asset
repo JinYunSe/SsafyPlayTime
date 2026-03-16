@@ -15,8 +15,8 @@ MonoBehaviour:
   maxSpeed: 3
   acceleration: 30
   rotateSpeedDeg: 300
-  jumpImpulse: 20
-  extraGravity: 10
+  jumpImpulse: 70
+  extraGravity: 5
   groundProbeRadius: 0.1
   groundProbeDistance: 0.5
   fallEnterSec: 0.8
