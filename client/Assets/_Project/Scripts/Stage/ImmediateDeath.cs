@@ -1,3 +1,4 @@
+using Fusion;
 using SSAFYPlayTime.Gameplay.Items;
 using UnityEngine;
 
@@ -39,6 +40,12 @@ public class ImmediateDeath : MonoBehaviour
         }
 
         if (drop == null)
+        {
+            return;
+        }
+
+        var networkObject = drop.GetComponent<NetworkObject>();
+        if (networkObject != null && networkObject.Id.IsValid && !networkObject.HasStateAuthority)
         {
             return;
         }
