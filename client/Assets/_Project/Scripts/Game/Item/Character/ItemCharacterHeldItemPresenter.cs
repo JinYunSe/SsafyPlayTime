@@ -5,6 +5,7 @@
  * - 입력, 손 장착, 근접 판정, 버프 반영 같은 캐릭터 쪽 연결만 여기서 다루고, 실제 상태 전이는 Runtime 계층에서 유지한다.
  */
 using System;
+using Fusion;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Gameplay.Items
@@ -179,6 +180,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             var isWatermelonSword = string.Equals(heldItemId, ItemIds.WaterMelonSword, StringComparison.Ordinal);
             // 수박칼은 조건과 무관하게 Lit 셰이더로 강제 교체해 마젠타를 방지한다.
             ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_spawnedHeldVisual, isWatermelonSword);
+            StripNetworkComponentsForHeldVisual(_spawnedHeldVisual);
             DisableNonHeldVisualEffects(heldItemId, _spawnedHeldVisual);
             ApplyPose(heldItemId, _spawnedHeldVisual.transform);
             DisablePhysicsForHeldVisual(_spawnedHeldVisual);
@@ -444,6 +446,41 @@ namespace SSAFYPlayTime.Gameplay.Items
 
                 body.isKinematic = true;
                 body.useGravity = false;
+            }
+        }
+
+        private static void StripNetworkComponentsForHeldVisual(GameObject visualRoot)
+        {
+            if (visualRoot == null)
+            {
+                return;
+            }
+
+            var networkBehaviours = visualRoot.GetComponentsInChildren<NetworkBehaviour>(true);
+            for (var i = 0; i < networkBehaviours.Length; i++)
+            {
+                if (networkBehaviours[i] != null)
+                {
+                    Destroy(networkBehaviours[i]);
+                }
+            }
+
+            var networkTransforms = visualRoot.GetComponentsInChildren<NetworkTransform>(true);
+            for (var i = 0; i < networkTransforms.Length; i++)
+            {
+                if (networkTransforms[i] != null)
+                {
+                    Destroy(networkTransforms[i]);
+                }
+            }
+
+            var networkObjects = visualRoot.GetComponentsInChildren<NetworkObject>(true);
+            for (var i = 0; i < networkObjects.Length; i++)
+            {
+                if (networkObjects[i] != null)
+                {
+                    Destroy(networkObjects[i]);
+                }
             }
         }
 
