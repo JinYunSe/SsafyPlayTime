@@ -482,6 +482,24 @@ namespace SSAFYPlayTime.Gameplay.Items
                     Destroy(networkObjects[i]);
                 }
             }
+
+            var fieldDrops = visualRoot.GetComponentsInChildren<ItemFieldDrop>(true);
+            for (var i = 0; i < fieldDrops.Length; i++)
+            {
+                if (fieldDrops[i] != null)
+                {
+                    Destroy(fieldDrops[i]);
+                }
+            }
+
+            var networkedDrops = visualRoot.GetComponentsInChildren<NetworkedItemFieldDrop>(true);
+            for (var i = 0; i < networkedDrops.Length; i++)
+            {
+                if (networkedDrops[i] != null)
+                {
+                    Destroy(networkedDrops[i]);
+                }
+            }
         }
 
         private static void DisableNonHeldVisualEffects(string heldItemId, GameObject visualRoot)
@@ -519,125 +537,6 @@ namespace SSAFYPlayTime.Gameplay.Items
                     lights[i].enabled = false;
                 }
             }
-        }
-
-        private static void ApplyUrpMaterialFallbackForHeldVisual(GameObject root, bool forceLitOverride)
-        {
-            if (root == null)
-            {
-                return;
-            }
-
-            var renderers = root.GetComponentsInChildren<Renderer>(true);
-            for (var i = 0; i < renderers.Length; i++)
-            {
-                var renderer = renderers[i];
-                if (renderer == null)
-                {
-                    continue;
-                }
-
-                var materials = renderer.materials;
-                var replaced = false;
-                for (var m = 0; m < materials.Length; m++)
-                {
-                    var source = materials[m];
-                    if (source == null)
-                    {
-                        continue;
-                    }
-
-                    if (!forceLitOverride && !NeedsUrpFallback(source))
-                    {
-                        continue;
-                    }
-
-                    var fallbackShader =
-                        Shader.Find("Universal Render Pipeline/Lit") ??
-                        Shader.Find("Universal Render Pipeline/Unlit") ??
-                        Shader.Find("Universal Render Pipeline/Simple Lit");
-                    if (fallbackShader == null)
-                    {
-                        continue;
-                    }
-
-                    var fallback = new Material(fallbackShader)
-                    {
-                        name = $"{source.name}_HeldFallback"
-                    };
-
-                    var sourceTexture = source.HasProperty("_BaseMap")
-                        ? source.GetTexture("_BaseMap")
-                        : source.HasProperty("_MainTex")
-                            ? source.GetTexture("_MainTex")
-                            : null;
-                    if (sourceTexture != null)
-                    {
-                        if (fallback.HasProperty("_BaseMap"))
-                        {
-                            fallback.SetTexture("_BaseMap", sourceTexture);
-                        }
-                        else if (fallback.HasProperty("_MainTex"))
-                        {
-                            fallback.SetTexture("_MainTex", sourceTexture);
-                        }
-                    }
-
-                    var sourceColor = source.HasProperty("_BaseColor")
-                        ? source.GetColor("_BaseColor")
-                        : source.HasProperty("_Color")
-                            ? source.GetColor("_Color")
-                            : Color.white;
-                    if (fallback.HasProperty("_BaseColor"))
-                    {
-                        fallback.SetColor("_BaseColor", sourceColor);
-                    }
-                    if (fallback.HasProperty("_Color"))
-                    {
-                        fallback.SetColor("_Color", sourceColor);
-                    }
-
-                    materials[m] = fallback;
-                    replaced = true;
-                }
-
-                if (replaced)
-                {
-                    renderer.materials = materials;
-                }
-            }
-        }
-
-        private static bool NeedsUrpFallback(Material source)
-        {
-            if (source == null)
-            {
-                return false;
-            }
-
-            var shader = source.shader;
-            if (shader == null)
-            {
-                return true;
-            }
-
-            if (!shader.isSupported)
-            {
-                return true;
-            }
-
-            var shaderName = shader.name ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(shaderName))
-            {
-                return true;
-            }
-
-            if (shaderName.IndexOf("Hidden/InternalErrorShader", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return true;
-            }
-
-            return false;
         }
 
         private void ClearHeldVisual()

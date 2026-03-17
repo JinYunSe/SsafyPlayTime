@@ -18,7 +18,7 @@ namespace SSAFYPlayTime.Gameplay.Items
     [RequireComponent(typeof(NetworkTransform))]
     public sealed class NetworkedItemEffectProxy : NetworkBehaviour
     {
-        private static readonly Quaternion BlackholeVisualLocalRotation = Quaternion.Euler(-90f, 0f, 0f);
+        private static readonly Quaternion BlackholeVisualLocalRotation = Quaternion.identity;
         private static readonly Quaternion SatelliteVisualLocalRotation = Quaternion.Euler(-90f, 0f, 0f);
 
         private const string BlackholeVisualAssetPath = "Assets/_Project/Prefabs/Items/BlackholeBomb.prefab";
@@ -238,8 +238,8 @@ namespace SSAFYPlayTime.Gameplay.Items
         private void RefreshBlackholeVisualState()
         {
             var targetScale = Activated
-                ? Mathf.Max(0.4f, Radius * 0.154f) * 3f
-                : 0.28f;
+                ? Mathf.Clamp(Radius * 0.3f, 0.9f, 6f)
+                : 0.08f;
             _visualRoot.transform.localScale = Vector3.one * targetScale;
 
             var renderer = _visualRoot.GetComponent<Renderer>();

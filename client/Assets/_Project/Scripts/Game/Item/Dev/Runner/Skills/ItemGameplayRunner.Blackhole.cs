@@ -298,7 +298,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return _blackholeEffectPrefabCache;
             }
 
-            _blackholeEffectPrefabCache = Resources.Load<GameObject>("Effect_02_BlackHole");
+            _blackholeEffectPrefabCache = Resources.Load<GameObject>(
+                "Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple");
             return _blackholeEffectPrefabCache;
         }
 

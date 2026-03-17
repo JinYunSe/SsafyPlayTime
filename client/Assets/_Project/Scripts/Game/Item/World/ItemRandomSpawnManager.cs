@@ -274,16 +274,16 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             var spawnPoint = _spawnPoints[UnityEngine.Random.Range(0, _spawnPoints.Count)];
             var definition = _spawnableDefinitions[UnityEngine.Random.Range(0, _spawnableDefinitions.Count)];
-            var prefab = _prefabResolver.Resolve(definition.Master.PrefabPath);
+            var prefab = ItemFieldDropFactory.TryLoadNetworkedDropPrefab(_prefabResolver);
             if (prefab == null)
             {
-                DebugLog($"Missing item prefab: {definition.Master.PrefabPath}");
+                DebugLog($"Missing networked wrapper prefab for {definition.Master.ItemId}");
                 return;
             }
 
             if (prefab.GetComponent<NetworkObject>() == null)
             {
-                DebugLog($"Item prefab is missing NetworkObject: {definition.Master.PrefabPath}");
+                DebugLog($"Networked wrapper prefab is missing NetworkObject: {definition.Master.ItemId}");
                 return;
             }
 
@@ -311,6 +311,12 @@ namespace SSAFYPlayTime.Gameplay.Items
                     {
                         fieldDrop.SetItemId(definition.Master.ItemId);
                         fieldDrop.SetInstanceId(requestedInstanceId);
+                    }
+
+                    var networkedDrop = obj.GetComponent<NetworkedItemFieldDrop>();
+                    if (networkedDrop != null)
+                    {
+                        networkedDrop.InitializeMetadata(definition.Master.ItemId);
                     }
                 });
 

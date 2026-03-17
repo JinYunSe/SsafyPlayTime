@@ -18,7 +18,7 @@ public sealed partial class NetworkPlayer
     private const string NetworkedItemEffectProxyResourcePath = "_Project/Prefabs/Effects/NetworkedItemEffectProxy";
     private const string BlackholeVisualAssetPath = "Assets/_Project/Prefabs/Items/BlackholeBomb.prefab";
     private const string BlackholeVisualResourcePath = "_Project/Prefabs/Items/BlackholeBomb";
-    private const string BlackholeEffectResourcePath = "Effect_02_BlackHole";
+    private const string BlackholeEffectResourcePath = "Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple";
     private const string FlamethrowerEffectAssetPath = "Assets/Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky.prefab";
     private const string FlamethrowerEffectResourcePath = "Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky";
     private const string SatelliteProjectileAssetPath =
