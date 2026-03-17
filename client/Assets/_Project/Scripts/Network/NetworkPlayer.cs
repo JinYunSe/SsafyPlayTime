@@ -45,6 +45,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     // 스프린트 상태 동기화 (원격 클라이언트 애니메이션용)
     [Networked] private NetworkBool NetworkedIsSprinting { get; set; }
+    [Networked] private float NetworkedVisualYaw { get; set; }
+    [Networked] private byte NetworkedLocomotionState { get; set; }
+
+    // 좌/우 펀치 동기화 — 호스트가 결정, 모든 클라이언트가 동일한 클립 재생
+    [Networked] private NetworkBool NetworkedPunchIsLeft { get; set; }
 
     // 관절 회전값 네트워크 배열
     [Networked, Capacity(15)]
@@ -56,6 +61,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     // 액티브 래그돌 상태
     [Networked] public NetworkBool NetworkedIsActiveRagdoll { get; set; }
+    [Networked] private byte NetworkedStunPresentationPhase { get; set; }
 
     // ─── 그랩 상태 동기화 ───
     [Networked] public NetworkBool NetworkedLeftGrabHolding { get; set; }
@@ -87,6 +93,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     // ─── 로컬 변수 ───
     private float _localMoveSpeed;
     private int _localMotorState;
+    private float _localVisualYaw;
+    private PresentationLocomotionState _localPresentationLocomotionState;
     private int _lastConsumedAnimationEventSequence = -1;
     private Vector2 _sandboxInput;
     private bool _sandboxJump;
@@ -107,6 +115,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private readonly List<Transform> _detachedCameraRoots = new();
     private bool _cameraHierarchyDetached;
 
+    // 카메라 Follow 앵커 — transform.position이 SyncRootToPhysicsBody로 급격히 변해도
+    // 카메라는 이 앵커를 따라가므로 부드럽게 추적함
+    private Transform _cameraFollowAnchor;
+
     // PuppetMaster 통합
     private PuppetMaster _puppetMaster;
     private BehaviourPuppet _behaviourPuppet;
@@ -115,6 +127,19 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     private bool _isActiveRagdoll = true;
     public bool IsActiveRagdoll => _isActiveRagdoll;
+
+    // ─── 공개 상태 API ───
+    /// <summary>기절 중 여부 (activeRagdoll이 아닌 상태)</summary>
+    public bool IsStunned => !_isActiveRagdoll;
+    /// <summary>기절 회복 직후 취약 상태 여부</summary>
+    public bool IsRecovering => _isRecovering;
+    /// <summary>전투 행동(펀치/그랩/던지기) 가능 여부. 기절 중이거나 안정화/회복 중이면 false.</summary>
+    public bool CanPerformCombatActions => _isActiveRagdoll && !_isRecovering;
+    /// <summary>이동 가능 여부. 기절 중이면 false, 회복 중에는 이동 허용.</summary>
+    public bool CanDriveLocomotion => _isActiveRagdoll;
+
+    /// <summary>카메라가 따라가야 할 타겟. Follow 앵커가 있으면 앵커, 없으면 transform.</summary>
+    public Transform GetCameraFollowTarget() => _cameraFollowAnchor != null ? _cameraFollowAnchor : transform;
 
     // OwnerProxy 잡힘 상태 레퍼런스 카운트
     private int _beingGrabbedRefCount;
@@ -131,6 +156,20 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     /// <summary>Spawned 이후에만 Networked 속성 접근 가능 여부.</summary>
     private bool IsNetworkReady => Runner != null && Object != null && Object.IsValid;
+
+    internal enum PresentationLocomotionState : byte
+    {
+        Idle = 0,
+        Walk = 1,
+        Sprint = 2
+    }
+
+    internal enum StunPresentationPhase : byte
+    {
+        Active = 0,
+        Stunned = 1,
+        RecoverStabilizing = 2
+    }
 
     // ─── OwnerProxy 플레이어 타입 판별 ───
     /// <summary>AuthorityOwner: 호스트 로컬 캐릭터</summary>
@@ -228,6 +267,78 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     public float GetNetworkedMoveSpeed() => Runner != null && Object != null && Object.IsValid ? NetworkedMoveSpeed : _localMoveSpeed;
     public int GetNetworkedMotorState() => Runner != null && Object != null && Object.IsValid ? NetworkedMotorState : _localMotorState;
     public bool GetNetworkedIsSprinting() => Runner != null && Object != null && Object.IsValid ? (bool)NetworkedIsSprinting : false;
+    internal float GetNetworkedVisualYaw() => Runner != null && Object != null && Object.IsValid ? NetworkedVisualYaw : _localVisualYaw;
+    internal PresentationLocomotionState GetNetworkedLocomotionState() =>
+        Runner != null && Object != null && Object.IsValid
+            ? (PresentationLocomotionState)NetworkedLocomotionState
+            : _localPresentationLocomotionState;
+
+    internal StunPresentationPhase GetStunPresentationPhase()
+    {
+        if (!IsNetworkReady || HasStateAuthority)
+            return ResolveLocalStunPresentationPhase();
+
+        return (StunPresentationPhase)NetworkedStunPresentationPhase;
+    }
+
+    internal PresentationLocomotionState ResolveLocomotionState(float speed, bool sprinting)
+    {
+        if (speed <= PM_LocomotionThreshold)
+            return PresentationLocomotionState.Idle;
+
+        return sprinting ? PresentationLocomotionState.Sprint : PresentationLocomotionState.Walk;
+    }
+
+    internal Transform GetPresentationRootTransform()
+    {
+        if (_targetRoot != null)
+            return _targetRoot;
+
+        if (_animatedVisualRoot != null)
+            return _animatedVisualRoot;
+
+        if (animator != null && animator.transform != transform)
+            return animator.transform;
+
+        return null;
+    }
+
+    private float ResolvePresentationYawFromTransform()
+    {
+        var presentationRoot = GetPresentationRootTransform();
+        return presentationRoot != null ? presentationRoot.eulerAngles.y : transform.eulerAngles.y;
+    }
+
+    private void SetPresentationVisualYaw(float yaw)
+    {
+        _localVisualYaw = Mathf.Repeat(yaw, 360f);
+
+        if (Runner != null && Object != null && Object.IsValid && HasStateAuthority)
+            NetworkedVisualYaw = _localVisualYaw;
+    }
+
+    private StunPresentationPhase ResolveLocalStunPresentationPhase()
+    {
+        if (!_isActiveRagdoll)
+            return StunPresentationPhase.Stunned;
+
+        return _isRecoverStabilizing
+            ? StunPresentationPhase.RecoverStabilizing
+            : StunPresentationPhase.Active;
+    }
+
+    private void SynchronizeStunPresentationPhase()
+    {
+        if (!IsNetworkReady || !HasStateAuthority)
+            return;
+
+        NetworkedStunPresentationPhase = (byte)ResolveLocalStunPresentationPhase();
+    }
+
+    internal bool ShouldUsePhysicsPosePresentation()
+    {
+        return GetStunPresentationPhase() != StunPresentationPhase.Active;
+    }
 
     // 기절 관련
     private float _startSlerpPositionSpring;
@@ -246,6 +357,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private bool _rightMouseDown;
     private float _rightMouseDownTime;
     private bool _rightMouseConsumedAsGrab;
+
+    // 호스트 측 좌/우 펀치 토글
+    private bool _hostNextPunchLeft;
 
     // 로컬 트리거
     private bool _dropTriggered;
@@ -269,7 +383,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         Throw = 2,
         GetHit = 3,
         StunFall = 4,
-        StunRecover = 5
+        StunRecover = 5,
+        PunchLeft = 6,
+        PunchRight = 7
     }
 
     private void Awake()
@@ -286,6 +402,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private void OnDestroy()
     {
         CleanupDetachedCameraRoots();
+        if (_cameraFollowAnchor != null)
+            Destroy(_cameraFollowAnchor.gameObject);
     }
 
     public override void Spawned()
@@ -297,10 +415,13 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (HasStateAuthority)
         {
             NetworkedIsActiveRagdoll = true;
+            NetworkedStunPresentationPhase = (byte)StunPresentationPhase.Active;
             AccumulatedStunDamage = 0f;
             StunTimeRemaining = 0f;
             NetworkedAnimationEventSequence = 0;
             NetworkedAnimationEventType = (int)AnimationEventType.None;
+            NetworkedVisualYaw = _localVisualYaw;
+            NetworkedLocomotionState = (byte)_localPresentationLocomotionState;
         }
 
         if (!HasStateAuthority)
@@ -345,6 +466,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             }
         }
         _targetRoot = _puppetMaster != null ? _puppetMaster.targetRoot : null;
+        MarkPhysicsPoseBindingsDirty();
         _bodyPartPhysicsManager = GetComponentInChildren<SSAFYPlayTime.Character.BodyPartPhysicsManager>(true);
 
         _handGrabHandlers = GetComponentsInChildren<HandGrabHandler>(true);
@@ -366,6 +488,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         ConfigureAnimatedVisualMode();
         EnsureAnimatorBinding();
+        SetPresentationVisualYaw(ResolvePresentationYawFromTransform());
         CacheOwnedPresentationComponents();
     }
 
@@ -463,11 +586,17 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (driver == null)
             return;
 
+        // PartyMonsterAnimationDriver가 NetworkPlayer와 동일한 Animator를 사용하도록 보장.
+        // ConfigureAnimatedVisualMode()에서 _animatedVisualRoot의 Animator를 선택했는데,
+        // 드라이버가 별도의 serialized 참조로 다른 (비활성화된) Animator를 가리킬 수 있다.
+        if (animator != null)
+            driver.SetAnimator(animator);
+
         // StateAuthority가 없는 모든 캐릭터는 네트워크 데이터 기반 애니메이션을 사용.
         // 피호스트 로컬 플레이어(HasInputAuthority=true, HasStateAuthority=false)도
         // 자기 캐릭터를 직접 시뮬하지 않으므로, 네트워크 속도/이벤트 기반으로 구동해야 한다.
         // 이전: !HasInputAuthority → 피호스트 로컬 플레이어가 로컬 rigidbody 기반으로 잘못 분기됨
-        var isRemote = Runner != null && !HasStateAuthority;
+        var isRemote = Runner != null && (!HasInputAuthority || !HasStateAuthority);
         driver.SetRemoteProxy(isRemote);
 
         // 피호스트 로컬 플레이어: 입력은 즉시 예측 연출, 로코모션만 네트워크 기반
@@ -504,6 +633,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             listener.enabled = isLocalOwner;
         }
 
+        // 카메라 Follow 앵커 생성 — transform이 SyncRootToPhysicsBody로 급변해도
+        // 카메라는 이 앵커를 부드럽게 따라감
+        if (isLocalOwner)
+            EnsureCameraFollowAnchor();
+
         foreach (var cameraRig in _ownedCameraRigsCache)
         {
             if (cameraRig == null)
@@ -511,7 +645,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
             cameraRig.enabled = isLocalOwner;
             if (isLocalOwner)
-                cameraRig.SetTarget(transform);
+                cameraRig.SetTarget(_cameraFollowAnchor != null ? _cameraFollowAnchor : transform);
         }
 
         foreach (var cameraModeController in _ownedCameraModeControllersCache)
@@ -609,6 +743,37 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         _detachedCameraRoots.Clear();
         _cameraHierarchyDetached = false;
+    }
+
+    // ─── 카메라 Follow 앵커 ───
+
+    /// <summary>
+    /// 카메라 Follow 전용 앵커를 월드 공간에 생성.
+    /// 캐릭터 계층 밖에 두어 SyncRootToPhysicsBody의 급격한 위치 변화가
+    /// 직접 카메라에 전달되지 않도록 한다.
+    /// </summary>
+    private void EnsureCameraFollowAnchor()
+    {
+        if (_cameraFollowAnchor != null) return;
+        var go = new GameObject("_CameraFollowAnchor");
+        go.transform.position = transform.position;
+        _cameraFollowAnchor = go.transform;
+    }
+
+    /// <summary>
+    /// 카메라 앵커를 캐릭터 위치에 부드럽게 추적.
+    /// 정상 상태(isActiveRagdoll=true): 빠르게 따라감 — 이동 시 카메라 지연 없음
+    /// 기절 상태: 느리게 따라감 — SyncRootToPhysicsBody의 스냅을 흡수
+    /// </summary>
+    internal void UpdateCameraFollowAnchor()
+    {
+        if (_cameraFollowAnchor == null) return;
+
+        var speed = _isActiveRagdoll ? 25f : 6f;
+        _cameraFollowAnchor.position = Vector3.Lerp(
+            _cameraFollowAnchor.position,
+            transform.position,
+            Time.deltaTime * speed);
     }
 
 }

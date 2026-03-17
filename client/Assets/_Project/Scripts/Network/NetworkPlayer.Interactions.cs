@@ -9,6 +9,10 @@ public sealed partial class NetworkPlayer
         if (_handGrabHandlers == null || !_isActiveRagdoll)
             return;
 
+        // 회복 안정화 중에는 전투 행동 차단 (이동은 허용)
+        if (_isRecovering)
+            return;
+
         var dropRequested = input.Drop || _dropTriggered;
         var throwRequested = input.Throw || _throwTriggered;
         var anyHolding = IsAnyHandHoldingObject();
@@ -58,8 +62,16 @@ public sealed partial class NetworkPlayer
     {
         if (!TryUseHeldItemByPrimaryClick() && !anyHolding)
         {
-            RaiseAnimationEvent(AnimationEventType.Punch, H_Punch);
-            ExecutePunchHitDetection();
+            // 호스트가 좌/우 펀치를 결정하고 네트워크에 기록
+            var isLeft = _hostNextPunchLeft;
+            _hostNextPunchLeft = !_hostNextPunchLeft;
+
+            if (IsNetworkReady)
+                NetworkedPunchIsLeft = isLeft;
+
+            var punchEvent = isLeft ? AnimationEventType.PunchLeft : AnimationEventType.PunchRight;
+            RaiseAnimationEvent(punchEvent, H_Punch);
+            ExecutePunchHitDetection(isLeft);
         }
     }
 

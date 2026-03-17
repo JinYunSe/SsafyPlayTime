@@ -24,7 +24,9 @@
       "Bash(grep -E \"\\\\.\\(cs\\)$\")",
       "Bash(find C:UsersadminDesktoptempS14P21D104clientAssets_ProjectScripts -type f \\\\\\(-name *Puppet* -o -name *Ragdoll* \\\\\\))",
       "Bash(find C:UsersadminDesktoptempS14P21D104clientAssets_ProjectScripts -type f -name *PartyMonster* -o -name *AnimationDriver*)",
-      "mcp__unityMCP__refresh_unity"
+      "mcp__unityMCP__refresh_unity",
+      "Bash(grep -rn \"input.Punch\\\\|PUNCH\\\\|OnPlayerBodyPartHit\" C:/Users/admin/Desktop/temp/S14P21D104/client/Assets/_Project/Scripts/Network/ --include=*.cs)",
+      "Bash(grep -rn \"ExecutePunchHitDetection\\\\|private void.*Punch\" C:/Users/admin/Desktop/temp/S14P21D104/client/Assets/_Project/Scripts/Network/ --include=*.cs)"
     ]
   }
 }

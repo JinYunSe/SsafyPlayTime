@@ -122,6 +122,18 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!114 &19893650 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 6088816361835090415, guid: e8ff1a6c22834d4488a63ca569af4947,
+    type: 3}
+  m_PrefabInstance: {fileID: 2639113225965553716}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6069cece2055cff41b80f19da8455eec, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &49710516
 GameObject:
   m_ObjectHideFlags: 0
@@ -332,6 +344,18 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1073457231}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &93581198 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 1339412196800576122, guid: 6a9d66a6701843e439985d15b0d12813,
+    type: 3}
+  m_PrefabInstance: {fileID: 3892081043160192869}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6069cece2055cff41b80f19da8455eec, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &160843757
 GameObject:
   m_ObjectHideFlags: 0
@@ -982,6 +1006,18 @@ MonoBehaviour:
   collisionRadius: 0.2
   collisionBuffer: 0.1
   minDistance: 1.25
+--- !u!114 &1159687829 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 348058667930669166, guid: 4b5b2971a03a6924ba0edc8cb41b58fd,
+    type: 3}
+  m_PrefabInstance: {fileID: 658894274854226221}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6069cece2055cff41b80f19da8455eec, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &1211872928
 GameObject:
   m_ObjectHideFlags: 0
@@ -1115,6 +1151,18 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1255658470 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 3271759017308229780, guid: aa29d712bac5035499fc89bf5765b79d,
+    type: 3}
+  m_PrefabInstance: {fileID: 6035792636440888701}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6069cece2055cff41b80f19da8455eec, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &1303757750
 GameObject:
   m_ObjectHideFlags: 0
@@ -1683,6 +1731,16 @@ PrefabInstance:
       propertyPath: SortKey
       value: 2430243070
       objectReference: {fileID: 0}
+    - target: {fileID: 3379147690258884884, guid: 4b5b2971a03a6924ba0edc8cb41b58fd,
+        type: 3}
+      propertyPath: NetworkedBehaviours.Array.size
+      value: 2
+      objectReference: {fileID: 0}
+    - target: {fileID: 3379147690258884884, guid: 4b5b2971a03a6924ba0edc8cb41b58fd,
+        type: 3}
+      propertyPath: NetworkedBehaviours.Array.data[0]
+      value: 
+      objectReference: {fileID: 1159687829}
     - target: {fileID: 5250822024937179733, guid: 4b5b2971a03a6924ba0edc8cb41b58fd,
         type: 3}
       propertyPath: m_Name
@@ -1806,6 +1864,16 @@ PrefabInstance:
       propertyPath: SortKey
       value: 1298557812
       objectReference: {fileID: 0}
+    - target: {fileID: 4745225354388726735, guid: e8ff1a6c22834d4488a63ca569af4947,
+        type: 3}
+      propertyPath: NetworkedBehaviours.Array.size
+      value: 2
+      objectReference: {fileID: 0}
+    - target: {fileID: 4745225354388726735, guid: e8ff1a6c22834d4488a63ca569af4947,
+        type: 3}
+      propertyPath: NetworkedBehaviours.Array.data[0]
+      value: 
+      objectReference: {fileID: 19893650}
     - target: {fileID: 5318593706682879629, guid: e8ff1a6c22834d4488a63ca569af4947,
         type: 3}
       propertyPath: m_Name
@@ -1829,6 +1897,16 @@ PrefabInstance:
       propertyPath: SortKey
       value: 3404022957
       objectReference: {fileID: 0}
+    - target: {fileID: 27192319507159456, guid: 6a9d66a6701843e439985d15b0d12813,
+        type: 3}
+      propertyPath: NetworkedBehaviours.Array.size
+      value: 2
+      objectReference: {fileID: 0}
+    - target: {fileID: 27192319507159456, guid: 6a9d66a6701843e439985d15b0d12813,
+        type: 3}
+      propertyPath: NetworkedBehaviours.Array.data[0]
+      value: 
+      objectReference: {fileID: 93581198}
     - target: {fileID: 4022499257010193187, guid: 6a9d66a6701843e439985d15b0d12813,
         type: 3}
       propertyPath: m_LocalPosition.x
@@ -1957,6 +2035,16 @@ PrefabInstance:
       propertyPath: SortKey
       value: 477725957
       objectReference: {fileID: 0}
+    - target: {fileID: 8555446931640564650, guid: aa29d712bac5035499fc89bf5765b79d,
+        type: 3}
+      propertyPath: NetworkedBehaviours.Array.size
+      value: 2
+      objectReference: {fileID: 0}
+    - target: {fileID: 8555446931640564650, guid: aa29d712bac5035499fc89bf5765b79d,
+        type: 3}
+      propertyPath: NetworkedBehaviours.Array.data[0]
+      value: 
+      objectReference: {fileID: 1255658470}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []

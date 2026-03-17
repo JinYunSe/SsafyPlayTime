@@ -87,7 +87,7 @@ namespace SSAFYPlayTime
                 // LauncherScene·GameScene 공통으로 필요하다.
                 TryRemapMigrationEntryOnJoin(runner, player);
 
-                if (IsActiveGameplayScene())
+                if (IsActiveGameplayScene() && _gameplaySceneSpawnBootstrapComplete)
                 {
                     TrySpawnGameplayNetworkCharacter(player);
                 }
@@ -405,6 +405,7 @@ namespace SSAFYPlayTime
                     {
                         RestoreEnvironmentStatesAfterMigration();
                         TrySpawnGameplayNetworkCharactersForAllPlayers();
+                        _gameplaySceneSpawnBootstrapComplete = true;
                     }
 
                     // 모든 플레이어(서버·클라이언트 공통)가 자신의 캐릭터 선택을 재전송한다.
@@ -710,6 +711,7 @@ namespace SSAFYPlayTime
             _spawnedGameplayNetworkCharacters.Clear();
             _spawnedCharacterIndexByPlayerId.Clear();
             _cachedSpawnPointGroup = null;
+            _gameplaySceneSpawnBootstrapComplete = false;
 
             // 마이그레이션 중에는 캡처해둔 위치 테이블을 지우지 않는다.
             // StartGame(HostMigrationToken) 과정에서 OnSceneLoadStart 가 발동할 수 있으나
@@ -767,6 +769,7 @@ namespace SSAFYPlayTime
                     // 마이그레이션 데이터가 없으면 no-op.
                     RestoreEnvironmentStatesAfterMigration();
                     TrySpawnGameplayNetworkCharactersForAllPlayers();
+                    _gameplaySceneSpawnBootstrapComplete = true;
                 }
             }
         }

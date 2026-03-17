@@ -63,6 +63,16 @@ public sealed partial class NetworkPlayer
 
         if (Input.GetKeyDown(KeyCode.F))
             _dropTriggered = true;
+
+        // OwnerProxy: DoPhysicsStep은 호스트에서만 실행되므로
+        // 로컬 입력 기반 grab 상태를 여기서 갱신해야
+        // PartyMonsterAnimationDriver.SyncGrabAnimation()이 올바르게 동작한다.
+        if (Runner != null && HasInputAuthority && !HasStateAuthority)
+        {
+            _isLeftGrabActive = _leftMouseDown && _leftMouseConsumedAsGrab;
+            _isRightGrabActive = _rightMouseDown && _rightMouseConsumedAsGrab;
+            _isGrabActive = _isLeftGrabActive || _isRightGrabActive;
+        }
     }
 
     private void UpdatePrimaryClickState()
@@ -156,6 +166,7 @@ public sealed partial class NetworkPlayer
         }
 
         NetworkedIsActiveRagdoll = _isActiveRagdoll;
+        SynchronizeStunPresentationPhase();
     }
 
     private void UpdateGrabHandlers()

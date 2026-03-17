@@ -2869,11 +2869,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dc81d8401fd80724199a03ece649b9b0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  handSide: 0
   animator: {fileID: 0}
   grabProfile: {fileID: 11400000, guid: 8196247d979e23644ae1b3d44c2a4017, type: 2}
   breakForce: 2000
   breakTorque: 2000
   dualGrabBreakMultiplier: 3
+  maxGrabDistance: 2.5
   grabbedPinWeight: 0.3
   grabbedMuscleWeight: 0.3
 --- !u!1 &4726257278134330922
@@ -3117,6 +3119,7 @@ GameObject:
   - component: {fileID: 4745225354388726735}
   - component: {fileID: 7663240486625969133}
   - component: {fileID: -3072525174819799080}
+  - component: {fileID: 8762998777785654494}
   m_Layer: 0
   m_Name: FitCharacterAndCameraAndPuppet
   m_TagString: Untagged
@@ -3317,7 +3320,24 @@ MonoBehaviour:
   holdPoint: {fileID: 0}
   _CharacterTypeIndex: -1
   _BoneRotations: []
+  _NetworkedHipsPosition: {x: 0, y: 0, z: 0}
   _NetworkedIsActiveRagdoll:
+    _value: 0
+  _NetworkedLeftGrabHolding:
+    _value: 0
+  _NetworkedRightGrabHolding:
+    _value: 0
+  _LeftGrabTargetId:
+    Raw: 0
+  _RightGrabTargetId:
+    Raw: 0
+  _LeftGrabAnchorLocal: {x: 0, y: 0, z: 0}
+  _RightGrabAnchorLocal: {x: 0, y: 0, z: 0}
+  _LeftGrabConfirmed:
+    _value: 0
+  _RightGrabConfirmed:
+    _value: 0
+  _NetworkedIsBeingGrabbed:
     _value: 0
   itemWorldEffectMask:
     serializedVersion: 2
@@ -3502,6 +3522,21 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   Guid:
     RawGuidValue: e8ff1a6c22834d4488a63ca569af4947
+--- !u!114 &8762998777785654494
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5318593706682879629}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2c91d775bc9a4b34e9b6cd70503b9ee5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  profile: {fileID: 11400000, guid: c79c878183ccc3d44809d4fc7f5f98a5, type: 2}
+  puppetMaster: {fileID: 0}
+  lerpSpeed: 8
 --- !u!1 &5413706484301116359
 GameObject:
   m_ObjectHideFlags: 0
@@ -4045,7 +4080,7 @@ MonoBehaviour:
   pinWeightThreshold: 1
   unpinnedMuscleKnockout: 0
   dropProps: 0
-  canGetUp: 1
+  canGetUp: 0
   getUpDelay: 1
   blendToAnimationTime: 0.2
   maxGetUpVelocity: 0.3
@@ -4388,11 +4423,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dc81d8401fd80724199a03ece649b9b0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  handSide: 0
   animator: {fileID: 0}
   grabProfile: {fileID: 11400000, guid: 8196247d979e23644ae1b3d44c2a4017, type: 2}
   breakForce: 2000
   breakTorque: 2000
   dualGrabBreakMultiplier: 3
+  maxGrabDistance: 2.5
   grabbedPinWeight: 0.3
   grabbedMuscleWeight: 0.3
 --- !u!1 &7028737582734136109

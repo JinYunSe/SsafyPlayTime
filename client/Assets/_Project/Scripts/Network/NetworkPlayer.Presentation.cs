@@ -15,6 +15,26 @@ public sealed partial class NetworkPlayer
     private const float PM_ThrowLockDuration = 0.85f;
     private bool _pmNextAttackLeft;
 
+    // OwnerProxy 로컬 예측 reconcile
+    private float _localPunchPredictionTime = -1f;
+    private float _localThrowPredictionTime = -1f;
+    private bool _localPredictedPunchIsLeft; // 로컬 예측 시 어느 손을 재생했는지
+
+    /// <summary>
+    /// PartyMonsterAnimationDriver가 로컬 예측 펀치 시 호출.
+    /// 예측 타임스탬프와 방향을 기록하여 네트워크 reconcile 시 비교한다.
+    /// </summary>
+    internal void NotifyLocalPunchPrediction(bool isLeft)
+    {
+        _localPunchPredictionTime = Time.time;
+        _localPredictedPunchIsLeft = isLeft;
+    }
+
+    internal void NotifyLocalThrowPrediction()
+    {
+        _localThrowPredictionTime = Time.time;
+    }
+
     // PuppetMaster 애니메이션 모드 런타임 상태
     private bool _usePuppetMasterAnimation;
     private bool _hasExternalAnimationDriver; // PartyMonsterAnimationDriver가 존재하면 true
@@ -54,6 +74,9 @@ public sealed partial class NetworkPlayer
             // grab/carry 애니메이터 파라미터 동기화
             SyncGrabbingAnimatorFromNetwork();
         }
+
+        UpdatePhysicsDrivenVisualPose();
+        ApplyProxyPresentationRotation();
     }
 
     /// <summary>
@@ -115,6 +138,11 @@ public sealed partial class NetworkPlayer
 
     private void LateUpdate()
     {
+        // 카메라 앵커 업데이트 — CameraRig.LateUpdate 이전에 위치를 갱신해야
+        // 같은 프레임에서 카메라가 최신 앵커 위치를 따라간다.
+        UpdateCameraFollowAnchor();
+        UpdatePhysicsDrivenVisualPose();
+
         if (Runner == null)
             UpdateAnimationParameters();
     }
@@ -154,11 +182,11 @@ public sealed partial class NetworkPlayer
 
     private void UpdateAnimationParameters()
     {
-        if (animator == null)
-            return;
-
         // PartyMonsterAnimationDriver가 로코모션/전투 애니메이션을 모두 제어하므로 스킵
         if (_hasExternalAnimationDriver)
+            return;
+
+        if (animator == null)
             return;
 
         var (speed, state) = ResolveAnimationParameters();
@@ -182,13 +210,7 @@ public sealed partial class NetworkPlayer
         if (_pmHasMovementSpeedParam)
             animator.SetFloat(H_MovementSpeed, speed);
 
-        string targetState;
-        if (speed <= PM_LocomotionThreshold)
-            targetState = PM_IdleState;
-        else
-            targetState = Input.GetKey(KeyCode.LeftShift) ? PM_SprintState : PM_WalkState;
-
-        PlayPMState(targetState);
+        PlayPMState(ResolvePuppetMasterLocomotionStateName(speed));
     }
 
     private (float speed, int state) ResolveAnimationParameters()
@@ -197,6 +219,89 @@ public sealed partial class NetworkPlayer
             return (NetworkedMoveSpeed, NetworkedMotorState);
 
         return (_localMoveSpeed, _localMotorState);
+    }
+
+    private string ResolvePuppetMasterLocomotionStateName(float speed)
+    {
+        PresentationLocomotionState locomotionState;
+        if (Runner != null && Object != null && Object.IsValid)
+            locomotionState = GetNetworkedLocomotionState();
+        else
+            locomotionState = ResolveLocomotionState(speed, Input.GetKey(KeyCode.LeftShift));
+
+        return locomotionState switch
+        {
+            PresentationLocomotionState.Sprint => PM_SprintState,
+            PresentationLocomotionState.Walk => PM_WalkState,
+            _ => PM_IdleState
+        };
+    }
+
+    private void ApplyProxyPresentationRotation()
+    {
+        if (HasStateAuthority || NetworkedIsBeingGrabbed || ShouldUsePhysicsPosePresentation())
+            return;
+
+        var presentationRoot = GetPresentationRootTransform();
+        if (presentationRoot == null)
+            return;
+
+        var targetYaw = GetNetworkedVisualYaw();
+        if (IsOwnerProxy && TryResolveOwnerProxyPredictedYaw(out var predictedYaw))
+            targetYaw = Mathf.LerpAngle(targetYaw, predictedYaw, 0.85f);
+
+        var rotateSpeed = config != null ? config.rotateSpeedDeg : 360f;
+        var targetRotation = Quaternion.Euler(0f, targetYaw, 0f);
+        presentationRoot.rotation = Quaternion.RotateTowards(
+            presentationRoot.rotation,
+            targetRotation,
+            rotateSpeed * Time.deltaTime);
+
+        SetPresentationVisualYaw(presentationRoot.rotation.eulerAngles.y);
+    }
+
+    private bool TryResolveOwnerProxyPredictedYaw(out float yaw)
+    {
+        yaw = 0f;
+
+        if (!IsOwnerProxy)
+            return false;
+
+        var localMove = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+        if (localMove.sqrMagnitude <= 0.0001f)
+            return false;
+
+        var moveDirection = ResolvePresentationMoveDirection(localMove);
+        if (moveDirection.sqrMagnitude <= 0.0001f)
+            return false;
+
+        var visualDirection = _targetRoot != null
+            ? moveDirection
+            : new Vector3(-moveDirection.x, 0f, moveDirection.z);
+
+        if (visualDirection.sqrMagnitude <= 0.0001f)
+            return false;
+
+        yaw = Quaternion.LookRotation(visualDirection.normalized, Vector3.up).eulerAngles.y;
+        return true;
+    }
+
+    private static Vector3 ResolvePresentationMoveDirection(Vector2 localMove)
+    {
+        var moveInput = new Vector3(localMove.x, 0f, localMove.y);
+        var mainCamera = Camera.main;
+        if (mainCamera == null)
+            return moveInput;
+
+        var cameraForward = mainCamera.transform.forward;
+        var cameraRight = mainCamera.transform.right;
+        cameraForward.y = 0f;
+        cameraRight.y = 0f;
+
+        if (cameraForward.sqrMagnitude <= 0.0001f || cameraRight.sqrMagnitude <= 0.0001f)
+            return moveInput;
+
+        return cameraForward.normalized * moveInput.z + cameraRight.normalized * moveInput.x;
     }
 
     private void EnsureAnimatorBinding()
@@ -267,7 +372,10 @@ public sealed partial class NetworkPlayer
 
     private void ApplyReplicatedAnimationEvent()
     {
-        if (animator == null || Runner == null || Object == null || !Object.IsValid)
+        if (Runner == null || Object == null || !Object.IsValid)
+            return;
+
+        if (!_hasExternalAnimationDriver && animator == null)
             return;
 
         if (_lastConsumedAnimationEventSequence < 0)
@@ -283,13 +391,34 @@ public sealed partial class NetworkPlayer
 
         var eventType = (AnimationEventType)NetworkedAnimationEventType;
 
-        // 피호스트 로컬 플레이어: 펀치/던지기는 HandleInput()에서 이미 로컬 예측 재생했으므로
-        // 네트워크 이벤트에서 중복 재생 방지. 기절/피격 등 비예측 이벤트만 적용.
+        // 피호스트 로컬 플레이어: 로컬 예측 reconcile.
+        // 예측이 최근이고 손이 일치하면 스킵. 손이 다르면 교정 재생.
+        // 예측 없거나 만료 → 호스트 확정 이벤트로 강제 재생.
         if (HasInputAuthority && !HasStateAuthority)
         {
-            if (eventType == AnimationEventType.Punch || eventType == AnimationEventType.Throw)
-                return;
+            if (eventType == AnimationEventType.Punch || eventType == AnimationEventType.PunchLeft || eventType == AnimationEventType.PunchRight)
+            {
+                bool withinWindow = Time.time - _localPunchPredictionTime < PM_AttackLockDuration;
+                if (withinWindow)
+                {
+                    // 호스트가 결정한 손과 로컬 예측이 같으면 스킵 (이미 맞는 애니메이션 재생 중)
+                    bool hostIsLeft = (eventType == AnimationEventType.PunchLeft);
+                    if (hostIsLeft == _localPredictedPunchIsLeft)
+                        return;
+                    // 손이 다르면 → 아래로 진행하여 교정 재생
+                }
+                // 예측 없음/만료 → 아래로 진행하여 호스트 확정 이벤트 재생
+            }
+            else if (eventType == AnimationEventType.Throw)
+            {
+                if (Time.time - _localThrowPredictionTime < PM_ThrowLockDuration)
+                    return;
+            }
         }
+
+        // 원격 클라이언트에서 GetHit 수신 시 로컬 히트스탑 연출
+        if (eventType == AnimationEventType.GetHit && !HasStateAuthority)
+            ApplyReplicatedHitStop();
 
         // PartyMonsterAnimationDriver가 있으면 드라이버를 통해 애니메이션 이벤트 적용
         if (_hasExternalAnimationDriver && _externalAnimationDriver != null)
@@ -307,6 +436,8 @@ public sealed partial class NetworkPlayer
         switch (eventType)
         {
             case AnimationEventType.Punch:
+            case AnimationEventType.PunchLeft:
+            case AnimationEventType.PunchRight:
                 animator.SetTrigger(H_Punch);
                 break;
             case AnimationEventType.Throw:
@@ -326,8 +457,27 @@ public sealed partial class NetworkPlayer
 
     private void RaiseAnimationEvent(AnimationEventType eventType, int triggerHash)
     {
+        // OwnerProxy 로컬 예측 타임스탬프 + 손 방향 기록 (reconcile용)
+        if (HasInputAuthority && !HasStateAuthority)
+        {
+            if (eventType == AnimationEventType.Punch || eventType == AnimationEventType.PunchLeft || eventType == AnimationEventType.PunchRight)
+            {
+                _localPunchPredictionTime = Time.time;
+                _localPredictedPunchIsLeft = (eventType == AnimationEventType.PunchLeft);
+            }
+            else if (eventType == AnimationEventType.Throw)
+                _localThrowPredictionTime = Time.time;
+        }
+
         // PartyMonsterAnimationDriver가 있으면 애니메이션은 거기서 직접 제어
-        if (animator != null && !_hasExternalAnimationDriver)
+        if (_hasExternalAnimationDriver && _externalAnimationDriver != null)
+        {
+            // Host-side proxies have state authority, so Render() will not replay their
+            // replicated events. Apply the action immediately on that local copy.
+            if (HasStateAuthority && !HasInputAuthority)
+                ApplyExternalDriverAnimationEvent(eventType);
+        }
+        else if (animator != null)
         {
             if (_usePuppetMasterAnimation)
                 ApplyPuppetMasterAnimationEvent(eventType);
@@ -350,6 +500,12 @@ public sealed partial class NetworkPlayer
             case AnimationEventType.Punch:
                 _externalAnimationDriver.PlayAttack();
                 break;
+            case AnimationEventType.PunchLeft:
+                _externalAnimationDriver.PlayAttackLeft();
+                break;
+            case AnimationEventType.PunchRight:
+                _externalAnimationDriver.PlayAttackRight();
+                break;
             case AnimationEventType.Throw:
                 _externalAnimationDriver.PlayThrowFromNetwork();
                 break;
@@ -366,9 +522,16 @@ public sealed partial class NetworkPlayer
         switch (eventType)
         {
             case AnimationEventType.Punch:
+                // 레거시 호환: 구분 없는 Punch 이벤트 → 로컬 토글
                 var punchState = _pmNextAttackLeft ? PM_PunchLeftState : PM_PunchRightState;
                 _pmNextAttackLeft = !_pmNextAttackLeft;
                 PlayPMLockedAction(punchState, PM_AttackLockDuration);
+                break;
+            case AnimationEventType.PunchLeft:
+                PlayPMLockedAction(PM_PunchLeftState, PM_AttackLockDuration);
+                break;
+            case AnimationEventType.PunchRight:
+                PlayPMLockedAction(PM_PunchRightState, PM_AttackLockDuration);
                 break;
             case AnimationEventType.Throw:
                 PlayPMLockedAction(PM_ThrowState, PM_ThrowLockDuration);

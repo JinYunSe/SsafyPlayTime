@@ -28,7 +28,10 @@ public class ProceduralGrabArm : MonoBehaviour
     float _rightBlend;
 
     NetworkPlayer _networkPlayer;
-    HandGrabHandler[] _handGrabHandlers;
+
+    // HandSide 기반 핸들러 캐시 — 배열 인덱스 순서에 의존하지 않음
+    HandGrabHandler _leftHandler;
+    HandGrabHandler _rightHandler;
 
     // IK targets (created at runtime)
     Transform _leftIKTarget;
@@ -55,7 +58,15 @@ public class ProceduralGrabArm : MonoBehaviour
 
     void Start()
     {
-        _handGrabHandlers = GetComponentsInChildren<HandGrabHandler>(true);
+        // HandSide 기반으로 좌우 핸들러를 확정 — 계층 순서에 의존하지 않음
+        var handlers = GetComponentsInChildren<HandGrabHandler>(true);
+        foreach (var h in handlers)
+        {
+            if (h.Side == HandGrabHandler.HandSide.Left)
+                _leftHandler = h;
+            else
+                _rightHandler = h;
+        }
 
         // Create IK target transforms
         _leftIKTarget = CreateIKTarget("LeftArm_IKTarget");
@@ -119,8 +130,8 @@ public class ProceduralGrabArm : MonoBehaviour
         if (puppetMaster == null) return;
 
         bool grabActive = _networkPlayer != null && _networkPlayer.IsGrabActive;
-        bool leftHolding = IsHandHolding(0);
-        bool rightHolding = IsHandHolding(1);
+        bool leftHolding = IsHandHolding(_leftHandler);
+        bool rightHolding = IsHandHolding(_rightHandler);
 
         bool leftShouldReach = grabActive || leftHolding;
         bool rightShouldReach = grabActive || rightHolding;
@@ -129,16 +140,31 @@ public class ProceduralGrabArm : MonoBehaviour
         _leftBlend = Mathf.MoveTowards(_leftBlend, leftShouldReach ? 1f : 0f, dt);
         _rightBlend = Mathf.MoveTowards(_rightBlend, rightShouldReach ? 1f : 0f, dt);
 
-        // Update reach directions and IK target positions
-        _leftReachDir = GetReachDirection(_leftPhysicsHand, true);
-        _rightReachDir = GetReachDirection(_rightPhysicsHand, false);
+        // 잡고 있을 때: connectedAnchor 월드 좌표를 IK 타겟으로 직접 사용
+        // 잡고 있지 않을 때: 기존 주변 탐색 방식 유지
+        if (leftHolding)
+        {
+            _leftIKTarget.position = _leftHandler.GetGrabAnchorWorldPosition();
+            _leftReachDir = (_leftIKTarget.position - puppetMaster.targetRoot.position).normalized;
+        }
+        else
+        {
+            _leftReachDir = GetReachDirection(_leftPhysicsHand, true);
+            Vector3 charPos = puppetMaster.targetRoot.position;
+            _leftIKTarget.position = charPos + Vector3.up * 0.8f + _leftReachDir * reachDistance;
+        }
 
-        Vector3 charPos = puppetMaster.targetRoot.position;
-        float charHeight = 0.8f;
-        Vector3 shoulderApprox = charPos + Vector3.up * charHeight;
-
-        _leftIKTarget.position = shoulderApprox + _leftReachDir * reachDistance;
-        _rightIKTarget.position = shoulderApprox + _rightReachDir * reachDistance;
+        if (rightHolding)
+        {
+            _rightIKTarget.position = _rightHandler.GetGrabAnchorWorldPosition();
+            _rightReachDir = (_rightIKTarget.position - puppetMaster.targetRoot.position).normalized;
+        }
+        else
+        {
+            _rightReachDir = GetReachDirection(_rightPhysicsHand, false);
+            Vector3 charPos = puppetMaster.targetRoot.position;
+            _rightIKTarget.position = charPos + Vector3.up * 0.8f + _rightReachDir * reachDistance;
+        }
     }
 
     void FixedUpdate()
@@ -146,11 +172,15 @@ public class ProceduralGrabArm : MonoBehaviour
         if (puppetMaster == null) return;
 
         bool grabActive = _networkPlayer != null && _networkPlayer.IsGrabActive;
-        if (grabActive)
-        {
-            PushPhysicsHand(_leftPhysicsHandRb, _leftReachDir, IsHandHolding(0));
-            PushPhysicsHand(_rightPhysicsHandRb, _rightReachDir, IsHandHolding(1));
-        }
+        bool leftHolding = IsHandHolding(_leftHandler);
+        bool rightHolding = IsHandHolding(_rightHandler);
+
+        if (grabActive || leftHolding)
+            PushPhysicsHand(_leftPhysicsHandRb, _leftReachDir, leftHolding,
+                leftHolding ? _leftHandler.GetGrabAnchorWorldPosition() : Vector3.zero);
+        if (grabActive || rightHolding)
+            PushPhysicsHand(_rightPhysicsHandRb, _rightReachDir, rightHolding,
+                rightHolding ? _rightHandler.GetGrabAnchorWorldPosition() : Vector3.zero);
     }
 
     void OnPuppetMasterRead()
@@ -179,11 +209,31 @@ public class ProceduralGrabArm : MonoBehaviour
             rightArmIK.solver.FixTransforms();
     }
 
-    void PushPhysicsHand(Rigidbody handRb, Vector3 reachDir, bool isHolding)
+    void PushPhysicsHand(Rigidbody handRb, Vector3 reachDir, bool isHolding, Vector3 anchorWorld)
     {
-        if (handRb == null || isHolding) return;
-        handRb.AddForce(reachDir * handReachForce, ForceMode.Acceleration);
-        handRb.AddForce(-handRb.velocity * handDamping, ForceMode.Acceleration);
+        if (handRb == null) return;
+
+        if (isHolding)
+        {
+            // 잡고 있을 때: 손 → 앵커 월드 좌표 직접 벡터로 끌어당김
+            // targetRoot 기준이 아닌 실제 손 위치 기준이므로 손이 옆/뒤로 밀려도 정확히 복원
+            var toAnchor = anchorWorld - handRb.position;
+            var dist = toAnchor.magnitude;
+            if (dist > 0.01f)
+            {
+                var dir = toAnchor / dist;
+                // 거리에 비례하여 힘 증가 — 멀수록 더 세게 끌어당김
+                var forceMult = Mathf.Clamp(dist * 2f, 0.5f, 3f);
+                handRb.AddForce(dir * handReachForce * forceMult, ForceMode.Acceleration);
+            }
+            handRb.AddForce(-handRb.velocity * handDamping * 1.5f, ForceMode.Acceleration);
+        }
+        else
+        {
+            // 잡으려고 뻗는 중: 가장 가까운 타겟 방향으로 밀기
+            handRb.AddForce(reachDir * handReachForce, ForceMode.Acceleration);
+            handRb.AddForce(-handRb.velocity * handDamping, ForceMode.Acceleration);
+        }
     }
 
     Vector3 GetReachDirection(Transform physicsHand, bool isLeft)
@@ -227,11 +277,9 @@ public class ProceduralGrabArm : MonoBehaviour
         return (baseDir + charRoot.right * defaultSpread).normalized;
     }
 
-    bool IsHandHolding(int handIndex)
+    static bool IsHandHolding(HandGrabHandler handler)
     {
-        if (_handGrabHandlers == null) return false;
-        if (handIndex < 0 || handIndex >= _handGrabHandlers.Length) return false;
-        return _handGrabHandlers[handIndex] != null && _handGrabHandlers[handIndex].IsHolding;
+        return handler != null && handler.IsHolding;
     }
 
     void OnDestroy()

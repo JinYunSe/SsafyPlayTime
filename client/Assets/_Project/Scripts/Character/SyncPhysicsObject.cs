@@ -80,4 +80,18 @@ public class SyncPhysicsObject : MonoBehaviour
         jointDrive.positionSpring = startSlerpPositionSpring;
         joint.slerpDrive = jointDrive;
     }
+
+    /// <summary>
+    /// 스프링을 0 → startSlerpPositionSpring 사이에서 점진적으로 복원.
+    /// t=0이면 스프링 0, t=1이면 원래 값.
+    /// ForceRecover 안정화 단계에서 매 틱 호출된다.
+    /// </summary>
+    public void SetSpringLerp(float t)
+    {
+        if (joint == null) return;
+
+        JointDrive jointDrive = joint.slerpDrive;
+        jointDrive.positionSpring = Mathf.Lerp(0f, startSlerpPositionSpring, t);
+        joint.slerpDrive = jointDrive;
+    }
 }
