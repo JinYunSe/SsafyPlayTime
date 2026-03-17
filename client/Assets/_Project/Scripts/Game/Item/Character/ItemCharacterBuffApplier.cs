@@ -21,6 +21,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private const string InvisibilityDustPrefabPath = "Assets/Polygon Arsenal/Prefabs/Environment/Dust/DustCalm.prefab";
         private const string ShieldObjectName = "ConsumableShieldEffect";
         private const string ShieldFlatRingObjectName = "FlatRing";
+        private const string ShieldStartObjectName = "ShieldStart";
         private const string DustObjectName = "ConsumableDustEffect";
         private const float MinimumShieldScaleAxis = 2f;
 
@@ -487,7 +488,6 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (_shieldEffectInstance == null)
             {
                 _shieldEffectInstance = CreateEffectInstance(ShieldPrefabPath, ShieldObjectName);
-                DisableShieldFlatRing(_shieldEffectInstance);
             }
 
             if (_shieldEffectInstance == null)
@@ -498,6 +498,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             _shieldEffectInstance.transform.localPosition = shieldLocalOffset;
             _shieldEffectInstance.transform.localRotation = Quaternion.identity;
             _shieldEffectInstance.transform.localScale = Vector3.Scale(ResolveShieldScale(), Vector3.one * snapshot.ScaleMultiplier);
+            EnsureShieldEffectVisualState();
         }
 
         private void UpdateDustEffect(ItemBuffSnapshot snapshot)
@@ -555,23 +556,50 @@ namespace SSAFYPlayTime.Gameplay.Items
                 Mathf.Max(MinimumShieldScaleAxis, shieldScale.z));
         }
 
-        private static void DisableShieldFlatRing(GameObject shieldRoot)
+        private void EnsureShieldEffectVisualState()
         {
-            if (shieldRoot == null)
+            if (_shieldEffectInstance == null)
             {
                 return;
             }
 
-            var transforms = shieldRoot.GetComponentsInChildren<Transform>(true);
-            for (var i = 0; i < transforms.Length; i++)
+            var renderers = _shieldEffectInstance.GetComponentsInChildren<Renderer>(true);
+            for (var i = 0; i < renderers.Length; i++)
             {
-                var current = transforms[i];
-                if (current == null || !string.Equals(current.name, ShieldFlatRingObjectName, StringComparison.Ordinal))
+                var renderer = renderers[i];
+                if (renderer == null)
                 {
                     continue;
                 }
 
-                current.gameObject.SetActive(false);
+                renderer.enabled = true;
+            }
+
+            var particleSystems = _shieldEffectInstance.GetComponentsInChildren<ParticleSystem>(true);
+            for (var i = 0; i < particleSystems.Length; i++)
+            {
+                var particleSystem = particleSystems[i];
+                if (particleSystem == null)
+                {
+                    continue;
+                }
+
+                var particleObject = particleSystem.gameObject;
+                if (particleObject != null && !particleObject.activeSelf)
+                {
+                    particleObject.SetActive(true);
+                }
+
+                var main = particleSystem.main;
+                if (string.Equals(particleObject.name, ShieldStartObjectName, StringComparison.Ordinal))
+                {
+                    main.loop = true;
+                }
+
+                if (main.loop && !particleSystem.isPlaying)
+                {
+                    particleSystem.Play(withChildren: true);
+                }
             }
         }
 
@@ -601,6 +629,8 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (_shieldEffectInstance != null)
             {
                 _shieldEffectInstance.transform.localPosition = shieldLocalOffset;
+                _shieldEffectInstance.transform.localRotation = Quaternion.identity;
+                EnsureShieldEffectVisualState();
             }
 
             if (_dustEffectInstance != null)

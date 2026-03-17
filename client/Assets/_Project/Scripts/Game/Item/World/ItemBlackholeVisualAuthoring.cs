@@ -20,7 +20,8 @@ namespace SSAFYPlayTime.Gameplay.Items
     {
         private const string BlackholeEffectAssetPath =
             "Assets/Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple.prefab";
-        private const string BlackholeEffectResourcePath = "Effect_02_BlackHole";
+        private const string BlackholeEffectResourcePath =
+            "Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple";
         private const string EffectChildName = "Item_BlackholeFx";
         private const string ShellMaterialAssetPath = "Assets/_Project/Materials/ItemBlackholeShell.mat";
         private const string OuterMaterialAssetPath = "Assets/_Project/Materials/BlackholeFx_Outer_URP.mat";
