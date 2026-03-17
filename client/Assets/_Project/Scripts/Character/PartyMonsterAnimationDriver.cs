@@ -24,7 +24,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     float locomotionThreshold = 0.1f;
 
     [SerializeField]
-    float grabHoldThreshold = 0.2f;
+    float grabHoldThreshold = 0.15f;
 
     [SerializeField]
     float attackLockDuration = 0.7f;
@@ -99,7 +99,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
                 SyncGrabAnimation();
                 HandleInput();
                 if (!IsActionLocked())
-                    UpdateLocomotionFromNetwork();
+                    UpdateLocomotionForOwnerProxy();
             }
             else
             {
@@ -137,16 +137,55 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         isLocalWithoutAuthority = value;
     }
 
+    /// <summary>
+    /// 외부에서 Animator를 명시적으로 지정한다.
+    /// NetworkPlayer가 _animatedVisualRoot에서 선택한 Animator와 일치시키기 위해 사용.
+    /// </summary>
+    public void SetAnimator(Animator newAnimator)
+    {
+        if (newAnimator == null || newAnimator == animator)
+            return;
+
+        animator = newAnimator;
+        ConfigureAnimator();
+    }
+
     public void PlayAttack()
     {
         if (!CanDriveAnimation())
             return;
 
-        // 좌우 펀치 번갈아 재생
-        string punchState = nextAttackLeft ? PunchLeftState : PunchRightState;
+        bool isLeft = nextAttackLeft;
         nextAttackLeft = !nextAttackLeft;
 
+        string punchState = isLeft ? PunchLeftState : PunchRightState;
         PlayLockedAction(punchState, attackLockDuration);
+
+        // OwnerProxy: NetworkPlayer에 예측 방향을 알려서 reconcile 시 비교 가능하게
+        if (networkPlayer != null)
+            networkPlayer.NotifyLocalPunchPrediction(isLeft);
+    }
+
+    /// <summary>
+    /// 네트워크 이벤트에서 호출. 호스트가 결정한 왼손 펀치를 재생한다.
+    /// </summary>
+    public void PlayAttackLeft()
+    {
+        if (!CanDriveAnimation())
+            return;
+
+        PlayLockedAction(PunchLeftState, attackLockDuration);
+    }
+
+    /// <summary>
+    /// 네트워크 이벤트에서 호출. 호스트가 결정한 오른손 펀치를 재생한다.
+    /// </summary>
+    public void PlayAttackRight()
+    {
+        if (!CanDriveAnimation())
+            return;
+
+        PlayLockedAction(PunchRightState, attackLockDuration);
     }
 
     /// <summary>
@@ -179,7 +218,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return;
 
         isGrabPoseActive = false;
-        UpdateLocomotion();
+        UpdateCurrentLocomotion();
     }
 
     public void ThrowHeld()
@@ -191,6 +230,8 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return;
 
         isGrabPoseActive = false;
+        if (networkPlayer != null)
+            networkPlayer.NotifyLocalThrowPrediction();
         PlayLockedAction(ThrowState, throwLockDuration);
     }
 
@@ -246,6 +287,10 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
     void HandleInput()
     {
+        // 기절 중이거나 회복 안정화 중이면 전투 입력 무시
+        if (networkPlayer != null && !networkPlayer.CanPerformCombatActions)
+            return;
+
         if (Input.GetMouseButtonDown(0))
             attackButtonPressedAt = Time.time;
 
@@ -292,10 +337,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         else if (!anyHandHolding && isGrabPoseActive && !networkPlayer.IsGrabActive)
         {
             isGrabPoseActive = false;
-            if (isRemoteProxy)
-                UpdateLocomotionFromNetwork();
-            else
-                UpdateLocomotion();
+            UpdateCurrentLocomotion();
         }
     }
 
@@ -311,31 +353,11 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         }
 
         isSprinting = Input.GetKey(KeyCode.LeftShift) && speed > locomotionThreshold;
+        var locomotionState = speed <= locomotionThreshold
+            ? NetworkPlayer.PresentationLocomotionState.Idle
+            : (isSprinting ? NetworkPlayer.PresentationLocomotionState.Sprint : NetworkPlayer.PresentationLocomotionState.Walk);
 
-        string locomotionState;
-        if (speed <= locomotionThreshold)
-            locomotionState = IdleState;
-        else
-            locomotionState = isSprinting ? SprintState : WalkState;
-
-        if (hasIsSprintingParameter)
-            animator.SetBool(isSprintingParameterHash, isSprinting);
-
-        if (!hasMovementSpeedParameter)
-        {
-            PlayState(locomotionState);
-            return;
-        }
-
-        SetMovementSpeedParameter(speed);
-
-        if (currentStateName != IdleState && currentStateName != WalkState && currentStateName != SprintState)
-        {
-            animator.CrossFadeInFixedTime(locomotionState, 0.1f, 0, 0f);
-            currentStateName = locomotionState;
-        }
-        else
-            PlayState(locomotionState);
+        ApplyLocomotionState(locomotionState, speed);
     }
 
     /// <summary>
@@ -347,19 +369,40 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return;
 
         float speed = networkPlayer.GetNetworkedMoveSpeed();
-        bool sprinting = networkPlayer.GetNetworkedIsSprinting();
+        var locomotionState = networkPlayer.GetNetworkedLocomotionState();
+        ApplyLocomotionState(locomotionState, speed);
+    }
 
-        string locomotionState;
-        if (speed <= locomotionThreshold)
-            locomotionState = IdleState;
-        else
-            locomotionState = sprinting ? SprintState : WalkState;
+    void UpdateLocomotionForOwnerProxy()
+    {
+        if (networkPlayer == null)
+            return;
 
-        if (hasIsSprintingParameter)
-            animator.SetBool(isSprintingParameterHash, sprinting);
+        var localMove = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+        var predictedMagnitude = Mathf.Clamp01(localMove.magnitude);
+        var networkSpeed = networkPlayer.GetNetworkedMoveSpeed();
+        var speed = Mathf.Max(networkSpeed, predictedMagnitude);
+        var locomotionState = predictedMagnitude > locomotionThreshold
+            ? (Input.GetKey(KeyCode.LeftShift)
+                ? NetworkPlayer.PresentationLocomotionState.Sprint
+                : NetworkPlayer.PresentationLocomotionState.Walk)
+            : networkPlayer.GetNetworkedLocomotionState();
 
-        SetMovementSpeedParameter(speed);
-        PlayState(locomotionState);
+        ApplyLocomotionState(locomotionState, speed);
+    }
+
+    void UpdateCurrentLocomotion()
+    {
+        if (isRemoteProxy)
+        {
+            if (isLocalWithoutAuthority)
+                UpdateLocomotionForOwnerProxy();
+            else
+                UpdateLocomotionFromNetwork();
+            return;
+        }
+
+        UpdateLocomotion();
     }
 
     bool IsActionLocked()
@@ -369,12 +412,16 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
     bool CanDriveAnimation()
     {
+        // 기절 중이면 애니메이션 구동 불가 (래그돌이 대신 보임)
+        if (networkPlayer != null && networkPlayer.ShouldUsePhysicsPosePresentation())
+            return false;
+
         // 원격 프록시는 로컬 BehaviourPuppet 상태와 무관하게 항상 애니메이션 구동
         // (래그돌 상태는 네트워크 데이터로 제어)
         if (isRemoteProxy)
             return true;
 
-        return behaviourPuppet == null || behaviourPuppet.state == BehaviourPuppet.State.Puppet;
+        return true;
     }
 
     void ResetActionState()
@@ -391,6 +438,42 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return;
 
         animator.SetFloat(movementSpeedParameterHash, speed);
+    }
+
+    void ApplyLocomotionState(NetworkPlayer.PresentationLocomotionState locomotionState, float speed)
+    {
+        isSprinting = locomotionState == NetworkPlayer.PresentationLocomotionState.Sprint;
+
+        if (hasIsSprintingParameter)
+            animator.SetBool(isSprintingParameterHash, isSprinting);
+
+        SetMovementSpeedParameter(speed);
+
+        var locomotionStateName = ResolveLocomotionStateName(locomotionState);
+        if (!hasMovementSpeedParameter)
+        {
+            PlayState(locomotionStateName);
+            return;
+        }
+
+        if (currentStateName != IdleState && currentStateName != WalkState && currentStateName != SprintState)
+        {
+            animator.CrossFadeInFixedTime(locomotionStateName, 0.1f, 0, 0f);
+            currentStateName = locomotionStateName;
+            return;
+        }
+
+        PlayState(locomotionStateName);
+    }
+
+    string ResolveLocomotionStateName(NetworkPlayer.PresentationLocomotionState locomotionState)
+    {
+        return locomotionState switch
+        {
+            NetworkPlayer.PresentationLocomotionState.Sprint => SprintState,
+            NetworkPlayer.PresentationLocomotionState.Walk => WalkState,
+            _ => IdleState
+        };
     }
 
     void PlayLockedAction(string stateName, float duration)

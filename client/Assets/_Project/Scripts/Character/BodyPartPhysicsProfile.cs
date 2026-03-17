@@ -59,10 +59,12 @@ namespace SSAFYPlayTime.Character
         [Header("Stunned — 기절 상태")]
         public StateProfile stunned = new StateProfile
         {
-            hand   = new BodyPartSettings { pinWeight = 0f, muscleWeight = 0f, mappingWeight = 0.3f, staticFriction = 0.2f, dynamicFriction = 0.1f, frictionCombine = PhysicMaterialCombine.Minimum },
-            arm    = new BodyPartSettings { pinWeight = 0f, muscleWeight = 0f, mappingWeight = 0.3f, staticFriction = 0.2f, dynamicFriction = 0.1f, frictionCombine = PhysicMaterialCombine.Minimum },
-            torso  = new BodyPartSettings { pinWeight = 0f, muscleWeight = 0f, mappingWeight = 0.3f, staticFriction = 0.5f, dynamicFriction = 0.3f, frictionCombine = PhysicMaterialCombine.Average },
-            leg    = new BodyPartSettings { pinWeight = 0f, muscleWeight = 0f, mappingWeight = 0.3f, staticFriction = 0.3f, dynamicFriction = 0.2f, frictionCombine = PhysicMaterialCombine.Average }
+            // mappingWeight 1.0: 물리 래그돌 결과를 타겟 스켈레톤에 100% 매핑.
+            // 0.3이면 보이는 모델이 래그돌을 30%만 따라가서 서있는 채로 미끄러지는 것처럼 보임.
+            hand   = new BodyPartSettings { pinWeight = 0f, muscleWeight = 0f, mappingWeight = 1f, staticFriction = 0.2f, dynamicFriction = 0.1f, frictionCombine = PhysicMaterialCombine.Minimum },
+            arm    = new BodyPartSettings { pinWeight = 0f, muscleWeight = 0f, mappingWeight = 1f, staticFriction = 0.2f, dynamicFriction = 0.1f, frictionCombine = PhysicMaterialCombine.Minimum },
+            torso  = new BodyPartSettings { pinWeight = 0f, muscleWeight = 0f, mappingWeight = 1f, staticFriction = 0.5f, dynamicFriction = 0.3f, frictionCombine = PhysicMaterialCombine.Average },
+            leg    = new BodyPartSettings { pinWeight = 0f, muscleWeight = 0f, mappingWeight = 1f, staticFriction = 0.3f, dynamicFriction = 0.2f, frictionCombine = PhysicMaterialCombine.Average }
         };
 
         [Header("Recovering — 기절 회복 직후 취약 상태")]

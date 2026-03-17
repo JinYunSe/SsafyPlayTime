@@ -28,6 +28,10 @@ public class HandGrabHandler : MonoBehaviour
     [SerializeField] float breakTorque = 2000f;
     [SerializeField] float dualGrabBreakMultiplier = 3f;
 
+    [Header("Grab Distance")]
+    [Tooltip("손과 잡힌 앵커 사이 이 거리 초과 시 자동 해제")]
+    [SerializeField] float maxGrabDistance = 2.5f;
+
     [Header("Opponent Weaken")]
     [SerializeField] float grabbedPinWeight = 0.3f;
     [SerializeField] float grabbedMuscleWeight = 0.3f;
@@ -59,6 +63,18 @@ public class HandGrabHandler : MonoBehaviour
     public PuppetMaster GrabbedPuppet => _grabbedPuppet;
 
     bool UseConfigurableJoint => grabProfile != null && grabProfile.jointMode == GrabDriveProfile.GrabJointMode.ConfigurableJoint;
+
+    /// <summary>
+    /// 현재 잡고 있는 앵커의 월드 좌표.
+    /// ProceduralGrabArm의 IK 타겟 및 거리 기반 해제 검사에 사용.
+    /// </summary>
+    public Vector3 GetGrabAnchorWorldPosition()
+    {
+        var joint = ActiveJoint;
+        if (joint == null || joint.connectedBody == null)
+            return transform.position;
+        return joint.connectedBody.transform.TransformPoint(joint.connectedAnchor);
+    }
 
     void Awake()
     {
@@ -115,6 +131,23 @@ public class HandGrabHandler : MonoBehaviour
             var weakened = grabProfile.EvaluateWeakenedBreakForce(_currentGrabTargetType, holdDuration);
             _configurableJoint.breakForce = weakened;
             _configurableJoint.breakTorque = weakened;
+        }
+
+        // 손-앵커 거리 초과 시 강제 해제 (HFF/PA 방식)
+        // 조인트가 살아 있어도 손이 실제로 닿지 못하면 그랩 유지 불가
+        if (IsHolding)
+        {
+            var anchorWorld = GetGrabAnchorWorldPosition();
+            var handDist = Vector3.Distance(transform.position, anchorWorld);
+            if (handDist > maxGrabDistance)
+            {
+                RestoreGrabbedPuppet();
+                NotifyGrabReleased();
+                DestroyActiveJoint();
+                _grabbedPlayer = null;
+                _grabbedPuppet = null;
+                return;
+            }
         }
 
         if (networkPlayer.IsHandGrabActive(handSide))

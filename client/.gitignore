@@ -35,6 +35,7 @@
 
 # ─── Visual Studio Code ───
 .vscode/
+.claude/
 !.vscode/settings.json
 !.vscode/extensions.json
 

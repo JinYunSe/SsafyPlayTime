@@ -1,12 +1,12 @@
-using UnityEngine;
+using System.Collections.Generic;
 using RootMotion.Dynamics;
+using UnityEngine;
 
 namespace SSAFYPlayTime.Character
 {
     /// <summary>
-    /// 캐릭터 상태 전이에 따라 PuppetMaster의 부위별 가중치와 PhysicMaterial을 전환.
-    /// NetworkPlayer에서 상태 변경 시 SetState()를 호출하면
-    /// BodyPartPhysicsProfile에 정의된 부위별 프리셋을 각 Muscle에 적용한다.
+    /// 캐릭터 상태 전이에 따라 PuppetMaster 근육 가중치와 부위별 마찰을 전환한다.
+    /// Foot Collider와 루트 drive collider까지 포함해 실제 접촉점 마찰을 제어한다.
     /// </summary>
     public class BodyPartPhysicsManager : MonoBehaviour
     {
@@ -15,21 +15,17 @@ namespace SSAFYPlayTime.Character
         [SerializeField] private PuppetMaster puppetMaster;
 
         [Header("Transition")]
-        [Tooltip("상태 전환 시 보간 속도. 0이면 즉시 적용.")]
         [SerializeField] private float lerpSpeed = 8f;
 
         private BodyPartPhysicsProfile.CharacterPhysicsState _currentState = BodyPartPhysicsProfile.CharacterPhysicsState.Normal;
         private BodyPartPhysicsProfile.CharacterPhysicsState _targetState = BodyPartPhysicsProfile.CharacterPhysicsState.Normal;
         public BodyPartPhysicsProfile.CharacterPhysicsState CurrentState => _currentState;
 
-        // 부위별 런타임 PhysicMaterial 캐시 (각 Muscle의 Collider에 할당)
-        private PhysicMaterial[] _muscleMaterials;
-        // Muscle → BodyPartCategory 매핑 캐시
+        private List<PhysicMaterial>[] _muscleMaterials;
+        private readonly List<PhysicMaterial> _rootDriveMaterials = new();
         private BodyPartPhysicsProfile.BodyPartCategory[] _muscleCategories;
-        // 보간용 현재 값 캐시
         private float[] _currentPinWeights;
         private float[] _currentMuscleWeights;
-
         private bool _initialized;
 
         void Awake()
@@ -49,7 +45,6 @@ namespace SSAFYPlayTime.Character
             LerpToTarget(Time.deltaTime);
         }
 
-        /// <summary>외부(NetworkPlayer 등)에서 상태를 전환할 때 호출.</summary>
         public void SetState(BodyPartPhysicsProfile.CharacterPhysicsState newState)
         {
             if (profile == null || puppetMaster == null)
@@ -65,64 +60,54 @@ namespace SSAFYPlayTime.Character
             }
         }
 
-        /// <summary>프로파일 런타임 교체.</summary>
         public void SetProfile(BodyPartPhysicsProfile newProfile)
         {
             profile = newProfile;
             _initialized = false;
         }
 
-        // ============================================================
-        // 초기화
-        // ============================================================
-
         private void EnsureInitialized()
         {
-            if (_initialized) return;
-            if (puppetMaster == null || puppetMaster.muscles == null) return;
+            if (_initialized)
+                return;
+            if (puppetMaster == null || puppetMaster.muscles == null)
+                return;
 
             var count = puppetMaster.muscles.Length;
             _muscleCategories = new BodyPartPhysicsProfile.BodyPartCategory[count];
-            _muscleMaterials = new PhysicMaterial[count];
+            _muscleMaterials = new List<PhysicMaterial>[count];
             _currentPinWeights = new float[count];
             _currentMuscleWeights = new float[count];
 
-            for (int i = 0; i < count; i++)
+            CacheRootDriveMaterials();
+
+            for (var i = 0; i < count; i++)
             {
                 var muscle = puppetMaster.muscles[i];
                 _muscleCategories[i] = MapGroupToCategory(muscle.props.group);
                 _currentPinWeights[i] = muscle.props.pinWeight;
                 _currentMuscleWeights[i] = muscle.props.muscleWeight;
-
-                // 런타임 PhysicMaterial 생성 및 할당
-                var col = muscle.joint != null ? muscle.joint.GetComponent<Collider>() : null;
-                if (col != null)
-                {
-                    var mat = new PhysicMaterial($"BodyPart_{_muscleCategories[i]}_{i}");
-                    col.material = mat;
-                    _muscleMaterials[i] = mat;
-                }
+                _muscleMaterials[i] = CreateRuntimeMaterialsForMuscle(i, muscle.joint != null ? muscle.joint.transform : null);
             }
 
             _initialized = true;
+            ApplyImmediate(_targetState);
         }
-
-        // ============================================================
-        // 적용
-        // ============================================================
 
         private void ApplyImmediate(BodyPartPhysicsProfile.CharacterPhysicsState state)
         {
             var stateProfile = profile.GetProfile(state);
             var count = puppetMaster.muscles.Length;
 
-            for (int i = 0; i < count; i++)
+            for (var i = 0; i < count; i++)
             {
                 var settings = BodyPartPhysicsProfile.GetSettingsForCategory(stateProfile, _muscleCategories[i]);
                 ApplyToMuscle(i, settings);
                 _currentPinWeights[i] = settings.pinWeight;
                 _currentMuscleWeights[i] = settings.muscleWeight;
             }
+
+            ApplyRootDriveMaterials(stateProfile);
         }
 
         private void LerpToTarget(float dt)
@@ -132,7 +117,7 @@ namespace SSAFYPlayTime.Character
             var t = lerpSpeed > 0f ? Mathf.Clamp01(lerpSpeed * dt) : 1f;
             var allReached = true;
 
-            for (int i = 0; i < count; i++)
+            for (var i = 0; i < count; i++)
             {
                 var target = BodyPartPhysicsProfile.GetSettingsForCategory(targetProfile, _muscleCategories[i]);
 
@@ -143,19 +128,14 @@ namespace SSAFYPlayTime.Character
                 muscle.props.pinWeight = _currentPinWeights[i];
                 muscle.props.muscleWeight = _currentMuscleWeights[i];
                 muscle.props.mappingWeight = Mathf.Lerp(muscle.props.mappingWeight, target.mappingWeight, t);
-
-                // PhysicMaterial은 보간 대신 즉시 적용 (마찰 전환은 즉시가 자연스러움)
-                if (_currentState != _targetState && _muscleMaterials[i] != null)
-                {
-                    _muscleMaterials[i].staticFriction = target.staticFriction;
-                    _muscleMaterials[i].dynamicFriction = target.dynamicFriction;
-                    _muscleMaterials[i].frictionCombine = target.frictionCombine;
-                }
+                ApplyMaterialSettings(_muscleMaterials[i], target);
 
                 if (Mathf.Abs(_currentPinWeights[i] - target.pinWeight) > 0.01f ||
                     Mathf.Abs(_currentMuscleWeights[i] - target.muscleWeight) > 0.01f)
                     allReached = false;
             }
+
+            ApplyRootDriveMaterials(targetProfile);
 
             if (allReached)
                 _currentState = _targetState;
@@ -167,28 +147,100 @@ namespace SSAFYPlayTime.Character
             muscle.props.pinWeight = settings.pinWeight;
             muscle.props.muscleWeight = settings.muscleWeight;
             muscle.props.mappingWeight = settings.mappingWeight;
+            ApplyMaterialSettings(_muscleMaterials[index], settings);
+        }
 
-            if (_muscleMaterials[index] != null)
+        private void CacheRootDriveMaterials()
+        {
+            _rootDriveMaterials.Clear();
+
+            var colliders = GetComponents<Collider>();
+            for (var i = 0; i < colliders.Length; i++)
             {
-                _muscleMaterials[index].staticFriction = settings.staticFriction;
-                _muscleMaterials[index].dynamicFriction = settings.dynamicFriction;
-                _muscleMaterials[index].frictionCombine = settings.frictionCombine;
+                var collider = colliders[i];
+                if (collider == null || collider.isTrigger)
+                    continue;
+
+                var material = new PhysicMaterial($"BodyPart_RootDrive_{i}");
+                collider.material = material;
+                _rootDriveMaterials.Add(material);
             }
         }
 
-        // ============================================================
-        // Muscle.Group → BodyPartCategory 매핑
-        // ============================================================
+        private List<PhysicMaterial> CreateRuntimeMaterialsForMuscle(int muscleIndex, Transform jointRoot)
+        {
+            var materials = new List<PhysicMaterial>();
+            if (jointRoot == null)
+                return materials;
+
+            CollectColliderMaterialsRecursive(jointRoot, materials, muscleIndex);
+            return materials;
+        }
+
+        private void CollectColliderMaterialsRecursive(Transform current, List<PhysicMaterial> materials, int muscleIndex)
+        {
+            if (current == null)
+                return;
+
+            var colliders = current.GetComponents<Collider>();
+            for (var i = 0; i < colliders.Length; i++)
+            {
+                var collider = colliders[i];
+                if (collider == null || collider.isTrigger)
+                    continue;
+
+                var material = new PhysicMaterial($"BodyPart_{_muscleCategories[muscleIndex]}_{muscleIndex}_{materials.Count}");
+                collider.material = material;
+                materials.Add(material);
+            }
+
+            for (var i = 0; i < current.childCount; i++)
+            {
+                var child = current.GetChild(i);
+                if (child == null)
+                    continue;
+
+                if (child.GetComponent<Rigidbody>() != null || child.GetComponent<ConfigurableJoint>() != null)
+                    continue;
+
+                CollectColliderMaterialsRecursive(child, materials, muscleIndex);
+            }
+        }
+
+        private static void ApplyMaterialSettings(List<PhysicMaterial> materials, BodyPartPhysicsProfile.BodyPartSettings settings)
+        {
+            if (materials == null)
+                return;
+
+            for (var i = 0; i < materials.Count; i++)
+            {
+                var material = materials[i];
+                if (material == null)
+                    continue;
+
+                material.staticFriction = settings.staticFriction;
+                material.dynamicFriction = settings.dynamicFriction;
+                material.frictionCombine = settings.frictionCombine;
+            }
+        }
+
+        private void ApplyRootDriveMaterials(BodyPartPhysicsProfile.StateProfile stateProfile)
+        {
+            // Root sphere collider is the main locomotion contact surface, so reuse leg settings.
+            var settings = BodyPartPhysicsProfile.GetSettingsForCategory(
+                stateProfile,
+                BodyPartPhysicsProfile.BodyPartCategory.Leg);
+            ApplyMaterialSettings(_rootDriveMaterials, settings);
+        }
 
         private static BodyPartPhysicsProfile.BodyPartCategory MapGroupToCategory(Muscle.Group group)
         {
             return group switch
             {
                 Muscle.Group.Hand => BodyPartPhysicsProfile.BodyPartCategory.Hand,
-                Muscle.Group.Arm  => BodyPartPhysicsProfile.BodyPartCategory.Arm,
-                Muscle.Group.Leg  => BodyPartPhysicsProfile.BodyPartCategory.Leg,
+                Muscle.Group.Arm => BodyPartPhysicsProfile.BodyPartCategory.Arm,
+                Muscle.Group.Leg => BodyPartPhysicsProfile.BodyPartCategory.Leg,
                 Muscle.Group.Foot => BodyPartPhysicsProfile.BodyPartCategory.Leg,
-                // Hips, Spine, Head → Torso
                 _ => BodyPartPhysicsProfile.BodyPartCategory.Torso
             };
         }
