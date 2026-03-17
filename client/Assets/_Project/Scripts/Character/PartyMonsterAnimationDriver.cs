@@ -50,6 +50,14 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     bool isRemoteProxy;
     // 피호스트 로컬 플레이어: 입력은 읽지만 로코모션은 네트워크 기반
     bool isLocalWithoutAuthority;
+    [SerializeField] bool enableAnimationDriverDiagnostics = true;
+    bool animationDriverDiagInitialized;
+    bool animationDriverDiagLastCanDrive;
+    bool animationDriverDiagLastAnimatorEnabled;
+    bool animationDriverDiagLastPreserveGrabPose;
+    bool animationDriverDiagLastRemoteProxy;
+    bool animationDriverDiagLastLocalWithoutAuthority;
+    string animationDriverDiagLastStateName;
 
     void Reset()
     {
@@ -80,10 +88,12 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         if (animator == null)
             return;
 
-        if (!CanDriveAnimation())
+        var canDriveAnimation = CanDriveAnimation();
+        if (!canDriveAnimation)
         {
             ResetActionState();
             animator.enabled = false;
+            TraceAnimationDriverDiagnostics("Update-Disabled", canDriveAnimation);
             return;
         }
 
@@ -98,26 +108,28 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
                 // 로코모션은 네트워크 기반 (자기 rigidbody는 시뮬 안 하므로)
                 SyncGrabAnimation();
                 HandleInput();
-                if (!IsActionLocked())
+                if (!IsActionLocked() && !ShouldPreserveGrabPose())
                     UpdateLocomotionForOwnerProxy();
             }
             else
             {
                 // 순수 원격 프록시: 모든 것이 네트워크 데이터 기반
                 SyncGrabAnimation();
-                if (!IsActionLocked())
+                if (!IsActionLocked() && !ShouldPreserveGrabPose())
                     UpdateLocomotionFromNetwork();
             }
+            TraceAnimationDriverDiagnostics("Update-Remote", canDriveAnimation);
             return;
         }
 
         HandleInput();
 
-        if (IsActionLocked())
+        if (IsActionLocked() || ShouldPreserveGrabPose())
             return;
 
         // 그랩 중에도 locomotion 애니메이션 유지 (팔은 ProceduralGrabArm이 절차적으로 제어)
         UpdateLocomotion();
+        TraceAnimationDriverDiagnostics("Update-Local", canDriveAnimation);
     }
 
     /// <summary>
@@ -150,6 +162,19 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         ConfigureAnimator();
     }
 
+    public void RestoreAnimatorAfterPhysicsPresentation()
+    {
+        if (animator == null)
+            return;
+
+        ResetActionState();
+        currentStateName = null;
+        animator.enabled = true;
+        animator.Rebind();
+        animator.Update(0f);
+        UpdateCurrentLocomotion();
+    }
+
     public void PlayAttack()
     {
         if (!CanDriveAnimation())
@@ -160,8 +185,10 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         string punchState = isLeft ? PunchLeftState : PunchRightState;
         PlayLockedAction(punchState, attackLockDuration);
+        TraceOwnerProxyInputDiagnostics("PlayAttack", $"punchState={punchState} nextAttackLeft={nextAttackLeft} lockedUntil={actionLockedUntil:F3}");
 
         // OwnerProxy: NetworkPlayer에 예측 방향을 알려서 reconcile 시 비교 가능하게
+        if (networkPlayer != null)
         if (networkPlayer != null)
             networkPlayer.NotifyLocalPunchPrediction(isLeft);
     }
@@ -325,16 +352,19 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     {
         if (networkPlayer == null) return;
 
-        bool anyHandHolding = networkPlayer.IsAnyHandHolding;
+        var phase = networkPlayer.GetPhysicalPhase();
+        bool shouldGrabPose = phase == NetworkPlayer.PhysicalPhase.GrabIntent ||
+                              phase == NetworkPlayer.PhysicalPhase.Holding ||
+                              networkPlayer.IsGrabActive;
 
         // 물리적으로 잡고 있는데 그랩 포즈가 아니면 → 그랩 애니메이션 시작
-        if (anyHandHolding && !isGrabPoseActive && !IsActionLocked())
+        if (shouldGrabPose && !isGrabPoseActive && !IsActionLocked())
         {
             isGrabPoseActive = true;
             PlayState(GrabState);
         }
         // 물리적으로 아무것도 안 잡고 있는데 그랩 포즈가 활성이고 그랩 입력도 없으면 → 해제
-        else if (!anyHandHolding && isGrabPoseActive && !networkPlayer.IsGrabActive)
+        else if (!shouldGrabPose && isGrabPoseActive)
         {
             isGrabPoseActive = false;
             UpdateCurrentLocomotion();
@@ -413,7 +443,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     bool CanDriveAnimation()
     {
         // 기절 중이면 애니메이션 구동 불가 (래그돌이 대신 보임)
-        if (networkPlayer != null && networkPlayer.ShouldUsePhysicsPosePresentation())
+        if (networkPlayer != null && networkPlayer.ShouldUseHardPhysicsPresentation())
             return false;
 
         // 원격 프록시는 로컬 BehaviourPuppet 상태와 무관하게 항상 애니메이션 구동
@@ -422,6 +452,18 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return true;
 
         return true;
+    }
+
+    bool ShouldPreserveGrabPose()
+    {
+        if (networkPlayer == null)
+            return isGrabPoseActive;
+
+        var phase = networkPlayer.GetPhysicalPhase();
+        if (phase == NetworkPlayer.PhysicalPhase.GrabIntent || phase == NetworkPlayer.PhysicalPhase.Holding)
+            return true;
+
+        return networkPlayer.IsGrabActive || (!isRemoteProxy && isGrabPoseActive);
     }
 
     void ResetActionState()
@@ -492,5 +534,63 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         animator.Play(stateName, 0, 0f);
         currentStateName = stateName;
+    }
+
+    void TraceAnimationDriverDiagnostics(string source, bool canDriveAnimation)
+    {
+        if (!enableAnimationDriverDiagnostics || !Application.isPlaying || networkPlayer == null)
+            return;
+
+        if (!(Debug.isDebugBuild || Application.isEditor))
+            return;
+
+        if (networkPlayer.Runner == null || networkPlayer.Object == null || !networkPlayer.Object.IsValid || networkPlayer.HasStateAuthority)
+            return;
+
+        var animatorEnabled = animator != null && animator.enabled;
+        var preserveGrabPose = ShouldPreserveGrabPose();
+        var changed = !animationDriverDiagInitialized
+                      || animationDriverDiagLastCanDrive != canDriveAnimation
+                      || animationDriverDiagLastAnimatorEnabled != animatorEnabled
+                      || animationDriverDiagLastPreserveGrabPose != preserveGrabPose
+                      || animationDriverDiagLastRemoteProxy != isRemoteProxy
+                      || animationDriverDiagLastLocalWithoutAuthority != isLocalWithoutAuthority
+                      || animationDriverDiagLastStateName != currentStateName;
+
+        if (!changed)
+            return;
+
+        animationDriverDiagInitialized = true;
+        animationDriverDiagLastCanDrive = canDriveAnimation;
+        animationDriverDiagLastAnimatorEnabled = animatorEnabled;
+        animationDriverDiagLastPreserveGrabPose = preserveGrabPose;
+        animationDriverDiagLastRemoteProxy = isRemoteProxy;
+        animationDriverDiagLastLocalWithoutAuthority = isLocalWithoutAuthority;
+        animationDriverDiagLastStateName = currentStateName;
+
+        Debug.Log(
+            $"[AnimDriverDiag:{source}] name={name} remoteProxy={isRemoteProxy} localWithoutAuthority={isLocalWithoutAuthority} " +
+            $"canDrive={canDriveAnimation} animatorEnabled={animatorEnabled} preserveGrab={preserveGrabPose} " +
+            $"phase={networkPlayer.GetPhysicalPhase()} hard={networkPlayer.ShouldUseHardPhysicsPresentation()} " +
+            $"loco={networkPlayer.GetNetworkedLocomotionState()} moveSpeed={networkPlayer.GetNetworkedMoveSpeed():F2} " +
+            $"state={currentStateName ?? "<null>"}",
+            this);
+    }
+
+    void TraceOwnerProxyInputDiagnostics(string source, string detail)
+    {
+        if (!enableAnimationDriverDiagnostics || !Application.isPlaying || networkPlayer == null)
+            return;
+
+        if (!(Debug.isDebugBuild || Application.isEditor))
+            return;
+
+        if (!isRemoteProxy || !isLocalWithoutAuthority)
+            return;
+
+        Debug.Log(
+            $"[AnimInputDiag:{source}] name={name} canDrive={CanDriveAnimation()} grabPose={isGrabPoseActive} " +
+            $"phase={networkPlayer.GetPhysicalPhase()} hard={networkPlayer.ShouldUseHardPhysicsPresentation()} detail={detail}",
+            this);
     }
 }

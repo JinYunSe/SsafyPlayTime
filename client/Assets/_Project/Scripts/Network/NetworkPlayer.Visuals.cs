@@ -8,6 +8,8 @@ public sealed partial class NetworkPlayer
     {
         public Transform physics;
         public Transform visual;
+        public Quaternion physicsRestLocalRotation;
+        public Quaternion visualRestLocalRotation;
     }
 
     private bool ShouldDisablePhysicsAnimationSync =>
@@ -15,6 +17,9 @@ public sealed partial class NetworkPlayer
     private bool _hasAlternateVisualSwapTargets;
     private readonly List<PhysicsPoseBinding> _physicsPoseBindings = new();
     private bool _physicsPoseBindingsDirty = true;
+    private bool _wasUsingPhysicsPresentation;
+    private int _lastPhysicsPresentationSyncFrame = -1;
+    private bool _pendingAnimatorDrivenPoseReset;
 
     private void ConfigureAnimatedVisualMode()
     {
@@ -149,7 +154,12 @@ public sealed partial class NetworkPlayer
 
     private void UpdatePhysicsDrivenVisualPose()
     {
-        if (!ShouldUsePhysicsPosePresentation())
+        SynchronizePhysicsPresentationState();
+
+        if (_pendingAnimatorDrivenPoseReset)
+            TryRestoreAnimatorDrivenPresentation();
+
+        if (!ShouldUseHardPhysicsPresentation())
             return;
 
         var presentationRoot = GetPresentationRootTransform();
@@ -163,8 +173,62 @@ public sealed partial class NetworkPlayer
             if (binding.physics == null || binding.visual == null)
                 continue;
 
-            binding.visual.rotation = binding.physics.rotation;
+            binding.visual.localRotation = ResolveVisualLocalRotation(binding);
         }
+    }
+
+    private void SynchronizePhysicsPresentationState()
+    {
+        if (_lastPhysicsPresentationSyncFrame == Time.frameCount)
+            return;
+
+        _lastPhysicsPresentationSyncFrame = Time.frameCount;
+
+        var usingPhysicsPresentation = ShouldUseHardPhysicsPresentation();
+        if (usingPhysicsPresentation == _wasUsingPhysicsPresentation)
+            return;
+
+        _wasUsingPhysicsPresentation = usingPhysicsPresentation;
+
+        // 비호스트: physics presentation 전환 시 PuppetMaster mode 토글.
+        // Active → Map()이 muscle→target 매핑 실행 (기절/잡힘 물리 포즈 필요)
+        // Disabled → Map() 스킵, Animator가 target skeleton 단독 구동
+        if (_puppetMaster != null && !HasStateAuthority)
+        {
+            _puppetMaster.mode = usingPhysicsPresentation
+                ? RootMotion.Dynamics.PuppetMaster.Mode.Active
+                : RootMotion.Dynamics.PuppetMaster.Mode.Disabled;
+        }
+
+        SetPhysicsPresentationVisualMode(usingPhysicsPresentation);
+        MarkPhysicsPoseBindingsDirty();
+        MarkPresentationEffectsDirty();
+
+        if (!usingPhysicsPresentation)
+            _pendingAnimatorDrivenPoseReset = true;
+    }
+
+    private void TryRestoreAnimatorDrivenPresentation()
+    {
+        if (!_pendingAnimatorDrivenPoseReset || ShouldUseHardPhysicsPresentation())
+            return;
+
+        _pendingAnimatorDrivenPoseReset = false;
+        MarkPhysicsPoseBindingsDirty();
+        MarkPresentationEffectsDirty();
+
+        if (_externalAnimationDriver != null)
+        {
+            _externalAnimationDriver.RestoreAnimatorAfterPhysicsPresentation();
+            return;
+        }
+
+        if (animator == null)
+            return;
+
+        animator.enabled = true;
+        animator.Rebind();
+        animator.Update(0f);
     }
 
     private void EnsurePhysicsPoseBindings(Transform presentationRoot)
@@ -199,9 +263,28 @@ public sealed partial class NetworkPlayer
             _physicsPoseBindings.Add(new PhysicsPoseBinding
             {
                 physics = physicsTransform,
-                visual = visualTransform
+                visual = visualTransform,
+                physicsRestLocalRotation = physicsTransform.localRotation,
+                visualRestLocalRotation = visualTransform.localRotation
             });
         }
+    }
+
+    private static Quaternion ResolveVisualLocalRotation(in PhysicsPoseBinding binding)
+    {
+        return ResolveRelativeLocalRotation(
+            binding.physicsRestLocalRotation,
+            binding.physics.localRotation,
+            binding.visualRestLocalRotation);
+    }
+
+    private static Quaternion ResolveRelativeLocalRotation(
+        Quaternion physicsRestLocalRotation,
+        Quaternion currentPhysicsLocalRotation,
+        Quaternion visualRestLocalRotation)
+    {
+        var localDelta = Quaternion.Inverse(physicsRestLocalRotation) * currentPhysicsLocalRotation;
+        return visualRestLocalRotation * localDelta;
     }
 
     private bool _isStunVisualMode;
@@ -213,17 +296,17 @@ public sealed partial class NetworkPlayer
     /// 회복 시: 애니메이션 비주얼 루트의 메시를 복원.
     ///          → 보이는 모델이 애니메이터 구동으로 돌아감.
     /// </summary>
-    private void SetStunVisualMode(bool stunned)
+    private void SetPhysicsPresentationVisualMode(bool usePhysicsPresentation)
     {
         if (!ShouldDisablePhysicsAnimationSync || _animatedVisualRoot == null || !_hasAlternateVisualSwapTargets)
             return;
 
-        if (_isStunVisualMode == stunned)
+        if (_isStunVisualMode == usePhysicsPresentation)
             return;
 
-        _isStunVisualMode = stunned;
+        _isStunVisualMode = usePhysicsPresentation;
 
-        if (stunned)
+        if (usePhysicsPresentation)
         {
             // 물리 타겟 스켈레톤의 렌더러를 보이게, 애니메이션 비주얼 렌더러를 숨기기
             var skinnedMeshRenderers = GetComponentsInChildren<SkinnedMeshRenderer>(true);
@@ -239,5 +322,10 @@ public sealed partial class NetworkPlayer
             // 원래 상태 복원: 애니메이션 비주얼만 보이게
             SetVisibleRendererState(_animatedVisualRoot);
         }
+    }
+
+    private void SetStunVisualMode(bool stunned)
+    {
+        SetPhysicsPresentationVisualMode(stunned);
     }
 }
