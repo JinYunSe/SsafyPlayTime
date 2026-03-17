@@ -88,7 +88,7 @@ namespace SSAFYPlayTime
                 // LauncherScene·GameScene 공통으로 필요하다.
                 TryRemapMigrationEntryOnJoin(runner, player);
 
-                if (IsActiveGameplayScene())
+                if (IsActiveGameplayScene() && _gameplaySceneSpawnBootstrapComplete)
                 {
                     TrySpawnGameplayNetworkCharacter(player);
                 }
@@ -423,6 +423,7 @@ namespace SSAFYPlayTime
                     {
                         RestoreEnvironmentStatesAfterMigration();
                         TrySpawnGameplayNetworkCharactersForAllPlayers();
+                        _gameplaySceneSpawnBootstrapComplete = true;
                     }
 
                     // 모든 플레이어(서버·클라이언트 공통)가 자신의 캐릭터 선택을 재전송한다.
@@ -552,17 +553,22 @@ namespace SSAFYPlayTime
         private bool _netLeftMouseDown;
         private float _netLeftMouseDownTime;
         private bool _netLeftMouseConsumedAsGrab;
+        private bool _netRightMouseDown;
+        private float _netRightMouseDownTime;
+        private bool _netRightMouseConsumedAsGrab;
         private const float NET_GRAB_HOLD_THRESHOLD = 0.15f;
 
         // 매 네트워크 틱마다 로컬 플레이어의 입력을 수집해 Fusion에 전달한다.
-        // 좌클릭 짧게 떼기 = 아이템 사용(Punch 비트 재사용), 좌클릭 꾹(0.15초 이상) = GrabHold
+        // 좌클릭 짧게 = 아이템 사용(Punch), 좌클릭 꾹(0.15초+) = 왼손 그랩
+        // 우클릭 짧게 = 던지기, 우클릭 꾹(0.15초+) = 오른손 그랩
         void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input)
         {
             if (!GameStartCountdown.InputEnabled) return;
 
             bool isPunch = false;
+            bool isThrow = false;
 
-            // 좌클릭 상태 추적
+            // 좌클릭 상태 추적 (왼손 그랩)
             if (Input.GetMouseButtonDown(0))
             {
                 _netLeftMouseDown = true;
@@ -579,14 +585,35 @@ namespace SSAFYPlayTime
             if (Input.GetMouseButtonUp(0))
             {
                 if (!_netLeftMouseConsumedAsGrab && Time.time - _netLeftMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
-                {
                     isPunch = true;
-                }
 
                 _netLeftMouseDown = false;
             }
 
-            bool isGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
+            // 우클릭 상태 추적 (오른손 그랩)
+            if (Input.GetMouseButtonDown(1))
+            {
+                _netRightMouseDown = true;
+                _netRightMouseDownTime = Time.time;
+                _netRightMouseConsumedAsGrab = false;
+            }
+
+            if (Input.GetMouseButton(1) && _netRightMouseDown)
+            {
+                if (Time.time - _netRightMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
+                    _netRightMouseConsumedAsGrab = true;
+            }
+
+            if (Input.GetMouseButtonUp(1))
+            {
+                if (!_netRightMouseConsumedAsGrab && Time.time - _netRightMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
+                    isThrow = true;
+
+                _netRightMouseDown = false;
+            }
+
+            bool isLeftGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
+            bool isRightGrabHold = _netRightMouseDown && _netRightMouseConsumedAsGrab;
             var cameraYaw = Camera.main != null ? Camera.main.transform.eulerAngles.y : 0f;
 
             input.Set(new PlayerNetworkInput
@@ -596,8 +623,9 @@ namespace SSAFYPlayTime
                 Jump = Input.GetKeyDown(KeyCode.Space),
                 Punch = isPunch,
                 Drop = Input.GetKeyDown(KeyCode.F),
-                Throw = Input.GetMouseButtonDown(1),
-                GrabHold = isGrabHold,
+                Throw = isThrow,
+                LeftGrabHold = isLeftGrabHold,
+                RightGrabHold = isRightGrabHold,
                 Headbutt = Input.GetMouseButtonDown(2),
                 Sprint = Input.GetKey(KeyCode.LeftShift)
             });
@@ -717,6 +745,7 @@ namespace SSAFYPlayTime
             _spawnedGameplayNetworkCharacters.Clear();
             _spawnedCharacterIndexByPlayerId.Clear();
             _cachedSpawnPointGroup = null;
+            _gameplaySceneSpawnBootstrapComplete = false;
 
             // 마이그레이션 중에는 캡처해둔 위치 테이블을 지우지 않는다.
             // StartGame(HostMigrationToken) 과정에서 OnSceneLoadStart 가 발동할 수 있으나
@@ -776,6 +805,7 @@ namespace SSAFYPlayTime
                     // 마이그레이션 데이터가 없으면 no-op.
                     RestoreEnvironmentStatesAfterMigration();
                     TrySpawnGameplayNetworkCharactersForAllPlayers();
+                    _gameplaySceneSpawnBootstrapComplete = true;
                 }
             }
             else
