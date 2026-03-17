@@ -1,9 +1,20 @@
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 public sealed partial class NetworkPlayer
 {
+    private struct PhysicsPoseBinding
+    {
+        public Transform physics;
+        public Transform visual;
+    }
+
     private bool ShouldDisablePhysicsAnimationSync =>
         useAnimatedVisualOnly && disablePhysicsAnimationSync && _animatedVisualRoot != null;
+    private bool _hasAlternateVisualSwapTargets;
+    private readonly List<PhysicsPoseBinding> _physicsPoseBindings = new();
+    private bool _physicsPoseBindingsDirty = true;
 
     private void ConfigureAnimatedVisualMode()
     {
@@ -13,6 +24,10 @@ public sealed partial class NetworkPlayer
         _animatedVisualRoot = FindAnimatedVisualRoot();
         if (_animatedVisualRoot == null)
             return;
+
+        MarkPhysicsPoseBindingsDirty();
+
+        _hasAlternateVisualSwapTargets = HasAlternateVisibleRenderers(_animatedVisualRoot);
 
         var preferredAnimator = _animatedVisualRoot.GetComponent<Animator>()
             ?? _animatedVisualRoot.GetComponentInChildren<Animator>(true);
@@ -26,7 +41,10 @@ public sealed partial class NetworkPlayer
 
     private Transform FindAnimatedVisualRoot()
     {
-        if (IsAnimatedVisualRoot(animator != null ? animator.transform : null))
+        if (_puppetMaster != null && _puppetMaster.targetRoot != null)
+            return _puppetMaster.targetRoot;
+
+        if (animator != null && animator.transform != transform)
             return animator.transform;
 
         var animationDriver = transform.Find("_AnimationDriver");
@@ -52,6 +70,9 @@ public sealed partial class NetworkPlayer
                 return candidate.transform;
         }
 
+        if (animators.Length == 1 && animators[0] != null && animators[0].transform != transform)
+            return animators[0].transform;
+
         return null;
     }
 
@@ -61,6 +82,19 @@ public sealed partial class NetworkPlayer
             return false;
 
         return candidate.name == "_AnimationDriver" || candidate.name.Contains("Animated");
+    }
+
+    private bool HasAlternateVisibleRenderers(Transform visibleRoot)
+    {
+        var renderers = GetComponentsInChildren<Renderer>(true);
+        for (var i = 0; i < renderers.Length; i++)
+        {
+            var candidate = renderers[i];
+            if (candidate != null && !IsUnderVisualRoot(candidate.transform, visibleRoot))
+                return true;
+        }
+
+        return false;
     }
 
     private void SetVisibleRendererState(Transform visibleRoot)
@@ -104,6 +138,106 @@ public sealed partial class NetworkPlayer
         {
             if (syncPhysicsObjects[i] != null)
                 syncPhysicsObjects[i].SetSyncAnimationEnabled(enabled);
+        }
+    }
+
+    // ─── 기절/회복 비주얼 모드 전환 ───
+    private void MarkPhysicsPoseBindingsDirty()
+    {
+        _physicsPoseBindingsDirty = true;
+    }
+
+    private void UpdatePhysicsDrivenVisualPose()
+    {
+        if (!ShouldUsePhysicsPosePresentation())
+            return;
+
+        var presentationRoot = GetPresentationRootTransform();
+        if (presentationRoot == null || syncPhysicsObjects == null || syncPhysicsObjects.Length == 0)
+            return;
+
+        EnsurePhysicsPoseBindings(presentationRoot);
+        for (var i = 0; i < _physicsPoseBindings.Count; i++)
+        {
+            var binding = _physicsPoseBindings[i];
+            if (binding.physics == null || binding.visual == null)
+                continue;
+
+            binding.visual.rotation = binding.physics.rotation;
+        }
+    }
+
+    private void EnsurePhysicsPoseBindings(Transform presentationRoot)
+    {
+        if (!_physicsPoseBindingsDirty && _physicsPoseBindings.Count > 0)
+            return;
+
+        _physicsPoseBindingsDirty = false;
+        _physicsPoseBindings.Clear();
+
+        var visualByName = new Dictionary<string, Transform>(StringComparer.Ordinal);
+        var visualTransforms = presentationRoot.GetComponentsInChildren<Transform>(true);
+        for (var i = 0; i < visualTransforms.Length; i++)
+        {
+            var candidate = visualTransforms[i];
+            if (candidate != null && !visualByName.ContainsKey(candidate.name))
+                visualByName.Add(candidate.name, candidate);
+        }
+
+        for (var i = 0; i < syncPhysicsObjects.Length; i++)
+        {
+            var physicsTransform = syncPhysicsObjects[i] != null ? syncPhysicsObjects[i].transform : null;
+            if (physicsTransform == null)
+                continue;
+
+            if (!visualByName.TryGetValue(physicsTransform.name, out var visualTransform))
+                continue;
+
+            if (visualTransform == physicsTransform)
+                continue;
+
+            _physicsPoseBindings.Add(new PhysicsPoseBinding
+            {
+                physics = physicsTransform,
+                visual = visualTransform
+            });
+        }
+    }
+
+    private bool _isStunVisualMode;
+
+    /// <summary>
+    /// 기절 시: PuppetMaster 타겟 스켈레톤(물리 매핑 대상)의 메시를 보여주고
+    ///          애니메이션 비주얼 루트의 메시를 숨긴다.
+    ///          → 보이는 모델이 래그돌 물리 결과를 따라감.
+    /// 회복 시: 애니메이션 비주얼 루트의 메시를 복원.
+    ///          → 보이는 모델이 애니메이터 구동으로 돌아감.
+    /// </summary>
+    private void SetStunVisualMode(bool stunned)
+    {
+        if (!ShouldDisablePhysicsAnimationSync || _animatedVisualRoot == null || !_hasAlternateVisualSwapTargets)
+            return;
+
+        if (_isStunVisualMode == stunned)
+            return;
+
+        _isStunVisualMode = stunned;
+
+        if (stunned)
+        {
+            // 물리 타겟 스켈레톤의 렌더러를 보이게, 애니메이션 비주얼 렌더러를 숨기기
+            var skinnedMeshRenderers = GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            for (var i = 0; i < skinnedMeshRenderers.Length; i++)
+                skinnedMeshRenderers[i].enabled = !IsUnderVisualRoot(skinnedMeshRenderers[i].transform, _animatedVisualRoot);
+
+            var meshRenderers = GetComponentsInChildren<MeshRenderer>(true);
+            for (var i = 0; i < meshRenderers.Length; i++)
+                meshRenderers[i].enabled = !IsUnderVisualRoot(meshRenderers[i].transform, _animatedVisualRoot);
+        }
+        else
+        {
+            // 원래 상태 복원: 애니메이션 비주얼만 보이게
+            SetVisibleRendererState(_animatedVisualRoot);
         }
     }
 }

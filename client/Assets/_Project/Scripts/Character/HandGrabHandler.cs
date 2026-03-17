@@ -1,104 +1,175 @@
+using Fusion;
 using UnityEngine;
+using RootMotion.Dynamics;
+using SSAFYPlayTime.Character;
 using SSAFYPlayTime.Gameplay.Items;
 
 /// <summary>
-/// 멀?�플?�이 ?�??그랩 ?�들??
-/// 
-/// 좌클�?�?= 그랩 모드
-///   - ?�드 ?�이?�을 ?�으�?물리 고정 ?�??즉시 ?�득 처리
-///   - OnCollisionEnter?�서 FixedJoint ?�성 (물체 or ?�른 ?�레?�어)
-///   - ?�른 ?�레?�어가 active ragdoll ??붙잡?�서 ?�동 방해
-///   - ?�른 ?�레?�어가 기절 ???�이?�처???�고 ?�니?��? ?��?�?가??
-/// 좌클�??��? = ?��?(HandGrabHandler 밖에??NetworkPlayer가 처리)
-///
-/// StateAuthority(?�스???�서�?물리 ?�산 ?�행.
+/// 멀티플레이 손 그랩 핸들러.
+/// GrabDriveProfile에 따라 FixedJoint(딱딱) 또는 ConfigurableJoint(탄성) 모드 선택 가능.
+/// StateAuthority(호스트)에서만 물리 연산 실행.
 /// </summary>
 public class HandGrabHandler : MonoBehaviour
 {
+    public enum HandSide { Left, Right }
+
+    [Header("Hand Identity")]
+    [SerializeField] HandSide handSide = HandSide.Left;
+    public HandSide Side => handSide;
+
     [SerializeField] Animator animator;
 
-    // ?��??�에 ?�성?�는 FixedJoint
-    FixedJoint fixedJoint;
+    [Header("Grab Profile (선택)")]
+    [Tooltip("프로파일이 없으면 기본 FixedJoint 모드로 동작")]
+    [SerializeField] GrabDriveProfile grabProfile;
 
-    // ???�의 Rigidbody
+    [Header("Grab Physics (프로파일 미사용 시 폴백)")]
+    [SerializeField] float breakForce = 2000f;
+    [SerializeField] float breakTorque = 2000f;
+    [SerializeField] float dualGrabBreakMultiplier = 3f;
+
+    [Header("Grab Distance")]
+    [Tooltip("손과 잡힌 앵커 사이 이 거리 초과 시 자동 해제")]
+    [SerializeField] float maxGrabDistance = 2.5f;
+
+    [Header("Opponent Weaken")]
+    [SerializeField] float grabbedPinWeight = 0.3f;
+    [SerializeField] float grabbedMuscleWeight = 0.3f;
+
+    // 런타임 — 두 조인트 중 하나만 사용
+    FixedJoint _fixedJoint;
+    ConfigurableJoint _configurableJoint;
     Rigidbody rigidbody3D;
-
-    // ?�위 NetworkPlayer 참조
     NetworkPlayer networkPlayer;
     ItemRuntimeHost itemRuntimeHost;
-
-    // ?�???�인??(?�터?�이???�환)
     Transform _holdPoint;
-
-    // ?�힌 ?�?�이 ?�레?�어?��? 추적
     NetworkPlayer _grabbedPlayer;
 
-    /// <summary>?�재 무언가�??�고 ?�는지</summary>
-    public bool IsHolding => fixedJoint != null;
+    // 잡힌 PuppetMaster 약화 추적
+    PuppetMaster _grabbedPuppet;
+    float _originalPinWeight;
+    float _originalMuscleWeight;
 
-    /// <summary>?�힌 ?�?�이 기절???�레?�어?��?</summary>
+    // 동일 PuppetMaster를 잡고 있는 핸들러 수 (양손 중복 약화 방지)
+    static readonly System.Collections.Generic.Dictionary<PuppetMaster, int> _grabRefCounts
+        = new System.Collections.Generic.Dictionary<PuppetMaster, int>();
+
+    // --- 프로퍼티: 어느 조인트든 활성이면 잡고 있는 것 ---
+    Joint ActiveJoint => (Joint)_fixedJoint ?? _configurableJoint;
+    public bool IsHolding => ActiveJoint != null;
     public bool IsHoldingStunnedPlayer => _grabbedPlayer != null && !_grabbedPlayer.IsActiveRagdoll;
+    public bool IsHoldingConsciousPlayer => IsHolding && _grabbedPlayer != null && _grabbedPlayer.IsActiveRagdoll;
+    public bool IsHoldingThrowableTarget => IsHolding && (_grabbedPlayer == null || !_grabbedPlayer.IsActiveRagdoll);
+    public PuppetMaster GrabbedPuppet => _grabbedPuppet;
 
-    public bool IsHoldingConsciousPlayer => fixedJoint != null && _grabbedPlayer != null && _grabbedPlayer.IsActiveRagdoll;
+    bool UseConfigurableJoint => grabProfile != null && grabProfile.jointMode == GrabDriveProfile.GrabJointMode.ConfigurableJoint;
 
-    public bool IsHoldingThrowableTarget => fixedJoint != null && (_grabbedPlayer == null || !_grabbedPlayer.IsActiveRagdoll);
+    /// <summary>
+    /// 현재 잡고 있는 앵커의 월드 좌표.
+    /// ProceduralGrabArm의 IK 타겟 및 거리 기반 해제 검사에 사용.
+    /// </summary>
+    public Vector3 GetGrabAnchorWorldPosition()
+    {
+        var joint = ActiveJoint;
+        if (joint == null || joint.connectedBody == null)
+            return transform.position;
+        return joint.connectedBody.transform.TransformPoint(joint.connectedAnchor);
+    }
 
     void Awake()
     {
         networkPlayer = transform.root.GetComponent<NetworkPlayer>();
         rigidbody3D = GetComponent<Rigidbody>();
 
+        // 손 Rigidbody solver budget: 프로젝트 기본 10 기반, 그랩 안정성을 위해 약간 상향.
+        // 255는 CPU 과부하 위험 — 보고서 권장 10~20 범위 준수.
         if (rigidbody3D != null)
-            rigidbody3D.solverIterations = 255;
+            rigidbody3D.solverIterations = 16;
 
         if (animator == null)
             animator = GetComponentInParent<Animator>();
+
+        // Inspector에서 미설정 시 트랜스폼 이름으로 자동 감지
+        AutoDetectHandSide();
     }
 
-    /// <summary>?�???�인?��? ?��??�서 지??(기존 ?�터?�이???�환)</summary>
+    private void AutoDetectHandSide()
+    {
+        var nameLower = transform.name.ToLowerInvariant();
+        if (nameLower.Contains("right") || nameLower.Contains("_r_") || nameLower.EndsWith("_r"))
+            handSide = HandSide.Right;
+    }
+
+    void OnJointBreak(float breakForceAmount)
+    {
+        RestoreGrabbedPuppet();
+        NotifyGrabReleased();
+        _fixedJoint = null;
+        _configurableJoint = null;
+        _grabbedPlayer = null;
+        _grabbedPuppet = null;
+    }
+
     public void SetHoldPoint(Transform point)
     {
         _holdPoint = point;
     }
 
-    /// <summary>
-    /// NetworkPlayer가 ?�택???��????�스?��? 공유받는??
-    /// </summary>
     public void SetItemRuntimeHost(ItemRuntimeHost runtimeHost)
     {
         itemRuntimeHost = runtimeHost;
     }
 
-    /// <summary>
-    /// NetworkPlayer.FixedUpdateNetwork()?�서 �????�출 (?�스???�용).
-    /// 좌클�?�?GrabHold) ?�태???�라 그랩 ?��?/?�제.
-    /// </summary>
     public void UpdateState()
     {
         if (networkPlayer == null) return;
 
-        if (networkPlayer.IsGrabActive)
+        // 잡고 있는 동안 시간 경과에 따라 breakForce 약화 (weakening curve)
+        if (IsHolding && _configurableJoint != null && grabProfile != null)
+        {
+            var holdDuration = Time.time - _grabStartTime;
+            var weakened = grabProfile.EvaluateWeakenedBreakForce(_currentGrabTargetType, holdDuration);
+            _configurableJoint.breakForce = weakened;
+            _configurableJoint.breakTorque = weakened;
+        }
+
+        // 손-앵커 거리 초과 시 강제 해제 (HFF/PA 방식)
+        // 조인트가 살아 있어도 손이 실제로 닿지 못하면 그랩 유지 불가
+        if (IsHolding)
+        {
+            var anchorWorld = GetGrabAnchorWorldPosition();
+            var handDist = Vector3.Distance(transform.position, anchorWorld);
+            if (handDist > maxGrabDistance)
+            {
+                RestoreGrabbedPuppet();
+                NotifyGrabReleased();
+                DestroyActiveJoint();
+                _grabbedPlayer = null;
+                _grabbedPuppet = null;
+                return;
+            }
+        }
+
+        if (networkPlayer.IsHandGrabActive(handSide))
             return;
 
-        if (fixedJoint != null)
+        if (IsHolding)
         {
-            Destroy(fixedJoint);
+            RestoreGrabbedPuppet();
+            NotifyGrabReleased();
+            DestroyActiveJoint();
             _grabbedPlayer = null;
+            _grabbedPuppet = null;
         }
     }
 
-    /// <summary>
-    /// OverlapSphere 방식??그랩 ?�도.
-    /// ?�트?�크 ?�경?�서???�스?�에?�만 ?�출.
-    /// ?�른 ?�레?�어???�기 ?�?�에 ?�함.
-    /// </summary>
     public void TryGrab()
     {
         if (networkPlayer != null && networkPlayer.Object != null
             && networkPlayer.Object.IsValid && !networkPlayer.HasStateAuthority)
             return;
 
-        if (fixedJoint != null) return;
+        if (IsHolding) return;
         if (networkPlayer != null && !networkPlayer.IsActiveRagdoll) return;
 
         float grabRadius = 0.8f;
@@ -123,7 +194,6 @@ public class HandGrabHandler : MonoBehaviour
 
         if (bestTarget != null)
         {
-            // ?�드 ?�이?��? ??�� ?�득 경로�??�용?�고 물리 그랩?�로 ?�백?��? ?�는??
             if (IsFieldItemRigidbody(bestTarget))
             {
                 TryPickupFieldItem(bestTarget);
@@ -134,50 +204,55 @@ public class HandGrabHandler : MonoBehaviour
         }
     }
 
-    /// <summary>?�려?�기 (F??</summary>
     public void Drop()
     {
-        if (fixedJoint == null) return;
+        if (!IsHolding) return;
 
-        if (fixedJoint.connectedBody != null)
-            fixedJoint.connectedBody.AddForce(Vector3.up * 0.5f, ForceMode.Impulse);
+        Rigidbody connected = GetConnectedBody();
+        if (connected != null)
+            connected.AddForce(Vector3.up * 0.5f, ForceMode.Impulse);
 
-        Destroy(fixedJoint);
+        RestoreGrabbedPuppet();
+        NotifyGrabReleased();
+        DestroyActiveJoint();
         _grabbedPlayer = null;
+        _grabbedPuppet = null;
     }
 
-    /// <summary>?��?�?(?�클�?</summary>
     public void Throw()
     {
-        if (fixedJoint == null) return;
+        if (!IsHolding) return;
         if (_grabbedPlayer != null && _grabbedPlayer.IsActiveRagdoll) return;
 
-        if (fixedJoint.connectedBody != null)
-        {
-            float force;
-            if (_grabbedPlayer != null && !_grabbedPlayer.IsActiveRagdoll)
-                force = GetGrabThrowForceStunned();
-            else if (_grabbedPlayer != null)
-                force = GetGrabThrowForceNormal();
-            else
-                force = 10f;
+        Rigidbody connected = GetConnectedBody();
 
+        // Throw 힘 계산을 조인트 파괴 전에 수행 (버그 수정)
+        float force;
+        float throwUp = grabProfile != null ? grabProfile.throwUpComponent : 0.4f;
+
+        if (_grabbedPlayer != null && !_grabbedPlayer.IsActiveRagdoll)
+            force = GetGrabThrowForceStunned();
+        else if (_grabbedPlayer != null)
+            force = GetGrabThrowForceNormal();
+        else
+            force = 10f;
+
+        RestoreGrabbedPuppet();
+        NotifyGrabReleased();
+        DestroyActiveJoint();
+        _grabbedPlayer = null;
+        _grabbedPuppet = null;
+
+        if (connected != null)
+        {
             Vector3 throwDir = Vector3.up;
             if (networkPlayer != null)
-                throwDir = (networkPlayer.transform.forward + Vector3.up * 0.3f).normalized * force;
+                throwDir = (networkPlayer.transform.forward + Vector3.up * throwUp).normalized * force;
 
-            fixedJoint.connectedBody.AddForce(throwDir, ForceMode.Impulse);
+            connected.AddForce(throwDir, ForceMode.Impulse);
         }
-
-        Destroy(fixedJoint);
-        _grabbedPlayer = null;
     }
 
-    /// <summary>
-    /// 충돌 ???�동 그랩.
-    /// 좌클�?�?GrabHold) ?�태?�서 충돌?�면 FixedJoint ?�결.
-    /// ?�른 ?�레?�어???�?�이 ??
-    /// </summary>
     void OnCollisionEnter(Collision collision)
     {
         TryCarryObject(collision);
@@ -185,22 +260,19 @@ public class HandGrabHandler : MonoBehaviour
 
     bool TryCarryObject(Collision collision)
     {
-        // StateAuthority�??�행
         if (networkPlayer != null && networkPlayer.Object != null
             && networkPlayer.Object.IsValid && !networkPlayer.HasStateAuthority)
             return false;
 
         if (networkPlayer != null && !networkPlayer.IsActiveRagdoll) return false;
-        if (networkPlayer != null && !networkPlayer.IsGrabActive) return false;
-        if (fixedJoint != null) return false;
+        if (networkPlayer != null && !networkPlayer.IsHandGrabActive(handSide)) return false;
+        if (IsHolding) return false;
 
-        // ?�기 ?�신 불�?
         if (!collision.collider.TryGetComponent(out Rigidbody otherRb))
             return false;
         if (ShouldIgnoreGrabTarget(otherRb))
             return false;
 
-        // ?�드 ?�이?��? ??�� ?�득 경로�??�용?�고 물리 그랩?�로 ?�백?��? ?�는??
         if (IsFieldItemRigidbody(otherRb))
         {
             TryPickupFieldItem(otherRb);
@@ -229,7 +301,7 @@ public class HandGrabHandler : MonoBehaviour
 
         if (itemRuntimeHost == null)
         {
-            Debug.Log("[HandGrabHandler] ?�이???��????�스?��? 찾�? 못했?�니??", this);
+            Debug.Log("[HandGrabHandler] ItemRuntimeHost를 찾지 못했습니다", this);
             return false;
         }
 
@@ -238,13 +310,16 @@ public class HandGrabHandler : MonoBehaviour
 
         if (!itemRuntimeHost.IsReady && !itemRuntimeHost.Initialize())
         {
-            Debug.Log($"[HandGrabHandler] ?�이???��???초기???�패: {itemRuntimeHost.LastError}", this);
+            Debug.Log($"[HandGrabHandler] 아이템 런타임 초기화 실패: {itemRuntimeHost.LastError}", this);
             return false;
         }
 
-        if (!itemRuntimeHost.TryPickup(fieldDrop.ItemId, out var reason))
+        var pickedItemId = fieldDrop.ItemId;
+        var pickupOrigin = fieldDrop.transform.position;
+        var dropInstanceId = fieldDrop.InstanceId;
+
+        if (!itemRuntimeHost.TryPickup(pickedItemId, out var reason))
         {
-            // ?��? 보유 중이�????�?��? ?�비??것으�?간주??물리 그랩 ?�백??막는??
             if (!string.IsNullOrWhiteSpace(reason) &&
                 reason.StartsWith("Already holding an item", System.StringComparison.Ordinal))
             {
@@ -252,11 +327,15 @@ public class HandGrabHandler : MonoBehaviour
             }
 
             if (!string.IsNullOrWhiteSpace(reason))
-                Debug.Log($"[HandGrabHandler] ?�이???�득 ?�패: {reason}", this);
+                Debug.Log($"[HandGrabHandler] 아이템 획득 실패: {reason}", this);
             return false;
         }
 
         fieldDrop.MarkPickedUp();
+
+        // 키 기반 픽업과 동일하게 네트워크 브로드캐스트 — 원격 클라이언트에서도 드롭 제거
+        if (networkPlayer != null)
+            networkPlayer.NotifyHandGrabPickedFieldDrop(pickedItemId, dropInstanceId ?? string.Empty, pickupOrigin);
 
         return true;
     }
@@ -314,21 +393,126 @@ public class HandGrabHandler : MonoBehaviour
         return owner == characterRoot || owner.root == characterRoot;
     }
 
+    // =========================================================
+    // 조인트 생성 — 프로파일에 따라 FixedJoint / ConfigurableJoint
+    // =========================================================
+
+    // 잡힌 시간 추적 (weakening curve 적용용)
+    private float _grabStartTime;
+    private SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType _currentGrabTargetType;
+
     private void AttachGrab(Rigidbody targetRb, Vector3 worldAnchorPoint)
     {
         if (ShouldIgnoreGrabTarget(targetRb))
             return;
 
-        fixedJoint = gameObject.AddComponent<FixedJoint>();
-        fixedJoint.connectedBody = targetRb;
-        fixedJoint.autoConfigureConnectedAnchor = false;
-        fixedJoint.connectedAnchor = targetRb.transform.InverseTransformPoint(worldAnchorPoint);
+        Vector3 localAnchor = targetRb.transform.InverseTransformPoint(worldAnchorPoint);
 
-        // ?�힌 ?�?�이 ?�른 ?�레?�어?��? 체크
-        _grabbedPlayer = targetRb.transform.root.GetComponent<NetworkPlayer>();
+        // 타겟 유형 판별: 사람 vs 오브젝트
+        var targetPlayer = targetRb.transform.root.GetComponent<NetworkPlayer>();
+        _currentGrabTargetType = targetPlayer != null
+            ? SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.Player
+            : SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.Object;
+        _grabStartTime = Time.time;
+
+        if (UseConfigurableJoint)
+            AttachConfigurableJoint(targetRb, localAnchor, _currentGrabTargetType);
+        else
+            AttachFixedJoint(targetRb, localAnchor);
+
+        _grabbedPlayer = targetPlayer;
+        WeakenGrabbedPuppet(targetRb);
+
+        // OwnerProxy용 grab 관계 보고: 누구를 잡았는지 + 앵커
+        if (networkPlayer != null)
+        {
+            var targetNetObj = targetRb.transform.root.GetComponent<Fusion.NetworkObject>();
+            var netId = targetNetObj != null ? targetNetObj.Id : default;
+            networkPlayer.ReportGrabAttached(handSide, netId, localAnchor);
+        }
+
+        // 잡힌 상대에게 알림 (OwnerProxy 뼈 보간 전환용)
+        if (_grabbedPlayer != null)
+            _grabbedPlayer.SetGrabbedByOther(true);
     }
 
-    // CSV ?�치 ?�퍼
+    private void AttachFixedJoint(Rigidbody targetRb, Vector3 localAnchor)
+    {
+        float bf = grabProfile != null ? grabProfile.breakForce : breakForce;
+        float bt = grabProfile != null ? grabProfile.breakTorque : breakTorque;
+
+        _fixedJoint = gameObject.AddComponent<FixedJoint>();
+        _fixedJoint.connectedBody = targetRb;
+        _fixedJoint.autoConfigureConnectedAnchor = false;
+        _fixedJoint.connectedAnchor = localAnchor;
+        _fixedJoint.breakForce = bf;
+        _fixedJoint.breakTorque = bt;
+    }
+
+    private void AttachConfigurableJoint(Rigidbody targetRb, Vector3 localAnchor,
+        SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType targetType = SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.Default)
+    {
+        var cj = gameObject.AddComponent<ConfigurableJoint>();
+        cj.connectedBody = targetRb;
+        cj.autoConfigureConnectedAnchor = false;
+        cj.connectedAnchor = localAnchor;
+
+        // 모든 축을 Limited로 설정
+        cj.xMotion = ConfigurableJointMotion.Limited;
+        cj.yMotion = ConfigurableJointMotion.Limited;
+        cj.zMotion = ConfigurableJointMotion.Limited;
+        cj.angularXMotion = ConfigurableJointMotion.Free;
+        cj.angularYMotion = ConfigurableJointMotion.Free;
+        cj.angularZMotion = ConfigurableJointMotion.Free;
+
+        // 타겟 유형별 스프링 드라이브
+        var drive = grabProfile.CreateGrabDrive(false, targetType);
+        cj.xDrive = drive;
+        cj.yDrive = drive;
+        cj.zDrive = drive;
+
+        // 타겟 유형별 리니어 리미트
+        cj.linearLimit = grabProfile.CreateLinearLimit(targetType);
+        cj.linearLimitSpring = grabProfile.CreateLimitSpring();
+
+        // 타겟 유형별 breakForce
+        var bf = grabProfile.EvaluateWeakenedBreakForce(targetType, 0f);
+        cj.breakForce = bf;
+        cj.breakTorque = bf;
+
+        _configurableJoint = cj;
+    }
+
+    // =========================================================
+    // 조인트 유틸
+    // =========================================================
+
+    private Rigidbody GetConnectedBody()
+    {
+        if (_fixedJoint != null) return _fixedJoint.connectedBody;
+        if (_configurableJoint != null) return _configurableJoint.connectedBody;
+        return null;
+    }
+
+    private void DestroyActiveJoint()
+    {
+        if (_fixedJoint != null)
+        {
+            Destroy(_fixedJoint);
+            _fixedJoint = null;
+        }
+
+        if (_configurableJoint != null)
+        {
+            Destroy(_configurableJoint);
+            _configurableJoint = null;
+        }
+    }
+
+    // =========================================================
+    // 던지기 힘 설정
+    // =========================================================
+
     private float GetGrabThrowForceNormal()
     {
         return CombatSettings.Instance != null ? CombatSettings.Instance.grabThrowForceNormal : 10f;
@@ -337,6 +521,129 @@ public class HandGrabHandler : MonoBehaviour
     private float GetGrabThrowForceStunned()
     {
         return CombatSettings.Instance != null ? CombatSettings.Instance.grabThrowForceStunned : 15f;
+    }
+
+    // =========================================================
+    // 상대 PuppetMaster 약화/복원
+    // =========================================================
+
+    private void WeakenGrabbedPuppet(Rigidbody targetRb)
+    {
+        PuppetMaster pm = targetRb.transform.root.GetComponentInChildren<PuppetMaster>(true);
+        if (pm == null) return;
+
+        _grabbedPuppet = pm;
+
+        // BodyPartPhysicsManager가 있으면 부위별 프로파일로 전환
+        var bodyPartManager = targetRb.transform.root.GetComponentInChildren<SSAFYPlayTime.Character.BodyPartPhysicsManager>(true);
+        if (bodyPartManager != null)
+        {
+            if (!_grabRefCounts.ContainsKey(pm) || _grabRefCounts[pm] <= 0)
+            {
+                _originalPinWeight = pm.pinWeight;
+                _originalMuscleWeight = pm.muscleWeight;
+                bodyPartManager.SetState(SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed);
+                _grabRefCounts[pm] = 1;
+            }
+            else
+            {
+                _originalPinWeight = pm.pinWeight;
+                _originalMuscleWeight = pm.muscleWeight;
+                _grabRefCounts[pm]++;
+                BoostAllGrabJoints(pm);
+            }
+            return;
+        }
+
+        // 폴백: 기존 전역 가중치 방식
+        float pinW = grabProfile != null ? grabProfile.grabbedPinWeight : grabbedPinWeight;
+        float muscleW = grabProfile != null ? grabProfile.grabbedMuscleWeight : grabbedMuscleWeight;
+
+        if (!_grabRefCounts.ContainsKey(pm) || _grabRefCounts[pm] <= 0)
+        {
+            _originalPinWeight = pm.pinWeight;
+            _originalMuscleWeight = pm.muscleWeight;
+            pm.pinWeight = pinW;
+            pm.muscleWeight = muscleW;
+            _grabRefCounts[pm] = 1;
+        }
+        else
+        {
+            _originalPinWeight = pinW;
+            _originalMuscleWeight = muscleW;
+            _grabRefCounts[pm]++;
+
+            BoostAllGrabJoints(pm);
+        }
+    }
+
+    private void RestoreGrabbedPuppet()
+    {
+        if (_grabbedPuppet == null) return;
+
+        if (_grabRefCounts.ContainsKey(_grabbedPuppet))
+        {
+            _grabRefCounts[_grabbedPuppet]--;
+
+            if (_grabRefCounts[_grabbedPuppet] <= 0)
+            {
+                // BodyPartPhysicsManager가 있으면 Normal 상태로 복원
+                var bodyPartManager = _grabbedPuppet.transform.root.GetComponentInChildren<SSAFYPlayTime.Character.BodyPartPhysicsManager>(true);
+                if (bodyPartManager != null)
+                    bodyPartManager.SetState(SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState.Normal);
+                else
+                {
+                    _grabbedPuppet.pinWeight = _originalPinWeight;
+                    _grabbedPuppet.muscleWeight = _originalMuscleWeight;
+                }
+
+                _grabRefCounts.Remove(_grabbedPuppet);
+            }
+        }
+    }
+
+    private void BoostAllGrabJoints(PuppetMaster targetPm)
+    {
+        if (networkPlayer == null) return;
+
+        float dualMult = grabProfile != null ? grabProfile.dualGrabMultiplier : dualGrabBreakMultiplier;
+
+        var handlers = networkPlayer.GetComponentsInChildren<HandGrabHandler>(true);
+        foreach (var h in handlers)
+        {
+            if (!h.IsHolding || h._grabbedPuppet != targetPm)
+                continue;
+
+            if (h._fixedJoint != null)
+            {
+                float bf = grabProfile != null ? grabProfile.breakForce : breakForce;
+                float bt = grabProfile != null ? grabProfile.breakTorque : breakTorque;
+                h._fixedJoint.breakForce = bf * dualMult;
+                h._fixedJoint.breakTorque = bt * dualMult;
+            }
+
+            if (h._configurableJoint != null && grabProfile != null)
+            {
+                var drive = grabProfile.CreateGrabDrive(true);
+                h._configurableJoint.xDrive = drive;
+                h._configurableJoint.yDrive = drive;
+                h._configurableJoint.zDrive = drive;
+                h._configurableJoint.breakForce = grabProfile.maximumForce * dualMult;
+                h._configurableJoint.breakTorque = grabProfile.maximumForce * dualMult;
+            }
+        }
+    }
+
+    /// <summary>
+    /// grab 해제 시 NetworkPlayer에 관계 해제 + 잡힌 상대에게 알림.
+    /// OnJointBreak / UpdateState release / Drop / Throw 모든 경로에서 호출.
+    /// </summary>
+    private void NotifyGrabReleased()
+    {
+        if (networkPlayer != null)
+            networkPlayer.ReportGrabDetached(handSide);
+        if (_grabbedPlayer != null)
+            _grabbedPlayer.SetGrabbedByOther(false);
     }
 
     private bool ShouldIgnoreGrabTarget(Rigidbody targetRb)
@@ -356,6 +663,3 @@ public class HandGrabHandler : MonoBehaviour
         return targetRb.transform.root == networkPlayer.transform;
     }
 }
-
-
-
