@@ -88,14 +88,11 @@ public class PuppetStateSync : MonoBehaviour
                 }
             }
 
-            // PuppetMaster.Mode 동기화 (Active ↔ Kinematic ↔ Disabled)
-            if (pMode != _lastAppliedPuppetMode)
-            {
-                _lastAppliedPuppetMode = pMode;
-                var targetMode = (PuppetMaster.Mode)pMode;
-                if (puppetMaster.mode != targetMode)
-                    puppetMaster.mode = targetMode;
-            }
+            // PuppetMaster.Mode 동기화 — 비호스트에서는 스킵.
+            // 비호스트의 PuppetMaster mode는 NetworkPlayer.SynchronizePhysicsPresentationState()에서
+            // presentation 상태(기절/잡힘 ↔ 정상)에 따라 직접 제어한다.
+            // 호스트는 항상 Active인데 비호스트에서 그대로 동기화하면
+            // frozen kinematic muscle의 Map()이 Animator 출력을 덮어쓰는 문제가 발생한다.
 
             // IsActiveRagdoll 상태 반영 — 원격에서도 기절/회복 상태를 알 수 있도록
             if (_networkPlayer.NetworkedIsActiveRagdoll != _networkPlayer.IsActiveRagdoll)
