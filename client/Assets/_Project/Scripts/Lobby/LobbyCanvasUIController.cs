@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -90,6 +91,16 @@ namespace SSAFYPlayTime
         [SerializeField] private GameObject mainPanel;
         [SerializeField] private GameObject gameSettingModal;
         [SerializeField] private GameObject editNicknameModal;
+
+        [Header("Game End Panel")]
+        [Tooltip("게임 종료 후 순위를 표시하는 패널 (LauncherScene 캔버스 하위)")]
+        [SerializeField] private GameObject gameEndPanel;
+        [Tooltip("순위 항목 RankingItemUI들이 배치된 부모 Transform")]
+        [SerializeField] private Transform rankingContainer;
+        [Tooltip("같은 방으로 버튼")]
+        [SerializeField] private Button returnToRoomButton;
+        [Tooltip("처음으로 버튼")]
+        [SerializeField] private Button returnToLobbyButton;
 
         [Header("Nickname")]
         [SerializeField] private TMP_InputField nicknameInput;
@@ -204,6 +215,7 @@ namespace SSAFYPlayTime
         [SerializeField] private Button readyButton;
         [SerializeField] private TMP_Text readyButtonText;
         [SerializeField] private string gameplaySceneName = string.Empty;
+        [SerializeField] private string launcherSceneName = "LauncherScene";
         [Header("In-Game Panel (GameScene)")]
         [SerializeField] private GameObject gamePanel;
         [SerializeField] private Button leaveGameButton;
@@ -262,6 +274,7 @@ namespace SSAFYPlayTime
         private string _nickname = string.Empty;
         private string _currentRoomName = string.Empty;
         private bool _currentRoomIsPrivate;
+        private string _currentRoomPassword = string.Empty;
         private string _currentRoomOwner = "-";
         private int _currentOwnerPlayerId = -1;
         private string _pendingPrivateRoomName = string.Empty;
@@ -295,17 +308,35 @@ namespace SSAFYPlayTime
         private readonly Dictionary<Transform, int> _characterOptionIndexByTransform = new();
         private readonly Dictionary<Transform, float> _characterPrePlacedWorldY = new();
         private bool _characterSlotsInitialized;
+        private bool _gameEndReturnTransitionStarted;
+        // 게임 종료 후 순위 화면 표시 중 여부. IsActiveSceneNamed("GameEndScene") 대신 사용한다.
+        private bool _isShowingGameEndPanel;
+        // 게임 종료 씬 전환 직전에 세워두는 플래그. OnSceneLoadDone에서 ShowGameEndPanel 호출 트리거.
+        private bool _pendingGameEndPanel;
+        // 게임 종료 후 LauncherScene 진입 시 백그라운드에서 실행되는 방 자동 입장 Task.
+        // 버튼 클릭 시 이 Task를 await해 완료 여부를 확인한다.
+        private Task<bool> _gameEndAutoRoomJoinTask;
 
         // MonoBehaviour 초기화. 패널·이벤트·캐릭터 슬롯을 순서대로 준비하고 닉네임 입력 화면을 표시한다.
         // 모든 UI 참조는 Inspector에서 SerializeField로 직접 할당해야 한다.
         private void Start()
         {
+            // LauncherScene 재로드 시 DontDestroyOnLoad 인스턴스가 이미 존재하면 새 인스턴스를 제거한다.
+            var existing = FindObjectsByType<LobbyCanvasUIController>(FindObjectsSortMode.None);
+            if (existing.Length > 1)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
             AutoBindReadyBadges();
             if (!ValidateInitialReferences())
             {
                 enabled = false;
                 return;
             }
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
             EnsurePersistentAcrossScenes();
             EnsureLocalClientId();
             RuntimeLogOverlay.EnsureInstance();
@@ -656,6 +687,7 @@ namespace SSAFYPlayTime
 
             _currentRoomName = roomName;
             _currentRoomIsPrivate = isPrivate;
+            _currentRoomPassword = isPrivate ? password : string.Empty;
             _currentRoomOwner = _nickname;
             _currentOwnerPlayerId = _runner.LocalPlayer.PlayerId;
             _isInLobby = false;
@@ -829,6 +861,7 @@ namespace SSAFYPlayTime
 
             _currentRoomName = room.Name;
             _currentRoomIsPrivate = room.IsPrivate;
+            _currentRoomPassword = room.IsPrivate ? (room.Password ?? string.Empty) : string.Empty;
             _currentRoomOwner = string.IsNullOrWhiteSpace(room.OwnerNickname) ? "-" : room.OwnerNickname;
             _currentOwnerPlayerId = -1;
             _isInLobby = false;
@@ -941,6 +974,53 @@ namespace SSAFYPlayTime
             return false;
         }
 
+        private static bool IsActiveSceneNamed(string sceneName)
+        {
+            if (string.IsNullOrWhiteSpace(sceneName))
+                return false;
+
+            var activeScene = SceneManager.GetActiveScene();
+            return activeScene.IsValid() &&
+                   string.Equals(activeScene.name, sceneName.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void CleanupRunnerAfterGameEndHostExit()
+        {
+            if (!_isShowingGameEndPanel || _gameEndReturnTransitionStarted || _runner == null)
+                return;
+
+            Debug.Log("[Lobby] Cleanup stale runner after host exit while staying on game end panel.");
+
+            try
+            {
+                _runner.RemoveCallbacks(this);
+            }
+            catch
+            {
+            }
+
+            if (_runnerObject != null)
+            {
+                Destroy(_runnerObject);
+            }
+            else
+            {
+                Destroy(_runner);
+            }
+
+            _runner = null;
+            _runnerObject = null;
+            _isInLobby = false;
+            _currentOwnerPlayerId = -1;
+            _lastSessionListUpdatedAtUtc = DateTime.MinValue;
+            _roomSnapshots.Clear();
+            _roomParticipantsByPlayerId.Clear();
+            _selectedCharacterIndexByPlayerId.Clear();
+            _readyStateByPlayerId.Clear();
+            _spawnedGameplayNetworkCharacters.Clear();
+            _spawnedCharacterIndexByPlayerId.Clear();
+        }
+
         // 방 나가기 버튼 클릭 처리. 러너를 종료하고 로비 패널로 복귀해 방 목록을 다시 불러온다.
         private async void OnLeaveRoomClicked()
         {
@@ -948,6 +1028,7 @@ namespace SSAFYPlayTime
             _currentRoomOwner = "-";
             _currentOwnerPlayerId = -1;
             _currentRoomIsPrivate = false;
+            _currentRoomPassword = string.Empty;
             // 다음 방 입장 시 ? 기본 선택이 다시 적용되도록 리셋한다.
             _localSelectedCharacterIndex = -1;
             _localIsReady = false;
@@ -956,6 +1037,300 @@ namespace SSAFYPlayTime
             ShowLobbyPanel();
             await EnsureLobbyRunnerAsync();
             RefreshRoomList();
+        }
+
+        // 게임 종료 순위 화면에서 플레이어가 "같은 방으로"를 선택한다.
+        // 백그라운드 자동 방 입장(_gameEndAutoRoomJoinTask)이 이미 완료돼 있으므로 즉시 반응한다.
+        public void ReturnToRoomFromGameEnd()
+        {
+            if (_gameEndReturnTransitionStarted || _isProcessing)
+                return;
+
+            _gameEndReturnTransitionStarted = true;
+            _ = ExecuteReturnFromGameEndAsync(goToLobby: false);
+        }
+
+        // 게임 종료 순위 화면에서 플레이어가 "처음으로"를 선택한다.
+        // 백그라운드에서 이미 방 세션에 입장한 상태이므로 완료 대기 후 퇴장 처리한다.
+        public void ReturnToLobbyFromGameEnd()
+        {
+            if (_gameEndReturnTransitionStarted || _isProcessing)
+                return;
+
+            _gameEndReturnTransitionStarted = true;
+            _ = ExecuteReturnFromGameEndAsync(goToLobby: true);
+        }
+
+        // 두 버튼의 공통 진입점.
+        // 백그라운드 자동 방 입장(_gameEndAutoRoomJoinTask) 완료를 대기한 뒤 goToLobby에 따라 분기한다.
+        // 순위 화면을 보는 동안(통상 수 초) 자동 입장이 완료되므로 버튼 클릭이 즉시 반응한다.
+        private async Task ExecuteReturnFromGameEndAsync(bool goToLobby)
+        {
+            if (_isProcessing) return;
+            _isProcessing = true;
+
+            bool joined = _gameEndAutoRoomJoinTask != null && await _gameEndAutoRoomJoinTask;
+
+            if (!joined)
+            {
+                // 방 자동 입장 실패 → 로비 메인으로 fallback
+                _isProcessing = false;
+                ResetGameEndReturnState();
+                ShowLobbyPanel();
+                return;
+            }
+
+            if (goToLobby)
+            {
+                // 로비 선택: gameEndPanel 닫기 → 방 세션 퇴장 → 로비 패널 표시.
+                // 퇴장 시 host migration이 발생하면 다음 순위 플레이어가 방장을 이어받는다.
+                _isShowingGameEndPanel = false;
+                if (gameEndPanel != null) gameEndPanel.SetActive(false);
+                _currentRoomName = string.Empty;
+                _currentRoomOwner = "-";
+                _currentOwnerPlayerId = -1;
+                _currentRoomIsPrivate = false;
+                _currentRoomPassword = string.Empty;
+                _localSelectedCharacterIndex = -1;
+                _localIsReady = false;
+                try
+                {
+                    await ShutdownRunnerAsync();
+                }
+                finally
+                {
+                    _isProcessing = false;
+                }
+                ShowLobbyPanel();
+            }
+            else
+            {
+                // 방 선택: gameEndPanel 닫기 → 방 패널 즉시 표시.
+                // LauncherScene에 이미 있으므로 씬 전환 없이 패널 전환만 한다.
+                _isProcessing = false;
+                _isShowingGameEndPanel = false;
+                if (gameEndPanel != null) gameEndPanel.SetActive(false);
+                ShowRoomPanel();
+                UpdateRoomPanel();
+            }
+        }
+
+        // Fusion runner.LoadScene() 호출 전에 세워두는 플래그.
+        // Despawned()가 OnSceneLoadDone보다 늦게 실행될 수 있으므로
+        // GameResultData.Entries가 비어 있어도 패널을 표시하도록 보장한다.
+        public void NotifyGameEndTransition()
+        {
+            _pendingGameEndPanel = true;
+        }
+
+        // 게임 종료 후 LauncherScene 진입 시 OnSceneLoadDone에서 호출.
+        // 순위 화면을 표시하고 백그라운드에서 방 세션에 자동 입장한다.
+        // 완료 전에 버튼을 눌러도 완료 시점에 즉시 처리되므로 사용자에게 대기 시간이 없다.
+        // 로컬 테스트 전용 (네트워크 없음): 씬을 직접 로드한 뒤 게임 종료 패널을 표시한다.
+        // DebugGameEndTransition이 씬 전환 시 파괴되므로 DontDestroyOnLoad인 이 컨트롤러에서 코루틴을 실행한다.
+        public void LoadSceneAndShowGameEndPanel(string sceneName)
+        {
+            StartCoroutine(CoLoadSceneAndShowGameEndPanel(sceneName));
+        }
+
+        private IEnumerator CoLoadSceneAndShowGameEndPanel(string sceneName)
+        {
+            SceneManager.LoadScene(sceneName);
+            while (SceneManager.GetActiveScene().name != sceneName)
+                yield return null;
+            ShowGameEndPanel();
+        }
+
+        public void ShowGameEndPanel()
+        {
+            if (gameEndPanel == null)
+            {
+                Debug.LogWarning("[Lobby] gameEndPanel이 연결되지 않았습니다. Inspector에서 연결하세요.");
+                return;
+            }
+
+            if (nicknamePanel != null) nicknamePanel.SetActive(false);
+            if (lobbyPanel != null) lobbyPanel.SetActive(false);
+            if (roomPanel != null) roomPanel.SetActive(false);
+            if (createRoomModal != null) createRoomModal.SetActive(false);
+            if (passwordModal != null) passwordModal.SetActive(false);
+            if (mainPanel != null) mainPanel.SetActive(false);
+            if (gamePanel != null) gamePanel.SetActive(false);
+            gameEndPanel.SetActive(true);
+
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+
+            _isShowingGameEndPanel = true;
+            _gameEndReturnTransitionStarted = false;
+
+            DisplayRankings();
+            // 표시 완료 후 데이터를 클리어해 이후 OnSceneLoadDone 재발생 시 패널이 중복 표시되지 않도록 한다.
+            GameResultData.Clear();
+
+            if (returnToRoomButton != null)
+            {
+                returnToRoomButton.onClick.RemoveAllListeners();
+                returnToRoomButton.onClick.AddListener(ReturnToRoomFromGameEnd);
+            }
+
+            if (returnToLobbyButton != null)
+            {
+                returnToLobbyButton.onClick.RemoveAllListeners();
+                returnToLobbyButton.onClick.AddListener(ReturnToLobbyFromGameEnd);
+            }
+
+            _gameEndAutoRoomJoinTask = StartAutoRoomJoinFromGameEndAsync();
+        }
+
+        private void DisplayRankings()
+        {
+            if (rankingContainer == null) return;
+
+            var entries = GameResultData.Entries
+                .OrderBy(e => e.Rank)
+                .ToList();
+
+            var rankingItems = rankingContainer.GetComponentsInChildren<RankingItemUI>(true).ToList();
+
+            for (int i = 0; i < rankingItems.Count; i++)
+            {
+                bool shouldShow = i < entries.Count;
+                rankingItems[i].gameObject.SetActive(shouldShow);
+                if (shouldShow)
+                {
+                    var entry = entries[i];
+                    var nickname = !string.IsNullOrWhiteSpace(entry.Nickname)
+                        ? entry.Nickname
+                        : $"Player{entry.PlayerId}";
+                    rankingItems[i].SetData(entry.Rank, nickname);
+                }
+            }
+        }
+
+        // LauncherScene 진입 시 OnSceneLoadDone에서 호출.
+        // 백그라운드에서 이전 세션을 종료하고 순위 기반 딜레이 후 새 방 세션에 자동 입장한다.
+        // 완료 전에 버튼을 눌러도 완료 시점에 즉시 처리되므로 사용자에게 대기 시간이 없다.
+        private async Task<bool> StartAutoRoomJoinFromGameEndAsync()
+        {
+            var roomName = _currentRoomName;
+            var isPrivate = _currentRoomIsPrivate;
+            var roomPassword = _currentRoomPassword;
+
+            await ShutdownRunnerAsync();
+            _localIsReady = false;
+            // 게임 종료 후 방으로 돌아올 때 캐릭터 선택을 ?로 초기화한다.
+            _localSelectedCharacterIndex = -1;
+
+            if (string.IsNullOrEmpty(roomName))
+            {
+                Debug.LogWarning("[Lobby] AutoRoomJoin: roomName 없음, 건너뜁니다.");
+                return false;
+            }
+
+            // ── 순위 기반 딜레이 (백그라운드, 사용자에게 체감 없음) ────────────────────
+            // GameEndScene UI를 보는 수 초 사이에 완료되므로 버튼 클릭 시 즉시 반응한다.
+            //   1등:   0ms → HOST로 세션 생성
+            //   2등: 150ms → CLIENT로 입장
+            //   3등: 300ms → CLIENT로 입장
+            //   4등: 450ms → CLIENT로 입장
+            const int RankDelayMs = 150;
+            var localRank = GameResultData.LocalPlayerRank;
+            var delaySteps = localRank > 0 ? (localRank - 1) : MaxPlayers;
+            if (delaySteps > 0)
+                await Task.Delay(delaySteps * RankDelayMs);
+
+            if (!TryCreateRunner(out var runner))
+            {
+                Debug.LogWarning("[Lobby] AutoRoomJoin: TryCreateRunner 실패.");
+                return false;
+            }
+
+            _runner = runner;
+            StartGameResult result;
+            try
+            {
+                var sessionProperties = new Dictionary<string, SessionProperty>
+                {
+                    { PrivateKey, isPrivate },
+                    { StartedKey, false }
+                };
+                if (isPrivate && !string.IsNullOrEmpty(roomPassword))
+                    sessionProperties[PasswordKey] = roomPassword;
+
+                var appSettings = GetOrCreatePhotonSettings();
+                result = await _runner.StartGame(new StartGameArgs
+                {
+                    GameMode = GameMode.AutoHostOrClient,
+                    SessionName = roomName,
+                    SceneManager = GetOrAddSceneManager(),
+                    PlayerCount = MaxPlayers,
+                    SessionProperties = sessionProperties,
+                    IsVisible = true,
+                    IsOpen = true,
+                    ConnectionToken = BuildConnectionToken(_nickname),
+                    CustomLobbyName = SharedLobbyName,
+                    CustomPhotonAppSettings = appSettings
+                });
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Lobby] AutoRoomJoin: StartGame 예외. {e.Message}");
+                return false;
+            }
+
+            if (!result.Ok)
+            {
+                Debug.LogWarning($"[Lobby] AutoRoomJoin: StartGame 실패. reason={result.ShutdownReason}");
+                return false;
+            }
+
+            _currentRoomName = roomName;
+            _currentRoomIsPrivate = isPrivate;
+            _currentRoomPassword = roomPassword;
+            _isInLobby = false;
+
+            if (_localSelectedCharacterIndex >= 0)
+                _selectedCharacterIndexByPlayerId[_runner.LocalPlayer.PlayerId] = _localSelectedCharacterIndex;
+
+            RegisterParticipant(_runner.LocalPlayer, _nickname);
+
+            if (_runner.IsServer)
+            {
+                _currentRoomOwner = _nickname;
+                _currentOwnerPlayerId = _runner.LocalPlayer.PlayerId;
+                UpdateOwnerSessionProperty();
+                BroadcastPlayerRoster();
+            }
+            else if (_localSelectedCharacterIndex >= 0)
+            {
+                SetLocalPlayerSelectedCharacter(_localSelectedCharacterIndex);
+            }
+
+            Debug.Log($"[Lobby] AutoRoomJoin: 완료. isHost={_runner.IsServer}, room={roomName}");
+            return true;
+        }
+
+        private void ResetGameEndReturnState()
+        {
+            _gameEndReturnTransitionStarted = false;
+            _isShowingGameEndPanel = false;
+        }
+
+        // GameScene 전환 시 파괴된 캐릭터 오브젝트 참조를 초기화한다.
+        // LauncherScene 복귀 후 InitializeCharacterSlotsIfNeeded()가 재실행되도록 플래그를 리셋한다.
+        private void ResetCharacterSlotState()
+        {
+            _characterSlotsInitialized = false;
+            for (var slot = 0; slot < PlayerSlotCount; slot++)
+                for (var option = 0; option < CharacterOptionCount; option++)
+                    _slotCharacterRoots[slot, option] = null;
+
+            _characterPrePlacedWorldY.Clear();
+            _characterBaseBoundsHeights.Clear();
+            _characterBaseLocalScales.Clear();
+            _characterBaseLocalRotations.Clear();
+            _characterOptionIndexByTransform.Clear();
         }
 
         // 현재 방 이름·공개 여부·플레이어 슬롯·게임 시작 버튼 활성 상태를 갱신한다.
@@ -1873,6 +2248,8 @@ namespace SSAFYPlayTime
             }
 
             var selectedIndex = _selectedCharacterIndexBySlot[slotIndex];
+            // 선택하지 않은 경우(selectedIndex < 0)에는 ?（Random）를 기본 표시한다.
+            var displayIndex = selectedIndex >= 0 ? selectedIndex : (int)CharacterKind.Random;
             var shouldShow = slotHasPlayer;
             for (var option = 0; option < CharacterOptionCount; option++)
             {
@@ -1882,7 +2259,7 @@ namespace SSAFYPlayTime
                     continue;
                 }
 
-                rect.gameObject.SetActive(shouldShow && selectedIndex >= 0 && option == selectedIndex);
+                rect.gameObject.SetActive(shouldShow && option == displayIndex);
             }
         }
 
@@ -2149,6 +2526,7 @@ namespace SSAFYPlayTime
             _spawnedGameplayNetworkCharacters.Clear();
             _spawnedCharacterIndexByPlayerId.Clear();
             _currentOwnerPlayerId = -1;
+            ResetGameEndReturnState();
         }
 
         // 새 GameObject에 NetworkRunner를 추가하고 콜백을 등록한다. 성공 시 true를 반환한다.
