@@ -14,6 +14,18 @@ namespace SSAFYPlayTime.Game.GhostThrow
         public float cooldown = 1f;
         public float throwForce = 15f;
         public float spawnForwardOffset = 2f;
+        [Tooltip("스폰 위치의 타겟 기준 높이 (m) — 너무 높으면 카메라 위로 올라감")]
+        public float spawnHeight = 3f;
+        [Tooltip("스폰 위치에서 포물선 정점까지 추가 높이 (m) — 클수록 체공 시간이 길어져 느리게 날아감")]
+        public float arcHeight = 20f;
+        [Tooltip("수평 최대 속도 (m/s) — 거리가 멀어도 이 속도를 넘지 않도록 arcHeight를 자동으로 높임")]
+        public float maxHorizontalSpeed = 25f;
+        [Tooltip("타겟에서 카메라 방향으로 스폰 위치를 얼마나 오프셋할지 (m)")]
+        public float spawnLaunchOffset = 8f;
+
+        [Header("Ghost Throw Spawn Point")]
+        [Tooltip("사망 후 폭탄/바나나가 발사될 고정 위치. 지정하면 항상 이 위치에서 발사됨.\n비워두면 카메라 방향 자동 계산 방식으로 폴백.")]
+        [SerializeField] private Transform ghostThrowSpawnPoint;
         public LayerMask hitLayer = ~0;
 
         [Header("Bomb Prefabs")]
@@ -57,11 +69,36 @@ namespace SSAFYPlayTime.Game.GhostThrow
             if (!_isGhostThrowEnabled)
                 return;
 
+            // ghostThrowSpawnPoint가 없는 매니저는, 동일 씬에 스폰 포인트가 지정된
+            // 다른 활성 매니저가 있으면 입력을 양보한다. (중복 투척 방지)
+            if (!ShouldHandleInput())
+                return;
+
             if (Input.GetMouseButtonDown(0))
                 TryThrow(isBanana: false);
 
             if (Input.GetMouseButtonDown(1))
                 TryThrow(isBanana: true);
+        }
+
+        private bool ShouldHandleInput()
+        {
+            // 스폰 포인트가 지정된 매니저는 항상 우선권을 가진다
+            if (ghostThrowSpawnPoint != null)
+                return true;
+
+            // 스폰 포인트가 없는 경우: 이미 활성화된 다른 매니저 중
+            // ghostThrowSpawnPoint가 있는 것이 있으면 그쪽에 양보
+            var allManagers = FindObjectsByType<GhostThrowManager>(FindObjectsSortMode.None);
+            for (var i = 0; i < allManagers.Length; i++)
+            {
+                var other = allManagers[i];
+                if (other == null || other == this) continue;
+                if (other.isActiveAndEnabled && other._isGhostThrowEnabled && other.ghostThrowSpawnPoint != null)
+                    return false;
+            }
+
+            return true;
         }
 
         private void BindLocalPlayer()
@@ -178,14 +215,33 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
             lastThrowTime = Time.time;
 
-            var spawnPos = Camera.main.transform.position + Camera.main.transform.forward * spawnForwardOffset;
-            var throwDirection = (targetPoint - spawnPos).normalized;
+            // 스폰 위치: 고정 스폰 포인트가 있으면 그것을, 없으면 카메라→타겟 방향으로
+            // spawnLaunchOffset(또는 타겟까지 거리의 절반) 앞 지점에서 발사.
+            // 이렇게 하면 포물선 시작점과 도착점 모두 카메라 시야에 잡힘.
+            Vector3 spawnPos;
+            if (ghostThrowSpawnPoint != null)
+            {
+                spawnPos = ghostThrowSpawnPoint.position;
+            }
+            else
+            {
+                var camPos = Camera.main.transform.position;
+                var camToTarget = targetPoint - camPos;
+                var distToTarget = camToTarget.magnitude;
+                var dirToTarget = distToTarget > 0.001f
+                    ? camToTarget / distToTarget
+                    : Camera.main.transform.forward;
+                // 타겟까지 거리의 절반을 넘지 않도록 clamp → 스폰이 타겟을 넘어가지 않음
+                var spawnDist = Mathf.Min(spawnLaunchOffset, distToTarget * 0.5f);
+                spawnPos = camPos + dirToTarget * spawnDist;
+            }
+            var initialVelocity = CalculateParabolicVelocity(spawnPos, targetPoint);
 
             var runner = FindAnyObjectByType<NetworkRunner>();
             if (runner != null && runner.IsRunning)
             {
                 var localNetworkPlayer = ResolveLocalNetworkPlayer();
-                if (localNetworkPlayer != null && localNetworkPlayer.TryRequestGhostThrow(isBanana, spawnPos, throwDirection))
+                if (localNetworkPlayer != null && localNetworkPlayer.TryRequestGhostThrow(isBanana, spawnPos, initialVelocity))
                 {
                     var label = isBanana ? "banana" : "bomb";
                     Debug.Log($"GhostThrow [Request]: requested {label} at {spawnPos}");
@@ -195,39 +251,112 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
             if (runner != null && runner.IsRunning && runner.IsServer)
             {
-                SpawnOnline(runner, isBanana, spawnPos, throwDirection);
+                SpawnOnline(runner, isBanana, spawnPos, initialVelocity);
             }
             else
             {
-                SpawnOffline(isBanana, spawnPos, throwDirection);
+                SpawnOffline(isBanana, spawnPos, initialVelocity);
             }
         }
 
-        internal bool TrySpawnOnlineFromRequest(bool isBanana, Vector3 spawnPos, Vector3 dir)
+        private Vector3 CalculateParabolicVelocity(Vector3 from, Vector3 to)
+        {
+            float g = Physics.gravity.y; // 음수 (예: -9.81)
+            float dy = to.y - from.y;
+            float dx = Vector2.Distance(new Vector2(from.x, from.z), new Vector2(to.x, to.z));
+
+            // ① 수평 속도 제한: 멀수록 arcHeight를 자동으로 높여 최대 수평속도를 보장
+            //    T_level ≈ 2*sqrt(2h/|g|)  →  h_min = |g|*dx² / (8*Vmax²)
+            float vMaxSq = maxHorizontalSpeed * maxHorizontalSpeed;
+            float minArcForSpeed = vMaxSq > 0f ? (-g) * dx * dx / (8f * vMaxSq) : 0f;
+
+            // ② 카메라 가시성 제한: frustum top plane 기준으로 정점이 화면 안에 들어오도록 arcHeight를 클램프
+            float maxArcForVisibility = ComputeMaxVisibleArcHeight(from, to);
+
+            // ③ 최종 적용: 속도 제약(하한) 우선, 가능하면 가시성 범위(상한) 안으로 제한
+            float effectiveArcHeight = Mathf.Max(minArcForSpeed, Mathf.Min(maxArcForVisibility, arcHeight));
+
+            // 원하는 호 높이에서 초기 수직 속도 계산
+            float vy0 = Mathf.Sqrt(Mathf.Max(0f, -2f * g * effectiveArcHeight));
+
+            // 0.5*g*T^2 + vy0*T - dy = 0 풀기
+            float discriminant = vy0 * vy0 + 2f * g * dy;
+            if (discriminant < 0f) discriminant = 0f;
+            float T = (-vy0 - Mathf.Sqrt(discriminant)) / g;
+            if (T <= 0.01f) T = 0.5f; // 폴백
+
+            return new Vector3(
+                (to.x - from.x) / T,
+                vy0,
+                (to.z - from.z) / T
+            );
+        }
+
+        /// <summary>
+        /// 카메라 frustum의 top plane 기준으로, 포물선 정점 위치에서 허용되는
+        /// 최대 worldspace Y를 역산해 arcHeight 상한을 반환한다.
+        /// 정점은 수평 경로 중간 지점 근처에서 발생한다고 근사한다.
+        /// </summary>
+        private float ComputeMaxVisibleArcHeight(Vector3 spawnPos, Vector3 targetPos)
+        {
+            var cam = Camera.main;
+            if (cam == null)
+                return arcHeight;
+
+            // 포물선 정점의 수평 위치 = 스폰과 타겟의 중간점
+            var peakXZ = (spawnPos + targetPos) * 0.5f;
+
+            // Unity frustum planes 순서: 0=Left 1=Right 2=Bottom 3=Top 4=Near 5=Far
+            // 각 평면의 normal은 frustum 내부를 향함 → 내부 점은 dot(n, p) + d >= 0
+            var planes = GeometryUtility.CalculateFrustumPlanes(cam);
+            var top = planes[3];
+
+            // top plane 방정식을 Y에 대해 풀기:
+            //   top.normal.x*x + top.normal.y*Y + top.normal.z*z + top.distance >= 0
+            //   → Y <= -(top.normal.x*x + top.normal.z*z + top.distance) / top.normal.y
+            //      (top.normal.y < 0 이므로 부등호 방향 주의 — 이미 위 식에 반영됨)
+            if (Mathf.Abs(top.normal.y) < 0.001f)
+                return arcHeight; // top plane이 수평 → Y 제약 없음
+
+            float maxWorldY = -(top.normal.x * peakXZ.x
+                              + top.normal.z * peakXZ.z
+                              + top.distance) / top.normal.y;
+
+            // arcHeight는 스폰 위치 기준 상대 높이
+            float maxArc = maxWorldY - spawnPos.y;
+
+            // 너무 낮으면 1m 보장 (속도 제약이 별도로 하한을 맞춤)
+            return Mathf.Max(1f, maxArc);
+        }
+
+        internal bool TrySpawnOnlineFromRequest(bool isBanana, Vector3 spawnPos, Vector3 velocity)
         {
             var runner = FindAnyObjectByType<NetworkRunner>();
             if (runner == null || !runner.IsRunning || !runner.IsServer)
                 return false;
 
-            return SpawnOnline(runner, isBanana, spawnPos, dir);
+            return SpawnOnline(runner, isBanana, spawnPos, velocity);
         }
 
-        private bool SpawnOnline(NetworkRunner runner, bool isBanana, Vector3 spawnPos, Vector3 dir)
+        private bool SpawnOnline(NetworkRunner runner, bool isBanana, Vector3 spawnPos, Vector3 velocity)
         {
             var prefabRef = isBanana ? bananaPrefabOnline : cubePrefabOnline;
             var prefabObject = isBanana ? bananaPrefabOnlineObject : cubePrefabOnlineObject;
             var label = isBanana ? "banana" : "bomb";
 
+            var spawnRot = velocity.sqrMagnitude > 0.001f ? Quaternion.LookRotation(velocity) : Quaternion.identity;
+
             if (prefabObject != null)
             {
-                var spawnedByObject = runner.Spawn(prefabObject, spawnPos, Quaternion.LookRotation(dir));
+                var spawnedByObject = runner.Spawn(prefabObject, spawnPos, spawnRot);
                 if (spawnedByObject == null)
                 {
                     Debug.LogError($"GhostThrowManager [Online]: failed to spawn {label} prefab object.");
                     return false;
                 }
 
-                ApplyThrowForce(spawnedByObject.gameObject, dir, isBanana);
+                ApplyThrowVelocity(spawnedByObject.gameObject, velocity);
+                NotifySpectatorCameraToTrack(spawnedByObject.transform);
                 Debug.Log($"GhostThrow [Online]: threw {label} at {spawnPos}");
                 return true;
             }
@@ -238,13 +367,14 @@ namespace SSAFYPlayTime.Game.GhostThrow
                 return false;
             }
 
-            var spawnedObj = runner.Spawn(prefabRef, spawnPos, Quaternion.LookRotation(dir));
-            ApplyThrowForce(spawnedObj.gameObject, dir, isBanana);
+            var spawnedObj = runner.Spawn(prefabRef, spawnPos, spawnRot);
+            ApplyThrowVelocity(spawnedObj.gameObject, velocity);
+            NotifySpectatorCameraToTrack(spawnedObj.transform);
             Debug.Log($"GhostThrow [Online]: threw {label} at {spawnPos}");
             return true;
         }
 
-        private void SpawnOffline(bool isBanana, Vector3 spawnPos, Vector3 dir)
+        private void SpawnOffline(bool isBanana, Vector3 spawnPos, Vector3 velocity)
         {
             var prefab = isBanana ? bananaPrefabOffline : cubePrefabOffline;
             var label = isBanana ? "banana" : "bomb";
@@ -255,20 +385,36 @@ namespace SSAFYPlayTime.Game.GhostThrow
                 return;
             }
 
-            var spawnedObj = Instantiate(prefab, spawnPos, Quaternion.LookRotation(dir));
-            ApplyThrowForce(spawnedObj, dir, isBanana);
+            var spawnRot = velocity.sqrMagnitude > 0.001f ? Quaternion.LookRotation(velocity) : Quaternion.identity;
+            var spawnedObj = Instantiate(prefab, spawnPos, spawnRot);
+            ApplyThrowVelocity(spawnedObj, velocity);
+            NotifySpectatorCameraToTrack(spawnedObj.transform);
             Debug.Log($"GhostThrow [Offline]: threw {label} at {spawnPos}");
         }
 
-        private void ApplyThrowForce(GameObject obj, Vector3 direction, bool isBanana)
+        private void NotifySpectatorCameraToTrack(Transform projectile)
+        {
+            // GhostThrowManager와 같은 오브젝트에 붙은 카메라 우선 탐색,
+            // 없으면 씬 전체에서 찾음
+            var spectatorCam = GetComponent<GhostSpectatorCamera>();
+            if (spectatorCam == null)
+                spectatorCam = FindAnyObjectByType<GhostSpectatorCamera>();
+
+            spectatorCam?.TrackProjectile(projectile);
+        }
+
+        private static void ApplyThrowVelocity(GameObject obj, Vector3 velocity)
         {
             var rb = obj.GetComponent<Rigidbody>();
             if (rb == null)
                 return;
 
-            var upBias = isBanana ? 0.05f : 0.2f;
-            var adjustedDir = (direction + Vector3.up * upBias).normalized;
-            rb.AddForce(adjustedDir * throwForce, ForceMode.VelocityChange);
+            // Bomb 프리팹의 ItemFieldDrop.Awake()가 drag를 0.15f로 덮어쓰므로
+            // 포물선 계산(drag=0 가정)과 실제 비행이 일치하도록 명시적으로 초기화한다.
+            rb.drag = 0f;
+            rb.angularDrag = 0.05f;
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            rb.velocity = velocity;
         }
 
         private NetworkPlayer ResolveLocalNetworkPlayer()
