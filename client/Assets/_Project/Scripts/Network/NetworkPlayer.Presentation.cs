@@ -7,11 +7,12 @@ public sealed partial class NetworkPlayer
     private const string PM_IdleState = "Idle01";
     private const string PM_WalkState = "WalkFWD";
     private const string PM_SprintState = "SprintFWD";
+    private const string PM_PunchState = "Punch";
     private const string PM_PunchLeftState = "PunchLeft";
     private const string PM_PunchRightState = "PunchRight";
     private const string PM_ThrowState = "Throw";
     private const float PM_LocomotionThreshold = 0.1f;
-    private const float PM_AttackLockDuration = 0.7f;
+    private const float PM_DefaultPunchPredictionWindow = 0.35f;
     private const float PM_ThrowLockDuration = 0.85f;
     private const float OwnerRecoveringHipsLerpScale = 0.35f;
     private const float OwnerRecoveringHipsDeadzone = 0.12f;
@@ -139,22 +140,37 @@ public sealed partial class NetworkPlayer
 
         // BodyPartPhysicsManager 상태 전환
 
-        Debug.Log($"[Remote] ActiveRagdoll 전환: {(isRecovering ? "회복" : "기절")}");
+        // 로컬 플레이어(OwnerProxy)가 기절 진입 시 슬로우모션 연출
+        if (!isRecovering && HasInputAuthority)
+            TriggerStunSlowMotion();
+
+        ArmStunForceDiagnostics(
+            "SyncRemoteActiveRagdollState",
+            $"isRecovering={isRecovering} netRagdoll={networkedActive}");
+
     }
 
     private void LateUpdate()
     {
-        // 카메라 앵커 업데이트 — CameraRig.LateUpdate 이전에 위치를 갱신해야
-        // 같은 프레임에서 카메라가 최신 앵커 위치를 따라간다.
+        // 비주얼 상태를 먼저 갱신한 뒤 카메라 앵커를 갱신해야
+        // 앵커가 최종 표시 비주얼 위치를 기준으로 추적한다.
         UpdateRemotePhysicsPresentationResetWindow();
-        UpdateCameraFollowAnchor();
         UpdatePhysicsDrivenVisualPose();
 
         if (Runner == null)
             UpdateAnimationParameters();
 
         UpdateCharacterPresentationEffects();
+
+        // 비주얼 갱신 완료 후 카메라 앵커 갱신 — CameraRig.LateUpdate에서 읽는다.
+        UpdateCameraFollowAnchor();
+
         TraceProxyAnimationDiagnostics("LateUpdate");
+        TraceCameraDeltaDiagnostics();
+
+        // 기절 슬로우모션 timeScale 복원 틱 (로컬 플레이어만)
+        TickStunSlowMotion();
+        UpdateStunForceDiagnosticsHotkey();
     }
 
     private void InterpolateRemoteBoneRotations()
@@ -182,6 +198,8 @@ public sealed partial class NetworkPlayer
             else
                 syncPhysicsObjects[0].transform.position = Vector3.Lerp(
                     hipsCurrent, hipsTarget, ResolveHipsInterpolationAlpha(interpolator.Alpha));
+
+            TraceProxyStunPresentation("InterpolateRemoteBoneRotations", hipsCurrent, hipsTarget);
         }
 
         // 뼈 회전 보간
@@ -263,6 +281,8 @@ public sealed partial class NetworkPlayer
         // 액션 잠금 중(펀치/던지기 애니메이션 재생 중)에는 로코모션 전환하지 않음
         if (Time.time < _pmActionLockedUntil)
             return;
+
+        RestorePMPunchSpeed();
 
         if (_pmHasMovementSpeedParam)
             animator.SetFloat(H_MovementSpeed, speed);
@@ -458,7 +478,7 @@ public sealed partial class NetworkPlayer
         {
             if (eventType == AnimationEventType.Punch || eventType == AnimationEventType.PunchLeft || eventType == AnimationEventType.PunchRight)
             {
-                bool withinWindow = Time.time - _localPunchPredictionTime < PM_AttackLockDuration;
+                bool withinWindow = Time.time - _localPunchPredictionTime < ResolvePMPunchPredictionWindow();
                 if (withinWindow)
                 {
                     // 호스트가 결정한 손과 로컬 예측이 같으면 스킵 (이미 맞는 애니메이션 재생 중)
@@ -478,7 +498,11 @@ public sealed partial class NetworkPlayer
 
         // 원격 클라이언트에서 GetHit 수신 시 로컬 히트스탑 연출
         if (eventType == AnimationEventType.GetHit && !HasStateAuthority)
+        {
             ApplyReplicatedHitStop();
+            if (HasInputAuthority)
+                TriggerVictimCameraKick(-ResolveCombatForward(), FallbackPunchKnockbackForce);
+        }
 
         // PartyMonsterAnimationDriver가 있으면 드라이버를 통해 애니메이션 이벤트 적용
         if (_hasExternalAnimationDriver && _externalAnimationDriver != null)
@@ -577,21 +601,31 @@ public sealed partial class NetworkPlayer
         }
     }
 
+    private const float PM_PunchAnimSpeed = 2.2f;
+    private const float PM_PunchAnimStartOffset = 0.2f;
+    private bool _pmPunchSpeedActive;
+
     private void ApplyPuppetMasterAnimationEvent(AnimationEventType eventType)
     {
         switch (eventType)
         {
             case AnimationEventType.Punch:
+            {
                 // 레거시 호환: 구분 없는 Punch 이벤트 → 로컬 토글
-                var punchState = _pmNextAttackLeft ? PM_PunchLeftState : PM_PunchRightState;
+                var punchIsLeft = _pmNextAttackLeft;
                 _pmNextAttackLeft = !_pmNextAttackLeft;
-                PlayPMLockedAction(punchState, PM_AttackLockDuration);
+                var punchState = ResolvePMPunchStateName(punchIsLeft);
+                PlayPMFastPunch(punchState);
+                TriggerProceduralPunchFromPM(punchIsLeft);
                 break;
+            }
             case AnimationEventType.PunchLeft:
-                PlayPMLockedAction(PM_PunchLeftState, PM_AttackLockDuration);
+                PlayPMFastPunch(ResolvePMPunchStateName(true));
+                TriggerProceduralPunchFromPM(true);
                 break;
             case AnimationEventType.PunchRight:
-                PlayPMLockedAction(PM_PunchRightState, PM_AttackLockDuration);
+                PlayPMFastPunch(ResolvePMPunchStateName(false));
+                TriggerProceduralPunchFromPM(false);
                 break;
             case AnimationEventType.Throw:
                 PlayPMLockedAction(PM_ThrowState, PM_ThrowLockDuration);
@@ -608,10 +642,78 @@ public sealed partial class NetworkPlayer
         }
     }
 
+    private void TriggerProceduralPunchFromPM(bool isLeft)
+    {
+        var punchArm = GetComponent<ProceduralPunchArm>();
+        if (punchArm == null) return;
+
+        var forward = _targetRoot != null ? _targetRoot.forward : transform.forward;
+        if (isLeft)
+            punchArm.TriggerLeftPunch(forward);
+        else
+            punchArm.TriggerRightPunch(forward);
+    }
+
+    private void PlayPMFastPunch(string stateName)
+    {
+        _pmActionLockedUntil = Time.time + ResolvePMPunchLockDuration();
+        if (animator != null)
+        {
+            animator.speed = PM_PunchAnimSpeed;
+            _pmPunchSpeedActive = true;
+            animator.Play(stateName, 0, PM_PunchAnimStartOffset);
+            _pmCurrentStateName = stateName;
+        }
+    }
+
+    private void RestorePMPunchSpeed()
+    {
+        if (!_pmPunchSpeedActive) return;
+        _pmPunchSpeedActive = false;
+        if (animator != null)
+            animator.speed = 1f;
+    }
+
     private void PlayPMLockedAction(string stateName, float duration)
     {
         _pmActionLockedUntil = Time.time + duration;
         PlayPMState(stateName);
+    }
+
+    private float ResolvePMPunchPredictionWindow()
+    {
+        return Mathf.Max(PM_DefaultPunchPredictionWindow, GetConfiguredPunchCooldown());
+    }
+
+    private float ResolvePMPunchLockDuration()
+    {
+        var punchArm = GetComponent<ProceduralPunchArm>();
+        var proceduralDuration = punchArm != null ? punchArm.TotalPunchDuration : 0f;
+        return Mathf.Max(GetConfiguredPunchCooldown(), proceduralDuration);
+    }
+
+    private string ResolvePMPunchStateName(bool isLeft)
+    {
+        var requestedState = isLeft ? PM_PunchLeftState : PM_PunchRightState;
+        if (animator == null)
+            return requestedState;
+
+        if (HasPMPunchState(requestedState))
+            return requestedState;
+
+        if (HasPMPunchState(PM_PunchState))
+            return PM_PunchState;
+
+        return requestedState;
+    }
+
+    private bool HasPMPunchState(string stateName)
+    {
+        if (animator == null)
+            return false;
+
+        return animator.HasState(0, Animator.StringToHash(stateName))
+            || animator.HasState(0, Animator.StringToHash($"Base Layer.{stateName}"));
     }
 
     private void PlayPMState(string stateName)

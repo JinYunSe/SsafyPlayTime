@@ -1,6 +1,7 @@
 using UnityEngine;
 using RootMotion.Dynamics;
 using RootMotion.FinalIK;
+using SSAFYPlayTime.Character;
 
 /// <summary>
 /// Drives grab reach poses with FinalIK while the PuppetMaster muscles stay authoritative.
@@ -24,6 +25,9 @@ public class ProceduralGrabArm : MonoBehaviour
     [SerializeField] float handReachForce = 115f;
     [SerializeField] float handDamping = 8f;
 
+    [Header("IK Rotation")]
+    [SerializeField, Range(0f, 1f)] float holdIKRotationWeight = 0.5f;
+
     [Header("Hold Pose")]
     [SerializeField, Range(0f, 1f)] float anchorBlend = 0.6f;
     [SerializeField] float holdForwardOffset = 0.45f;
@@ -37,8 +41,14 @@ public class ProceduralGrabArm : MonoBehaviour
     [SerializeField] float behindBackForce = 90f;
     [SerializeField] float behindBackTurnTorque = 20f;
 
+    [Header("Carry Pose Profile")]
+    [SerializeField] CarryPoseProfile carryPoseProfile;
+
     float _leftBlend;
     float _rightBlend;
+
+    // 오버헤드 캐리 포즈 전환 블렌드 (0=frontCarry, 1=overheadCarry)
+    float _overheadBlend;
 
     NetworkPlayer _networkPlayer;
 
@@ -157,42 +167,64 @@ public class ProceduralGrabArm : MonoBehaviour
         if (puppetMaster == null) return;
 
         var phase = _networkPlayer != null ? _networkPlayer.GetPhysicalPhase() : NetworkPlayer.PhysicalPhase.Stable;
-        bool grabActive = phase == NetworkPlayer.PhysicalPhase.GrabIntent || phase == NetworkPlayer.PhysicalPhase.Holding;
+        bool grabActive = phase == NetworkPlayer.PhysicalPhase.GrabIntent || phase == NetworkPlayer.PhysicalPhase.Holding || phase == NetworkPlayer.PhysicalPhase.CarryingStunned;
+        bool weaponEquipped = phase == NetworkPlayer.PhysicalPhase.WeaponEquipped;
         bool suppressReach = NetworkPlayer.UsesPhysicsPosePresentation(phase);
         bool leftHolding = IsHandHolding(_leftHandler);
         bool rightHolding = IsHandHolding(_rightHandler);
 
-        bool leftShouldReach = (grabActive || leftHolding) && !suppressReach;
-        bool rightShouldReach = (grabActive || rightHolding) && !suppressReach;
+        bool leftShouldReach = (grabActive || leftHolding || weaponEquipped) && !suppressReach;
+        bool rightShouldReach = (grabActive || rightHolding || weaponEquipped) && !suppressReach;
 
         float dt = Time.deltaTime * blendSpeed;
         _leftBlend = Mathf.MoveTowards(_leftBlend, leftShouldReach ? 1f : 0f, dt);
         _rightBlend = Mathf.MoveTowards(_rightBlend, rightShouldReach ? 1f : 0f, dt);
 
-        if (leftHolding)
-        {
-            var anchorWorld = _leftHandler.GetGrabAnchorWorldPosition();
-            _leftIKTarget.position = ResolveHoldTarget(true, anchorWorld);
-            _leftReachDir = (_leftIKTarget.position - puppetMaster.targetRoot.position).normalized;
-        }
-        else
-        {
-            _leftReachDir = GetReachDirection(_leftPhysicsHand, true);
-            Vector3 charPos = puppetMaster.targetRoot.position;
-            _leftIKTarget.position = charPos + Vector3.up * 0.8f + _leftReachDir * reachDistance;
-        }
+        // 오버헤드 캐리 포즈 전환 부드러운 블렌드
+        float overheadTarget = (phase == NetworkPlayer.PhysicalPhase.CarryingStunned) ? 1f : 0f;
+        float overheadSpeed = carryPoseProfile != null ? carryPoseProfile.overheadBlendSpeed : 4f;
+        _overheadBlend = Mathf.MoveTowards(_overheadBlend, overheadTarget, Time.deltaTime * overheadSpeed);
 
-        if (rightHolding)
+        if (weaponEquipped && !leftHolding && !rightHolding)
         {
-            var anchorWorld = _rightHandler.GetGrabAnchorWorldPosition();
-            _rightIKTarget.position = ResolveHoldTarget(false, anchorWorld);
-            _rightReachDir = (_rightIKTarget.position - puppetMaster.targetRoot.position).normalized;
+            // 무기 장착 시 양손 모두 twoHandWeapon 포즈로
+            var leftTarget = ResolveWeaponPoseTarget(true);
+            var rightTarget = ResolveWeaponPoseTarget(false);
+            _leftIKTarget.position = leftTarget;
+            _rightIKTarget.position = rightTarget;
+            _leftReachDir = (leftTarget - puppetMaster.targetRoot.position).normalized;
+            _rightReachDir = (rightTarget - puppetMaster.targetRoot.position).normalized;
         }
         else
         {
-            _rightReachDir = GetReachDirection(_rightPhysicsHand, false);
-            Vector3 charPos = puppetMaster.targetRoot.position;
-            _rightIKTarget.position = charPos + Vector3.up * 0.8f + _rightReachDir * reachDistance;
+            if (leftHolding)
+            {
+                var anchorWorld = _leftHandler.GetGrabAnchorWorldPosition();
+                _leftIKTarget.position = ResolveHoldTarget(true, anchorWorld);
+                _leftReachDir = (_leftIKTarget.position - puppetMaster.targetRoot.position).normalized;
+                // 손바닥이 앵커(잡힌 대상 표면)를 향하도록 IK rotation 설정
+                OrientIKTargetToAnchor(_leftIKTarget, anchorWorld, true);
+            }
+            else
+            {
+                _leftReachDir = GetReachDirection(_leftPhysicsHand, true);
+                Vector3 charPos = puppetMaster.targetRoot.position;
+                _leftIKTarget.position = charPos + Vector3.up * 0.8f + _leftReachDir * reachDistance;
+            }
+
+            if (rightHolding)
+            {
+                var anchorWorld = _rightHandler.GetGrabAnchorWorldPosition();
+                _rightIKTarget.position = ResolveHoldTarget(false, anchorWorld);
+                _rightReachDir = (_rightIKTarget.position - puppetMaster.targetRoot.position).normalized;
+                OrientIKTargetToAnchor(_rightIKTarget, anchorWorld, false);
+            }
+            else
+            {
+                _rightReachDir = GetReachDirection(_rightPhysicsHand, false);
+                Vector3 charPos = puppetMaster.targetRoot.position;
+                _rightIKTarget.position = charPos + Vector3.up * 0.8f + _rightReachDir * reachDistance;
+            }
         }
     }
 
@@ -201,21 +233,22 @@ public class ProceduralGrabArm : MonoBehaviour
         if (puppetMaster == null) return;
 
         var phase = _networkPlayer != null ? _networkPlayer.GetPhysicalPhase() : NetworkPlayer.PhysicalPhase.Stable;
-        bool grabActive = phase == NetworkPlayer.PhysicalPhase.GrabIntent || phase == NetworkPlayer.PhysicalPhase.Holding;
+        bool grabActive = phase == NetworkPlayer.PhysicalPhase.GrabIntent || phase == NetworkPlayer.PhysicalPhase.Holding || phase == NetworkPlayer.PhysicalPhase.CarryingStunned;
+        bool weaponEquipped = phase == NetworkPlayer.PhysicalPhase.WeaponEquipped;
         bool suppressReach = NetworkPlayer.UsesPhysicsPosePresentation(phase);
         bool leftHolding = IsHandHolding(_leftHandler);
         bool rightHolding = IsHandHolding(_rightHandler);
 
-        if (!suppressReach && (grabActive || leftHolding))
+        if (!suppressReach && (grabActive || leftHolding || weaponEquipped))
         {
             var anchorWorld = leftHolding ? _leftHandler.GetGrabAnchorWorldPosition() : Vector3.zero;
-            PushPhysicsHand(_leftPhysicsHandRb, _leftReachDir, leftHolding, _leftIKTarget.position, anchorWorld, true);
+            PushPhysicsHand(_leftPhysicsHandRb, _leftReachDir, leftHolding || weaponEquipped, _leftIKTarget.position, anchorWorld, true);
         }
 
-        if (!suppressReach && (grabActive || rightHolding))
+        if (!suppressReach && (grabActive || rightHolding || weaponEquipped))
         {
             var anchorWorld = rightHolding ? _rightHandler.GetGrabAnchorWorldPosition() : Vector3.zero;
-            PushPhysicsHand(_rightPhysicsHandRb, _rightReachDir, rightHolding, _rightIKTarget.position, anchorWorld, false);
+            PushPhysicsHand(_rightPhysicsHandRb, _rightReachDir, rightHolding || weaponEquipped, _rightIKTarget.position, anchorWorld, false);
         }
     }
 
@@ -223,15 +256,20 @@ public class ProceduralGrabArm : MonoBehaviour
     {
         if (!enabled) return;
 
+        bool leftHolding = IsHandHolding(_leftHandler);
+        bool rightHolding = IsHandHolding(_rightHandler);
+
         if (leftArmIK != null)
         {
             leftArmIK.solver.SetIKPositionWeight(_leftBlend);
+            leftArmIK.solver.SetIKRotationWeight(leftHolding ? _leftBlend * holdIKRotationWeight : 0f);
             leftArmIK.solver.Update();
         }
 
         if (rightArmIK != null)
         {
             rightArmIK.solver.SetIKPositionWeight(_rightBlend);
+            rightArmIK.solver.SetIKRotationWeight(rightHolding ? _rightBlend * holdIKRotationWeight : 0f);
             rightArmIK.solver.Update();
         }
     }
@@ -264,6 +302,12 @@ public class ProceduralGrabArm : MonoBehaviour
             if (toAnchor.sqrMagnitude > 0.0001f)
                 handRb.AddForce(toAnchor.normalized * handReachForce * anchorAssistScale, ForceMode.Acceleration);
 
+            // 오버헤드 캐리 시 추가 수직 리프트 보조 (블렌드로 부드럽게 적용)
+            if (carryPoseProfile != null && _overheadBlend > 0.01f)
+            {
+                handRb.AddForce(Vector3.up * carryPoseProfile.overheadLiftForce * _overheadBlend, ForceMode.Acceleration);
+            }
+
             ApplyBehindBackCorrection(handRb, isLeft);
             handRb.AddForce(-handRb.velocity * handDamping * 1.5f, ForceMode.Acceleration);
         }
@@ -274,25 +318,110 @@ public class ProceduralGrabArm : MonoBehaviour
         }
     }
 
+    /// <summary>핸들러의 GrabbedTargetKind에 따라 적절한 PoseAnchor를 선택</summary>
+    CarryPoseProfile.PoseAnchor ResolvePoseAnchor(HandGrabHandler handler)
+    {
+        if (carryPoseProfile == null)
+            return default;
+
+        var kind = handler != null ? handler.GrabbedTargetKind : GrabDriveProfile.GrabTargetType.Default;
+
+        switch (kind)
+        {
+            case GrabDriveProfile.GrabTargetType.StunnedPlayer:
+                // frontCarry → overheadCarry를 _overheadBlend로 부드럽게 전환
+                return LerpPoseAnchor(carryPoseProfile.frontCarry, carryPoseProfile.overheadCarry, _overheadBlend);
+            case GrabDriveProfile.GrabTargetType.Weapon:
+                return carryPoseProfile.twoHandWeapon;
+            default:
+                return carryPoseProfile.frontGrab;
+        }
+    }
+
+    static CarryPoseProfile.PoseAnchor LerpPoseAnchor(CarryPoseProfile.PoseAnchor a, CarryPoseProfile.PoseAnchor b, float t)
+    {
+        return new CarryPoseProfile.PoseAnchor
+        {
+            sideOffset = Mathf.Lerp(a.sideOffset, b.sideOffset, t),
+            forwardOffset = Mathf.Lerp(a.forwardOffset, b.forwardOffset, t),
+            heightOffset = Mathf.Lerp(a.heightOffset, b.heightOffset, t),
+            verticalClamp = Mathf.Lerp(a.verticalClamp, b.verticalClamp, t),
+            lateralClamp = Mathf.Lerp(a.lateralClamp, b.lateralClamp, t),
+            anchorBlend = Mathf.Lerp(a.anchorBlend, b.anchorBlend, t)
+        };
+    }
+
+    /// <summary>무기 장착 시 양손 IK 타겟 위치 계산 (CarryPoseProfile.twoHandWeapon 사용)</summary>
+    Vector3 ResolveWeaponPoseTarget(bool isLeft)
+    {
+        Transform bodyRoot = ResolveBodyReference();
+        float side = isLeft ? -1f : 1f;
+
+        float useSide, useForward, useHeight;
+        if (carryPoseProfile != null)
+        {
+            var pose = carryPoseProfile.twoHandWeapon;
+            useSide = pose.sideOffset;
+            useForward = pose.forwardOffset;
+            useHeight = pose.heightOffset;
+        }
+        else
+        {
+            useSide = holdSideOffset;
+            useForward = holdForwardOffset;
+            useHeight = holdHeightOffset;
+        }
+
+        return bodyRoot.TransformPoint(new Vector3(side * useSide, useHeight, useForward));
+    }
+
     Vector3 ResolveHoldTarget(bool isLeft, Vector3 anchorWorld)
+    {
+        return ResolveHoldTargetForHandler(isLeft, anchorWorld, isLeft ? _leftHandler : _rightHandler);
+    }
+
+    Vector3 ResolveHoldTargetForHandler(bool isLeft, Vector3 anchorWorld, HandGrabHandler handler)
     {
         Transform bodyRoot = ResolveBodyReference();
 
+        // CarryPoseProfile이 있으면 프로파일에서 오프셋을 가져옴
+        float useSide, useForward, useHeight, useVClamp, useLClamp, useBlend;
+        if (carryPoseProfile != null && handler != null && handler.IsHolding)
+        {
+            var pose = ResolvePoseAnchor(handler);
+            useSide = pose.sideOffset;
+            useForward = pose.forwardOffset;
+            useHeight = pose.heightOffset;
+            useVClamp = pose.verticalClamp;
+            useLClamp = pose.lateralClamp;
+            useBlend = pose.anchorBlend;
+        }
+        else
+        {
+            // 프로파일 미설정 시 기존 Inspector 값 폴백
+            useSide = holdSideOffset;
+            useForward = holdForwardOffset;
+            useHeight = holdHeightOffset;
+            useVClamp = holdVerticalClamp;
+            useLClamp = holdLateralClamp;
+            useBlend = anchorBlend;
+        }
+
         float side = isLeft ? -1f : 1f;
-        var poseTarget = bodyRoot.TransformPoint(new Vector3(side * holdSideOffset, holdHeightOffset, holdForwardOffset));
+        var poseTarget = bodyRoot.TransformPoint(new Vector3(side * useSide, useHeight, useForward));
 
         var localAnchor = bodyRoot.InverseTransformPoint(anchorWorld);
-        var forwardRange = Mathf.Max(0.01f, holdForwardOffset - behindBackThreshold);
+        var forwardRange = Mathf.Max(0.01f, useForward - behindBackThreshold);
         var behindAmount = Mathf.Clamp01((behindBackThreshold - localAnchor.z) / forwardRange);
-        var effectiveBlend = Mathf.Lerp(anchorBlend, 0.2f, behindAmount);
+        var effectiveBlend = Mathf.Lerp(useBlend, 0.2f, behindAmount);
 
-        localAnchor.x = Mathf.Lerp(side * holdSideOffset, localAnchor.x, effectiveBlend);
+        localAnchor.x = Mathf.Lerp(side * useSide, localAnchor.x, effectiveBlend);
         localAnchor.x = Mathf.Clamp(
             localAnchor.x,
-            side * holdSideOffset - holdLateralClamp,
-            side * holdSideOffset + holdLateralClamp);
-        localAnchor.y = Mathf.Clamp(localAnchor.y, holdHeightOffset - holdVerticalClamp, holdHeightOffset + holdVerticalClamp);
-        localAnchor.z = Mathf.Max(localAnchor.z, holdForwardOffset * 0.35f);
+            side * useSide - useLClamp,
+            side * useSide + useLClamp);
+        localAnchor.y = Mathf.Clamp(localAnchor.y, useHeight - useVClamp, useHeight + useVClamp);
+        localAnchor.z = Mathf.Max(localAnchor.z, useForward * 0.35f);
 
         var constrainedAnchor = bodyRoot.TransformPoint(localAnchor);
         return Vector3.Lerp(poseTarget, constrainedAnchor, effectiveBlend);
@@ -388,6 +517,21 @@ public class ProceduralGrabArm : MonoBehaviour
 
         float defaultSpread = isLeft ? -0.25f : 0.25f;
         return (baseDir + charRoot.right * defaultSpread).normalized;
+    }
+
+    /// <summary>
+    /// IK 타겟 회전을 설정하여 손바닥이 앵커 방향을 향하도록 합니다.
+    /// forward = 손바닥→앵커 방향, up = 캐릭터 up 기준
+    /// </summary>
+    void OrientIKTargetToAnchor(Transform ikTarget, Vector3 anchorWorld, bool isLeft)
+    {
+        var toAnchor = anchorWorld - ikTarget.position;
+        if (toAnchor.sqrMagnitude < 0.001f)
+            return;
+
+        // 손바닥이 앵커를 향하도록: forward를 앵커 방향으로
+        var charUp = puppetMaster.targetRoot != null ? puppetMaster.targetRoot.up : Vector3.up;
+        ikTarget.rotation = Quaternion.LookRotation(toAnchor.normalized, charUp);
     }
 
     static bool IsHandHolding(HandGrabHandler handler)

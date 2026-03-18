@@ -64,6 +64,9 @@ public sealed partial class NetworkPlayer
         {
             // 호스트가 좌/우 펀치를 결정하고 네트워크에 기록
             var isLeft = _hostNextPunchLeft;
+            if (!TryBeginPunchHitDetection(isLeft))
+                return;
+
             _hostNextPunchLeft = !_hostNextPunchLeft;
 
             if (IsNetworkReady)
@@ -71,7 +74,6 @@ public sealed partial class NetworkPlayer
 
             var punchEvent = isLeft ? AnimationEventType.PunchLeft : AnimationEventType.PunchRight;
             RaiseAnimationEvent(punchEvent, H_Punch);
-            ExecutePunchHitDetection(isLeft);
         }
     }
 
@@ -150,16 +152,45 @@ public sealed partial class NetworkPlayer
         return false;
     }
 
+    /// <summary>
+    /// 양손으로 같은 기절자를 잡고 있는지 판별.
+    /// Phase 2(overhead carry)와 Phase 4(양손 강화) 진입 조건으로 사용.
+    /// </summary>
+    internal bool IsDualGrabbingStunnedPlayer
+    {
+        get
+        {
+            if (_handGrabHandlers == null || _handGrabHandlers.Length < 2)
+                return false;
+
+            HandGrabHandler left = null, right = null;
+            foreach (var h in _handGrabHandlers)
+            {
+                if (h == null) continue;
+                if (h.Side == HandGrabHandler.HandSide.Left) left = h;
+                else right = h;
+            }
+
+            if (left == null || right == null)
+                return false;
+
+            return left.IsHoldingStunnedPlayer && right.IsHoldingStunnedPlayer
+                && left.GrabTargetRoot != null && left.GrabTargetRoot == right.GrabTargetRoot;
+        }
+    }
+
     private void UpdateGrabbingAnimatorFlag()
     {
         if (animator == null)
             return;
 
         var phase = GetPhysicalPhase();
-        var isCarrying = phase == PhysicalPhase.Holding && IsAnyHandHoldingThrowableTarget();
-        var isGrabbing = (phase == PhysicalPhase.GrabIntent || phase == PhysicalPhase.Holding) && !isCarrying;
+        var isCarrying = (phase == PhysicalPhase.Holding && IsAnyHandHoldingThrowableTarget())
+            || phase == PhysicalPhase.CarryingStunned;
+        var isWeaponEquipped = phase == PhysicalPhase.WeaponEquipped;
+        var isGrabbing = (phase == PhysicalPhase.GrabIntent || phase == PhysicalPhase.Holding || phase == PhysicalPhase.CarryingStunned) && !isCarrying;
 
-        animator.SetBool(H_IsGrabbing, isGrabbing);
+        animator.SetBool(H_IsGrabbing, isGrabbing || isWeaponEquipped);
         animator.SetBool("isCarrying", isCarrying);
     }
 

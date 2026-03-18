@@ -122,40 +122,40 @@ MonoBehaviour:
       frictionCombine: 0
   stunned:
     hand:
-      pinWeight: 0
-      muscleWeight: 0
+      pinWeight: 0.04
+      muscleWeight: 0.03
       mappingWeight: 1
-      staticFriction: 0.2
-      dynamicFriction: 0.1
-      frictionCombine: 2
+      staticFriction: 0.45
+      dynamicFriction: 0.28
+      frictionCombine: 0
     arm:
-      pinWeight: 0
-      muscleWeight: 0
+      pinWeight: 0.06
+      muscleWeight: 0.04
       mappingWeight: 1
-      staticFriction: 0.2
-      dynamicFriction: 0.1
-      frictionCombine: 2
+      staticFriction: 0.4
+      dynamicFriction: 0.25
+      frictionCombine: 0
     head:
-      pinWeight: 0
-      muscleWeight: 0
+      pinWeight: 0.08
+      muscleWeight: 0.05
       mappingWeight: 1
-      staticFriction: 0.15
-      dynamicFriction: 0.08
-      frictionCombine: 2
+      staticFriction: 0.35
+      dynamicFriction: 0.22
+      frictionCombine: 0
     torso:
-      pinWeight: 0
-      muscleWeight: 0
+      pinWeight: 0.24
+      muscleWeight: 0.16
       mappingWeight: 1
-      staticFriction: 0.5
-      dynamicFriction: 0.3
-      frictionCombine: 0
+      staticFriction: 1.2
+      dynamicFriction: 0.95
+      frictionCombine: 3
     leg:
-      pinWeight: 0
-      muscleWeight: 0
+      pinWeight: 0.18
+      muscleWeight: 0.12
       mappingWeight: 1
-      staticFriction: 0.3
-      dynamicFriction: 0.2
-      frictionCombine: 0
+      staticFriction: 1.35
+      dynamicFriction: 1.05
+      frictionCombine: 3
   recovering:
     hand:
       pinWeight: 0.48

@@ -213,7 +213,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         Dragged = 4,
         Unstable = 5,
         Stunned = 6,
-        Recovering = 7
+        Recovering = 7,
+        CarryingStunned = 8,
+        WeaponEquipped = 9,
+        BeingCarriedStunned = 10
     }
 
     private const int RemotePhysicsPresentationHoldFrameCount = 4;
@@ -589,7 +592,15 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         _lastObservedPhysicsPresentationResetVersion = NetworkedPhysicsPresentationResetVersion;
 
-        if (!HasStateAuthority)
+        if (HasStateAuthority)
+        {
+            // 호스트: BehaviourPuppet의 자체 충돌 반응(Unpinned/GetUp)을 비활성화.
+            // 게임은 자체 스턴 시스템(TriggerStun/ForceRecover)을 사용하므로
+            // BehaviourPuppet의 넘어짐 로직이 중복 작동하면 호스트가 넘어져서 못 일어남.
+            if (_behaviourPuppet != null)
+                _behaviourPuppet.enabled = false;
+        }
+        else
         {
             foreach (var rb in GetComponentsInChildren<Rigidbody>(true))
                 rb.isKinematic = true;
@@ -662,6 +673,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         ConfigureAnimatedVisualMode();
         EnsureAnimatorBinding();
         SetPresentationVisualYaw(ResolvePresentationYawFromTransform());
+        _cameraTargetTransform = FindCameraTargetTransform();
         CacheOwnedPresentationComponents();
     }
 
@@ -920,6 +932,16 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     // ─── 카메라 Follow 앵커 ───
 
+    // 카메라 기준점 — presentationRoot 하위 CameraTarget 또는 presentationRoot 자체
+    private Transform _cameraTargetTransform;
+    private Vector3 _cameraAnchorVelocity;
+
+    // Phase 0 계측용
+    private Vector3 _diagPrevRootPos;
+    private Vector3 _diagPrevAnchorPos;
+    private Vector3 _diagPrevPresentationPos;
+    private bool _diagCameraDeltaInitialized;
+
     /// <summary>
     /// 카메라 Follow 전용 앵커를 월드 공간에 생성.
     /// 캐릭터 계층 밖에 두어 SyncRootToPhysicsBody의 급격한 위치 변화가
@@ -934,19 +956,123 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     }
 
     /// <summary>
+    /// presentationRoot 하위에서 "CameraTarget" 이름의 Transform을 탐색.
+    /// 없으면 presentationRoot 자체를 반환. presentationRoot도 없으면 null.
+    /// </summary>
+    private Transform FindCameraTargetTransform()
+    {
+        // 1순위: 직계 자식 중 CameraTarget
+        var directChild = transform.Find("CameraTarget");
+        if (directChild != null)
+            return directChild;
+
+        // 2순위: presentationRoot 하위 CameraTarget
+        var presentationRoot = GetPresentationRootTransform();
+        if (presentationRoot != null)
+        {
+            var underPresentation = presentationRoot.Find("CameraTarget");
+            if (underPresentation != null)
+                return underPresentation;
+
+            return presentationRoot;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// 카메라 앵커를 캐릭터 위치에 부드럽게 추적.
-    /// 정상 상태(isActiveRagdoll=true): 빠르게 따라감 — 이동 시 카메라 지연 없음
-    /// 기절 상태: 느리게 따라감 — SyncRootToPhysicsBody의 스냅을 흡수
+    /// Phase 2: presentationRoot/CameraTarget 기준 + SmoothDamp + 상태별 파라미터
     /// </summary>
     internal void UpdateCameraFollowAnchor()
     {
         if (_cameraFollowAnchor == null) return;
 
-        var speed = _isActiveRagdoll ? 25f : 6f;
-        _cameraFollowAnchor.position = Vector3.Lerp(
-            _cameraFollowAnchor.position,
-            transform.position,
-            Time.deltaTime * speed);
+        var targetPos = _cameraTargetTransform != null
+            ? _cameraTargetTransform.position
+            : transform.position;
+
+        var smoothTime = ResolveCameraAnchorSmoothTime();
+        var snapThreshold = 9f; // 3m² — 텔레포트/큰 보정 시 즉시 스냅
+
+        if ((_cameraFollowAnchor.position - targetPos).sqrMagnitude > snapThreshold)
+        {
+            _cameraFollowAnchor.position = targetPos;
+            _cameraAnchorVelocity = Vector3.zero;
+        }
+        else
+        {
+            _cameraFollowAnchor.position = Vector3.SmoothDamp(
+                _cameraFollowAnchor.position,
+                targetPos,
+                ref _cameraAnchorVelocity,
+                smoothTime);
+        }
+    }
+
+    /// <summary>
+    /// PhysicalPhase에 따른 카메라 앵커 SmoothDamp 시간.
+    /// 이동 중: 빠르게 붙음 / 기절·잡힘: 느리게 따라감
+    /// </summary>
+    private float ResolveCameraAnchorSmoothTime()
+    {
+        var phase = GetPhysicalPhase();
+        return phase switch
+        {
+            PhysicalPhase.Stunned => 0.25f,
+            PhysicalPhase.BeingGrabbed => 0.25f,
+            PhysicalPhase.Dragged => 0.20f,
+            PhysicalPhase.Recovering => 0.15f,
+            PhysicalPhase.Unstable => 0.15f,
+            _ => _isActiveRagdoll ? 0.04f : 0.20f
+        };
+    }
+
+    /// <summary>
+    /// Phase 0 계측: 카메라 추적 체인의 프레임간 delta 로그.
+    /// root, anchor, presentationRoot 각각의 위치 변화량을 기록.
+    /// </summary>
+    internal void TraceCameraDeltaDiagnostics()
+    {
+        if (!enableProxyAnimationDiagnostics || !Application.isPlaying)
+            return;
+        if (!(Debug.isDebugBuild || Application.isEditor))
+            return;
+        if (Runner == null || Object == null || !Object.IsValid || !HasInputAuthority)
+            return;
+
+        var rootPos = transform.position;
+        var anchorPos = _cameraFollowAnchor != null ? _cameraFollowAnchor.position : rootPos;
+        var presentationRoot = GetPresentationRootTransform();
+        var presentationPos = presentationRoot != null ? presentationRoot.position : rootPos;
+
+        if (!_diagCameraDeltaInitialized)
+        {
+            _diagPrevRootPos = rootPos;
+            _diagPrevAnchorPos = anchorPos;
+            _diagPrevPresentationPos = presentationPos;
+            _diagCameraDeltaInitialized = true;
+            return;
+        }
+
+        var rootDelta = (rootPos - _diagPrevRootPos).magnitude;
+        var anchorDelta = (anchorPos - _diagPrevAnchorPos).magnitude;
+        var presentationDelta = (presentationPos - _diagPrevPresentationPos).magnitude;
+
+        _diagPrevRootPos = rootPos;
+        _diagPrevAnchorPos = anchorPos;
+        _diagPrevPresentationPos = presentationPos;
+
+        // 의미 있는 움직임이 있을 때만 출력 (0.01m 이상)
+        if (rootDelta < 0.01f && anchorDelta < 0.01f && presentationDelta < 0.01f)
+            return;
+
+        var rootAnchorGap = (rootPos - anchorPos).magnitude;
+        Debug.Log(
+            $"[CamDeltaDiag] name={name} auth={HasStateAuthority} " +
+            $"rootΔ={rootDelta:F4} anchorΔ={anchorDelta:F4} presentΔ={presentationDelta:F4} " +
+            $"root→anchor={rootAnchorGap:F4} phase={GetPhysicalPhase()} dt={Time.deltaTime:F4}",
+            this);
     }
 
 }

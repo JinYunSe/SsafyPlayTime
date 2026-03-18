@@ -97,8 +97,8 @@ public sealed partial class NetworkPlayer
             }
         }
 
-        TryAddUpperBodySwayBinding(HumanBodyBones.Neck, 0.16f, physicsByName);
-        TryAddUpperBodySwayBinding(HumanBodyBones.Head, 0.24f, physicsByName);
+        TryAddUpperBodySwayBinding(HumanBodyBones.Neck, 0.38f, physicsByName);
+        TryAddUpperBodySwayBinding(HumanBodyBones.Head, 0.46f, physicsByName);
         TryAddUpperBodySwayBinding(HumanBodyBones.Chest, 0.12f, physicsByName);
         TryAddUpperBodySwayBinding(HumanBodyBones.LeftUpperArm, 0.42f, physicsByName);
         TryAddUpperBodySwayBinding(HumanBodyBones.LeftLowerArm, 0.52f, physicsByName);

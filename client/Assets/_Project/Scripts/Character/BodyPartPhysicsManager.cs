@@ -10,8 +10,8 @@ namespace SSAFYPlayTime.Character
         private const float DefaultSpeedForMaxWobble = 4f;
         private const float DefaultTurnRateForMaxWobble = 220f;
         private const float DefaultAirborneWobbleBonus = 0.08f;
-        private const float DefaultHeadPinMultiplier = 0.72f;
-        private const float DefaultHeadMuscleMultiplier = 0.58f;
+        private const float DefaultHeadPinMultiplier = 0.48f;
+        private const float DefaultHeadMuscleMultiplier = 0.38f;
         private const float DefaultArmPinMultiplier = 0.64f;
         private const float DefaultArmMuscleMultiplier = 0.52f;
         private const float DefaultHandPinMultiplier = 0.82f;
@@ -36,8 +36,8 @@ namespace SSAFYPlayTime.Character
         [SerializeField] private float speedForMaxWobble = 4f;
         [SerializeField] private float turnRateForMaxWobble = 220f;
         [SerializeField, Range(0f, 0.5f)] private float airborneWobbleBonus = 0.08f;
-        [SerializeField, Range(0.25f, 1f)] private float headPinMultiplier = 0.72f;
-        [SerializeField, Range(0.25f, 1f)] private float headMuscleMultiplier = 0.58f;
+        [SerializeField, Range(0.25f, 1f)] private float headPinMultiplier = 0.48f;
+        [SerializeField, Range(0.25f, 1f)] private float headMuscleMultiplier = 0.38f;
         [SerializeField, Range(0.25f, 1f)] private float armPinMultiplier = 0.64f;
         [SerializeField, Range(0.25f, 1f)] private float armMuscleMultiplier = 0.52f;
         [SerializeField, Range(0.25f, 1f)] private float handPinMultiplier = 0.82f;
@@ -123,6 +123,27 @@ namespace SSAFYPlayTime.Character
                 _currentState = newState;
                 ApplyImmediate(newState);
             }
+        }
+
+        public void SetStateImmediate(BodyPartPhysicsProfile.CharacterPhysicsState newState)
+        {
+            _targetState = newState;
+
+            if (profile == null)
+                return;
+
+            if (puppetMaster == null)
+                puppetMaster = GetComponentInChildren<PuppetMaster>();
+
+            if (puppetMaster == null)
+                return;
+
+            EnsureInitialized();
+            if (!_initialized)
+                return;
+
+            _currentState = newState;
+            ApplyImmediate(newState);
         }
 
         public void SetProfile(BodyPartPhysicsProfile newProfile)
@@ -492,7 +513,9 @@ namespace SSAFYPlayTime.Character
                 NetworkPlayer.PhysicalPhase.Dragged => BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed,
                 NetworkPlayer.PhysicalPhase.Unstable => BodyPartPhysicsProfile.CharacterPhysicsState.Unstable,
                 NetworkPlayer.PhysicalPhase.Stunned => BodyPartPhysicsProfile.CharacterPhysicsState.Stunned,
+                NetworkPlayer.PhysicalPhase.BeingCarriedStunned => BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned,
                 NetworkPlayer.PhysicalPhase.Recovering => BodyPartPhysicsProfile.CharacterPhysicsState.Recovering,
+                NetworkPlayer.PhysicalPhase.CarryingStunned => BodyPartPhysicsProfile.CharacterPhysicsState.Normal,
                 _ => BodyPartPhysicsProfile.CharacterPhysicsState.Normal
             };
         }
