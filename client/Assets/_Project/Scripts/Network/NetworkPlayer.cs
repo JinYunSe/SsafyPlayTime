@@ -77,6 +77,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     // ─── OwnerProxy용 — 내가 다른 플레이어에게 잡힌 상태 ───
     [Networked] public NetworkBool NetworkedIsBeingGrabbed { get; set; }
+    [Networked] private byte NetworkedPhysicalPhase { get; set; }
+    [Networked] private float NetworkedInstability { get; set; }
+    [Networked] public NetworkBool NetworkedIsDragged { get; set; }
+    [Networked] private byte NetworkedPhysicsPresentationResetVersion { get; set; }
 
     // ─── PuppetMaster 상태 동기화 ───
     [Networked] private float NetworkedPuppetPinWeight { get; set; }
@@ -95,6 +99,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private int _localMotorState;
     private float _localVisualYaw;
     private PresentationLocomotionState _localPresentationLocomotionState;
+    private PhysicalPhase _localPhysicalPhase = PhysicalPhase.Stable;
+    private float _localInstability;
+    private bool _localIsDragged;
+    private byte _lastObservedPhysicsPresentationResetVersion;
+    private int _remotePhysicsPresentationHoldUntilFrame = -1;
     private int _lastConsumedAnimationEventSequence = -1;
     private Vector2 _sandboxInput;
     private bool _sandboxJump;
@@ -154,6 +163,30 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         return side == HandGrabHandler.HandSide.Left ? _isLeftGrabActive : _isRightGrabActive;
     }
 
+    internal PhysicalPhase GetPhysicalPhase()
+    {
+        if (IsNetworkReady && !HasStateAuthority)
+            return (PhysicalPhase)NetworkedPhysicalPhase;
+
+        return _localPhysicalPhase;
+    }
+
+    internal float GetPhysicalInstability()
+    {
+        if (IsNetworkReady && !HasStateAuthority)
+            return NetworkedInstability;
+
+        return _localInstability;
+    }
+
+    internal bool IsDraggedByPhysics()
+    {
+        if (IsNetworkReady && !HasStateAuthority)
+            return NetworkedIsDragged;
+
+        return _localIsDragged;
+    }
+
     /// <summary>Spawned 이후에만 Networked 속성 접근 가능 여부.</summary>
     private bool IsNetworkReady => Runner != null && Object != null && Object.IsValid;
 
@@ -170,6 +203,20 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         Stunned = 1,
         RecoverStabilizing = 2
     }
+
+    internal enum PhysicalPhase : byte
+    {
+        Stable = 0,
+        GrabIntent = 1,
+        Holding = 2,
+        BeingGrabbed = 3,
+        Dragged = 4,
+        Unstable = 5,
+        Stunned = 6,
+        Recovering = 7
+    }
+
+    private const int RemotePhysicsPresentationHoldFrameCount = 4;
 
     // ─── OwnerProxy 플레이어 타입 판별 ───
     /// <summary>AuthorityOwner: 호스트 로컬 캐릭터</summary>
@@ -229,6 +276,61 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             RightGrabAnchorLocal = Vector3.zero;
             RightGrabConfirmed = false;
         }
+    }
+
+    internal bool TryGetHeldAnchorWorldPosition(HandGrabHandler.HandSide side, out Vector3 anchorWorld)
+    {
+        anchorWorld = Vector3.zero;
+        if (_handGrabHandlers == null)
+            return false;
+
+        for (var i = 0; i < _handGrabHandlers.Length; i++)
+        {
+            var handler = _handGrabHandlers[i];
+            if (handler == null || handler.Side != side || !handler.IsHolding)
+                continue;
+
+            anchorWorld = handler.GetGrabAnchorWorldPosition();
+            return true;
+        }
+
+        return false;
+    }
+
+    internal bool TryGetAverageHeldAnchorWorldPosition(out Vector3 anchorWorld)
+    {
+        anchorWorld = Vector3.zero;
+        var count = 0;
+
+        if (TryGetHeldAnchorWorldPosition(HandGrabHandler.HandSide.Left, out var leftAnchor))
+        {
+            anchorWorld += leftAnchor;
+            count++;
+        }
+
+        if (TryGetHeldAnchorWorldPosition(HandGrabHandler.HandSide.Right, out var rightAnchor))
+        {
+            anchorWorld += rightAnchor;
+            count++;
+        }
+
+        if (count <= 0)
+            return false;
+
+        anchorWorld /= count;
+        return true;
+    }
+
+    internal bool IsGrabFacingLocked()
+    {
+        if (UsesPhysicsPosePresentation(GetPhysicalPhase()))
+            return false;
+
+        if (HasStateAuthority)
+            return IsAnyHandHoldingObject();
+
+        return GetPhysicalPhase() == PhysicalPhase.Holding &&
+               (NetworkedLeftGrabHolding || NetworkedRightGrabHolding);
     }
 
     /// <summary>
@@ -335,9 +437,66 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         NetworkedStunPresentationPhase = (byte)ResolveLocalStunPresentationPhase();
     }
 
+    internal bool ShouldUsePhysicalPhasePresentation()
+    {
+        return UsesPhysicsPosePresentation(GetPhysicalPhase()) || IsRemotePhysicsPresentationResetLocked();
+    }
+
+    internal bool ShouldUseHardPhysicsPresentation()
+    {
+        if (!ShouldUsePhysicalPhasePresentation())
+            return false;
+
+        if (IsRemotePhysicsPresentationResetLocked())
+            return true;
+
+        return GetPhysicalPhase() switch
+        {
+            PhysicalPhase.BeingGrabbed => true,
+            PhysicalPhase.Dragged => true,
+            PhysicalPhase.Stunned => true,
+            _ => false
+        };
+    }
+
+    internal static bool UsesPhysicsPosePresentation(PhysicalPhase phase)
+    {
+        return phase == PhysicalPhase.BeingGrabbed ||
+               phase == PhysicalPhase.Dragged ||
+               phase == PhysicalPhase.Unstable ||
+               phase == PhysicalPhase.Stunned ||
+               phase == PhysicalPhase.Recovering;
+    }
+
     internal bool ShouldUsePhysicsPosePresentation()
     {
-        return GetStunPresentationPhase() != StunPresentationPhase.Active;
+        return ShouldUsePhysicalPhasePresentation();
+    }
+
+    internal void UpdateRemotePhysicsPresentationResetWindow()
+    {
+        if (!IsNetworkReady || HasStateAuthority)
+            return;
+
+        if (_lastObservedPhysicsPresentationResetVersion == NetworkedPhysicsPresentationResetVersion)
+            return;
+
+        _lastObservedPhysicsPresentationResetVersion = NetworkedPhysicsPresentationResetVersion;
+        _remotePhysicsPresentationHoldUntilFrame = Time.frameCount + RemotePhysicsPresentationHoldFrameCount;
+    }
+
+    private bool IsRemotePhysicsPresentationResetLocked()
+    {
+        return !HasStateAuthority &&
+               _remotePhysicsPresentationHoldUntilFrame >= Time.frameCount;
+    }
+
+    private void FlagPhysicsPresentationReset()
+    {
+        if (!IsNetworkReady || !HasStateAuthority)
+            return;
+
+        NetworkedPhysicsPresentationResetVersion++;
     }
 
     // 기절 관련
@@ -416,6 +575,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         {
             NetworkedIsActiveRagdoll = true;
             NetworkedStunPresentationPhase = (byte)StunPresentationPhase.Active;
+            NetworkedPhysicalPhase = (byte)PhysicalPhase.Stable;
+            NetworkedInstability = 0f;
+            NetworkedIsDragged = false;
+            NetworkedPhysicsPresentationResetVersion = 0;
             AccumulatedStunDamage = 0f;
             StunTimeRemaining = 0f;
             NetworkedAnimationEventSequence = 0;
@@ -424,15 +587,25 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             NetworkedLocomotionState = (byte)_localPresentationLocomotionState;
         }
 
+        _lastObservedPhysicsPresentationResetVersion = NetworkedPhysicsPresentationResetVersion;
+
         if (!HasStateAuthority)
         {
             foreach (var rb in GetComponentsInChildren<Rigidbody>(true))
                 rb.isKinematic = true;
+
+            // 비호스트: PuppetMaster의 muscle→target 매핑(Map())을 비활성화.
+            // kinematic muscle이 frozen 상태이므로 Map()이 매 프레임 target skeleton을
+            // 스폰 시점 포즈로 덮어써 Animator 출력을 무효화하는 문제를 방지한다.
+            // 기절/잡힘 등 physics presentation 진입 시 Active로 복원된다.
+            if (_puppetMaster != null)
+                _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Disabled;
         }
 
         ConfigureLocalOwnershipPresentation();
         InitializeAnimationEventState();
         InitializeAnimationDriverNetworkMode();
+        TraceProxyAnimationDiagnostics("Spawned");
 
         // Issue 8: 호스트 마이그레이션 시 새 호스트의 자신 캐릭터 Spawned에서 드롭 아이템 위치를 재동기화한다.
         if (HasStateAuthority && HasInputAuthority && Runner != null && Runner.IsServer)

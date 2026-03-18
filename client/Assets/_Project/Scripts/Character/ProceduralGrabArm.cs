@@ -3,8 +3,8 @@ using RootMotion.Dynamics;
 using RootMotion.FinalIK;
 
 /// <summary>
-/// 그랩 모드일 때 LimbIK로 팔을 절차적으로 타겟 방향으로 뻗는다.
-/// PuppetMaster.OnRead 콜백에서 IK를 풀어 PM이 올바른 포즈를 읽도록 한다.
+/// Drives grab reach poses with FinalIK while the PuppetMaster muscles stay authoritative.
+/// The IK targets are updated during OnRead so the physical rig can keep up with grab intent.
 /// </summary>
 public class ProceduralGrabArm : MonoBehaviour
 {
@@ -16,20 +16,33 @@ public class ProceduralGrabArm : MonoBehaviour
     [SerializeField] LimbIK rightArmIK;
 
     [Header("Reach Settings")]
-    [SerializeField] float blendSpeed = 8f;
+    [SerializeField] float blendSpeed = 6f;
     [SerializeField] float targetScanRadius = 2f;
     [SerializeField] float reachDistance = 0.6f;
 
     [Header("Hand Physics Force")]
-    [SerializeField] float handReachForce = 150f;
-    [SerializeField] float handDamping = 10f;
+    [SerializeField] float handReachForce = 115f;
+    [SerializeField] float handDamping = 8f;
+
+    [Header("Hold Pose")]
+    [SerializeField, Range(0f, 1f)] float anchorBlend = 0.6f;
+    [SerializeField] float holdForwardOffset = 0.45f;
+    [SerializeField] float holdSideOffset = 0.24f;
+    [SerializeField] float holdHeightOffset = 0.82f;
+    [SerializeField] float holdVerticalClamp = 0.55f;
+    [SerializeField] float holdLateralClamp = 0.35f;
+    [SerializeField] float anchorAssistScale = 0.4f;
+    [SerializeField] float torsoReactionScale = 0.3f;
+    [SerializeField] float behindBackThreshold = -0.08f;
+    [SerializeField] float behindBackForce = 90f;
+    [SerializeField] float behindBackTurnTorque = 20f;
 
     float _leftBlend;
     float _rightBlend;
 
     NetworkPlayer _networkPlayer;
 
-    // HandSide 기반 핸들러 캐시 — 배열 인덱스 순서에 의존하지 않음
+    // Cache handlers by side so array order does not matter.
     HandGrabHandler _leftHandler;
     HandGrabHandler _rightHandler;
 
@@ -40,8 +53,10 @@ public class ProceduralGrabArm : MonoBehaviour
     // Physics hands
     Rigidbody _leftPhysicsHandRb;
     Rigidbody _rightPhysicsHandRb;
+    Rigidbody _hipsBodyRb;
     Transform _leftPhysicsHand;
     Transform _rightPhysicsHand;
+    Transform _torsoReference;
 
     Vector3 _leftReachDir;
     Vector3 _rightReachDir;
@@ -58,7 +73,6 @@ public class ProceduralGrabArm : MonoBehaviour
 
     void Start()
     {
-        // HandSide 기반으로 좌우 핸들러를 확정 — 계층 순서에 의존하지 않음
         var handlers = GetComponentsInChildren<HandGrabHandler>(true);
         foreach (var h in handlers)
         {
@@ -68,17 +82,15 @@ public class ProceduralGrabArm : MonoBehaviour
                 _rightHandler = h;
         }
 
-        // Create IK target transforms
         _leftIKTarget = CreateIKTarget("LeftArm_IKTarget");
         _rightIKTarget = CreateIKTarget("RightArm_IKTarget");
 
-        // Setup LimbIK references
         if (leftArmIK != null)
         {
             leftArmIK.solver.target = _leftIKTarget;
             leftArmIK.solver.SetIKPositionWeight(0f);
             leftArmIK.solver.SetIKRotationWeight(0f);
-            leftArmIK.enabled = false; // We solve manually
+            leftArmIK.enabled = false;
         }
 
         if (rightArmIK != null)
@@ -89,7 +101,6 @@ public class ProceduralGrabArm : MonoBehaviour
             rightArmIK.enabled = false;
         }
 
-        // Register PuppetMaster callbacks
         if (puppetMaster != null)
         {
             puppetMaster.OnRead += OnPuppetMasterRead;
@@ -108,6 +119,22 @@ public class ProceduralGrabArm : MonoBehaviour
     void FindPhysicsHands()
     {
         if (puppetMaster == null) return;
+
+        if (puppetMaster.muscles != null && puppetMaster.muscles.Length > 0)
+        {
+            var hipsMuscle = puppetMaster.muscles[0];
+            _hipsBodyRb = hipsMuscle.rigidbody != null
+                ? hipsMuscle.rigidbody
+                : hipsMuscle.joint != null ? hipsMuscle.joint.GetComponent<Rigidbody>() : null;
+        }
+
+        var animator = GetComponentInChildren<Animator>(true);
+        if (animator != null && animator.isHuman)
+        {
+            _torsoReference = animator.GetBoneTransform(HumanBodyBones.Chest);
+            if (_torsoReference == null)
+                _torsoReference = animator.GetBoneTransform(HumanBodyBones.Spine);
+        }
 
         foreach (var muscle in puppetMaster.muscles)
         {
@@ -129,22 +156,23 @@ public class ProceduralGrabArm : MonoBehaviour
     {
         if (puppetMaster == null) return;
 
-        bool grabActive = _networkPlayer != null && _networkPlayer.IsGrabActive;
+        var phase = _networkPlayer != null ? _networkPlayer.GetPhysicalPhase() : NetworkPlayer.PhysicalPhase.Stable;
+        bool grabActive = phase == NetworkPlayer.PhysicalPhase.GrabIntent || phase == NetworkPlayer.PhysicalPhase.Holding;
+        bool suppressReach = NetworkPlayer.UsesPhysicsPosePresentation(phase);
         bool leftHolding = IsHandHolding(_leftHandler);
         bool rightHolding = IsHandHolding(_rightHandler);
 
-        bool leftShouldReach = grabActive || leftHolding;
-        bool rightShouldReach = grabActive || rightHolding;
+        bool leftShouldReach = (grabActive || leftHolding) && !suppressReach;
+        bool rightShouldReach = (grabActive || rightHolding) && !suppressReach;
 
         float dt = Time.deltaTime * blendSpeed;
         _leftBlend = Mathf.MoveTowards(_leftBlend, leftShouldReach ? 1f : 0f, dt);
         _rightBlend = Mathf.MoveTowards(_rightBlend, rightShouldReach ? 1f : 0f, dt);
 
-        // 잡고 있을 때: connectedAnchor 월드 좌표를 IK 타겟으로 직접 사용
-        // 잡고 있지 않을 때: 기존 주변 탐색 방식 유지
         if (leftHolding)
         {
-            _leftIKTarget.position = _leftHandler.GetGrabAnchorWorldPosition();
+            var anchorWorld = _leftHandler.GetGrabAnchorWorldPosition();
+            _leftIKTarget.position = ResolveHoldTarget(true, anchorWorld);
             _leftReachDir = (_leftIKTarget.position - puppetMaster.targetRoot.position).normalized;
         }
         else
@@ -156,7 +184,8 @@ public class ProceduralGrabArm : MonoBehaviour
 
         if (rightHolding)
         {
-            _rightIKTarget.position = _rightHandler.GetGrabAnchorWorldPosition();
+            var anchorWorld = _rightHandler.GetGrabAnchorWorldPosition();
+            _rightIKTarget.position = ResolveHoldTarget(false, anchorWorld);
             _rightReachDir = (_rightIKTarget.position - puppetMaster.targetRoot.position).normalized;
         }
         else
@@ -171,16 +200,23 @@ public class ProceduralGrabArm : MonoBehaviour
     {
         if (puppetMaster == null) return;
 
-        bool grabActive = _networkPlayer != null && _networkPlayer.IsGrabActive;
+        var phase = _networkPlayer != null ? _networkPlayer.GetPhysicalPhase() : NetworkPlayer.PhysicalPhase.Stable;
+        bool grabActive = phase == NetworkPlayer.PhysicalPhase.GrabIntent || phase == NetworkPlayer.PhysicalPhase.Holding;
+        bool suppressReach = NetworkPlayer.UsesPhysicsPosePresentation(phase);
         bool leftHolding = IsHandHolding(_leftHandler);
         bool rightHolding = IsHandHolding(_rightHandler);
 
-        if (grabActive || leftHolding)
-            PushPhysicsHand(_leftPhysicsHandRb, _leftReachDir, leftHolding,
-                leftHolding ? _leftHandler.GetGrabAnchorWorldPosition() : Vector3.zero);
-        if (grabActive || rightHolding)
-            PushPhysicsHand(_rightPhysicsHandRb, _rightReachDir, rightHolding,
-                rightHolding ? _rightHandler.GetGrabAnchorWorldPosition() : Vector3.zero);
+        if (!suppressReach && (grabActive || leftHolding))
+        {
+            var anchorWorld = leftHolding ? _leftHandler.GetGrabAnchorWorldPosition() : Vector3.zero;
+            PushPhysicsHand(_leftPhysicsHandRb, _leftReachDir, leftHolding, _leftIKTarget.position, anchorWorld, true);
+        }
+
+        if (!suppressReach && (grabActive || rightHolding))
+        {
+            var anchorWorld = rightHolding ? _rightHandler.GetGrabAnchorWorldPosition() : Vector3.zero;
+            PushPhysicsHand(_rightPhysicsHandRb, _rightReachDir, rightHolding, _rightIKTarget.position, anchorWorld, false);
+        }
     }
 
     void OnPuppetMasterRead()
@@ -209,31 +245,108 @@ public class ProceduralGrabArm : MonoBehaviour
             rightArmIK.solver.FixTransforms();
     }
 
-    void PushPhysicsHand(Rigidbody handRb, Vector3 reachDir, bool isHolding, Vector3 anchorWorld)
+    void PushPhysicsHand(Rigidbody handRb, Vector3 reachDir, bool isHolding, Vector3 targetWorld, Vector3 anchorWorld, bool isLeft)
     {
         if (handRb == null) return;
 
         if (isHolding)
         {
-            // 잡고 있을 때: 손 → 앵커 월드 좌표 직접 벡터로 끌어당김
-            // targetRoot 기준이 아닌 실제 손 위치 기준이므로 손이 옆/뒤로 밀려도 정확히 복원
-            var toAnchor = anchorWorld - handRb.position;
-            var dist = toAnchor.magnitude;
-            if (dist > 0.01f)
+            var toTarget = targetWorld - handRb.position;
+            var targetDistance = toTarget.magnitude;
+            if (targetDistance > 0.01f)
             {
-                var dir = toAnchor / dist;
-                // 거리에 비례하여 힘 증가 — 멀수록 더 세게 끌어당김
-                var forceMult = Mathf.Clamp(dist * 2f, 0.5f, 3f);
-                handRb.AddForce(dir * handReachForce * forceMult, ForceMode.Acceleration);
+                var targetForce = toTarget / targetDistance * handReachForce * Mathf.Clamp(targetDistance * 2f, 0.4f, 2.5f);
+                handRb.AddForce(targetForce, ForceMode.Acceleration);
+                ApplyTorsoReaction(targetForce * torsoReactionScale);
             }
+
+            var toAnchor = anchorWorld - handRb.position;
+            if (toAnchor.sqrMagnitude > 0.0001f)
+                handRb.AddForce(toAnchor.normalized * handReachForce * anchorAssistScale, ForceMode.Acceleration);
+
+            ApplyBehindBackCorrection(handRb, isLeft);
             handRb.AddForce(-handRb.velocity * handDamping * 1.5f, ForceMode.Acceleration);
         }
         else
         {
-            // 잡으려고 뻗는 중: 가장 가까운 타겟 방향으로 밀기
             handRb.AddForce(reachDir * handReachForce, ForceMode.Acceleration);
             handRb.AddForce(-handRb.velocity * handDamping, ForceMode.Acceleration);
         }
+    }
+
+    Vector3 ResolveHoldTarget(bool isLeft, Vector3 anchorWorld)
+    {
+        Transform bodyRoot = ResolveBodyReference();
+
+        float side = isLeft ? -1f : 1f;
+        var poseTarget = bodyRoot.TransformPoint(new Vector3(side * holdSideOffset, holdHeightOffset, holdForwardOffset));
+
+        var localAnchor = bodyRoot.InverseTransformPoint(anchorWorld);
+        var forwardRange = Mathf.Max(0.01f, holdForwardOffset - behindBackThreshold);
+        var behindAmount = Mathf.Clamp01((behindBackThreshold - localAnchor.z) / forwardRange);
+        var effectiveBlend = Mathf.Lerp(anchorBlend, 0.2f, behindAmount);
+
+        localAnchor.x = Mathf.Lerp(side * holdSideOffset, localAnchor.x, effectiveBlend);
+        localAnchor.x = Mathf.Clamp(
+            localAnchor.x,
+            side * holdSideOffset - holdLateralClamp,
+            side * holdSideOffset + holdLateralClamp);
+        localAnchor.y = Mathf.Clamp(localAnchor.y, holdHeightOffset - holdVerticalClamp, holdHeightOffset + holdVerticalClamp);
+        localAnchor.z = Mathf.Max(localAnchor.z, holdForwardOffset * 0.35f);
+
+        var constrainedAnchor = bodyRoot.TransformPoint(localAnchor);
+        return Vector3.Lerp(poseTarget, constrainedAnchor, effectiveBlend);
+    }
+
+    void ApplyBehindBackCorrection(Rigidbody handRb, bool isLeft)
+    {
+        Transform bodyRoot = ResolveBodyReference();
+
+        var localHand = bodyRoot.InverseTransformPoint(handRb.position);
+        if (localHand.z >= behindBackThreshold)
+            return;
+
+        float side = isLeft ? -1f : 1f;
+        float depth = behindBackThreshold - localHand.z;
+        var correctiveForce = bodyRoot.forward * depth * behindBackForce;
+        correctiveForce += bodyRoot.right * side * behindBackForce * 0.15f;
+
+        handRb.AddForce(correctiveForce, ForceMode.Acceleration);
+        ApplyTorsoReaction(correctiveForce * torsoReactionScale);
+        ApplyTorsoFacingAssist(bodyRoot, handRb.position, depth);
+    }
+
+    void ApplyTorsoReaction(Vector3 reactionForce)
+    {
+        if (_hipsBodyRb == null || _hipsBodyRb.isKinematic || reactionForce.sqrMagnitude <= 0f)
+            return;
+
+        _hipsBodyRb.AddForce(reactionForce, ForceMode.Acceleration);
+    }
+
+    Transform ResolveBodyReference()
+    {
+        if (_torsoReference != null)
+            return _torsoReference;
+
+        if (puppetMaster != null && puppetMaster.targetRoot != null)
+            return puppetMaster.targetRoot;
+
+        return transform;
+    }
+
+    void ApplyTorsoFacingAssist(Transform bodyRoot, Vector3 handWorld, float depth)
+    {
+        if (_hipsBodyRb == null || _hipsBodyRb.isKinematic || bodyRoot == null || depth <= 0f)
+            return;
+
+        var planarHand = Vector3.ProjectOnPlane(handWorld - bodyRoot.position, bodyRoot.up);
+        if (planarHand.sqrMagnitude <= 0.0001f)
+            return;
+
+        var signedAngle = Vector3.SignedAngle(bodyRoot.forward, planarHand.normalized, bodyRoot.up);
+        var turnAssist = Mathf.Clamp(signedAngle / 90f, -1f, 1f) * behindBackTurnTorque * Mathf.Clamp01(depth * 4f);
+        _hipsBodyRb.AddTorque(bodyRoot.up * turnAssist, ForceMode.Acceleration);
     }
 
     Vector3 GetReachDirection(Transform physicsHand, bool isLeft)

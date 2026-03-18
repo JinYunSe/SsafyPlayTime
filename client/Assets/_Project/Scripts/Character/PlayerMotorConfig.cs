@@ -15,6 +15,11 @@ namespace SSAFYPlayTime.Character
         public float groundStickForce = 6f;
         public float stopSpeedEpsilon = 0.1f;
 
+        [Header("Grab Facing")]
+        public float grabYawSoftLimitDeg = 60f;
+        public float grabYawHardLimitDeg = 75f;
+        public float grabTurnSpeedScale = 0.45f;
+
         [Header("Jump/Gravity")]
         public float jumpImpulse = 20f;
         public float extraGravity = 10f;
