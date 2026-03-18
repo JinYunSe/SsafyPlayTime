@@ -433,32 +433,26 @@ namespace SSAFYPlayTime.Gameplay.Items
                     continue;
                 }
 
+                renderer.enabled = true;
+
                 var name = renderer.gameObject.name;
-                if (string.Equals(name, "OuterLayer", System.StringComparison.Ordinal))
+                if (string.Equals(name, "Glow", System.StringComparison.Ordinal) ||
+                    string.Equals(name, "Particles", System.StringComparison.Ordinal) ||
+                    string.Equals(name, EffectChildName, System.StringComparison.Ordinal))
+                {
+                    if (resolvedGlow != null)
+                    {
+                        AssignRendererMaterials(renderer, resolvedGlow);
+                    }
+
+                    continue;
+                }
+
+                if (string.Equals(name, "Circling", System.StringComparison.Ordinal))
                 {
                     if (resolvedOuter != null)
                     {
                         AssignRendererMaterials(renderer, resolvedOuter);
-                    }
-
-                    continue;
-                }
-
-                if (string.Equals(name, "Glow", System.StringComparison.Ordinal))
-                {
-                    if (resolvedGlow != null)
-                    {
-                        AssignRendererMaterials(renderer, resolvedGlow);
-                    }
-
-                    continue;
-                }
-
-                if (string.Equals(name, EffectChildName, System.StringComparison.Ordinal))
-                {
-                    if (resolvedGlow != null)
-                    {
-                        AssignRendererMaterials(renderer, resolvedGlow);
                     }
 
                     continue;
@@ -510,23 +504,26 @@ namespace SSAFYPlayTime.Gameplay.Items
                     continue;
                 }
 
+                renderer.enabled = true;
+
                 var name = renderer.gameObject.name;
-                if (string.Equals(name, "OuterLayer", System.StringComparison.Ordinal))
-                {
-                    if (outerLayerMaterial != null)
-                    {
-                        renderer.sharedMaterials = new[] { outerLayerMaterial };
-                    }
-
-                    continue;
-                }
-
                 if (string.Equals(name, "Glow", System.StringComparison.Ordinal) ||
+                    string.Equals(name, "Particles", System.StringComparison.Ordinal) ||
                     string.Equals(name, EffectChildName, System.StringComparison.Ordinal))
                 {
                     if (glowMaterial != null)
                     {
                         renderer.sharedMaterials = new[] { glowMaterial };
+                    }
+
+                    continue;
+                }
+
+                if (string.Equals(name, "Circling", System.StringComparison.Ordinal))
+                {
+                    if (outerLayerMaterial != null)
+                    {
+                        renderer.sharedMaterials = new[] { outerLayerMaterial };
                     }
 
                     continue;

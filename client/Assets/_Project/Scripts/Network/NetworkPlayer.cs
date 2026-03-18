@@ -10,8 +10,8 @@ using UnityEngine;
 // StateAuthority(서버/호스트)에서만 물리 시뮬레이션을 실행한다.
 //
 // [전투 시스템]
-// - stunDamage 누적 → 임계값(30) 초과 → 기절 → 가중치 기반 자동 회복
-// - 좌클릭 짧게=아이템 사용(보유 시)/펀치, 좌클릭 꾹=그랩(아이템이면 즉시 습득), 우클릭=던지기
+// - stunDamage 누적 -> 임계값(30) 초과 -> 기절 -> 가중치 기반 자동 회복
+// - 좌클릭 짧게 = 아이템 사용(보유 시)/펀치, 좌클릭 길게 = 그랩(아이템이면 즉시 습득), 우클릭 = 던지기
 // - 부위별/상태별 배율, 그로기 시스템
 public sealed partial class NetworkPlayer : NetworkBehaviour
 {
@@ -32,14 +32,14 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [Header("Grab")]
     [SerializeField] private Transform holdPoint;
 
-    // ─── 네트워크 동기화 변수 ───
+    // 네트워크 동기화 변수
     [Networked] private float NetworkedMoveSpeed { get; set; }
     [Networked] private int NetworkedMotorState { get; set; }
     [Networked] private int NetworkedAnimationEventSequence { get; set; }
     [Networked] private int NetworkedAnimationEventType { get; set; }
 
     // 스폰 시 확정된 캐릭터 종류(0=Ssaty, 1=AlG, 2=Fit, 3=Wise).
-    // ? 선택도 스폰 전 onBeforeSpawned에서 실제 배정값으로 기록된다.
+    // 랜덤 선택도 스폰 전 onBeforeSpawned에서 실제 배정값으로 기록된다.
     // 호스트 마이그레이션 캡처 시 roster 수신 여부와 무관하게 실제 외형을 보존하기 위해 사용한다.
     [Networked] public int CharacterTypeIndex { get; set; } = -1;
 

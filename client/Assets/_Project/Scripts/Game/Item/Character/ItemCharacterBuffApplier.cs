@@ -613,11 +613,18 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             var rendererName = renderer.gameObject.name ?? string.Empty;
+            var isShieldBody = string.Equals(rendererName, "ShieldYellow", StringComparison.Ordinal);
             var baseColor = string.Equals(rendererName, ShieldSparksObjectName, StringComparison.Ordinal)
                 ? new Color(1f, 0.84f, 0.2f, 0.85f)
-                : new Color(1f, 0.78f, 0.14f, 0.68f);
-            var rimColor = new Color(1f, 0.84f, 0.2f, 0.95f);
-            var innerColor = new Color(0.42f, 0.22f, 0.02f, 0.92f);
+                : isShieldBody
+                    ? new Color(1f, 0.82f, 0.18f, 0.55f)
+                    : new Color(1f, 0.78f, 0.14f, 0.68f);
+            var rimColor = isShieldBody
+                ? new Color(1f, 0.84f, 0.2f, 1f)
+                : new Color(1f, 0.84f, 0.2f, 0.95f);
+            var innerColor = isShieldBody
+                ? new Color(0.52f, 0.28f, 0.03f, 0.95f)
+                : new Color(0.42f, 0.22f, 0.02f, 0.92f);
 
             var materials = renderer.materials;
             for (var i = 0; i < materials.Length; i++)
