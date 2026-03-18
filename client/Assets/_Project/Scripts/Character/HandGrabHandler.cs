@@ -542,7 +542,6 @@ public class HandGrabHandler : MonoBehaviour
             {
                 _originalPinWeight = pm.pinWeight;
                 _originalMuscleWeight = pm.muscleWeight;
-                bodyPartManager.SetState(SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed);
                 _grabRefCounts[pm] = 1;
             }
             else
@@ -589,9 +588,7 @@ public class HandGrabHandler : MonoBehaviour
             {
                 // BodyPartPhysicsManager가 있으면 Normal 상태로 복원
                 var bodyPartManager = _grabbedPuppet.transform.root.GetComponentInChildren<SSAFYPlayTime.Character.BodyPartPhysicsManager>(true);
-                if (bodyPartManager != null)
-                    bodyPartManager.SetState(SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState.Normal);
-                else
+                if (bodyPartManager == null)
                 {
                     _grabbedPuppet.pinWeight = _originalPinWeight;
                     _grabbedPuppet.muscleWeight = _originalMuscleWeight;
