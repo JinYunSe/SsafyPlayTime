@@ -1,3 +1,4 @@
+using SSAFYPlayTime.Character;
 using UnityEngine;
 
 // NetworkPlayer LateUpdate(카메라 앵커 갱신) 이후 실행을 보장하기 위해 실행 순서를 뒤로 설정
@@ -21,6 +22,8 @@ public class CameraRig : MonoBehaviour
     [SerializeField] private bool invertY;
     [SerializeField] private bool lockCursor = true;
     [SerializeField] private float lookDeadZone = 0.01f;
+    [SerializeField] private float yawClampBlendInSpeed = 18f;
+    [SerializeField] private float yawClampBlendOutSpeed = 8f;
 
     [Header("Collision")]
     [SerializeField] private LayerMask obstructionMask = ~0;
@@ -38,10 +41,17 @@ public class CameraRig : MonoBehaviour
     private bool _initializedAngles;
     private Vector3 _impactPositionOffset;
     private Vector2 _impactRotationOffset;
+    private Transform _resolvedContextTarget;
+    private CameraFollowAnchorContext _targetAnchorContext;
+    private NetworkPlayer _targetPlayer;
+    private float _yawClampWeight;
+    private float _yawClampCenterYaw;
+    private float _yawClampHalfAngle = 180f;
 
     public void SetTarget(Transform newTarget)
     {
         target = newTarget;
+        ResolveTargetContext(force: true);
         InitializeAngles(force: true);
     }
 
@@ -93,7 +103,9 @@ public class CameraRig : MonoBehaviour
         if (target == null)
             return;
 
+        ResolveTargetContext(force: false);
         UpdateLookInput();
+        ApplyTargetYawClamp(Time.deltaTime);
 
         // 팔로우 위치: _cameraFollowAnchor(NetworkPlayer)가 이미 스무딩을 담당하므로
         // CameraRig에서 추가 SmoothDamp 없이 직접 사용 (이중 스무딩 제거)
@@ -132,6 +144,9 @@ public class CameraRig : MonoBehaviour
 
         _targetYaw = initialYaw;
         _targetPitch = Mathf.Clamp(initialPitch, minPitch, maxPitch);
+        _yawClampCenterYaw = _targetYaw;
+        _yawClampHalfAngle = 180f;
+        _yawClampWeight = 0f;
 
         _initializedAngles = true;
     }
@@ -148,6 +163,57 @@ public class CameraRig : MonoBehaviour
         _targetYaw += look.x * mouseSensitivity;
         _targetPitch += (invertY ? look.y : -look.y) * mouseSensitivity;
         _targetPitch = Mathf.Clamp(_targetPitch, minPitch, maxPitch);
+    }
+
+    private void ResolveTargetContext(bool force)
+    {
+        if (!force && _resolvedContextTarget == target)
+            return;
+
+        _resolvedContextTarget = target;
+        _targetAnchorContext = target != null ? target.GetComponent<CameraFollowAnchorContext>() : null;
+        _targetPlayer = _targetAnchorContext != null ? _targetAnchorContext.Owner : null;
+
+        if (_targetPlayer == null && target != null)
+            _targetPlayer = target.GetComponent<NetworkPlayer>();
+
+        if (_targetPlayer == null && target != null)
+            _targetPlayer = target.GetComponentInParent<NetworkPlayer>();
+    }
+
+    private void ApplyTargetYawClamp(float deltaTime)
+    {
+        var centerYaw = _yawClampCenterYaw;
+        var halfAngle = _yawClampHalfAngle;
+        var hasClamp = _targetPlayer != null && _targetPlayer.TryGetCameraYawClamp(out centerYaw, out halfAngle);
+        var clampSpeed = hasClamp ? yawClampBlendInSpeed : yawClampBlendOutSpeed;
+        var alpha = 1f - Mathf.Exp(-Mathf.Max(0.01f, clampSpeed) * deltaTime);
+
+        if (hasClamp)
+        {
+            if (_yawClampWeight <= 0.001f)
+            {
+                _yawClampCenterYaw = centerYaw;
+                _yawClampHalfAngle = halfAngle;
+            }
+            else
+            {
+                _yawClampCenterYaw = Mathf.LerpAngle(_yawClampCenterYaw, centerYaw, alpha);
+                _yawClampHalfAngle = Mathf.Lerp(_yawClampHalfAngle, halfAngle, alpha);
+            }
+        }
+        else
+        {
+            _yawClampHalfAngle = Mathf.Lerp(_yawClampHalfAngle, 180f, alpha);
+        }
+
+        _yawClampWeight = Mathf.Lerp(_yawClampWeight, hasClamp ? 1f : 0f, alpha);
+        if (_yawClampWeight <= 0.001f)
+            return;
+
+        var effectiveHalfAngle = Mathf.Lerp(180f, Mathf.Clamp(_yawClampHalfAngle, 1f, 179f), _yawClampWeight);
+        var deltaYaw = Mathf.DeltaAngle(_yawClampCenterYaw, _targetYaw);
+        _targetYaw = _yawClampCenterYaw + Mathf.Clamp(deltaYaw, -effectiveHalfAngle, effectiveHalfAngle);
     }
 
     private Vector3 ResolveCameraPosition(Vector3 pivot, Vector3 desiredPos)

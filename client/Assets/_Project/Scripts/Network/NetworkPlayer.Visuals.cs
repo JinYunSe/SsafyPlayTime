@@ -20,6 +20,8 @@ public sealed partial class NetworkPlayer
     private bool _wasUsingPhysicsPresentation;
     private int _lastPhysicsPresentationSyncFrame = -1;
     private bool _pendingAnimatorDrivenPoseReset;
+    private const float HitReactionBoneCopyThreshold = 0.58f;
+    private const float HitReactionBoneCopyFullThreshold = 0.88f;
 
     /// <summary>
     /// 호스트 전용 로컬 래치: 회복 진입 시 켜지고, Stable로 돌아오면 꺼진다.
@@ -168,11 +170,13 @@ public sealed partial class NetworkPlayer
         if (_pendingAnimatorDrivenPoseReset)
             TryRestoreAnimatorDrivenPresentation();
 
-        if (!ShouldUseHardPhysicsPresentation())
+        var useHardPhysicsPresentation = ShouldUseHardPhysicsPresentation();
+        var hitReactionCopyWeight = useHardPhysicsPresentation ? 1f : ResolveHitReactionBoneCopyWeight();
+        if (!useHardPhysicsPresentation && hitReactionCopyWeight <= 0f)
             return;
 
         // 호스트 래치 활성: 물리 뼈→비주얼 복사를 건너뛰어 animator pose를 유지
-        if (_forceAnimatorVisualLatch)
+        if (_forceAnimatorVisualLatch && hitReactionCopyWeight <= 0f)
             return;
 
         var presentationRoot = GetPresentationRootTransform();
@@ -186,8 +190,30 @@ public sealed partial class NetworkPlayer
             if (binding.physics == null || binding.visual == null)
                 continue;
 
-            binding.visual.localRotation = ResolveVisualLocalRotation(binding);
+            var physicsRotation = ResolveVisualLocalRotation(binding);
+            binding.visual.localRotation = hitReactionCopyWeight >= 0.999f
+                ? physicsRotation
+                : Quaternion.Slerp(binding.visual.localRotation, physicsRotation, hitReactionCopyWeight);
         }
+    }
+
+    private float ResolveHitReactionBoneCopyWeight()
+    {
+        if (GetPhysicalPhase() != PhysicalPhase.Unstable)
+            return 0f;
+
+        var instability = GetPhysicalInstability();
+        var instabilityWeight = Mathf.InverseLerp(
+            HitReactionBoneCopyThreshold,
+            HitReactionBoneCopyFullThreshold,
+            instability);
+        var hitWeight = 0f;
+        if (IsInHitRecoil)
+            hitWeight = 0.72f;
+        else if (_hitInstabilityBoost > 0.01f)
+            hitWeight = Mathf.Lerp(0.45f, 0.85f, Mathf.Clamp01(_hitInstabilityBoost / HitInstabilityBoostMax));
+
+        return Mathf.Clamp01(Mathf.Max(instabilityWeight, hitWeight));
     }
 
     /// <summary>

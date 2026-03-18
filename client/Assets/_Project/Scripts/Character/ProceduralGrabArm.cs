@@ -40,6 +40,11 @@ public class ProceduralGrabArm : MonoBehaviour
     [SerializeField] float behindBackThreshold = -0.08f;
     [SerializeField] float behindBackForce = 90f;
     [SerializeField] float behindBackTurnTorque = 20f;
+    [SerializeField, Range(0f, 1f)] float chestReactionShare = 0.4f;
+    [SerializeField] float carryingTorsoReactionMultiplier = 1.15f;
+    [SerializeField] float dualCarryTorsoReactionMultiplier = 1.35f;
+    [SerializeField] float carryingTurnAssistMultiplier = 1.1f;
+    [SerializeField] float dualCarryTurnAssistMultiplier = 1.25f;
 
     [Header("Carry Pose Profile")]
     [SerializeField] CarryPoseProfile carryPoseProfile;
@@ -64,6 +69,7 @@ public class ProceduralGrabArm : MonoBehaviour
     Rigidbody _leftPhysicsHandRb;
     Rigidbody _rightPhysicsHandRb;
     Rigidbody _hipsBodyRb;
+    Rigidbody _chestBodyRb;
     Transform _leftPhysicsHand;
     Transform _rightPhysicsHand;
     Transform _torsoReference;
@@ -144,6 +150,8 @@ public class ProceduralGrabArm : MonoBehaviour
             _torsoReference = animator.GetBoneTransform(HumanBodyBones.Chest);
             if (_torsoReference == null)
                 _torsoReference = animator.GetBoneTransform(HumanBodyBones.Spine);
+
+            _chestBodyRb = FindNearestRigidbody(_torsoReference, 3);
         }
 
         foreach (var muscle in puppetMaster.muscles)
@@ -160,6 +168,39 @@ public class ProceduralGrabArm : MonoBehaviour
                 _rightPhysicsHandRb = muscle.transform.GetComponent<Rigidbody>();
             }
         }
+
+        if (_chestBodyRb == null && puppetMaster.muscles != null)
+        {
+            foreach (var muscle in puppetMaster.muscles)
+            {
+                if (muscle == null || muscle.transform == null)
+                    continue;
+
+                if (muscle.transform.name != "Chest" && muscle.transform.name != "Spine2")
+                    continue;
+
+                _chestBodyRb = muscle.rigidbody != null
+                    ? muscle.rigidbody
+                    : muscle.joint != null ? muscle.joint.GetComponent<Rigidbody>() : null;
+                if (_chestBodyRb != null)
+                    break;
+            }
+        }
+    }
+
+    static Rigidbody FindNearestRigidbody(Transform start, int maxDepth)
+    {
+        var current = start;
+        for (var depth = 0; current != null && depth <= maxDepth; depth++)
+        {
+            var rb = current.GetComponent<Rigidbody>();
+            if (rb != null)
+                return rb;
+
+            current = current.parent;
+        }
+
+        return null;
     }
 
     void Update()
@@ -447,10 +488,18 @@ public class ProceduralGrabArm : MonoBehaviour
 
     void ApplyTorsoReaction(Vector3 reactionForce)
     {
-        if (_hipsBodyRb == null || _hipsBodyRb.isKinematic || reactionForce.sqrMagnitude <= 0f)
+        if (reactionForce.sqrMagnitude <= 0f)
             return;
 
-        _hipsBodyRb.AddForce(reactionForce, ForceMode.Acceleration);
+        var scaledForce = reactionForce * ResolveTorsoReactionMultiplier();
+        var chestShare = _chestBodyRb != null && !_chestBodyRb.isKinematic ? chestReactionShare : 0f;
+        var hipsShare = 1f - chestShare;
+
+        if (_hipsBodyRb != null && !_hipsBodyRb.isKinematic && hipsShare > 0.0001f)
+            _hipsBodyRb.AddForce(scaledForce * hipsShare, ForceMode.Acceleration);
+
+        if (_chestBodyRb != null && !_chestBodyRb.isKinematic && chestShare > 0.0001f)
+            _chestBodyRb.AddForce(scaledForce * chestShare, ForceMode.Acceleration);
     }
 
     Transform ResolveBodyReference()
@@ -466,7 +515,13 @@ public class ProceduralGrabArm : MonoBehaviour
 
     void ApplyTorsoFacingAssist(Transform bodyRoot, Vector3 handWorld, float depth)
     {
-        if (_hipsBodyRb == null || _hipsBodyRb.isKinematic || bodyRoot == null || depth <= 0f)
+        if ((_hipsBodyRb == null || _hipsBodyRb.isKinematic) &&
+            (_chestBodyRb == null || _chestBodyRb.isKinematic))
+        {
+            return;
+        }
+
+        if (bodyRoot == null || depth <= 0f)
             return;
 
         var planarHand = Vector3.ProjectOnPlane(handWorld - bodyRoot.position, bodyRoot.up);
@@ -474,8 +529,45 @@ public class ProceduralGrabArm : MonoBehaviour
             return;
 
         var signedAngle = Vector3.SignedAngle(bodyRoot.forward, planarHand.normalized, bodyRoot.up);
-        var turnAssist = Mathf.Clamp(signedAngle / 90f, -1f, 1f) * behindBackTurnTorque * Mathf.Clamp01(depth * 4f);
-        _hipsBodyRb.AddTorque(bodyRoot.up * turnAssist, ForceMode.Acceleration);
+        var turnAssist = Mathf.Clamp(signedAngle / 90f, -1f, 1f)
+            * behindBackTurnTorque
+            * Mathf.Clamp01(depth * 4f)
+            * ResolveTurnAssistMultiplier();
+        var assistTorque = bodyRoot.up * turnAssist;
+        var chestShare = _chestBodyRb != null && !_chestBodyRb.isKinematic ? chestReactionShare : 0f;
+        var hipsShare = 1f - chestShare;
+
+        if (_hipsBodyRb != null && !_hipsBodyRb.isKinematic && hipsShare > 0.0001f)
+            _hipsBodyRb.AddTorque(assistTorque * hipsShare, ForceMode.Acceleration);
+
+        if (_chestBodyRb != null && !_chestBodyRb.isKinematic && chestShare > 0.0001f)
+            _chestBodyRb.AddTorque(assistTorque * chestShare, ForceMode.Acceleration);
+    }
+
+    float ResolveTorsoReactionMultiplier()
+    {
+        if (_networkPlayer == null)
+            return 1f;
+
+        if (_networkPlayer.IsDualGrabbingStunnedPlayer)
+            return dualCarryTorsoReactionMultiplier;
+
+        return _networkPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.CarryingStunned
+            ? carryingTorsoReactionMultiplier
+            : 1f;
+    }
+
+    float ResolveTurnAssistMultiplier()
+    {
+        if (_networkPlayer == null)
+            return 1f;
+
+        if (_networkPlayer.IsDualGrabbingStunnedPlayer)
+            return dualCarryTurnAssistMultiplier;
+
+        return _networkPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.CarryingStunned
+            ? carryingTurnAssistMultiplier
+            : 1f;
     }
 
     Vector3 GetReachDirection(Transform physicsHand, bool isLeft)
