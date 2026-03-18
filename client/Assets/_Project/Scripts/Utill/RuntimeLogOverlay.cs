@@ -187,6 +187,9 @@ namespace SSAFYPlayTime
             CreateTopRightButton("CloseButton", "X", new Vector2(-8f, -8f), 32f, ClosePanel);
             CreateTopRightButton("CopyButton", "Copy", new Vector2(-48f, -8f), 72f, CopyLogsToClipboard);
             CreateTopRightButton("ClearButton", "Clear", new Vector2(-126f, -8f), 72f, ClearLogs);
+
+            // 기본적으로 숨김 상태 — F6으로 토글
+            _panel.SetActive(false);
         }
 
         private void CreateTopRightButton(string objectName, string labelText, Vector2 anchoredPosition, float width, UnityEngine.Events.UnityAction onClick)
