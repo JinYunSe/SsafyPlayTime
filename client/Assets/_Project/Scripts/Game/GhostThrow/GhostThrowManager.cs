@@ -29,7 +29,11 @@ namespace SSAFYPlayTime.Game.GhostThrow
         private float _lastBombThrowTime = -100f;
         private float _lastBananaThrowTime = -100f;
         private PlayerStats _localPlayerStats;
+        private NetworkPlayer _localNetworkPlayer;
         private bool _isGhostThrowEnabled;
+        private bool _hasLoggedMissingLocalPlayer;
+
+        public bool IsGhostThrowEnabled => _isGhostThrowEnabled;
 
         private void Start()
         {
@@ -45,7 +49,7 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
         private void Update()
         {
-            if (_localPlayerStats == null)
+            if (_localPlayerStats == null && _localNetworkPlayer == null)
                 BindLocalPlayer();
 
             RefreshGhostThrowStateFromLocalPlayer();
@@ -62,48 +66,45 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
         private void BindLocalPlayer()
         {
-            GameObject localPlayer = null;
-
-            if (manualLocalTarget != null)
-                localPlayer = manualLocalTarget.gameObject;
-            else
-                localPlayer = GameObject.FindGameObjectWithTag(localPlayerTag);
+            var localPlayer = ResolveLocalPlayerObject();
 
             if (localPlayer == null)
             {
-                var allPlayerStats = FindObjectsByType<PlayerStats>(FindObjectsSortMode.None);
-                for (var i = 0; i < allPlayerStats.Length; i++)
+                if (!_hasLoggedMissingLocalPlayer)
                 {
-                    var stats = allPlayerStats[i];
-                    if (stats == null)
-                        continue;
-
-                    var netObj = stats.GetComponent<NetworkObject>();
-                    if (netObj != null && netObj.HasInputAuthority)
-                    {
-                        localPlayer = stats.gameObject;
-                        break;
-                    }
+                    Debug.LogWarning($"GhostThrowManager: local player not found. tag={localPlayerTag}");
+                    _hasLoggedMissingLocalPlayer = true;
                 }
-            }
-
-            if (localPlayer == null)
-            {
-                Debug.LogWarning($"GhostThrowManager: local player not found. tag={localPlayerTag}");
                 return;
             }
 
+            _hasLoggedMissingLocalPlayer = false;
             _localPlayerStats = localPlayer.GetComponent<PlayerStats>();
             if (_localPlayerStats == null)
+                _localPlayerStats = localPlayer.GetComponentInChildren<PlayerStats>(true);
+            if (_localPlayerStats == null)
+                _localPlayerStats = localPlayer.GetComponentInParent<PlayerStats>();
+
+            _localNetworkPlayer = localPlayer.GetComponent<NetworkPlayer>();
+            if (_localNetworkPlayer == null)
+                _localNetworkPlayer = localPlayer.GetComponentInChildren<NetworkPlayer>(true);
+            if (_localNetworkPlayer == null)
+                _localNetworkPlayer = localPlayer.GetComponentInParent<NetworkPlayer>();
+
+            if (_localPlayerStats == null && _localNetworkPlayer == null)
             {
-                Debug.LogWarning($"GhostThrowManager: PlayerStats missing on {localPlayer.name}");
+                Debug.LogWarning($"GhostThrowManager: PlayerStats and NetworkPlayer missing on {localPlayer.name}");
                 return;
             }
 
-            _localPlayerStats.OnDied -= HandleLocalPlayerDied;
-            _localPlayerStats.OnDied += HandleLocalPlayerDied;
+            if (_localPlayerStats != null)
+            {
+                _localPlayerStats.OnDied -= HandleLocalPlayerDied;
+                _localPlayerStats.OnDied += HandleLocalPlayerDied;
+            }
 
-            if (_localPlayerStats.IsDead)
+            if ((_localPlayerStats != null && _localPlayerStats.IsDead) ||
+                (_localNetworkPlayer != null && _localNetworkPlayer.IsDeadNetworked))
                 _isGhostThrowEnabled = true;
         }
 
@@ -126,6 +127,12 @@ namespace SSAFYPlayTime.Game.GhostThrow
             if (_localPlayerStats != null && _localPlayerStats.IsDead)
             {
                 ForceEnableGhostThrow($"PlayerStats death state on {_localPlayerStats.name}");
+                return;
+            }
+
+            if (_localNetworkPlayer != null && _localNetworkPlayer.IsDeadNetworked)
+            {
+                ForceEnableGhostThrow($"NetworkPlayer death state on {_localNetworkPlayer.name}");
                 return;
             }
 
@@ -269,6 +276,10 @@ namespace SSAFYPlayTime.Game.GhostThrow
             if (_localPlayerStats != null)
             {
                 var player = _localPlayerStats.GetComponent<NetworkPlayer>();
+                if (player == null)
+                    player = _localPlayerStats.GetComponentInParent<NetworkPlayer>();
+                if (player == null)
+                    player = _localPlayerStats.GetComponentInChildren<NetworkPlayer>(true);
                 if (player != null)
                     return player;
             }
@@ -286,6 +297,88 @@ namespace SSAFYPlayTime.Game.GhostThrow
             }
 
             return null;
+        }
+
+        private GameObject ResolveLocalPlayerObject()
+        {
+            if (manualLocalTarget != null)
+                return manualLocalTarget.gameObject;
+
+            var localNetworkPlayer = ResolveLocalNetworkPlayerFromScene();
+            if (localNetworkPlayer != null)
+                return localNetworkPlayer.gameObject;
+
+            var localStats = ResolveLocalPlayerStatsFromScene();
+            if (localStats != null)
+                return localStats.gameObject;
+
+            return GameObject.FindGameObjectWithTag(localPlayerTag);
+        }
+
+        private static NetworkPlayer ResolveLocalNetworkPlayerFromScene()
+        {
+            var allPlayers = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None);
+            for (var i = 0; i < allPlayers.Length; i++)
+            {
+                var player = allPlayers[i];
+                if (player == null)
+                    continue;
+
+                var networkObject = player.GetComponent<NetworkObject>();
+                if (networkObject != null && networkObject.HasInputAuthority)
+                    return player;
+            }
+
+            return null;
+        }
+
+        private static PlayerStats ResolveLocalPlayerStatsFromScene()
+        {
+            var allPlayerStats = FindObjectsByType<PlayerStats>(FindObjectsSortMode.None);
+            for (var i = 0; i < allPlayerStats.Length; i++)
+            {
+                var stats = allPlayerStats[i];
+                if (stats == null)
+                    continue;
+
+                var netObj = stats.GetComponent<NetworkObject>();
+                if (netObj == null)
+                    netObj = stats.GetComponentInParent<NetworkObject>();
+                if (netObj == null)
+                    netObj = stats.GetComponentInChildren<NetworkObject>(true);
+
+                if (netObj != null && netObj.HasInputAuthority)
+                    return stats;
+            }
+
+            return null;
+        }
+
+        public static GhostThrowManager FindManagerForPlayer(NetworkPlayer player)
+        {
+            if (player != null)
+            {
+                var childManager = player.GetComponentInChildren<GhostThrowManager>(true);
+                if (childManager != null)
+                    return childManager;
+            }
+
+            var managers = FindObjectsByType<GhostThrowManager>(FindObjectsSortMode.None);
+            GhostThrowManager firstAvailable = null;
+
+            for (var i = 0; i < managers.Length; i++)
+            {
+                var manager = managers[i];
+                if (manager == null)
+                    continue;
+
+                firstAvailable ??= manager;
+
+                if (manager._isGhostThrowEnabled || !manager.enableOnlyAfterDeath)
+                    return manager;
+            }
+
+            return firstAvailable;
         }
     }
 }

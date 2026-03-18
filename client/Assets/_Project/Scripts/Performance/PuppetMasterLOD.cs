@@ -20,6 +20,7 @@ public class PuppetMasterLOD : MonoBehaviour
     PuppetMaster _pm;
     Transform _root;
     Rigidbody _rootRb;
+    NetworkPlayer _networkPlayer;
     bool _isDeactivated;
     bool _wasKinematic;
     Vector3 _lastSafePosition;
@@ -29,6 +30,7 @@ public class PuppetMasterLOD : MonoBehaviour
         _pm = GetComponentInChildren<PuppetMaster>();
         _root = transform;
         _rootRb = GetComponent<Rigidbody>();
+        _networkPlayer = GetComponent<NetworkPlayer>();
     }
 
     void OnEnable() { All.Add(this); }
@@ -36,6 +38,9 @@ public class PuppetMasterLOD : MonoBehaviour
 
     void LateUpdate()
     {
+        if (_networkPlayer != null && _networkPlayer.IsDeadNetworked)
+            return;
+
         // 바닥 추락 안전장치: Y가 너무 낮으면 마지막 안전 위치로 복원
         if (_root.position.y < minY)
         {
