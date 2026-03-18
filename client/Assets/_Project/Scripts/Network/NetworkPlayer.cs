@@ -942,11 +942,13 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     {
         if (_cameraFollowAnchor == null) return;
 
+        // 1f - Exp(-speed * dt): 프레임레이트 독립적 지수 감쇠 보간
+        // (Time.deltaTime * speed 방식은 fps에 따라 카메라 반응 속도가 달라지는 문제 수정)
         var speed = _isActiveRagdoll ? 25f : 6f;
         _cameraFollowAnchor.position = Vector3.Lerp(
             _cameraFollowAnchor.position,
             transform.position,
-            Time.deltaTime * speed);
+            1f - Mathf.Exp(-speed * Time.deltaTime));
     }
 
 }
