@@ -39,3 +39,7 @@ nginx/ssl/*.crt
 # ─── 에디터 백업 ───
 *.bak
 *.orig
+
+# ─── CLI ───
+.claude/
+.claude-code/

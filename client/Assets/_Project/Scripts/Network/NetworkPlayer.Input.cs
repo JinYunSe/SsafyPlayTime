@@ -3,6 +3,11 @@ using UnityEngine;
 
 public sealed partial class NetworkPlayer
 {
+    private Vector3 _lastSafePosition;
+    private Quaternion _lastSafeRotation = Quaternion.identity;
+    private bool _hasLastSafeTransform;
+    private float _nextOutOfBoundsRecoverAt;
+
     private float ResolveCameraYaw()
     {
         return Camera.main != null ? Camera.main.transform.eulerAngles.y : transform.eulerAngles.y;
@@ -39,10 +44,10 @@ public sealed partial class NetworkPlayer
         if (GetInput(out PlayerNetworkInput input))
             DoPhysicsStep(input, Runner.DeltaTime);
 
-        SynchronizeNetworkSimulationState();
         UpdateGrabHandlers();
+        UpdatePhysicalPhaseState(Runner.DeltaTime);
+        SynchronizeNetworkSimulationState();
         ClampOutOfBoundsCharacter();
-        TickFieldDropPositionSync();
     }
 
     private void PollLocalInputState()
@@ -55,11 +60,20 @@ public sealed partial class NetworkPlayer
         }
 
         UpdatePrimaryClickState();
+        UpdateSecondaryClickState();
 
         if (Input.GetKeyDown(KeyCode.F))
             _dropTriggered = true;
-        if (Input.GetMouseButtonDown(1))
-            _throwTriggered = true;
+
+        // OwnerProxy: DoPhysicsStep은 호스트에서만 실행되므로
+        // 로컬 입력 기반 grab 상태를 여기서 갱신해야
+        // PartyMonsterAnimationDriver.SyncGrabAnimation()이 올바르게 동작한다.
+        if (Runner != null && HasInputAuthority && !HasStateAuthority)
+        {
+            _isLeftGrabActive = _leftMouseDown && _leftMouseConsumedAsGrab;
+            _isRightGrabActive = _rightMouseDown && _rightMouseConsumedAsGrab;
+            _isGrabActive = _isLeftGrabActive || _isRightGrabActive;
+        }
     }
 
     private void UpdatePrimaryClickState()
@@ -86,6 +100,30 @@ public sealed partial class NetworkPlayer
         _leftMouseDown = false;
     }
 
+    private void UpdateSecondaryClickState()
+    {
+        if (Input.GetMouseButtonDown(1))
+        {
+            _rightMouseDown = true;
+            _rightMouseDownTime = Time.time;
+            _rightMouseConsumedAsGrab = false;
+        }
+
+        if (Input.GetMouseButton(1) && _rightMouseDown)
+        {
+            if (Time.time - _rightMouseDownTime >= GRAB_HOLD_THRESHOLD && !_rightMouseConsumedAsGrab)
+                _rightMouseConsumedAsGrab = true;
+        }
+
+        if (!Input.GetMouseButtonUp(1))
+            return;
+
+        if (!_rightMouseConsumedAsGrab && Time.time - _rightMouseDownTime < GRAB_HOLD_THRESHOLD)
+            _throwTriggered = true;
+
+        _rightMouseDown = false;
+    }
+
     private PlayerNetworkInput BuildSandboxInput()
     {
         return new PlayerNetworkInput
@@ -96,7 +134,8 @@ public sealed partial class NetworkPlayer
             Punch = _leftClickUseTriggered,
             Drop = _dropTriggered,
             Throw = _throwTriggered,
-            GrabHold = _leftMouseDown && _leftMouseConsumedAsGrab,
+            LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab,
+            RightGrabHold = _rightMouseDown && _rightMouseConsumedAsGrab,
             Headbutt = Input.GetMouseButtonDown(2),
             Sprint = Input.GetKey(KeyCode.LeftShift)
         };
@@ -110,16 +149,94 @@ public sealed partial class NetworkPlayer
 
     private void SynchronizeNetworkSimulationState()
     {
-        for (int i = 0; i < syncPhysicsObjects.Length; i++)
-            BoneRotations.Set(i, syncPhysicsObjects[i].transform.localRotation);
+        if (syncPhysicsObjects != null)
+        {
+            for (int i = 0; i < syncPhysicsObjects.Length; i++)
+            {
+                if (syncPhysicsObjects[i] != null)
+                    BoneRotations.Set(i, syncPhysicsObjects[i].transform.localRotation);
+            }
+        }
+
+        // Hips(muscles[0]) 절대 위치 동기화 — 잡기/끌기 시 원격 위치 추적
+        if (_puppetMaster != null && _puppetMaster.muscles != null && _puppetMaster.muscles.Length > 0)
+        {
+            var hipsMuscle = _puppetMaster.muscles[0];
+            if (hipsMuscle.joint != null)
+                NetworkedHipsPosition = hipsMuscle.joint.transform.position;
+        }
 
         NetworkedIsActiveRagdoll = _isActiveRagdoll;
+        NetworkedPhysicalPhase = (byte)_localPhysicalPhase;
+        NetworkedInstability = _localInstability;
+        NetworkedIsDragged = _localIsDragged;
+        SynchronizeStunPresentationPhase();
     }
 
     private void UpdateGrabHandlers()
     {
         foreach (var handler in _handGrabHandlers)
             handler.UpdateState();
+
+        SyncGrabNetworkState();
+    }
+
+    private void SyncGrabNetworkState()
+    {
+        if (Runner == null || !Object.IsValid || !HasStateAuthority)
+            return;
+
+        bool leftHolding = false, rightHolding = false;
+        foreach (var handler in _handGrabHandlers)
+        {
+            if (!handler.IsHolding) continue;
+            if (handler.Side == HandGrabHandler.HandSide.Left)
+                leftHolding = true;
+            else
+                rightHolding = true;
+        }
+
+        NetworkedLeftGrabHolding = leftHolding;
+        NetworkedRightGrabHolding = rightHolding;
+    }
+
+    private void RememberSafeTransform(Vector3 position, Quaternion rotation)
+    {
+        if (!float.IsFinite(position.x) || !float.IsFinite(position.y) || !float.IsFinite(position.z))
+            return;
+        if (position.y < -5f)
+            return;
+
+        _lastSafePosition = position;
+        _lastSafeRotation = rotation;
+        _hasLastSafeTransform = true;
+    }
+
+    private bool TryResolveRecoveryTransform(out Vector3 position, out Quaternion rotation)
+    {
+        if (_hasLastSafeTransform)
+        {
+            position = _lastSafePosition;
+            rotation = _lastSafeRotation;
+            return true;
+        }
+
+        var spawnGroup = FindObjectOfType<SpawnPointGroup>();
+        if (spawnGroup != null && spawnGroup.transform.childCount > 0)
+        {
+            var index = Random.Range(0, spawnGroup.transform.childCount);
+            var point = spawnGroup.transform.GetChild(index);
+            if (point != null)
+            {
+                position = point.position;
+                rotation = point.rotation;
+                return true;
+            }
+        }
+
+        position = new Vector3(transform.position.x, 1f, transform.position.z);
+        rotation = transform.rotation;
+        return false;
     }
 
     private void ClampOutOfBoundsCharacter()
@@ -127,12 +244,24 @@ public sealed partial class NetworkPlayer
         if (transform.position.y >= -10)
             return;
 
-        rigidbody3D.position = Vector3.zero;
+        var now = Runner != null ? (float)Runner.SimulationTime : Time.time;
+        if (now < _nextOutOfBoundsRecoverAt)
+            return;
+
+        _nextOutOfBoundsRecoverAt = now + 0.5f;
+
+        if (!TryResolveRecoveryTransform(out var recoveryPosition, out var recoveryRotation))
+            recoveryRotation = transform.rotation;
+
+        rigidbody3D.position = recoveryPosition;
+        rigidbody3D.rotation = recoveryRotation;
+        transform.SetPositionAndRotation(recoveryPosition, recoveryRotation);
         if (rigidbody3D != null && !rigidbody3D.isKinematic)
         {
             rigidbody3D.velocity = Vector3.zero;
             rigidbody3D.angularVelocity = Vector3.zero;
         }
+        RememberSafeTransform(recoveryPosition, recoveryRotation);
         ForceRecover();
     }
 }
