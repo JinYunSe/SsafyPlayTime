@@ -41,5 +41,19 @@ namespace SSAFYPlayTime.Character
         {
             CurrentState = PlayerMotorState.Jump;
         }
+
+        // 수영 상태 진입/해제. 물 안에 있을 때 호출.
+        public void SetSwimming(bool swimming)
+        {
+            if (swimming)
+            {
+                _airTime = 0f;
+                CurrentState = PlayerMotorState.Swimming;
+            }
+            else if (CurrentState == PlayerMotorState.Swimming)
+            {
+                CurrentState = PlayerMotorState.Fall;
+            }
+        }
     }
 }
