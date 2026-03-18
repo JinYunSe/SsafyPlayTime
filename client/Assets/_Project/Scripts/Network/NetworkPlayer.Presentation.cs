@@ -356,7 +356,7 @@ public sealed partial class NetworkPlayer
 
         var visualDirection = _targetRoot != null
             ? moveDirection
-            : new Vector3(-moveDirection.x, 0f, moveDirection.z);
+            : new Vector3(moveDirection.x, 0f, moveDirection.z);
 
         if (visualDirection.sqrMagnitude <= 0.0001f)
             return false;

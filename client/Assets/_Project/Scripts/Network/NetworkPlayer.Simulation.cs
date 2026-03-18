@@ -584,7 +584,7 @@ public sealed partial class NetworkPlayer
         else
         {
             // PuppetMaster 없는 커스텀 래그돌: 기존 ConfigurableJoint 방식
-            var visualDirection = new Vector3(-moveDirection.x, 0f, moveDirection.z);
+            var visualDirection = new Vector3(moveDirection.x, 0f, moveDirection.z);
             var desired = Quaternion.LookRotation(visualDirection.normalized, transform.up);
             ApplyDesiredFacingRotation(desired, config.rotateSpeedDeg, dt);
         }
