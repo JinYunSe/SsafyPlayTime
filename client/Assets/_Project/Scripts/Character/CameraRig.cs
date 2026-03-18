@@ -1,4 +1,5 @@
 using UnityEngine;
+using Fusion;
 
 public class CameraRig : MonoBehaviour
 {
@@ -90,6 +91,13 @@ public class CameraRig : MonoBehaviour
         if (!autoFindTargetWhenNull || target != null)
             return;
 
+        var localNetworkPlayer = ResolveLocalNetworkPlayer();
+        if (localNetworkPlayer != null)
+        {
+            SetTarget(localNetworkPlayer.GetCameraFollowTarget());
+            return;
+        }
+
         var tagged = GameObject.FindGameObjectWithTag(autoFindPlayerTag);
         if (tagged != null)
         {
@@ -109,7 +117,24 @@ public class CameraRig : MonoBehaviour
 
         var networkPlayer = FindObjectOfType<NetworkPlayer>();
         if (networkPlayer != null)
-            SetTarget(networkPlayer.transform);
+            SetTarget(networkPlayer.GetCameraFollowTarget());
+    }
+
+    private static NetworkPlayer ResolveLocalNetworkPlayer()
+    {
+        var allPlayers = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None);
+        for (var i = 0; i < allPlayers.Length; i++)
+        {
+            var player = allPlayers[i];
+            if (player == null)
+                continue;
+
+            var networkObject = player.GetComponent<NetworkObject>();
+            if (networkObject != null && networkObject.HasInputAuthority)
+                return player;
+        }
+
+        return null;
     }
 
     private void InitializeAngles(bool force)

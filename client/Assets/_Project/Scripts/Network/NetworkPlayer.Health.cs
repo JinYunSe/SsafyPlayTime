@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Fusion;
 using SSAFYPlayTime.Game.GhostThrow;
 using UnityEngine;
@@ -70,6 +71,11 @@ public sealed partial class NetworkPlayer
     private void HandleDeathVisuals()
     {
         var playerStats = GetComponent<PlayerStats>();
+        if (playerStats == null)
+            playerStats = GetComponentInChildren<PlayerStats>(true);
+        if (playerStats == null)
+            playerStats = GetComponentInParent<PlayerStats>();
+
         if (playerStats != null)
             playerStats.NotifyDeathFromNetwork();
 
@@ -84,6 +90,9 @@ public sealed partial class NetworkPlayer
 
     private void HandleLocalDeathTransition(PlayerStats playerStats)
     {
+        DisableOwnedCamerasForDeathView();
+        ActivateSceneSpectatorCamera();
+
         var cameraControllers = FindObjectsByType<CameraModeController>(FindObjectsSortMode.None);
         for (var i = 0; i < cameraControllers.Length; i++)
         {
@@ -102,6 +111,88 @@ public sealed partial class NetworkPlayer
 
         if (ghostManagers.Length == 0)
             Debug.LogWarning($"[HP] {gameObject.name} death transition found no GhostThrowManager in scene.");
+    }
+
+    private void DisableOwnedCamerasForDeathView()
+    {
+        CacheOwnedPresentationComponents();
+
+        if (_ownedCamerasCache != null)
+        {
+            for (var i = 0; i < _ownedCamerasCache.Length; i++)
+            {
+                var ownedCamera = _ownedCamerasCache[i];
+                if (ownedCamera == null)
+                    continue;
+
+                ownedCamera.enabled = false;
+                if (ownedCamera.CompareTag("MainCamera"))
+                    ownedCamera.tag = "Untagged";
+            }
+        }
+
+        if (_ownedListenersCache != null)
+        {
+            for (var i = 0; i < _ownedListenersCache.Length; i++)
+            {
+                var listener = _ownedListenersCache[i];
+                if (listener != null)
+                    listener.enabled = false;
+            }
+        }
+
+        if (_ownedCameraRigsCache != null)
+        {
+            for (var i = 0; i < _ownedCameraRigsCache.Length; i++)
+            {
+                var rig = _ownedCameraRigsCache[i];
+                if (rig != null)
+                    rig.enabled = false;
+            }
+        }
+
+        if (_ownedCameraModeControllersCache != null)
+        {
+            for (var i = 0; i < _ownedCameraModeControllersCache.Length; i++)
+            {
+                var controller = _ownedCameraModeControllersCache[i];
+                if (controller != null)
+                    controller.enabled = false;
+            }
+        }
+    }
+
+    private void ActivateSceneSpectatorCamera()
+    {
+        var ownedCameraSet = _ownedCamerasCache != null
+            ? _ownedCamerasCache.Where(c => c != null).ToHashSet()
+            : new System.Collections.Generic.HashSet<Camera>();
+
+        Camera fallbackCamera = null;
+        var allCameras = FindObjectsByType<Camera>(FindObjectsSortMode.None);
+        for (var i = 0; i < allCameras.Length; i++)
+        {
+            var camera = allCameras[i];
+            if (camera == null || ownedCameraSet.Contains(camera))
+                continue;
+
+            fallbackCamera ??= camera;
+            camera.enabled = true;
+
+            if (!camera.CompareTag("MainCamera"))
+                camera.tag = "MainCamera";
+
+            var listener = camera.GetComponent<AudioListener>();
+            if (listener != null)
+                listener.enabled = true;
+
+            var ghostSpectator = camera.GetComponent<GhostSpectatorCamera>();
+            if (ghostSpectator != null)
+                ghostSpectator.enabled = true;
+        }
+
+        if (fallbackCamera == null)
+            Debug.LogWarning($"[HP] {gameObject.name} death transition found no non-owned scene camera to activate.");
     }
 
     private void ApplyDeathPresentationState()
@@ -161,7 +252,7 @@ public sealed partial class NetworkPlayer
 
     private bool TrySpawnGhostThrowOnStateAuthority(bool isBanana, Vector3 spawnPos, Vector3 direction)
     {
-        var manager = GetComponentInChildren<GhostThrowManager>(true);
+        var manager = GhostThrowManager.FindManagerForPlayer(this);
         if (manager == null)
         {
             Debug.LogWarning($"[HP] {gameObject.name} could not find GhostThrowManager for ghost throw request.");
