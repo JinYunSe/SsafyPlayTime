@@ -1420,6 +1420,7 @@ GameObject:
   - component: {fileID: 1023068617517195665}
   - component: {fileID: 3716154165237251278}
   - component: {fileID: 3386663249259908847}
+  - component: {fileID: 9170000000000001001}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -1580,6 +1581,35 @@ MonoBehaviour:
   collisionRadius: 0.2
   collisionBuffer: 0.1
   minDistance: 1.25
+--- !u!114 &9170000000000001001
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3275150748056025194}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 225aa0b6136b5ef4cb50de0fe4fa2dbc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  enableOnlyAfterDeath: 1
+  localPlayerTag: Player
+  manualLocalTarget: {fileID: 0}
+  cooldown: 1
+  throwForce: 20
+  spawnForwardOffset: 2
+  hitLayer:
+    serializedVersion: 2
+    m_Bits: 119
+  cubePrefabOffline: {fileID: 2247541176841469660, guid: d967a8594241ca54d96fa911a702b77e, type: 3}
+  cubePrefabOnline:
+    RawGuidValue: 00000000000000000000000000000000
+  cubePrefabOnlineObject: {fileID: 2247541176841469660, guid: d967a8594241ca54d96fa911a702b77e, type: 3}
+  bananaPrefabOffline: {fileID: 1407451490957870, guid: 3ce32ffa6ccf60e4ab65d9e396f43433, type: 3}
+  bananaPrefabOnline:
+    RawGuidValue: 00000000000000000000000000000000
+  bananaPrefabOnlineObject: {fileID: 1407451490957870, guid: 3ce32ffa6ccf60e4ab65d9e396f43433, type: 3}
 --- !u!1 &3358183651257745206
 GameObject:
   m_ObjectHideFlags: 0
