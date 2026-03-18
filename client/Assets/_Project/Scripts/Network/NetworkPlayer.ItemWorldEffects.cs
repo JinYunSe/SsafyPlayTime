@@ -450,7 +450,7 @@ public sealed partial class NetworkPlayer
         bombBody.useGravity = false;
         bombProxy.Radius = request.Radius;
         bombProxy.SetActivated(true);
-        bombProxy.SyncNetworkPose(center, visualRoot.transform.rotation, zeroVelocity: true);
+        bombProxy.SyncNetworkPose(center, Quaternion.identity, zeroVelocity: true);
 
         var duration = Mathf.Max(0.1f, request.DurationSec);
         var radius = Mathf.Max(0.1f, request.Radius);
@@ -463,8 +463,8 @@ public sealed partial class NetworkPlayer
             var activeElapsed = Time.time - blackholeStartTime;
             var ramp = Mathf.Clamp01(activeElapsed / expandDuration);
             visualRoot.transform.position = center;
-            visualRoot.transform.Rotate(Vector3.up, 220f * Time.deltaTime, Space.World);
-            bombProxy.SyncNetworkPose(center, visualRoot.transform.rotation);
+            visualRoot.transform.rotation = Quaternion.identity;
+            bombProxy.SyncNetworkPose(center, Quaternion.identity);
 
             if (applyGameplay)
             {
@@ -1493,7 +1493,7 @@ public sealed partial class NetworkPlayer
 
         if (hasHeldFlamethrower)
         {
-            // ??????쇰뮛?????ㅼ쭋??? hyekang ????????怨뚰뇠?癰귙룗猷??????????雅?퍔瑗?땟??춻????????獄쏅챶留???? ????꿔꺂???影?덈튉??????????????????癲??????雅?퍔瑗?땟??춻????????꾩룆梨띰쭕?????????饔낅떽??????
+            // 손에 든 화염방사기 시각 효과는 총구 오프셋을 그대로 따라가게 한다.
             _replicatedFlamethrowerFxRoot.transform.localPosition = flamethrowerMuzzleLocalOffset;
             _replicatedFlamethrowerFxRoot.transform.localRotation = Quaternion.Euler(flamethrowerMuzzleLocalEulerOffset);
             _replicatedFlamethrowerFxRoot.transform.localScale = Vector3.one * Mathf.Max(0.01f, flamethrowerVisualScale);
