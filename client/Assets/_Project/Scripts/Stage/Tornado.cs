@@ -1,8 +1,11 @@
 using System.Collections;
 using System.Collections.Generic;
+
+using Fusion;
+
 using UnityEngine;
 
-public class Tornado : MonoBehaviour
+public class Tornado : NetworkBehaviour
 {
     /*[Header("Force Settings")]
     public float pullStrength = 10f;    // 중심으로 당기는 힘
@@ -66,13 +69,8 @@ public class Tornado : MonoBehaviour
         }
     }*/
 
-    [Header("Tornado Settings")]
-    public float liftSpeed = 5f;
-    public float spinSpeed = 300f;
-
-    [Header("Launch Settings")]
-    public float launchUpForce = 10f;    // 위로 솟구치는 힘
-    public float launchOutForce = 10f;   // 바깥으로 밀어내는 힘
+    [Header("Data Asset")]
+    public TornadoData data;
 
     private Collider tornadoCollider;
 
@@ -80,6 +78,12 @@ public class Tornado : MonoBehaviour
 
     private void OnTriggerStay(Collider other)
     {
+        // Runner가 유효하지 않거나 서버가 아니면 실행 안 함
+        /*if (Runner == null || !Runner.IsServer)
+            return;*/
+
+        if (data == null) return;
+
         Rigidbody rb = other.GetComponent<Rigidbody>();
         if (rb == null)
             return;
@@ -87,7 +91,7 @@ public class Tornado : MonoBehaviour
         float topY = tornadoCollider.bounds.max.y;
 
         // 1. 사출 판정 (꼭대기 근처)
-        if (other.transform.position.y >= topY - 0.8f)
+        if (other.transform.position.y >= topY - data.launchThreshold)
         {
             DoArcadeLaunch(rb);
         }
@@ -99,10 +103,10 @@ public class Tornado : MonoBehaviour
             centerDir.y = 0;
 
             // 중심으로 당기면서 위로 올림
-            rb.velocity = new Vector3(centerDir.x * 2f, liftSpeed, centerDir.z * 2f);
+            rb.velocity = new Vector3(centerDir.x * 2f, data.liftSpeed, centerDir.z * 2f);
 
             // 비주얼 회전
-            other.transform.Rotate(0, spinSpeed * Time.deltaTime, 0);
+            other.transform.Rotate(0, data.spinSpeed * Time.deltaTime, 0);
         }
     }
 
@@ -118,7 +122,7 @@ public class Tornado : MonoBehaviour
         exitDir.y = 0;
 
         // 새로운 깔끔한 힘 부여
-        Vector3 finalForce = (Vector3.up * launchUpForce) + (exitDir * launchOutForce);
+        Vector3 finalForce = (Vector3.up * data.launchUpForce) + (exitDir * data.launchOutForce);
         rb.AddForce(finalForce, ForceMode.Impulse);
 
         // [플레이어 제어권 강화]

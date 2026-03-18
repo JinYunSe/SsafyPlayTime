@@ -2,9 +2,10 @@ using System.Collections;
 using System.Collections.Generic;
 
 using UnityEngine;
+using Fusion;
 
 // 데드존에 플레이어가 머무르면 일정 간격마다 데미지를 입힘
-public class DeathZone : MonoBehaviour
+/*public class DeathZone : MonoBehaviour
 {
     [Header("Damage Settings")]
     public int damageAmount = 10;
@@ -54,6 +55,62 @@ public class DeathZone : MonoBehaviour
         }
 
         // 만약 죽었다면 관리 목록에서 제거
+        if (damageCoroutines.ContainsKey(player))
+        {
+            damageCoroutines.Remove(player);
+        }
+    }
+}*/
+
+public class DeathZone : NetworkBehaviour
+{
+    [Header("Data Source")]
+    public MapData mapData; // MapData 에셋 연결
+
+    private readonly Dictionary<PlayerStats, Coroutine> damageCoroutines = new Dictionary<PlayerStats, Coroutine>();
+
+    private void OnTriggerEnter(Collider other)
+    {
+        // 중요: 서버(Host) 권한이 있는 경우에만 데미지 루프를 시작합니다.
+        if (Runner != null && !Runner.IsServer)
+            return;
+
+        PlayerStats player = other.GetComponentInParent<PlayerStats>();
+        if (player != null && !damageCoroutines.ContainsKey(player))
+        {
+            Coroutine newRoutine = StartCoroutine(DamageTickRoutine(player));
+            damageCoroutines.Add(player, newRoutine);
+        }
+    }
+
+    private void OnTriggerExit(Collider other)
+    {
+        if (Runner != null && !Runner.IsServer)
+            return;
+
+        PlayerStats player = other.GetComponentInParent<PlayerStats>();
+        if (player != null && damageCoroutines.TryGetValue(player, out Coroutine routine))
+        {
+            StopCoroutine(routine);
+            damageCoroutines.Remove(player);
+        }
+    }
+
+    private IEnumerator DamageTickRoutine(PlayerStats player)
+    {
+        // MapData에서 간격 데이터를 가져옵니다.
+        float interval = mapData.deathZoneInterval;
+
+        yield return new WaitForSeconds(interval);
+
+        while (player != null && player.currentHealth > 0)
+        {
+            // 핵심: MapData 에셋에 저장된 데미지 수치를 가져와 사용합니다!
+            player.TakeDamage((int)mapData.deathZoneDamage);
+
+            yield return new WaitForSeconds(interval);
+        }
+
         if (damageCoroutines.ContainsKey(player))
         {
             damageCoroutines.Remove(player);

@@ -9876,6 +9876,7 @@ GameObject:
   - component: {fileID: 6948120640140276902}
   - component: {fileID: 8574050138076915638}
   - component: {fileID: 3992322495730044896}
+  - component: {fileID: 8549794161333245029}
   m_Layer: 0
   m_Name: TornadoRegion
   m_TagString: Untagged
@@ -9983,10 +9984,25 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3e48ee3752ad6d54595e306823dcf009, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  liftSpeed: 5
-  spinSpeed: 300
-  launchUpForce: 10
-  launchOutForce: 10
+  data: {fileID: 11400000, guid: 595a8bb061e37004ca66fed62c34a806, type: 2}
+--- !u!114 &8549794161333245029
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2968571046758530231}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  SortKey: 0
+  ObjectInterest: 1
+  Flags: 262144
+  NestedObjects: []
+  NetworkedBehaviours: []
+  ForceRemoteRenderTimeframe: 0
 --- !u!1 &3417948379171392480
 GameObject:
   m_ObjectHideFlags: 0
