@@ -1350,6 +1350,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1ec1efc7e081f04fb173b8a6cb9780a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  allowSoloStart: 1
   nicknamePanel: {fileID: 860748352}
   lobbyPanel: {fileID: 1519384042}
   roomPanel: {fileID: 1953091418}
