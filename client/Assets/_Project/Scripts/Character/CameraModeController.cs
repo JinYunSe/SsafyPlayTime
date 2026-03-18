@@ -56,7 +56,11 @@ public class CameraModeController : MonoBehaviour
         // Alive mode
         spectatorCamera.EnableSpectator(false);
         cameraRig.enabled = true;
-        cameraRig.SetTarget(localPlayer.transform);
+
+        // NetworkPlayer가 있으면 카메라 Follow 앵커를 사용 (SyncRootToPhysicsBody 급변 흡수)
+        var networkPlayer = localPlayer.GetComponent<NetworkPlayer>();
+        var followTarget = networkPlayer != null ? networkPlayer.GetCameraFollowTarget() : localPlayer.transform;
+        cameraRig.SetTarget(followTarget);
 
         Debug.Log($"CameraModeController: Alive mode, target = {localPlayer.name}");
     }
