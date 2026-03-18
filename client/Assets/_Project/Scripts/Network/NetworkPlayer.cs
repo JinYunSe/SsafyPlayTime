@@ -112,6 +112,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private readonly PlayerMotorStateMachine _stateMachine = new();
 
     private bool _isGrounded;
+    private bool _isInWater;
+    private WaterZone _activeWaterZone;
     private HandGrabHandler[] _handGrabHandlers;
     private ItemRuntimeHost _itemRuntimeHost;
     private ItemFieldInteractionService _itemFieldInteractionService;
@@ -138,6 +140,19 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     public bool IsActiveRagdoll => _isActiveRagdoll;
 
     // ─── 공개 상태 API ───
+    /// <summary>물 안에 있는지 여부. WaterZone 트리거 진입/이탈 시 갱신.</summary>
+    public bool IsInWater => _isInWater;
+
+    /// <summary>
+    /// WaterZone 트리거 진입/이탈 시 호출.
+    /// StateAuthority의 물리 시뮬레이션에서만 의미 있으므로 HasStateAuthority 체크를 생략한다.
+    /// </summary>
+    public void SetInWater(bool inWater, WaterZone zone)
+    {
+        _isInWater = inWater;
+        _activeWaterZone = zone;
+    }
+
     /// <summary>기절 중 여부 (activeRagdoll이 아닌 상태)</summary>
     public bool IsStunned => !_isActiveRagdoll;
     /// <summary>기절 회복 직후 취약 상태 여부</summary>
