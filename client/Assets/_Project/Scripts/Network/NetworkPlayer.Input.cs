@@ -41,13 +41,12 @@ public sealed partial class NetworkPlayer
         if (!HasStateAuthority)
             return;
 
-        if (GetInput(out PlayerNetworkInput input))
-        {
-            if (IsDeadNetworked)
-                input = default;
+        // 사망 후에는 물리/동기화 연산 전부 스킵 → 네트워크 부하 최소화
+        if (IsDeadNetworked)
+            return;
 
+        if (GetInput(out PlayerNetworkInput input))
             DoPhysicsStep(input, Runner.DeltaTime);
-        }
 
         UpdateGrabHandlers();
         UpdatePhysicalPhaseState(Runner.DeltaTime);
