@@ -375,6 +375,8 @@ namespace SSAFYPlayTime
         // 매 프레임 호스트 F5 게임 시작 단축키 처리 및 캐릭터 배치·정렬을 갱신한다.
         private void Update()
         {
+            CaptureNetworkInputState();
+
             if (roomPanel != null && roomPanel.activeSelf && _runner != null && _runner.IsRunning && _runner.IsServer)
             {
                 if (Input.GetKeyDown(KeyCode.F5))

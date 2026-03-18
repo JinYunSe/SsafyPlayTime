@@ -2678,11 +2678,11 @@ MonoBehaviour:
   puppetMaster: {fileID: 2415217475885416610}
   leftArmIK: {fileID: 2575550004218642660}
   rightArmIK: {fileID: 1118008190805905459}
-  blendSpeed: 8
+  blendSpeed: 6
   targetScanRadius: 2
   reachDistance: 0.6
-  handReachForce: 150
-  handDamping: 10
+  handReachForce: 115
+  handDamping: 8
 --- !u!114 &7711887360206274305
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3735,8 +3735,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   puppetMaster: {fileID: 2415217475885416610}
   lookAtIK: {fileID: 7575919295911529970}
-  maxLookDistance: 0
-  weightBlendSpeed: 3
+  maxLookDistance: 5.5
+  weightBlendSpeed: 2.2
   lookAtHeightOffset: 0.8
   scanInterval: 0.2
 --- !u!114 &3939445745044822066
