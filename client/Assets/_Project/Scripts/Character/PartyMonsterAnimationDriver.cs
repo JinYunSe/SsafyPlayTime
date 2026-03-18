@@ -7,6 +7,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     const string IdleState = "Idle01";
     const string WalkState = "WalkFWD";
     const string SprintState = "SprintFWD";
+    const string PunchState = "Punch";
     const string PunchLeftState = "PunchLeft";
     const string PunchRightState = "PunchRight";
     const string GrabState = "GrabIdle";
@@ -27,16 +28,25 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     float grabHoldThreshold = 0.15f;
 
     [SerializeField]
-    float attackLockDuration = 0.7f;
+    float attackLockDuration = 0.28f;
 
     [SerializeField]
     float throwLockDuration = 0.85f;
 
+    [Header("Punch Animation Tuning")]
+    [SerializeField, Tooltip("펀치 애니메이션 재생 속도 배율 (2.0 = 2배속)")]
+    float punchAnimSpeed = 2.2f;
+
+    [SerializeField, Tooltip("펀치 애니메이션 시작 오프셋 (0~1 정규화, 와인드업 건너뛰기)")]
+    float punchAnimStartOffset = 0.2f;
+
     PuppetMaster puppetMaster;
     BehaviourPuppet behaviourPuppet;
     NetworkPlayer networkPlayer;
+    ProceduralPunchArm proceduralPunchArm;
     float attackButtonPressedAt = -1f;
     float actionLockedUntil;
+    bool isPunchSpeedActive;
     bool isGrabPoseActive;
     bool hasMovementSpeedParameter;
     bool hasIsSprintingParameter;
@@ -109,14 +119,20 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
                 SyncGrabAnimation();
                 HandleInput();
                 if (!IsActionLocked() && !ShouldPreserveGrabPose())
+                {
+                    RestorePunchSpeed();
                     UpdateLocomotionForOwnerProxy();
+                }
             }
             else
             {
                 // 순수 원격 프록시: 모든 것이 네트워크 데이터 기반
                 SyncGrabAnimation();
                 if (!IsActionLocked() && !ShouldPreserveGrabPose())
+                {
+                    RestorePunchSpeed();
                     UpdateLocomotionFromNetwork();
+                }
             }
             TraceAnimationDriverDiagnostics("Update-Remote", canDriveAnimation);
             return;
@@ -126,6 +142,8 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         if (IsActionLocked() || ShouldPreserveGrabPose())
             return;
+
+        RestorePunchSpeed();
 
         // 그랩 중에도 locomotion 애니메이션 유지 (팔은 ProceduralGrabArm이 절차적으로 제어)
         UpdateLocomotion();
@@ -180,15 +198,18 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         if (!CanDriveAnimation())
             return;
 
-        bool isLeft = nextAttackLeft;
-        nextAttackLeft = !nextAttackLeft;
+        if (IsActionLocked())
+            return;
 
-        string punchState = isLeft ? PunchLeftState : PunchRightState;
-        PlayLockedAction(punchState, attackLockDuration);
+        bool isLeft = nextAttackLeft;
+        if (!TryStartPunchPresentation(isLeft))
+            return;
+
+        nextAttackLeft = !nextAttackLeft;
+        string punchState = ResolvePunchStateName(isLeft);
         TraceOwnerProxyInputDiagnostics("PlayAttack", $"punchState={punchState} nextAttackLeft={nextAttackLeft} lockedUntil={actionLockedUntil:F3}");
 
         // OwnerProxy: NetworkPlayer에 예측 방향을 알려서 reconcile 시 비교 가능하게
-        if (networkPlayer != null)
         if (networkPlayer != null)
             networkPlayer.NotifyLocalPunchPrediction(isLeft);
     }
@@ -201,7 +222,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         if (!CanDriveAnimation())
             return;
 
-        PlayLockedAction(PunchLeftState, attackLockDuration);
+        TryStartPunchPresentation(true);
     }
 
     /// <summary>
@@ -212,7 +233,35 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         if (!CanDriveAnimation())
             return;
 
-        PlayLockedAction(PunchRightState, attackLockDuration);
+        TryStartPunchPresentation(false);
+    }
+
+    bool TryStartPunchPresentation(bool isLeft)
+    {
+        if (!TryTriggerProceduralPunch(isLeft))
+            return false;
+
+        PlayFastPunch(ResolvePunchStateName(isLeft));
+        return true;
+    }
+
+    bool TryTriggerProceduralPunch(bool isLeft)
+    {
+        if (proceduralPunchArm == null)
+            return true;
+
+        var forward = ResolvePunchForward();
+        if (isLeft)
+            return proceduralPunchArm.TryTriggerLeftPunch(forward);
+
+        return proceduralPunchArm.TryTriggerRightPunch(forward);
+    }
+
+    Vector3 ResolvePunchForward()
+    {
+        if (puppetMaster != null && puppetMaster.targetRoot != null)
+            return puppetMaster.targetRoot.forward;
+        return transform.forward;
     }
 
     /// <summary>
@@ -267,6 +316,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         puppetMaster = GetComponentInChildren<PuppetMaster>(true);
         behaviourPuppet = GetComponentInChildren<BehaviourPuppet>(true);
         networkPlayer = GetComponent<NetworkPlayer>();
+        proceduralPunchArm = GetComponent<ProceduralPunchArm>();
 
         if (rigidbody3D == null)
             rigidbody3D = FindMainRigidbody();
@@ -471,6 +521,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         attackButtonPressedAt = -1f;
         actionLockedUntil = 0f;
         isGrabPoseActive = false;
+        RestorePunchSpeed();
         SetMovementSpeedParameter(0f);
     }
 
@@ -516,6 +567,60 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             NetworkPlayer.PresentationLocomotionState.Walk => WalkState,
             _ => IdleState
         };
+    }
+
+    void PlayFastPunch(string stateName)
+    {
+        if (animator == null) return;
+
+        actionLockedUntil = Time.time + ResolvePunchLockDuration();
+        animator.speed = punchAnimSpeed;
+        isPunchSpeedActive = true;
+        animator.Play(stateName, 0, punchAnimStartOffset);
+        currentStateName = stateName;
+    }
+
+    float ResolvePunchLockDuration()
+    {
+        float configuredCooldown = networkPlayer != null
+            ? networkPlayer.GetConfiguredPunchCooldown()
+            : attackLockDuration;
+        float proceduralDuration = proceduralPunchArm != null
+            ? proceduralPunchArm.TotalPunchDuration
+            : 0f;
+        return Mathf.Max(attackLockDuration, configuredCooldown, proceduralDuration);
+    }
+
+    string ResolvePunchStateName(bool isLeft)
+    {
+        var requestedState = isLeft ? PunchLeftState : PunchRightState;
+        if (animator == null)
+            return requestedState;
+
+        if (HasAnimatorState(requestedState))
+            return requestedState;
+
+        if (HasAnimatorState(PunchState))
+            return PunchState;
+
+        return requestedState;
+    }
+
+    bool HasAnimatorState(string stateName)
+    {
+        if (animator == null)
+            return false;
+
+        return animator.HasState(0, Animator.StringToHash(stateName))
+            || animator.HasState(0, Animator.StringToHash($"Base Layer.{stateName}"));
+    }
+
+    void RestorePunchSpeed()
+    {
+        if (!isPunchSpeedActive) return;
+        isPunchSpeedActive = false;
+        if (animator != null)
+            animator.speed = 1f;
     }
 
     void PlayLockedAction(string stateName, float duration)

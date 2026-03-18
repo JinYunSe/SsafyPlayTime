@@ -31,6 +31,11 @@ public class CameraRig : MonoBehaviour
     [SerializeField] private float collisionBuffer = 0.1f;
     [SerializeField] private float minDistance = 1.25f;
 
+    [Header("Impact")]
+    [SerializeField] private float impactPositionStrength = 0.22f;
+    [SerializeField] private float impactRotationStrength = 2.8f;
+    [SerializeField] private float impactDecay = 16f;
+
     private float _targetYaw;
     private float _targetPitch;
     private float _currentYaw;
@@ -40,11 +45,42 @@ public class CameraRig : MonoBehaviour
     private Vector3 _currentPivot;
     private Vector3 _pivotVelocity;
     private bool _initializedAngles;
+    private Vector3 _impactPositionOffset;
+    private Vector2 _impactRotationOffset;
 
     public void SetTarget(Transform newTarget)
     {
         target = newTarget;
         InitializeAngles(force: true);
+    }
+
+    public void AddImpactImpulse(Vector3 worldDirection, float intensity, bool receivedHit)
+    {
+        intensity = Mathf.Clamp01(intensity);
+        if (intensity <= 0f)
+            return;
+
+        var direction = worldDirection.sqrMagnitude > 0.0001f
+            ? worldDirection.normalized
+            : transform.forward;
+        var localDirection = Quaternion.Inverse(transform.rotation) * direction;
+        var lateral = Mathf.Clamp(localDirection.x, -1f, 1f);
+        var vertical = Mathf.Clamp(localDirection.y, -1f, 1f);
+
+        var positionKick = new Vector3(
+            -lateral * impactPositionStrength * (receivedHit ? 1.15f : 0.55f),
+            impactPositionStrength * (0.12f + Mathf.Abs(vertical) * 0.18f),
+            (receivedHit ? -1f : 0.35f) * impactPositionStrength) * intensity;
+        var rotationKick = new Vector2(
+            (receivedHit ? impactRotationStrength : -impactRotationStrength * 0.4f),
+            -lateral * impactRotationStrength * 0.9f) * intensity;
+
+        _impactPositionOffset = Vector3.ClampMagnitude(
+            _impactPositionOffset + positionKick,
+            impactPositionStrength * 3f);
+        _impactRotationOffset = Vector2.ClampMagnitude(
+            _impactRotationOffset + rotationKick,
+            impactRotationStrength * 1.6f);
     }
 
     private void Start()
@@ -77,6 +113,7 @@ public class CameraRig : MonoBehaviour
         var desiredRot = Quaternion.Euler(_currentPitch, _currentYaw, 0f);
         var desiredPos = _currentPivot + desiredRot * new Vector3(0f, height, -distance);
         var resolvedPos = ResolveCameraPosition(_currentPivot, desiredPos);
+        ApplyImpactOffsets(ref resolvedPos, ref desiredRot);
 
         var followAlpha = 1f - Mathf.Exp(-followSmooth * Time.deltaTime);
         var rotateAlpha = 1f - Mathf.Exp(-rotateSmooth * Time.deltaTime);
@@ -162,6 +199,19 @@ public class CameraRig : MonoBehaviour
 
         var resolvedDistance = Mathf.Max(minDistance, hit.distance - collisionBuffer);
         return pivot + direction * resolvedDistance;
+    }
+
+    private void ApplyImpactOffsets(ref Vector3 position, ref Quaternion rotation)
+    {
+        if (_impactPositionOffset.sqrMagnitude > 0.000001f)
+            position += rotation * _impactPositionOffset;
+
+        if (_impactRotationOffset.sqrMagnitude > 0.000001f)
+            rotation *= Quaternion.Euler(_impactRotationOffset.x, _impactRotationOffset.y, 0f);
+
+        var decay = 1f - Mathf.Exp(-impactDecay * Time.deltaTime);
+        _impactPositionOffset = Vector3.Lerp(_impactPositionOffset, Vector3.zero, decay);
+        _impactRotationOffset = Vector2.Lerp(_impactRotationOffset, Vector2.zero, decay);
     }
 
     private static float NormalizePitch(float angle)
