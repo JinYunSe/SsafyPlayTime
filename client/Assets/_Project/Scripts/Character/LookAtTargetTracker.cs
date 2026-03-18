@@ -1,43 +1,48 @@
 using System.Collections.Generic;
-using UnityEngine;
-using RootMotion.FinalIK;
 using RootMotion.Dynamics;
+using RootMotion.FinalIK;
+using UnityEngine;
 
-/// <summary>
-/// Finds the nearest opponent and sets it as the LookAtIK target.
-/// Works with PuppetMaster via OnWrite callback (IK after physics).
-/// </summary>
 public class LookAtTargetTracker : MonoBehaviour
 {
-    // Static registry — no per-frame FindObjectsOfType
-    static readonly List<PuppetMaster> AllPuppets = new List<PuppetMaster>();
+    private static readonly List<PuppetMaster> AllPuppets = new();
 
-    public static void Register(PuppetMaster pm) { if (!AllPuppets.Contains(pm)) AllPuppets.Add(pm); }
-    public static void Unregister(PuppetMaster pm) { AllPuppets.Remove(pm); }
+    public static void Register(PuppetMaster pm)
+    {
+        if (!AllPuppets.Contains(pm))
+            AllPuppets.Add(pm);
+    }
+
+    public static void Unregister(PuppetMaster pm)
+    {
+        AllPuppets.Remove(pm);
+    }
 
     [Header("References")]
-    [SerializeField] PuppetMaster puppetMaster;
-    [SerializeField] LookAtIK lookAtIK;
+    [SerializeField] private PuppetMaster puppetMaster;
+    [SerializeField] private LookAtIK lookAtIK;
 
     [Header("Settings")]
-    [Tooltip("0으로 설정하면 LookAt 비활성화")]
-    [SerializeField] float maxLookDistance = 0f;
-    [SerializeField] float weightBlendSpeed = 3f;
-    [SerializeField] float lookAtHeightOffset = 0.8f;
-    [SerializeField] float scanInterval = 0.2f;
+    [Tooltip("Set to 0 to disable look-at.")]
+    [SerializeField] private float maxLookDistance = 5.5f;
+    [SerializeField] private float weightBlendSpeed = 2.2f;
+    [SerializeField] private float lookAtHeightOffset = 0.8f;
+    [SerializeField] private float scanInterval = 0.2f;
 
-    Transform _currentTarget;
-    float _targetWeight;
-    Transform _ikTarget;
-    float _nextScanTime;
+    private Transform _currentTarget;
+    private float _targetWeight;
+    private Transform _ikTarget;
+    private float _nextScanTime;
 
-    void Start()
+    private void Start()
     {
-        if (lookAtIK == null) lookAtIK = GetComponentInChildren<LookAtIK>();
-        if (puppetMaster == null) puppetMaster = GetComponentInParent<PuppetMaster>();
+        if (lookAtIK == null)
+            lookAtIK = GetComponentInChildren<LookAtIK>();
+        if (puppetMaster == null)
+            puppetMaster = GetComponentInParent<PuppetMaster>();
         if (puppetMaster == null)
         {
-            Transform root = transform.root;
+            var root = transform.root;
             puppetMaster = root.GetComponentInChildren<PuppetMaster>();
         }
 
@@ -60,7 +65,7 @@ public class LookAtTargetTracker : MonoBehaviour
         puppetMaster.OnWrite += OnPuppetMasterWrite;
     }
 
-    void Update()
+    private void Update()
     {
         if (Time.time >= _nextScanTime)
         {
@@ -68,13 +73,14 @@ public class LookAtTargetTracker : MonoBehaviour
             FindNearestOpponent();
         }
 
-        float desired = _currentTarget != null ? 1f : 0f;
+        var desired = _currentTarget != null ? 1f : 0f;
         _targetWeight = Mathf.MoveTowards(_targetWeight, desired, weightBlendSpeed * Time.deltaTime);
     }
 
-    void OnPuppetMasterWrite()
+    private void OnPuppetMasterWrite()
     {
-        if (!enabled) return;
+        if (!enabled)
+            return;
 
         if (_currentTarget != null)
             _ikTarget.position = _currentTarget.position + Vector3.up * lookAtHeightOffset;
@@ -83,20 +89,31 @@ public class LookAtTargetTracker : MonoBehaviour
         lookAtIK.solver.Update();
     }
 
-    void FindNearestOpponent()
+    private void FindNearestOpponent()
     {
-        float bestDist = maxLookDistance;
-        Transform best = null;
-        Vector3 myPos = transform.root.position;
+        if (maxLookDistance <= 0f)
+        {
+            _currentTarget = null;
+            return;
+        }
 
-        for (int i = AllPuppets.Count - 1; i >= 0; i--)
+        var bestDist = maxLookDistance;
+        Transform best = null;
+        var myPos = transform.root.position;
+
+        for (var i = AllPuppets.Count - 1; i >= 0; i--)
         {
             var pm = AllPuppets[i];
-            if (pm == null) { AllPuppets.RemoveAt(i); continue; }
-            if (pm == puppetMaster) continue;
-            if (pm.transform.parent == null) continue;
+            if (pm == null)
+            {
+                AllPuppets.RemoveAt(i);
+                continue;
+            }
 
-            float dist = Vector3.Distance(myPos, pm.transform.parent.position);
+            if (pm == puppetMaster || pm.transform.parent == null)
+                continue;
+
+            var dist = Vector3.Distance(myPos, pm.transform.parent.position);
             if (dist < bestDist)
             {
                 bestDist = dist;
@@ -107,7 +124,7 @@ public class LookAtTargetTracker : MonoBehaviour
         _currentTarget = best;
     }
 
-    void OnDestroy()
+    private void OnDestroy()
     {
         if (puppetMaster != null)
         {
