@@ -1,148 +1,291 @@
 using Fusion;
-
 using UnityEngine;
 
 namespace SSAFYPlayTime.Game.GhostThrow
 {
     public class GhostThrowManager : MonoBehaviour
     {
+        [Header("Activation")]
+        [SerializeField] private bool enableOnlyAfterDeath = true;
+        [SerializeField] private string localPlayerTag = "Player";
+        [SerializeField] private Transform manualLocalTarget;
+
         [Header("Settings")]
-        [Tooltip("쿨타임 (초)")]
         public float cooldown = 1f;
-        [Tooltip("던질 때 가해지는 힘")]
         public float throwForce = 15f;
-        [Tooltip("카메라에서 생성될 거리")]
         public float spawnForwardOffset = 2f;
-        [Tooltip("레이캐스트 충돌 레이어")]
-        public LayerMask hitLayer = ~0; // 기본적으로 모든 레이어
+        public LayerMask hitLayer = ~0;
 
-        [Header("Bomb Prefabs (좌클릭)")]
-        [Tooltip("던질 폭탄 프리팹 (로컬/테스트 용)")]
+        [Header("Bomb Prefabs")]
         public GameObject cubePrefabOffline;
-        [Tooltip("던질 폭탄 프리팹 (네트워크/온라인 용)")]
         public NetworkPrefabRef cubePrefabOnline;
+        [SerializeField] private GameObject cubePrefabOnlineObject;
 
-        [Header("Banana Prefabs (우클릭)")]
-        [Tooltip("던질 바나나 프리팹 (로컬/테스트 용)")]
+        [Header("Banana Prefabs")]
         public GameObject bananaPrefabOffline;
-        [Tooltip("던질 바나나 프리팹 (네트워크/온라인 용)")]
         public NetworkPrefabRef bananaPrefabOnline;
+        [SerializeField] private GameObject bananaPrefabOnlineObject;
 
-        private float _lastBombThrowTime   = -100f;
+        private float _lastBombThrowTime = -100f;
         private float _lastBananaThrowTime = -100f;
+        private PlayerStats _localPlayerStats;
+        private bool _isGhostThrowEnabled;
+
+        private void Start()
+        {
+            BindLocalPlayer();
+            _isGhostThrowEnabled = !enableOnlyAfterDeath;
+        }
+
+        private void OnDestroy()
+        {
+            if (_localPlayerStats != null)
+                _localPlayerStats.OnDied -= HandleLocalPlayerDied;
+        }
 
         private void Update()
         {
-            // 좌클릭 → 폭탄
+            if (_localPlayerStats == null)
+                BindLocalPlayer();
+
+            RefreshGhostThrowStateFromLocalPlayer();
+
+            if (!_isGhostThrowEnabled)
+                return;
+
             if (Input.GetMouseButtonDown(0))
                 TryThrow(isBanana: false);
 
-            // 우클릭 → 바나나
             if (Input.GetMouseButtonDown(1))
                 TryThrow(isBanana: true);
-
-            CheckOutOfBoundsDeath();
         }
 
-        private void CheckOutOfBoundsDeath()
+        private void BindLocalPlayer()
         {
-            var allPlayers = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None);
-            foreach (var p in allPlayers)
+            GameObject localPlayer = null;
+
+            if (manualLocalTarget != null)
+                localPlayer = manualLocalTarget.gameObject;
+            else
+                localPlayer = GameObject.FindGameObjectWithTag(localPlayerTag);
+
+            if (localPlayer == null)
             {
-                if (p.transform.position.y < 3f)
+                var allPlayerStats = FindObjectsByType<PlayerStats>(FindObjectsSortMode.None);
+                for (var i = 0; i < allPlayerStats.Length; i++)
                 {
-                    PlayerStats stats = p.GetComponent<PlayerStats>();
-                    if (stats != null && stats.currentHealth > 0)
+                    var stats = allPlayerStats[i];
+                    if (stats == null)
+                        continue;
+
+                    var netObj = stats.GetComponent<NetworkObject>();
+                    if (netObj != null && netObj.HasInputAuthority)
                     {
-                        stats.TakeDamage(9999);
-                        Debug.Log($"GhostThrowManager: {p.name} 이(가) 맵 밖으로 떨어져 사망 처리됨.");
+                        localPlayer = stats.gameObject;
+                        break;
                     }
                 }
+            }
+
+            if (localPlayer == null)
+            {
+                Debug.LogWarning($"GhostThrowManager: local player not found. tag={localPlayerTag}");
+                return;
+            }
+
+            _localPlayerStats = localPlayer.GetComponent<PlayerStats>();
+            if (_localPlayerStats == null)
+            {
+                Debug.LogWarning($"GhostThrowManager: PlayerStats missing on {localPlayer.name}");
+                return;
+            }
+
+            _localPlayerStats.OnDied -= HandleLocalPlayerDied;
+            _localPlayerStats.OnDied += HandleLocalPlayerDied;
+
+            if (_localPlayerStats.IsDead)
+                _isGhostThrowEnabled = true;
+        }
+
+        private void HandleLocalPlayerDied(PlayerStats deadPlayer)
+        {
+            ForceEnableGhostThrow($"dead player {deadPlayer.name}");
+        }
+
+        public void ForceEnableGhostThrow(string reason = null)
+        {
+            _isGhostThrowEnabled = true;
+            Debug.Log($"GhostThrowManager: ghost throw enabled{(string.IsNullOrWhiteSpace(reason) ? string.Empty : $" ({reason})")}");
+        }
+
+        private void RefreshGhostThrowStateFromLocalPlayer()
+        {
+            if (_isGhostThrowEnabled || !enableOnlyAfterDeath)
+                return;
+
+            if (_localPlayerStats != null && _localPlayerStats.IsDead)
+            {
+                ForceEnableGhostThrow($"PlayerStats death state on {_localPlayerStats.name}");
+                return;
+            }
+
+            var allPlayers = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None);
+            for (var i = 0; i < allPlayers.Length; i++)
+            {
+                var player = allPlayers[i];
+                if (player == null)
+                    continue;
+
+                var networkObject = player.GetComponent<NetworkObject>();
+                if (networkObject == null || !networkObject.HasInputAuthority)
+                    continue;
+
+                if (!player.IsDeadNetworked)
+                    continue;
+
+                ForceEnableGhostThrow($"NetworkPlayer death state on {player.name}");
+                return;
             }
         }
 
         private void TryThrow(bool isBanana)
         {
-            // ── 쿨타임 체크 ──
-            ref float lastThrowTime = ref (isBanana ? ref _lastBananaThrowTime : ref _lastBombThrowTime);
+            ref var lastThrowTime = ref (isBanana ? ref _lastBananaThrowTime : ref _lastBombThrowTime);
             if (Time.time < lastThrowTime + cooldown)
             {
-                float remain = lastThrowTime + cooldown - Time.time;
-                Debug.Log($"GhostThrow [{(isBanana ? "바나나" : "폭탄")}]: 쿨타임 {remain:F1}초 남음");
+                var remain = lastThrowTime + cooldown - Time.time;
+                Debug.Log($"GhostThrow [{(isBanana ? "banana" : "bomb")}]: cooldown {remain:F1}s");
                 return;
             }
 
             if (Camera.main == null)
             {
-                Debug.LogWarning("GhostThrowManager: 메인 카메라를 찾을 수 없습니다.");
+                Debug.LogWarning("GhostThrowManager: main camera not found.");
                 return;
             }
 
-            // ── 목표 지점 레이캐스트 ──
-            Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-            Vector3 targetPoint = Physics.Raycast(ray, out RaycastHit hit, 1000f, hitLayer)
+            var ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+            var targetPoint = Physics.Raycast(ray, out RaycastHit hit, 1000f, hitLayer)
                 ? hit.point
                 : ray.GetPoint(100f);
 
             lastThrowTime = Time.time;
 
-            Vector3 spawnPos      = Camera.main.transform.position + Camera.main.transform.forward * spawnForwardOffset;
-            Vector3 throwDirection = (targetPoint - spawnPos).normalized;
+            var spawnPos = Camera.main.transform.position + Camera.main.transform.forward * spawnForwardOffset;
+            var throwDirection = (targetPoint - spawnPos).normalized;
 
-            // ── 스폰 ──
-            NetworkRunner runner = FindAnyObjectByType<NetworkRunner>();
+            var runner = FindAnyObjectByType<NetworkRunner>();
+            if (runner != null && runner.IsRunning)
+            {
+                var localNetworkPlayer = ResolveLocalNetworkPlayer();
+                if (localNetworkPlayer != null && localNetworkPlayer.TryRequestGhostThrow(isBanana, spawnPos, throwDirection))
+                {
+                    var label = isBanana ? "banana" : "bomb";
+                    Debug.Log($"GhostThrow [Request]: requested {label} at {spawnPos}");
+                    return;
+                }
+            }
+
             if (runner != null && runner.IsRunning && runner.IsServer)
+            {
                 SpawnOnline(runner, isBanana, spawnPos, throwDirection);
+            }
             else
+            {
                 SpawnOffline(isBanana, spawnPos, throwDirection);
+            }
         }
 
-        // ── 온라인 스폰 ───────────────────────────────────────────
-        private void SpawnOnline(NetworkRunner runner, bool isBanana, Vector3 spawnPos, Vector3 dir)
+        internal bool TrySpawnOnlineFromRequest(bool isBanana, Vector3 spawnPos, Vector3 dir)
         {
-            NetworkPrefabRef prefabRef = isBanana ? bananaPrefabOnline : cubePrefabOnline;
-            string label = isBanana ? "바나나" : "폭탄";
+            var runner = FindAnyObjectByType<NetworkRunner>();
+            if (runner == null || !runner.IsRunning || !runner.IsServer)
+                return false;
 
-            if (prefabRef.IsValid)
-            {
-                var spawnedObj = runner.Spawn(prefabRef, spawnPos, Quaternion.LookRotation(dir));
-                ApplyThrowForce(spawnedObj.gameObject, dir, isBanana);
-                Debug.Log($"GhostThrow [Online]: {label}을 던졌습니다 ({spawnPos})");
-            }
-            else
-            {
-                Debug.LogError($"GhostThrowManager [Online]: 온라인용 {label} 프리팹이 할당되지 않았습니다!");
-            }
+            return SpawnOnline(runner, isBanana, spawnPos, dir);
         }
 
-        // ── 오프라인 스폰 ─────────────────────────────────────────
+        private bool SpawnOnline(NetworkRunner runner, bool isBanana, Vector3 spawnPos, Vector3 dir)
+        {
+            var prefabRef = isBanana ? bananaPrefabOnline : cubePrefabOnline;
+            var prefabObject = isBanana ? bananaPrefabOnlineObject : cubePrefabOnlineObject;
+            var label = isBanana ? "banana" : "bomb";
+
+            if (prefabObject != null)
+            {
+                var spawnedByObject = runner.Spawn(prefabObject, spawnPos, Quaternion.LookRotation(dir));
+                if (spawnedByObject == null)
+                {
+                    Debug.LogError($"GhostThrowManager [Online]: failed to spawn {label} prefab object.");
+                    return false;
+                }
+
+                ApplyThrowForce(spawnedByObject.gameObject, dir, isBanana);
+                Debug.Log($"GhostThrow [Online]: threw {label} at {spawnPos}");
+                return true;
+            }
+
+            if (!prefabRef.IsValid)
+            {
+                Debug.LogError($"GhostThrowManager [Online]: {label} prefab is not assigned.");
+                return false;
+            }
+
+            var spawnedObj = runner.Spawn(prefabRef, spawnPos, Quaternion.LookRotation(dir));
+            ApplyThrowForce(spawnedObj.gameObject, dir, isBanana);
+            Debug.Log($"GhostThrow [Online]: threw {label} at {spawnPos}");
+            return true;
+        }
+
         private void SpawnOffline(bool isBanana, Vector3 spawnPos, Vector3 dir)
         {
-            GameObject prefab = isBanana ? bananaPrefabOffline : cubePrefabOffline;
-            string label = isBanana ? "바나나" : "폭탄";
+            var prefab = isBanana ? bananaPrefabOffline : cubePrefabOffline;
+            var label = isBanana ? "banana" : "bomb";
 
-            if (prefab != null)
+            if (prefab == null)
             {
-                var spawnedObj = Instantiate(prefab, spawnPos, Quaternion.LookRotation(dir));
-                ApplyThrowForce(spawnedObj, dir, isBanana);
-                Debug.Log($"GhostThrow [Offline]: {label}을 던졌습니다 ({spawnPos})");
+                Debug.LogWarning($"GhostThrowManager [Offline]: {label} prefab is not assigned.");
+                return;
             }
-            else
-            {
-                Debug.LogWarning($"GhostThrowManager [Offline]: {label} 프리팹(Offline)이 할당되지 않았습니다!");
-            }
+
+            var spawnedObj = Instantiate(prefab, spawnPos, Quaternion.LookRotation(dir));
+            ApplyThrowForce(spawnedObj, dir, isBanana);
+            Debug.Log($"GhostThrow [Offline]: threw {label} at {spawnPos}");
         }
 
-        // ── 던지기 힘 적용 ────────────────────────────────────────
         private void ApplyThrowForce(GameObject obj, Vector3 direction, bool isBanana)
         {
-            Rigidbody rb = obj.GetComponent<Rigidbody>();
-            if (rb == null) return;
+            var rb = obj.GetComponent<Rigidbody>();
+            if (rb == null)
+                return;
 
-            // 바나나는 낮게 포물선, 폭탄은 기존 방식
-            float upBias = isBanana ? 0.05f : 0.2f;
-            Vector3 adjustedDir = (direction + Vector3.up * upBias).normalized;
+            var upBias = isBanana ? 0.05f : 0.2f;
+            var adjustedDir = (direction + Vector3.up * upBias).normalized;
             rb.AddForce(adjustedDir * throwForce, ForceMode.VelocityChange);
+        }
+
+        private NetworkPlayer ResolveLocalNetworkPlayer()
+        {
+            if (_localPlayerStats != null)
+            {
+                var player = _localPlayerStats.GetComponent<NetworkPlayer>();
+                if (player != null)
+                    return player;
+            }
+
+            var allPlayers = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None);
+            for (var i = 0; i < allPlayers.Length; i++)
+            {
+                var player = allPlayers[i];
+                if (player == null)
+                    continue;
+
+                var networkObject = player.GetComponent<NetworkObject>();
+                if (networkObject != null && networkObject.HasInputAuthority)
+                    return player;
+            }
+
+            return null;
         }
     }
 }

@@ -78,4 +78,12 @@ public class CameraModeController : MonoBehaviour
         spectatorCamera.SetTargets(alivePlayers);
         spectatorCamera.EnableSpectator(true);
     }
+
+    public void ForceHandleLocalPlayerDied(PlayerStats dead)
+    {
+        if (dead == null)
+            return;
+
+        HandleLocalPlayerDied(dead);
+    }
 }

@@ -151,6 +151,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             StunTimeRemaining = 0f;
             NetworkedAnimationEventSequence = 0;
             NetworkedAnimationEventType = (int)AnimationEventType.None;
+
+            // ─── HP 초기화 ──────────────────────────────────────────
+            InitializeHp();
         }
 
         if (!HasStateAuthority)
@@ -163,14 +166,28 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         InitializeAnimationEventState();
         RememberSafeTransform(transform.position, transform.rotation);
 
+        // ─── EndGameManager에 PlayerStats 자동 등록 ─────────────
+        RegisterPlayerStatsToEndGameManager();
 
         // Issue 8: 호스트 마이그레이션 시 새 호스트의 자신 캐릭터 Spawned에서 드롭 아이템 위치를 재동기화한다.
         if (HasStateAuthority && HasInputAuthority && Runner != null && Runner.IsServer)
             StartCoroutine(CoResyncAllFieldDropsOnHostMigration());
     }
 
+    private void RegisterPlayerStatsToEndGameManager()
+    {
+        var playerStats = GetComponent<PlayerStats>();
+        if (playerStats == null)
+            playerStats = gameObject.AddComponent<PlayerStats>();
+
+        if (EndGameManager.Instance != null)
+            EndGameManager.Instance.RegisterPlayer(playerStats);
+    }
+
     private void InitializeInternal()
     {
+        EnsureCoreReferences();
+
         if (syncPhysicsObjects == null || syncPhysicsObjects.Length == 0)
             syncPhysicsObjects = GetComponentsInChildren<SyncPhysicsObject>(true);
 
@@ -194,6 +211,18 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         ConfigureAnimatedVisualMode();
         EnsureAnimatorBinding();
         CacheOwnedPresentationComponents();
+    }
+
+    private void EnsureCoreReferences()
+    {
+        if (rigidbody3D == null)
+            rigidbody3D = GetComponent<Rigidbody>() ?? GetComponentInChildren<Rigidbody>(true);
+
+        if (mainJoint == null)
+            mainJoint = GetComponent<ConfigurableJoint>() ?? GetComponentInChildren<ConfigurableJoint>(true);
+
+        if (animator == null)
+            animator = GetComponentInChildren<Animator>(true);
     }
 
     private void EnsureItemRuntimeIntegration()

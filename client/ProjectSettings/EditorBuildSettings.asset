@@ -14,7 +14,7 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/_Project/Scenes/GameScene.unity
     guid: 6e7ebca16e8287145b3955e886dfa821
-  - enabled: 0
+  - enabled: 1
     path: Assets/_Project/Scenes/GhostThrow.unity
     guid: a728dbd4e29213049911aabb56fff3cb
   m_configObjects: {}
