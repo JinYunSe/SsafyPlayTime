@@ -42,7 +42,12 @@ public sealed partial class NetworkPlayer
             return;
 
         if (GetInput(out PlayerNetworkInput input))
+        {
+            if (IsDeadNetworked)
+                input = default;
+
             DoPhysicsStep(input, Runner.DeltaTime);
+        }
 
         UpdateGrabHandlers();
         UpdatePhysicalPhaseState(Runner.DeltaTime);
@@ -52,6 +57,12 @@ public sealed partial class NetworkPlayer
 
     private void PollLocalInputState()
     {
+        if (IsDeadNetworked)
+        {
+            ClearGameplayInputState();
+            return;
+        }
+
         if (Runner == null)
         {
             _sandboxInput = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
@@ -145,6 +156,22 @@ public sealed partial class NetworkPlayer
     {
         _sandboxJump = false;
         _leftClickUseTriggered = false;
+    }
+
+    private void ClearGameplayInputState()
+    {
+        _sandboxInput = Vector2.zero;
+        _sandboxJump = false;
+        _leftClickUseTriggered = false;
+        _dropTriggered = false;
+        _throwTriggered = false;
+        _leftMouseDown = false;
+        _rightMouseDown = false;
+        _leftMouseConsumedAsGrab = false;
+        _rightMouseConsumedAsGrab = false;
+        _isLeftGrabActive = false;
+        _isRightGrabActive = false;
+        _isGrabActive = false;
     }
 
     private void SynchronizeNetworkSimulationState()
@@ -241,6 +268,9 @@ public sealed partial class NetworkPlayer
 
     private void ClampOutOfBoundsCharacter()
     {
+        if (IsDeadNetworked)
+            return;
+
         if (transform.position.y >= -10)
             return;
 
@@ -249,19 +279,10 @@ public sealed partial class NetworkPlayer
             return;
 
         _nextOutOfBoundsRecoverAt = now + 0.5f;
+        var lethalDamage = CombatSettings.Instance != null
+            ? Mathf.Max(MaxHp, CombatSettings.Instance.outOfBoundsHpDamage)
+            : MaxHp;
 
-        if (!TryResolveRecoveryTransform(out var recoveryPosition, out var recoveryRotation))
-            recoveryRotation = transform.rotation;
-
-        rigidbody3D.position = recoveryPosition;
-        rigidbody3D.rotation = recoveryRotation;
-        transform.SetPositionAndRotation(recoveryPosition, recoveryRotation);
-        if (rigidbody3D != null && !rigidbody3D.isKinematic)
-        {
-            rigidbody3D.velocity = Vector3.zero;
-            rigidbody3D.angularVelocity = Vector3.zero;
-        }
-        RememberSafeTransform(recoveryPosition, recoveryRotation);
-        ForceRecover();
+        ApplyHpDamage(lethalDamage);
     }
 }

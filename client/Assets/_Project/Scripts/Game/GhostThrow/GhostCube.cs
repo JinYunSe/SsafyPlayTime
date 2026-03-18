@@ -147,7 +147,7 @@ namespace SSAFYPlayTime.Game.GhostThrow
         }
 
         // ─── 폭발 로직 ────────────────────────────────────────
-        /// <summary>범위 내 모든 Rigidbody에 폭발력 적용.</summary>
+        /// <summary>범위 내 모든 Rigidbody에 폭발력 + NetworkPlayer HP 데미지 적용.</summary>
         private void ApplyExplosionKnockback(Vector3 explosionPos)
         {
             Collider[] cols = Physics.OverlapSphere(explosionPos, explosionRadius);
@@ -171,6 +171,23 @@ namespace SSAFYPlayTime.Game.GhostThrow
                 );
 
                 Debug.Log($"[GhostCube] 넉백: {rb.gameObject.name} (거리: {Vector3.Distance(explosionPos, rb.position):F1}m)");
+
+                // ─── HP 데미지: 거리 감쇠 적용 ───────────────────────
+                var np = col.GetComponentInParent<NetworkPlayer>();
+                if (np != null)
+                {
+                    float dist = Vector3.Distance(explosionPos, col.transform.position);
+                    float ratio = Mathf.Clamp01(1f - dist / explosionRadius); // 중심=1, 가장자리=0
+                    float baseDmg = CombatSettings.Instance != null
+                        ? CombatSettings.Instance.ghostBombHpDamage
+                        : 30f;
+                    float hpDmg = baseDmg * ratio;
+                    if (hpDmg > 0.5f)
+                    {
+                        np.ApplyHpDamage(hpDmg);
+                        Debug.Log($"[GhostCube] HP 데미지: {np.name} -{hpDmg:F1} (거리비율={ratio:F2})");
+                    }
+                }
             }
         }
 

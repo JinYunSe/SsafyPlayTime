@@ -1,12 +1,12 @@
 using UnityEngine;
+using Fusion;
 
-// NetworkPlayer LateUpdate(카메라 앵커 갱신) 이후 실행을 보장하기 위해 실행 순서를 뒤로 설정
-[DefaultExecutionOrder(100)]
 public class CameraRig : MonoBehaviour
 {
     [Header("Follow")]
     [SerializeField] private Transform target;
     [SerializeField] private string autoFindPlayerTag = "Player";
+    [SerializeField] private string autoFindTargetName = "Test";
     [SerializeField] private bool autoFindTargetWhenNull = true;
 
     [Header("Orbit")]
@@ -22,6 +22,10 @@ public class CameraRig : MonoBehaviour
     [SerializeField] private bool lockCursor = true;
     [SerializeField] private float lookDeadZone = 0.01f;
 
+    [Header("Smoothing")]
+    [SerializeField] private float followSmooth = 14f;
+    [SerializeField] private float rotateSmooth = 18f;
+
     [Header("Collision")]
     [SerializeField] private LayerMask obstructionMask = ~0;
     [SerializeField] private float collisionRadius = 0.2f;
@@ -30,6 +34,12 @@ public class CameraRig : MonoBehaviour
 
     private float _targetYaw;
     private float _targetPitch;
+    private float _currentYaw;
+    private float _currentPitch;
+    private float _yawVelocity;
+    private float _pitchVelocity;
+    private Vector3 _currentPivot;
+    private Vector3 _pivotVelocity;
     private bool _initializedAngles;
 
     public void SetTarget(Transform newTarget)
@@ -59,15 +69,21 @@ public class CameraRig : MonoBehaviour
 
         UpdateLookInput();
 
-        // 팔로우 위치: _cameraFollowAnchor(NetworkPlayer)가 이미 스무딩을 담당하므로
-        // CameraRig에서 추가 SmoothDamp 없이 직접 사용 (이중 스무딩 제거)
-        var pivot = target.position + pivotOffset;
-        var rot = Quaternion.Euler(_targetPitch, _targetYaw, 0f);
-        var desiredPos = pivot + rot * new Vector3(0f, height, -distance);
-        var resolvedPos = ResolveCameraPosition(pivot, desiredPos);
+        _currentYaw = Mathf.SmoothDampAngle(_currentYaw, _targetYaw, ref _yawVelocity, 1f / Mathf.Max(0.01f, rotateSmooth));
+        _currentPitch = Mathf.SmoothDampAngle(_currentPitch, _targetPitch, ref _pitchVelocity, 1f / Mathf.Max(0.01f, rotateSmooth));
 
-        transform.position = resolvedPos;
-        transform.rotation = rot;
+        var pivot = target.position + pivotOffset;
+        _currentPivot = Vector3.SmoothDamp(_currentPivot, pivot, ref _pivotVelocity, 1f / Mathf.Max(0.01f, followSmooth));
+
+        var desiredRot = Quaternion.Euler(_currentPitch, _currentYaw, 0f);
+        var desiredPos = _currentPivot + desiredRot * new Vector3(0f, height, -distance);
+        var resolvedPos = ResolveCameraPosition(_currentPivot, desiredPos);
+
+        var followAlpha = 1f - Mathf.Exp(-followSmooth * Time.deltaTime);
+        var rotateAlpha = 1f - Mathf.Exp(-rotateSmooth * Time.deltaTime);
+
+        transform.position = Vector3.Lerp(transform.position, resolvedPos, followAlpha);
+        transform.rotation = Quaternion.Slerp(transform.rotation, desiredRot, rotateAlpha);
     }
 
     private void TryAutoFindTarget()
@@ -75,11 +91,50 @@ public class CameraRig : MonoBehaviour
         if (!autoFindTargetWhenNull || target != null)
             return;
 
-        // 태그 탐색만 사용 — FindObjectOfType<NetworkPlayer> 제거
-        // (멀티플레이어에서 원격 플레이어를 잘못 잡는 문제 방지)
+        var localNetworkPlayer = ResolveLocalNetworkPlayer();
+        if (localNetworkPlayer != null)
+        {
+            SetTarget(localNetworkPlayer.GetCameraFollowTarget());
+            return;
+        }
+
         var tagged = GameObject.FindGameObjectWithTag(autoFindPlayerTag);
         if (tagged != null)
+        {
             SetTarget(tagged.transform);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(autoFindTargetName))
+        {
+            var namedTarget = GameObject.Find(autoFindTargetName);
+            if (namedTarget != null)
+            {
+                SetTarget(namedTarget.transform);
+                return;
+            }
+        }
+
+        var networkPlayer = FindObjectOfType<NetworkPlayer>();
+        if (networkPlayer != null)
+            SetTarget(networkPlayer.GetCameraFollowTarget());
+    }
+
+    private static NetworkPlayer ResolveLocalNetworkPlayer()
+    {
+        var allPlayers = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None);
+        for (var i = 0; i < allPlayers.Length; i++)
+        {
+            var player = allPlayers[i];
+            if (player == null)
+                continue;
+
+            var networkObject = player.GetComponent<NetworkObject>();
+            if (networkObject != null && networkObject.HasInputAuthority)
+                return player;
+        }
+
+        return null;
     }
 
     private void InitializeAngles(bool force)
@@ -90,11 +145,17 @@ public class CameraRig : MonoBehaviour
         if (!force && _initializedAngles)
             return;
 
-        var initialYaw = Mathf.Approximately(yaw, 0f) ? transform.eulerAngles.y : yaw;
-        var initialPitch = Mathf.Approximately(pitch, 0f) ? NormalizePitch(transform.eulerAngles.x) : pitch;
+        if (force || !_initializedAngles)
+        {
+            var initialYaw = Mathf.Approximately(yaw, 0f) ? transform.eulerAngles.y : yaw;
+            var initialPitch = Mathf.Approximately(pitch, 0f) ? NormalizePitch(transform.eulerAngles.x) : pitch;
 
-        _targetYaw = initialYaw;
-        _targetPitch = Mathf.Clamp(initialPitch, minPitch, maxPitch);
+            _targetYaw = initialYaw;
+            _targetPitch = Mathf.Clamp(initialPitch, minPitch, maxPitch);
+            _currentYaw = _targetYaw;
+            _currentPitch = _targetPitch;
+            _currentPivot = target.position + pivotOffset;
+        }
 
         _initializedAngles = true;
     }
