@@ -31,10 +31,5 @@ namespace SSAFYPlayTime.Character
         [Header("State")]
         public float fallEnterSec = 0.8f;
         public float freeFallEnterSec = 2.0f;
-
-        [Header("Water")]
-        public float swimBuoyancy = 8f;
-        public float swimSpeedMultiplier = 0.7f;
-        public float swimSurfaceThreshold = 0.8f;
     }
 }
