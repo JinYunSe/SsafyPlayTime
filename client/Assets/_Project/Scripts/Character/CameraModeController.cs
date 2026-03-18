@@ -1,5 +1,6 @@
 using System.Linq;
 
+using Fusion;
 using UnityEngine;
 
 public class CameraModeController : MonoBehaviour
@@ -10,69 +11,135 @@ public class CameraModeController : MonoBehaviour
 
     [Header("Auto Bind Local Player")]
     [SerializeField] private string localPlayerTag = "Player";
-    [SerializeField] private Transform manualLocalTarget; // 필요하면 여기 지정
+    [SerializeField] private Transform manualLocalTarget;
 
     private PlayerStats _localPlayerStats;
+    private NetworkPlayer _localNetworkPlayer;
+    private bool _hasHandledDeathTransition;
 
     private void Start()
     {
-        // 수동 지정 우선
-        if (manualLocalTarget != null)
+        var localPlayer = ResolveLocalPlayerObject();
+        if (localPlayer != null)
         {
-            BindLocalPlayer(manualLocalTarget.gameObject);
+            BindLocalPlayer(localPlayer);
             return;
         }
 
-        // 태그로 자동 탐색
-        var go = GameObject.FindGameObjectWithTag(localPlayerTag);
-        if (go != null)
-        {
-            BindLocalPlayer(go);
-            return;
-        }
-
-        Debug.LogError($"CameraModeController: 로컬 플레이어를 못 찾음, Tag={localPlayerTag} 확인 필요");
+        Debug.LogError($"CameraModeController: local player not found. Tag={localPlayerTag}");
     }
 
     public void BindLocalPlayer(GameObject localPlayer)
     {
         if (localPlayer == null)
         {
-            Debug.LogError("CameraModeController: localPlayer가 null");
+            Debug.LogError("CameraModeController: localPlayer is null");
             return;
         }
 
         _localPlayerStats = localPlayer.GetComponent<PlayerStats>();
         if (_localPlayerStats == null)
+            _localPlayerStats = localPlayer.GetComponentInChildren<PlayerStats>(true);
+        if (_localPlayerStats == null)
+            _localPlayerStats = localPlayer.GetComponentInParent<PlayerStats>();
+
+        _localNetworkPlayer = localPlayer.GetComponent<NetworkPlayer>();
+        if (_localNetworkPlayer == null)
+            _localNetworkPlayer = localPlayer.GetComponentInChildren<NetworkPlayer>(true);
+        if (_localNetworkPlayer == null)
+            _localNetworkPlayer = localPlayer.GetComponentInParent<NetworkPlayer>();
+
+        if (_localPlayerStats != null)
         {
-            Debug.LogError($"CameraModeController: {localPlayer.name} 에 PlayerStats가 없음 (관전 전환 불가)");
+            _localPlayerStats.OnDied -= HandleLocalPlayerDied;
+            _localPlayerStats.OnDied += HandleLocalPlayerDied;
+        }
+
+        if (_localPlayerStats == null && _localNetworkPlayer == null)
+        {
+            Debug.LogError($"CameraModeController: PlayerStats and NetworkPlayer missing on {localPlayer.name}");
             return;
         }
 
-        // 중복 구독 방지
-        _localPlayerStats.OnDied -= HandleLocalPlayerDied;
-        _localPlayerStats.OnDied += HandleLocalPlayerDied;
-
-        // Alive mode
         spectatorCamera.EnableSpectator(false);
         cameraRig.enabled = true;
 
-        // NetworkPlayer가 있으면 카메라 Follow 앵커를 사용 (SyncRootToPhysicsBody 급변 흡수)
-        var networkPlayer = localPlayer.GetComponent<NetworkPlayer>();
-        var followTarget = networkPlayer != null ? networkPlayer.GetCameraFollowTarget() : localPlayer.transform;
+        var followTarget = _localNetworkPlayer != null ? _localNetworkPlayer.GetCameraFollowTarget() : _localPlayerStats.transform;
         cameraRig.SetTarget(followTarget);
+        _hasHandledDeathTransition = false;
 
         Debug.Log($"CameraModeController: Alive mode, target = {localPlayer.name}");
     }
 
+    private void Update()
+    {
+        if (_hasHandledDeathTransition)
+            return;
+
+        if (_localPlayerStats != null && _localPlayerStats.IsDead)
+        {
+            ActivateSpectatorMode();
+            return;
+        }
+
+        if (_localNetworkPlayer != null && _localNetworkPlayer.IsDeadNetworked)
+            ActivateSpectatorMode();
+    }
+
+    private GameObject ResolveLocalPlayerObject()
+    {
+        if (manualLocalTarget != null)
+            return manualLocalTarget.gameObject;
+
+        var allPlayers = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None);
+        for (var i = 0; i < allPlayers.Length; i++)
+        {
+            var player = allPlayers[i];
+            if (player == null)
+                continue;
+
+            var networkObject = player.GetComponent<NetworkObject>();
+            if (networkObject != null && networkObject.HasInputAuthority)
+                return player.gameObject;
+        }
+
+        var allStats = FindObjectsByType<PlayerStats>(FindObjectsSortMode.None);
+        for (var i = 0; i < allStats.Length; i++)
+        {
+            var stats = allStats[i];
+            if (stats == null)
+                continue;
+
+            var networkObject = stats.GetComponent<NetworkObject>();
+            if (networkObject == null)
+                networkObject = stats.GetComponentInParent<NetworkObject>();
+            if (networkObject == null)
+                networkObject = stats.GetComponentInChildren<NetworkObject>(true);
+
+            if (networkObject != null && networkObject.HasInputAuthority)
+                return stats.gameObject;
+        }
+
+        return GameObject.FindGameObjectWithTag(localPlayerTag);
+    }
+
     private void HandleLocalPlayerDied(PlayerStats dead)
     {
-        Debug.Log($"CameraModeController: Local player died -> {dead.gameObject.name}, switch to spectator");
+        ActivateSpectatorMode(dead != null ? dead.gameObject.name : null);
+    }
 
-        // Spectator mode: 살아있는 플레이어들 전부 모아서 타겟으로
-        var alivePlayers = FindObjectsOfType<PlayerStats>()
-            .Where(p => p != null && p.gameObject.activeInHierarchy && p.currentHealth > 0)
-            .Select(p => p.transform)
+    private void ActivateSpectatorMode(string deadPlayerName = null)
+    {
+        _hasHandledDeathTransition = true;
+        var name = string.IsNullOrWhiteSpace(deadPlayerName)
+            ? (_localNetworkPlayer != null ? _localNetworkPlayer.gameObject.name : "local player")
+            : deadPlayerName;
+
+        Debug.Log($"CameraModeController: Local player died -> {name}, switch to spectator");
+
+        var alivePlayers = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None)
+            .Where(p => p != null && p.gameObject.activeInHierarchy && !p.IsDeadNetworked)
+            .Select(p => p.GetCameraFollowTarget() != null ? p.GetCameraFollowTarget() : p.transform)
             .ToList();
 
         Debug.Log($"CameraModeController: alive targets = {alivePlayers.Count}");
@@ -85,9 +152,6 @@ public class CameraModeController : MonoBehaviour
 
     public void ForceHandleLocalPlayerDied(PlayerStats dead)
     {
-        if (dead == null)
-            return;
-
-        HandleLocalPlayerDied(dead);
+        ActivateSpectatorMode(dead != null ? dead.gameObject.name : null);
     }
 }

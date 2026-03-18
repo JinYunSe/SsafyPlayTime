@@ -50,6 +50,11 @@ public class ImmediateDeath : MonoBehaviour
             : 9999f;
 
         var networkPlayer = playerStats.GetComponent<NetworkPlayer>();
+        if (networkPlayer == null)
+            networkPlayer = playerStats.GetComponentInParent<NetworkPlayer>();
+        if (networkPlayer == null)
+            networkPlayer = playerStats.GetComponentInChildren<NetworkPlayer>(true);
+
         if (networkPlayer != null)
         {
             networkPlayer.ApplyHpDamage(damage);

@@ -2375,11 +2375,9 @@ GameObject:
   - component: {fileID: 2235237411835398360}
   - component: {fileID: 1893564644018223642}
   - component: {fileID: 7711887360206274305}
-  - component: {fileID: 8994850389176562799}
   - component: {fileID: 8430327982809870411}
   - component: {fileID: 3379147690258884884}
   - component: {fileID: 4169575702658619610}
-  - component: {fileID: 4591625126194906424}
   - component: {fileID: 5944931517584916399}
   m_Layer: 0
   m_Name: SsatyCharacterAndCameraAndPuppet
@@ -2449,6 +2447,11 @@ MonoBehaviour:
     _value: 0
   _NetworkedIsBeingGrabbed:
     _value: 0
+  _NetworkedIsDragged:
+    _value: 0
+  _NetworkedHp: 0
+  _IsDeadNetworked:
+    _value: 0
   itemWorldEffectMask:
     serializedVersion: 2
     m_Bits: 119
@@ -2477,6 +2480,7 @@ MonoBehaviour:
   flamethrowerMuzzleLocalOffset: {x: 0, y: 0, z: 0.5}
   flamethrowerMuzzleLocalEulerOffset: {x: 0, y: 0, z: 0}
   enableItemWorldEffectLog: 0
+  enableProxyAnimationDiagnostics: 1
 --- !u!114 &5028562022910535247
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2495,6 +2499,7 @@ MonoBehaviour:
   grabHoldThreshold: 0.2
   attackLockDuration: 0.7
   throwLockDuration: 0.85
+  enableAnimationDriverDiagnostics: 1
 --- !u!54 &5945320000664910996
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -2683,6 +2688,17 @@ MonoBehaviour:
   reachDistance: 0.6
   handReachForce: 115
   handDamping: 8
+  anchorBlend: 0.6
+  holdForwardOffset: 0.45
+  holdSideOffset: 0.24
+  holdHeightOffset: 0.82
+  holdVerticalClamp: 0.55
+  holdLateralClamp: 0.35
+  anchorAssistScale: 0.4
+  torsoReactionScale: 0.3
+  behindBackThreshold: -0.08
+  behindBackForce: 90
+  behindBackTurnTorque: 20
 --- !u!114 &7711887360206274305
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2690,7 +2706,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5250822024937179733}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ff643284b35c99f4c9c9ae75ea5f307b, type: 3}
   m_Name: 
@@ -2698,23 +2714,6 @@ MonoBehaviour:
   activeDistance: 20
   deactivateDistance: 25
   minY: -10
---- !u!114 &8994850389176562799
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5250822024937179733}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6c2965f2950b6fa43a2aa91758b87b39, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  puppetMaster: {fileID: 2415217475885416610}
-  behaviourPuppet: {fileID: 990884687143830984}
-  respawnDelay: 3
-  respawnPoint: {fileID: 0}
-  freezeAfterDeathTime: 5
 --- !u!114 &8430327982809870411
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2722,14 +2721,14 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5250822024937179733}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 1b86ba4fd986d9d4aa98a5a8c8ead9f8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   puppetMaster: {fileID: 2415217475885416610}
   behaviourPuppet: {fileID: 990884687143830984}
-  lifecycleManager: {fileID: 8994850389176562799}
+  lifecycleManager: {fileID: 0}
   syncInterval: 0.1
 --- !u!114 &3379147690258884884
 MonoBehaviour:
@@ -2768,20 +2767,6 @@ MonoBehaviour:
   SyncParent: 0
   _autoAOIOverride: 1
   DisableSharedModeInterpolation: 0
---- !u!114 &4591625126194906424
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5250822024937179733}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 1541381998, guid: e725a070cec140c4caffb81624c8c787, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  Guid:
-    RawGuidValue: 4b5b2971a03a6924ba0edc8cb41b58fd
 --- !u!114 &5944931517584916399
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2796,7 +2781,24 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   profile: {fileID: 11400000, guid: c79c878183ccc3d44809d4fc7f5f98a5, type: 2}
   puppetMaster: {fileID: 0}
+  motionReference: {fileID: 0}
+  motionRigidbody: {fileID: 0}
+  networkPlayer: {fileID: 0}
   lerpSpeed: 8
+  enableDynamicWobble: 1
+  wobbleBlendSpeed: 6
+  speedForMaxWobble: 4
+  turnRateForMaxWobble: 220
+  airborneWobbleBonus: 0.08
+  headPinMultiplier: 0.72
+  headMuscleMultiplier: 0.58
+  armPinMultiplier: 0.64
+  armMuscleMultiplier: 0.52
+  handPinMultiplier: 0.82
+  handMuscleMultiplier: 0.72
+  grabbedLooseBonus: 0.16
+  unstableLooseBonus: 0.1
+  draggedLooseBonus: 0.08
 --- !u!1 &5318625280698802423
 GameObject:
   m_ObjectHideFlags: 0
