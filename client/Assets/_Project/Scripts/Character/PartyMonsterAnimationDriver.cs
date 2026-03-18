@@ -34,6 +34,9 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     float attackLockDuration = 0.08f;
 
     [SerializeField]
+    float attackVisualDuration = 0.3f;
+
+    [SerializeField]
     float throwLockDuration = 0.85f;
 
     PuppetMaster puppetMaster;
@@ -41,6 +44,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     NetworkPlayer networkPlayer;
     float attackButtonPressedAt = -1f;
     float actionLockedUntil;
+    float upperBodyStateVisibleUntil;
     bool isGrabPoseActive;
     bool hasMovementSpeedParameter;
     bool hasIsSprintingParameter;
@@ -185,6 +189,8 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         ResetActionState();
         currentStateName = null;
+        currentUpperBodyStateName = null;
+        upperBodyStateVisibleUntil = 0f;
         animator.enabled = true;
         animator.Rebind();
         animator.Update(0f);
@@ -201,7 +207,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         nextAttackLeft = !nextAttackLeft;
 
         string punchState = isLeft ? PunchLeftState : PunchRightState;
-        PlayLockedAction(punchState, attackLockDuration);
+        PlayLockedAction(punchState, attackLockDuration, attackVisualDuration);
         TraceOwnerProxyInputDiagnostics("PlayAttack", $"punchState={punchState} nextAttackLeft={nextAttackLeft} lockedUntil={actionLockedUntil:F3}");
 
         // OwnerProxy: NetworkPlayer에 예측 방향을 알려서 reconcile 시 비교 가능하게
@@ -217,7 +223,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         if (!CanDriveAnimation())
             return;
 
-        PlayLockedAction(PunchLeftState, attackLockDuration);
+        PlayLockedAction(PunchLeftState, attackLockDuration, attackVisualDuration);
     }
 
     /// <summary>
@@ -228,7 +234,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         if (!CanDriveAnimation())
             return;
 
-        PlayLockedAction(PunchRightState, attackLockDuration);
+        PlayLockedAction(PunchRightState, attackLockDuration, attackVisualDuration);
     }
 
     /// <summary>
@@ -486,7 +492,13 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     /// </summary>
     void UpdateUpperBodyLayerState()
     {
-        if (!IsActionLocked() && !isGrabPoseActive)
+        if (isGrabPoseActive)
+            return;
+
+        if (Time.time < upperBodyStateVisibleUntil)
+            return;
+
+        if (!IsActionLocked())
             ClearUpperBodyState();
     }
 
@@ -525,6 +537,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     {
         attackButtonPressedAt = -1f;
         actionLockedUntil = 0f;
+        upperBodyStateVisibleUntil = 0f;
         isGrabPoseActive = false;
         _punchBuffered = false;
         _wasActionLocked = false;
@@ -569,7 +582,13 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     /// </summary>
     void PlayLockedAction(string stateName, float duration)
     {
-        actionLockedUntil = Time.time + duration;
+        PlayLockedAction(stateName, duration, duration);
+    }
+
+    void PlayLockedAction(string stateName, float lockDuration, float visibleDuration)
+    {
+        actionLockedUntil = Time.time + lockDuration;
+        upperBodyStateVisibleUntil = Time.time + Mathf.Max(lockDuration, visibleDuration);
         PlayUpperBodyState(stateName);
     }
 
@@ -622,6 +641,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return;
 
         animator.SetLayerWeight(UpperBodyLayer, 0f);
+        upperBodyStateVisibleUntil = 0f;
         currentUpperBodyStateName = null;
     }
 

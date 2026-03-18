@@ -46,10 +46,12 @@ namespace SSAFYPlayTime.Character
         public bool usePlayerGrabOverride = true;
         [Tooltip("사람을 잡을 때 spring (기본보다 약하게)")]
         public float playerGrabSpring = 500f;
+        public float playerGrabDamper = 55f;
         [Tooltip("사람을 잡을 때 breakForce (기본보다 약하게 — 빠지기 쉬움)")]
         public float playerGrabBreakForce = 1200f;
         [Tooltip("사람을 잡을 때 최대 늘어남 거리 (기본보다 넓게)")]
         public float playerGrabLinearLimit = 0.5f;
+        public bool playerWeakeningEnabled = false;
 
         [Header("Object Grab Override (오브젝트 그랩 전용)")]
         [Tooltip("활성화하면 오브젝트를 잡을 때 별도 수치 사용")]
@@ -102,14 +104,10 @@ namespace SSAFYPlayTime.Character
             var spring = ResolveSpring(targetType);
             var maxF = ResolveBreakForce(targetType);
 
-            var damper = (targetType == GrabTargetType.StunnedPlayer && useStunnedPlayerGrabOverride)
-                ? stunnedPlayerGrabDamper
-                : grabDamper;
-
             return new JointDrive
             {
                 positionSpring = spring * mult,
-                positionDamper = damper,
+                positionDamper = ResolveDamper(targetType),
                 maximumForce = maxF * mult
             };
         }
@@ -143,7 +141,11 @@ namespace SSAFYPlayTime.Character
         /// <summary>기절자 잡기 시 시간 경과 약화를 건너뛸지 여부</summary>
         public bool ShouldSkipWeakening(GrabTargetType targetType)
         {
-            return targetType == GrabTargetType.StunnedPlayer && useStunnedPlayerGrabOverride && !stunnedPlayerWeakeningEnabled;
+            if (targetType == GrabTargetType.Player && usePlayerGrabOverride && !playerWeakeningEnabled)
+                return true;
+            if (targetType == GrabTargetType.StunnedPlayer && useStunnedPlayerGrabOverride && !stunnedPlayerWeakeningEnabled)
+                return true;
+            return false;
         }
 
         private float ResolveSpring(GrabTargetType targetType)
@@ -177,6 +179,15 @@ namespace SSAFYPlayTime.Character
             if (targetType == GrabTargetType.Object && useObjectGrabOverride)
                 return objectGrabLinearLimit;
             return linearLimit;
+        }
+
+        private float ResolveDamper(GrabTargetType targetType)
+        {
+            if (targetType == GrabTargetType.StunnedPlayer && useStunnedPlayerGrabOverride)
+                return stunnedPlayerGrabDamper;
+            if (targetType == GrabTargetType.Player && usePlayerGrabOverride)
+                return playerGrabDamper;
+            return grabDamper;
         }
     }
 }
