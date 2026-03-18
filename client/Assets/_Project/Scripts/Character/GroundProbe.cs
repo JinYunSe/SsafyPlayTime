@@ -17,7 +17,7 @@ namespace SSAFYPlayTime.Character
         // distance : 캐스트 거리
         public bool IsGrounded(Vector3 position, Transform root, float radius, float distance)
         {
-            var count = Physics.SphereCastNonAlloc(position, radius, Vector3.down, _hits, distance, ~0, QueryTriggerInteraction.Ignore);
+            var count = Physics.SphereCastNonAlloc(position, radius, Vector3.down, _hits, distance);
             for (var i = 0; i < count; i++)
             {
                 if (_hits[i].transform.root == root)
