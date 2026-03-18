@@ -180,6 +180,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             var isWatermelonSword = string.Equals(heldItemId, ItemIds.WaterMelonSword, StringComparison.Ordinal);
             // 수박칼은 조건과 무관하게 Lit 셰이더로 강제 교체해 마젠타를 방지한다.
             ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_spawnedHeldVisual, isWatermelonSword);
+            RefreshBlackholeHeldVisualIfNeeded(heldItemId, _spawnedHeldVisual);
             StripNetworkComponentsForHeldVisual(_spawnedHeldVisual);
             DisableNonHeldVisualEffects(heldItemId, _spawnedHeldVisual);
             ApplyPose(heldItemId, _spawnedHeldVisual.transform);
@@ -509,9 +510,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            var isBlackhole = string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal);
             var isSatellite = string.Equals(heldItemId, ItemIds.SatelliteStrike, StringComparison.Ordinal);
-            if (!isBlackhole && !isSatellite)
+            if (!isSatellite)
             {
                 return;
             }
@@ -536,6 +536,20 @@ namespace SSAFYPlayTime.Gameplay.Items
                 {
                     lights[i].enabled = false;
                 }
+            }
+        }
+
+        private static void RefreshBlackholeHeldVisualIfNeeded(string heldItemId, GameObject visualRoot)
+        {
+            if (!string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal) || visualRoot == null)
+            {
+                return;
+            }
+
+            var authoring = visualRoot.GetComponent<ItemBlackholeVisualAuthoring>();
+            if (authoring != null)
+            {
+                authoring.RefreshVisual();
             }
         }
 

@@ -26,9 +26,9 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
 
                 var useInstancedMaterials = ShouldUseInstancedMaterials(renderer);
-                var materials = SanitizeMaterials(useInstancedMaterials
+                var materials = useInstancedMaterials
                     ? renderer.materials
-                    : renderer.sharedMaterials);
+                    : renderer.sharedMaterials;
                 if (materials == null || materials.Length == 0)
                 {
                     continue;
@@ -180,9 +180,9 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return true;
             }
 
-            var materials = SanitizeMaterials(useInstancedMaterials
+            var materials = useInstancedMaterials
                 ? renderer.materials
-                : renderer.sharedMaterials);
+                : renderer.sharedMaterials;
             if (materials == null || materials.Length == 0)
             {
                 return false;
@@ -397,6 +397,15 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return Color.white;
             }
 
+            var materialName = source.name ?? string.Empty;
+            if (materialName.IndexOf("PolyProton", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                source.HasProperty("_RimColor"))
+            {
+                var protonColor = source.GetColor("_RimColor");
+                protonColor.a = 1f;
+                return protonColor;
+            }
+
             var shaderName = source.shader != null ? source.shader.name ?? string.Empty : string.Empty;
             var isParticleLikeShader = shaderName.IndexOf("Particles", StringComparison.OrdinalIgnoreCase) >= 0;
             if (isParticleLikeShader && source.HasProperty("_TintColor"))
@@ -507,45 +516,5 @@ namespace SSAFYPlayTime.Gameplay.Items
             return false;
         }
 
-        private static Material[] SanitizeMaterials(Material[] materials)
-        {
-            if (materials == null || materials.Length == 0)
-            {
-                return Array.Empty<Material>();
-            }
-
-            var validCount = 0;
-            for (var i = 0; i < materials.Length; i++)
-            {
-                if (materials[i] != null)
-                {
-                    validCount++;
-                }
-            }
-
-            if (validCount == materials.Length)
-            {
-                return materials;
-            }
-
-            if (validCount == 0)
-            {
-                return Array.Empty<Material>();
-            }
-
-            var sanitized = new Material[validCount];
-            var nextIndex = 0;
-            for (var i = 0; i < materials.Length; i++)
-            {
-                if (materials[i] == null)
-                {
-                    continue;
-                }
-
-                sanitized[nextIndex++] = materials[i];
-            }
-
-            return sanitized;
-        }
     }
 }
