@@ -4223,6 +4223,7 @@ GameObject:
   - component: {fileID: 1047001073462432665}
   - component: {fileID: 2653967396604278305}
   - component: {fileID: 264341386449131616}
+  - component: {fileID: 964483268536491044}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -4318,7 +4319,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   target: {fileID: 0}
   autoFindPlayerTag: Player
-  autoFindTargetName: Test
   autoFindTargetWhenNull: 1
   pivotOffset: {x: 0, y: 1.2, z: 0}
   distance: 8
@@ -4332,13 +4332,56 @@ MonoBehaviour:
   lockCursor: 1
   lookDeadZone: 0.01
   followSmooth: 14
-  rotateSmooth: 18
   obstructionMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 119
   collisionRadius: 0.2
   collisionBuffer: 0.1
   minDistance: 1.25
+--- !u!114 &964483268536491044
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7761395685847284647}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a79441f348de89743a2939f4d699eac1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_RenderShadows: 1
+  m_RequiresDepthTextureOption: 2
+  m_RequiresOpaqueTextureOption: 2
+  m_CameraType: 0
+  m_Cameras: []
+  m_RendererIndex: -1
+  m_VolumeLayerMask:
+    serializedVersion: 2
+    m_Bits: 1
+  m_VolumeTrigger: {fileID: 0}
+  m_VolumeFrameworkUpdateModeOption: 2
+  m_RenderPostProcessing: 0
+  m_Antialiasing: 0
+  m_AntialiasingQuality: 2
+  m_StopNaN: 0
+  m_Dithering: 0
+  m_ClearDepth: 1
+  m_AllowXRRendering: 1
+  m_AllowHDROutput: 1
+  m_UseScreenCoordOverride: 0
+  m_ScreenSizeOverride: {x: 0, y: 0, z: 0, w: 0}
+  m_ScreenCoordScaleBias: {x: 0, y: 0, z: 0, w: 0}
+  m_RequiresDepthTexture: 0
+  m_RequiresColorTexture: 0
+  m_Version: 2
+  m_TaaSettings:
+    m_Quality: 3
+    m_FrameInfluence: 0.1
+    m_JitterScale: 1
+    m_MipBias: 0
+    m_VarianceClampScale: 0.9
+    m_ContrastAdaptiveSharpening: 0
 --- !u!1 &7818269253471217244
 GameObject:
   m_ObjectHideFlags: 0
@@ -5080,7 +5123,6 @@ GameObject:
   - component: {fileID: 2497017319830200292}
   - component: {fileID: 27192319507159456}
   - component: {fileID: 6623650079103540993}
-  - component: {fileID: 1916621665409844942}
   - component: {fileID: 2823784520938017193}
   m_Layer: 0
   m_Name: AIgCharacterAndCameraAndPuppet
@@ -5301,6 +5343,8 @@ MonoBehaviour:
     _value: 0
   _NetworkedIsBeingGrabbed:
     _value: 0
+  _NetworkedIsDragged:
+    _value: 0
   itemWorldEffectMask:
     serializedVersion: 2
     m_Bits: 119
@@ -5329,6 +5373,7 @@ MonoBehaviour:
   flamethrowerMuzzleLocalOffset: {x: 0, y: 0, z: 0.5}
   flamethrowerMuzzleLocalEulerOffset: {x: 0, y: 0, z: 0}
   enableItemWorldEffectLog: 0
+  enableProxyAnimationDiagnostics: 1
 --- !u!114 &8050714215843509432
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5347,6 +5392,7 @@ MonoBehaviour:
   grabHoldThreshold: 0.2
   attackLockDuration: 0.7
   throwLockDuration: 0.85
+  enableAnimationDriverDiagnostics: 1
 --- !u!114 &1826213868747077357
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5367,6 +5413,17 @@ MonoBehaviour:
   reachDistance: 0.6
   handReachForce: 115
   handDamping: 8
+  anchorBlend: 0.6
+  holdForwardOffset: 0.45
+  holdSideOffset: 0.24
+  holdHeightOffset: 0.82
+  holdVerticalClamp: 0.55
+  holdLateralClamp: 0.35
+  anchorAssistScale: 0.4
+  torsoReactionScale: 0.3
+  behindBackThreshold: -0.08
+  behindBackForce: 90
+  behindBackTurnTorque: 20
 --- !u!114 &2457155399830757086
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5470,20 +5527,6 @@ MonoBehaviour:
   SyncParent: 0
   _autoAOIOverride: 1
   DisableSharedModeInterpolation: 0
---- !u!114 &1916621665409844942
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8705436626796712522}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 1541381998, guid: e725a070cec140c4caffb81624c8c787, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  Guid:
-    RawGuidValue: 6a9d66a6701843e439985d15b0d12813
 --- !u!114 &2823784520938017193
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5498,7 +5541,24 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   profile: {fileID: 11400000, guid: c79c878183ccc3d44809d4fc7f5f98a5, type: 2}
   puppetMaster: {fileID: 0}
+  motionReference: {fileID: 0}
+  motionRigidbody: {fileID: 0}
+  networkPlayer: {fileID: 0}
   lerpSpeed: 8
+  enableDynamicWobble: 1
+  wobbleBlendSpeed: 6
+  speedForMaxWobble: 4
+  turnRateForMaxWobble: 220
+  airborneWobbleBonus: 0.08
+  headPinMultiplier: 0.72
+  headMuscleMultiplier: 0.58
+  armPinMultiplier: 0.64
+  armMuscleMultiplier: 0.52
+  handPinMultiplier: 0.82
+  handMuscleMultiplier: 0.72
+  grabbedLooseBonus: 0.16
+  unstableLooseBonus: 0.1
+  draggedLooseBonus: 0.08
 --- !u!1 &9219188127029795745
 GameObject:
   m_ObjectHideFlags: 0
