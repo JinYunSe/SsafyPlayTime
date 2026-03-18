@@ -30,6 +30,7 @@ namespace SSAFYPlayTime
 
         // 씬에서 찾아둔 SpawnPointGroup 캐시 (OnSceneLoadStart 시 null 초기화)
         private SpawnPointGroup _cachedSpawnPointGroup;
+        private bool _gameplaySceneSpawnBootstrapComplete;
 
         // 호스트 마이그레이션 직전에 캡처한 각 플레이어의 캐릭터 위치/회전 (구 PlayerId 키).
         // 재접속 후 PlayerId가 유지되면 직접 조회한다.
@@ -479,10 +480,12 @@ namespace SSAFYPlayTime
                     : -1;
             }
 
-            // 그래도 미확정이면 기본 캐릭터(Ssaty)로 스폰한다.
+            // 씬 전환 직후에는 roster/selection 동기화가 아직 안 끝났을 수 있다.
+            // 이 시점에 기본 캐릭터로 폴백하면 잘못된 추가 스폰이 생기므로 확정될 때까지 보류한다.
             if (selectedCharacter < 0)
             {
-                selectedCharacter = (int)CharacterKind.Ssaty;
+                Debug.LogWarning($"[Lobby] Deferred gameplay spawn until character selection is resolved. player={player.PlayerId}");
+                return;
             }
 
             if (_spawnedGameplayNetworkCharacters.TryGetValue(player.PlayerId, out var existingSpawned))
@@ -695,6 +698,7 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            _gameplaySceneSpawnBootstrapComplete = false;
             ResolveRandomCharacterSelections();
 
             // ? 선택을 확정된 캐릭터 인덱스로 클라이언트에 동기화한다.
@@ -708,6 +712,8 @@ namespace SSAFYPlayTime
             {
                 TrySpawnGameplayNetworkCharacter(player);
             }
+
+            _gameplaySceneSpawnBootstrapComplete = true;
         }
     }
 }
