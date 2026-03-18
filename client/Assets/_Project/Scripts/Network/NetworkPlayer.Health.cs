@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using Fusion;
+using RootMotion.Dynamics;
 using SSAFYPlayTime.Game.GhostThrow;
 using UnityEngine;
 
@@ -90,8 +91,10 @@ public sealed partial class NetworkPlayer
 
     private void HandleLocalDeathTransition(PlayerStats playerStats)
     {
-        DisableOwnedCamerasForDeathView();
-        ActivateSceneSpectatorCamera();
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+
+        SwitchOwnedCameraToSpectatorMode();
 
         var cameraControllers = FindObjectsByType<CameraModeController>(FindObjectsSortMode.None);
         for (var i = 0; i < cameraControllers.Length; i++)
@@ -100,17 +103,42 @@ public sealed partial class NetworkPlayer
             if (controller != null)
                 controller.ForceHandleLocalPlayerDied(playerStats);
         }
+    }
 
-        var ghostManagers = FindObjectsByType<GhostThrowManager>(FindObjectsSortMode.None);
-        for (var i = 0; i < ghostManagers.Length; i++)
+    // 플레이어 카메라의 CameraRig를 끄고 GhostSpectatorCamera + GhostThrowManager를 활성화한다.
+    // 멀티 환경에서 각 클라이언트가 자신의 카메라를 독립적으로 스펙테이터 모드로 전환한다.
+    private void SwitchOwnedCameraToSpectatorMode()
+    {
+        CacheOwnedPresentationComponents();
+
+        // CameraRig / CameraModeController 비활성화 (플레이어 추적 중단)
+        if (_ownedCameraRigsCache != null)
+            for (var i = 0; i < _ownedCameraRigsCache.Length; i++)
+                if (_ownedCameraRigsCache[i] != null)
+                    _ownedCameraRigsCache[i].enabled = false;
+
+        if (_ownedCameraModeControllersCache != null)
+            for (var i = 0; i < _ownedCameraModeControllersCache.Length; i++)
+                if (_ownedCameraModeControllersCache[i] != null)
+                    _ownedCameraModeControllersCache[i].enabled = false;
+
+        // 소유 카메라에 붙은 GhostSpectatorCamera + GhostThrowManager 활성화
+        if (_ownedCamerasCache == null) return;
+        for (var i = 0; i < _ownedCamerasCache.Length; i++)
         {
-            var manager = ghostManagers[i];
-            if (manager != null)
-                manager.ForceEnableGhostThrow($"{gameObject.name} death");
-        }
+            var cam = _ownedCamerasCache[i];
+            if (cam == null) continue;
 
-        if (ghostManagers.Length == 0)
-            Debug.LogWarning($"[HP] {gameObject.name} death transition found no GhostThrowManager in scene.");
+            var ghostCam = cam.GetComponent<GhostSpectatorCamera>();
+            if (ghostCam != null) ghostCam.enabled = true;
+
+            var throwManager = cam.GetComponent<GhostThrowManager>();
+            if (throwManager != null)
+            {
+                throwManager.enabled = true;
+                throwManager.ForceEnableGhostThrow($"{gameObject.name} death");
+            }
+        }
     }
 
     private void DisableOwnedCamerasForDeathView()
@@ -222,6 +250,27 @@ public sealed partial class NetworkPlayer
             body.angularVelocity = Vector3.zero;
             body.isKinematic = true;
         }
+
+        // PuppetMaster 완전 정지
+        // mode = Disabled는 SwitchModes() 지연 전환이라 즉시 효과 없음.
+        // 컴포넌트 비활성화 → FixedUpdate/LateUpdate 콜백 즉시 중단.
+        // (muscle RB는 위 GetComponentsInChildren<Rigidbody> 루프에서 이미 처리됨)
+        if (_puppetMaster != null)
+        {
+            // BehaviourPuppet/BehaviourPuppetDamage 비활성화
+            // → 충돌 콜백에서 mode를 Active로 되돌리는 것을 차단
+            foreach (var behaviour in _puppetMaster.behaviours)
+            {
+                if (behaviour != null)
+                    behaviour.enabled = false;
+            }
+
+            _puppetMaster.enabled = false;
+        }
+
+        // 사망 캐릭터를 (0,0,0)으로 이동 → 네트워크 동기화 부하 최소화
+        if (HasStateAuthority || Runner == null)
+            transform.position = Vector3.zero;
     }
 
     public void TakeDamageFromStats(int damage)
