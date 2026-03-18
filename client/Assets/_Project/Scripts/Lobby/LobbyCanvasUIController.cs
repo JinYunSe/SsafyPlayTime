@@ -478,6 +478,10 @@ namespace SSAFYPlayTime
             {
                 nicknameInput.onValueChanged.AddListener(_ => EnforceNameInputLimit(nicknameInput));
             }
+            if (editNicknameInput != null)
+            {
+                editNicknameInput.onValueChanged.AddListener(_ => EnforceNameInputLimit(editNicknameInput));
+            }
 
             createPrivateToggle.onValueChanged.AddListener(OnPrivateToggleChanged);
             createConfirmButton.onClick.AddListener(OnCreateRoomConfirmed);
