@@ -22,6 +22,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private const string ShieldObjectName = "ConsumableShieldEffect";
         private const string ShieldFlatRingObjectName = "FlatRing";
         private const string ShieldStartObjectName = "ShieldStart";
+        private const string ShieldSparksObjectName = "Sparks";
         private const string DustObjectName = "ConsumableDustEffect";
         private const float MinimumShieldScaleAxis = 2f;
 
@@ -573,6 +574,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
 
                 renderer.enabled = true;
+                ApplyShieldRendererColors(renderer);
             }
 
             var particleSystems = _shieldEffectInstance.GetComponentsInChildren<ParticleSystem>(true);
@@ -601,6 +603,59 @@ namespace SSAFYPlayTime.Gameplay.Items
                     particleSystem.Play(withChildren: true);
                 }
             }
+        }
+
+        private static void ApplyShieldRendererColors(Renderer renderer)
+        {
+            if (renderer == null)
+            {
+                return;
+            }
+
+            var rendererName = renderer.gameObject.name ?? string.Empty;
+            var baseColor = string.Equals(rendererName, ShieldSparksObjectName, StringComparison.Ordinal)
+                ? new Color(1f, 0.84f, 0.2f, 0.85f)
+                : new Color(1f, 0.78f, 0.14f, 0.68f);
+            var rimColor = new Color(1f, 0.84f, 0.2f, 0.95f);
+            var innerColor = new Color(0.42f, 0.22f, 0.02f, 0.92f);
+
+            var materials = renderer.materials;
+            for (var i = 0; i < materials.Length; i++)
+            {
+                var material = materials[i];
+                if (material == null)
+                {
+                    continue;
+                }
+
+                if (material.HasProperty("_BaseColor"))
+                {
+                    material.SetColor("_BaseColor", baseColor);
+                }
+                if (material.HasProperty("_Color"))
+                {
+                    material.SetColor("_Color", baseColor);
+                }
+                if (material.HasProperty("_TintColor"))
+                {
+                    material.SetColor("_TintColor", baseColor);
+                }
+                if (material.HasProperty("_RimColor"))
+                {
+                    material.SetColor("_RimColor", rimColor);
+                }
+                if (material.HasProperty("_InnerColor"))
+                {
+                    material.SetColor("_InnerColor", innerColor);
+                }
+                if (material.HasProperty("_EmissionColor"))
+                {
+                    material.SetColor("_EmissionColor", rimColor * 0.65f);
+                    material.EnableKeyword("_EMISSION");
+                }
+            }
+
+            renderer.materials = materials;
         }
 
         private static void DisableRuntimePhysics(GameObject root)

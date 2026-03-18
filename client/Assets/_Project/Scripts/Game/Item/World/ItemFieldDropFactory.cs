@@ -25,6 +25,9 @@ namespace SSAFYPlayTime.Gameplay.Items
         private const float ConsumableFieldAngularDrag = 12f;
         private const float EquipmentFieldDrag = 0.15f;
         private const float EquipmentFieldAngularDrag = 0.35f;
+        private const float SpecialFieldFriction = 1f;
+        private const float SpecialFieldBounciness = 0f;
+        private static PhysicMaterial s_specialEquipmentFieldMaterial;
 
         private readonly IItemFieldPrefabResolver _prefabResolver;
 
@@ -288,6 +291,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                 sphereCollider = root.AddComponent<SphereCollider>();
             }
 
+            ConfigureColliderMaterial(sphereCollider, itemId);
+
             if (string.Equals(itemId, ItemIds.Growth, System.StringComparison.Ordinal))
             {
                 sphereCollider.center = Vector3.zero;
@@ -388,9 +393,51 @@ namespace SSAFYPlayTime.Gameplay.Items
                 body.angularDrag = EquipmentFieldAngularDrag;
                 body.maxAngularVelocity = 7f;
                 body.constraints = RigidbodyConstraints.None;
+
+                if (RequiresSpecialFieldFriction(itemId))
+                {
+                    body.drag = 0.55f;
+                    body.angularDrag = 2.5f;
+                }
             }
 
             body.WakeUp();
+        }
+
+        private static void ConfigureColliderMaterial(SphereCollider sphereCollider, string itemId)
+        {
+            if (sphereCollider == null)
+            {
+                return;
+            }
+
+            sphereCollider.sharedMaterial = RequiresSpecialFieldFriction(itemId)
+                ? GetOrCreateSpecialFieldMaterial()
+                : null;
+        }
+
+        private static bool RequiresSpecialFieldFriction(string itemId)
+        {
+            return string.Equals(itemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal) ||
+                   string.Equals(itemId, ItemIds.SatelliteStrike, System.StringComparison.Ordinal);
+        }
+
+        private static PhysicMaterial GetOrCreateSpecialFieldMaterial()
+        {
+            if (s_specialEquipmentFieldMaterial != null)
+            {
+                return s_specialEquipmentFieldMaterial;
+            }
+
+            s_specialEquipmentFieldMaterial = new PhysicMaterial("ItemFieldDrop_SpecialEquipment")
+            {
+                dynamicFriction = SpecialFieldFriction,
+                staticFriction = SpecialFieldFriction,
+                frictionCombine = PhysicMaterialCombine.Maximum,
+                bounciness = SpecialFieldBounciness,
+                bounceCombine = PhysicMaterialCombine.Minimum
+            };
+            return s_specialEquipmentFieldMaterial;
         }
 
         private static bool IsConsumableItem(string itemId)
