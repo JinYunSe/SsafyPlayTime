@@ -145,6 +145,17 @@ namespace SSAFYPlayTime.Game.GhostThrow
                 Debug.Log($"[BananaPeel] {playerRb.gameObject.name} 이(가) 바나나를 밟아 미끄러졌습니다!");
             }
 
+            // ─── HP 데미지 ────────────────────────────────────────
+            var np = playerObj.GetComponentInParent<NetworkPlayer>();
+            if (np != null)
+            {
+                float dmg = CombatSettings.Instance != null
+                    ? CombatSettings.Instance.bananaHpDamage
+                    : 10f;
+                np.ApplyHpDamage(dmg);
+                Debug.Log($"[BananaPeel] HP 데미지: {np.name} -{dmg}");
+            }
+
             if (Runner != null)
                 Invoke(nameof(TriggerDespawn), despawnDelay);
             else

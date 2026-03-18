@@ -945,6 +945,9 @@ public sealed partial class NetworkPlayer
         if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
             return;
 
+        if (IsDeadNetworked)
+            return;
+
         _localMoveSpeed = 0f;
         _localPresentationLocomotionState = PresentationLocomotionState.Idle;
         if (Runner != null && Object != null && Object.IsValid)
