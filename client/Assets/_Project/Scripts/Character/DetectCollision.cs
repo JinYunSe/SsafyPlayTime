@@ -8,9 +8,14 @@ using UnityEngine;
 public class DetectCollision : MonoBehaviour
 {
     [Header("Fallback Settings")]
-    [SerializeField] private float fallbackKnockoutThreshold = 15f;
+    [SerializeField] private float fallbackKnockoutThreshold = 18f;
     [SerializeField] private float fallbackMaxKnockbackForce = 30f;
     [SerializeField] private float fallbackStunEntryNudgeForce = 0f;
+    [SerializeField] private float fallbackMaxImpact = 55f;
+    [SerializeField] private float fallbackMinStunDamage = 3f;
+    [SerializeField] private float fallbackMaxStunDamage = 9f;
+    [SerializeField] private float fallbackMinHealthDamage = 0f;
+    [SerializeField] private float fallbackMaxHealthDamage = 14f;
 
     private NetworkPlayer networkPlayer;
     private Rigidbody hitRigidbody;
@@ -18,7 +23,22 @@ public class DetectCollision : MonoBehaviour
     private readonly ContactPoint[] contactPoints = new ContactPoint[5];
 
     private float KnockoutThreshold =>
-        CombatSettings.Instance != null ? CombatSettings.Instance.knockoutThreshold : fallbackKnockoutThreshold;
+        CombatSettings.Instance != null ? CombatSettings.Instance.environmentCollisionMinImpact : fallbackKnockoutThreshold;
+
+    private float MaxImpact =>
+        CombatSettings.Instance != null ? CombatSettings.Instance.environmentCollisionMaxImpact : fallbackMaxImpact;
+
+    private float MinStunDamage =>
+        CombatSettings.Instance != null ? CombatSettings.Instance.environmentCollisionMinStunDamage : fallbackMinStunDamage;
+
+    private float MaxStunDamage =>
+        CombatSettings.Instance != null ? CombatSettings.Instance.environmentCollisionMaxStunDamage : fallbackMaxStunDamage;
+
+    private float MinHealthDamage =>
+        CombatSettings.Instance != null ? CombatSettings.Instance.environmentCollisionMinHealthDamage : fallbackMinHealthDamage;
+
+    private float MaxHealthDamage =>
+        CombatSettings.Instance != null ? CombatSettings.Instance.environmentCollisionMaxHealthDamage : fallbackMaxHealthDamage;
 
     private float StunEntryNudgeForce =>
         Mathf.Max(0f, Mathf.Min(fallbackStunEntryNudgeForce, fallbackMaxKnockbackForce));
@@ -60,7 +80,17 @@ public class DetectCollision : MonoBehaviour
                 impactMagnitude,
                 contactPoint.impulse,
                 contactPoint.normal);
-            networkPlayer.OnPlayerBodyPartHit();
+
+            var maxImpact = Mathf.Max(KnockoutThreshold + 0.01f, MaxImpact);
+            var impactRatio = Mathf.InverseLerp(KnockoutThreshold, maxImpact, impactMagnitude);
+            var stunDamage = Mathf.Lerp(MinStunDamage, MaxStunDamage, impactRatio);
+            var healthDamage = Mathf.Lerp(MinHealthDamage, MaxHealthDamage, impactRatio);
+            networkPlayer.ApplyCombinedDamage(
+                healthDamage,
+                stunDamage,
+                "EnvironmentCollision",
+                0f,
+                impactMagnitude);
 
             if (hitRigidbody != null && !hitRigidbody.isKinematic && StunEntryNudgeForce > 0f)
             {

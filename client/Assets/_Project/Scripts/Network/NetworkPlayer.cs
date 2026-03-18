@@ -32,6 +32,26 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [Header("Grab")]
     [SerializeField] private Transform holdPoint;
 
+    [Header("Camera Follow")]
+    [SerializeField] private Vector3 cameraAnchorPresentationLocalOffset = new Vector3(0f, 1.35f, 0f);
+    [SerializeField] private Vector3 cameraAnchorFallbackRootLocalOffset = new Vector3(0f, 1.25f, 0f);
+    [SerializeField] private float cameraAnchorStableFollowSpeed = 25f;
+    [SerializeField] private float cameraAnchorStableAirborneFollowSpeed = 18f;
+    [SerializeField] private float cameraAnchorHoldingFollowSpeed = 18f;
+    [SerializeField] private float cameraAnchorRecoveringFollowSpeed = 12f;
+    [SerializeField] private float cameraAnchorHardPhysicsFollowSpeed = 6f;
+    [SerializeField] private float cameraAnchorVerticalFollowMultiplier = 0.75f;
+    [SerializeField] private float cameraAnchorStableAirborneVerticalFollowMultiplier = 0.9f;
+    [SerializeField] private float cameraAnchorHoldingVerticalFollowMultiplier = 0.82f;
+    [SerializeField] private float cameraAnchorHardPhysicsVerticalFollowMultiplier = 0.58f;
+    [SerializeField] private float cameraAnchorSnapDistance = 2f;
+    [SerializeField] private float cameraAnchorStableAirborneSnapMultiplier = 0.9f;
+    [SerializeField] private float cameraAnchorHoldingSnapMultiplier = 0.85f;
+    [SerializeField] private float cameraAnchorRecoveringSnapMultiplier = 1.1f;
+    [SerializeField] private float cameraAnchorOwnerProxyLeadDistance = 0.18f;
+    [SerializeField] private float cameraAnchorOwnerProxyPresentationCorrectionScale = 0.35f;
+    [SerializeField] private float cameraAnchorOwnerProxyMaxCorrectionDistance = 0.12f;
+
     // ─── 네트워크 동기화 변수 ───
     [Networked] private float NetworkedMoveSpeed { get; set; }
     [Networked] private int NetworkedMotorState { get; set; }
@@ -127,12 +147,23 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     // 카메라 Follow 앵커 — transform.position이 SyncRootToPhysicsBody로 급격히 변해도
     // 카메라는 이 앵커를 따라가므로 부드럽게 추적함
     private Transform _cameraFollowAnchor;
+    private Transform _cameraAnchorSourceCache;
+    private Transform _cameraAnchorSourceRootCache;
+    private CameraAnchorSourceMode _cameraAnchorSourceMode;
+    private static readonly string[] LegacyCameraAnchorTargetNames =
+    {
+        "FollowTarget",
+        "CameraPivot",
+        "ShoulderPivot",
+        "HeadTarget"
+    };
 
     // PuppetMaster 통합
     private PuppetMaster _puppetMaster;
     private BehaviourPuppet _behaviourPuppet;
     private Transform _targetRoot;
     private SSAFYPlayTime.Character.BodyPartPhysicsManager _bodyPartPhysicsManager;
+    private SSAFYPlayTime.Character.GrabAntiStretchController _grabAntiStretchController;
 
     private bool _isActiveRagdoll = true;
     public bool IsActiveRagdoll => _isActiveRagdoll;
@@ -143,9 +174,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     /// <summary>기절 회복 직후 취약 상태 여부</summary>
     public bool IsRecovering => _isRecovering;
     /// <summary>전투 행동(펀치/그랩/던지기) 가능 여부. 기절 중이거나 안정화/회복 중이면 false.</summary>
-    public bool CanPerformCombatActions => _isActiveRagdoll && !_isRecovering;
+    public bool CanPerformCombatActions => _isActiveRagdoll && !_isRecovering && !GetIsDeadState();
     /// <summary>이동 가능 여부. 기절 중이면 false, 회복 중에는 이동 허용.</summary>
-    public bool CanDriveLocomotion => _isActiveRagdoll;
+    public bool CanDriveLocomotion => _isActiveRagdoll && !GetIsDeadState();
 
     /// <summary>카메라가 따라가야 할 타겟. Follow 앵커가 있으면 앵커, 없으면 transform.</summary>
     public Transform GetCameraFollowTarget() => _cameraFollowAnchor != null ? _cameraFollowAnchor : transform;
@@ -217,6 +248,41 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         CarryingStunned = 8,
         WeaponEquipped = 9,
         BeingCarriedStunned = 10
+    }
+
+    private enum CameraAnchorSourceMode : byte
+    {
+        None = 0,
+        ExplicitCameraTarget = 1,
+        LegacyNamedTarget = 2,
+        PresentationRoot = 3,
+        RootTransform = 4
+    }
+
+    private readonly struct CameraAnchorFollowSettings
+    {
+        public readonly float planarFollowSpeed;
+        public readonly float verticalFollowMultiplier;
+        public readonly float snapDistance;
+        public readonly float ownerProxyLeadScale;
+        public readonly float ownerProxyCorrectionScale;
+        public readonly float maxOwnerProxyCorrectionDistance;
+
+        public CameraAnchorFollowSettings(
+            float planarFollowSpeed,
+            float verticalFollowMultiplier,
+            float snapDistance,
+            float ownerProxyLeadScale,
+            float ownerProxyCorrectionScale,
+            float maxOwnerProxyCorrectionDistance)
+        {
+            this.planarFollowSpeed = planarFollowSpeed;
+            this.verticalFollowMultiplier = verticalFollowMultiplier;
+            this.snapDistance = snapDistance;
+            this.ownerProxyLeadScale = ownerProxyLeadScale;
+            this.ownerProxyCorrectionScale = ownerProxyCorrectionScale;
+            this.maxOwnerProxyCorrectionDistance = maxOwnerProxyCorrectionDistance;
+        }
     }
 
     private const int RemotePhysicsPresentationHoldFrameCount = 4;
@@ -326,14 +392,64 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     internal bool IsGrabFacingLocked()
     {
-        if (UsesPhysicsPosePresentation(GetPhysicalPhase()))
+        var phase = GetPhysicalPhase();
+        if (UsesPhysicsPosePresentation(phase))
             return false;
 
         if (HasStateAuthority)
             return IsAnyHandHoldingObject();
 
-        return GetPhysicalPhase() == PhysicalPhase.Holding &&
+        return (phase == PhysicalPhase.Holding || phase == PhysicalPhase.CarryingStunned) &&
                (NetworkedLeftGrabHolding || NetworkedRightGrabHolding);
+    }
+
+    internal bool TryGetCameraYawClamp(out float centerYaw, out float halfAngle)
+    {
+        centerYaw = ResolveGrabCameraReferenceYaw();
+        halfAngle = 0f;
+
+        var phase = GetPhysicalPhase();
+        switch (phase)
+        {
+            case PhysicalPhase.Holding:
+                if (!IsAnyHandHolding)
+                    return false;
+
+                halfAngle = 62f;
+                return true;
+
+            case PhysicalPhase.CarryingStunned:
+                halfAngle = IsDualGrabbingStunnedPlayer ? 52f : 58f;
+                return true;
+
+            case PhysicalPhase.BeingGrabbed:
+            case PhysicalPhase.Dragged:
+                halfAngle = 42f;
+                return true;
+
+            case PhysicalPhase.BeingCarriedStunned:
+                halfAngle = 36f;
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    private float ResolveGrabCameraReferenceYaw()
+    {
+        var phase = GetPhysicalPhase();
+        if ((phase == PhysicalPhase.Holding || phase == PhysicalPhase.CarryingStunned) &&
+            TryGetAverageHeldAnchorWorldPosition(out var grabAnchorWorld))
+        {
+            var pivotPosition = ResolveGrabFacingPivotPosition();
+            var anchorPlanar = grabAnchorWorld - pivotPosition;
+            anchorPlanar.y = 0f;
+            if (anchorPlanar.sqrMagnitude > 0.0001f)
+                return Quaternion.LookRotation(anchorPlanar.normalized, Vector3.up).eulerAngles.y;
+        }
+
+        return ResolvePresentationYawFromTransform();
     }
 
     /// <summary>
@@ -406,6 +522,250 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             return animator.transform;
 
         return null;
+    }
+
+    private Transform ResolveCameraAnchorSource()
+    {
+        var presentationRoot = GetPresentationRootTransform();
+        var searchRoot = presentationRoot != null ? presentationRoot : transform;
+
+        if (_cameraAnchorSourceCache != null && _cameraAnchorSourceRootCache == searchRoot)
+            return _cameraAnchorSourceCache;
+
+        _cameraAnchorSourceRootCache = searchRoot;
+        _cameraAnchorSourceCache = null;
+        _cameraAnchorSourceMode = CameraAnchorSourceMode.None;
+
+        if (searchRoot == null)
+            return null;
+
+        var directCameraTarget = FindNamedTransformRecursive(searchRoot, "CameraTarget");
+        if (directCameraTarget != null)
+        {
+            _cameraAnchorSourceCache = directCameraTarget;
+            _cameraAnchorSourceMode = CameraAnchorSourceMode.ExplicitCameraTarget;
+            return _cameraAnchorSourceCache;
+        }
+
+        if (presentationRoot != null)
+        {
+            _cameraAnchorSourceCache = presentationRoot;
+            _cameraAnchorSourceMode = CameraAnchorSourceMode.PresentationRoot;
+            return _cameraAnchorSourceCache;
+        }
+
+        for (var i = 0; i < LegacyCameraAnchorTargetNames.Length; i++)
+        {
+            var legacy = FindNamedTransformRecursive(searchRoot, LegacyCameraAnchorTargetNames[i]);
+            if (legacy == null)
+                continue;
+
+            _cameraAnchorSourceCache = legacy;
+            _cameraAnchorSourceMode = CameraAnchorSourceMode.LegacyNamedTarget;
+            return _cameraAnchorSourceCache;
+        }
+
+        _cameraAnchorSourceCache = transform;
+        _cameraAnchorSourceMode = CameraAnchorSourceMode.RootTransform;
+        return _cameraAnchorSourceCache;
+    }
+
+    private static Transform FindNamedTransformRecursive(Transform root, string exactName)
+    {
+        if (root == null || string.IsNullOrEmpty(exactName))
+            return null;
+
+        if (root.name == exactName)
+            return root;
+
+        var children = root.GetComponentsInChildren<Transform>(true);
+        for (var i = 0; i < children.Length; i++)
+        {
+            var child = children[i];
+            if (child != null && child.name == exactName)
+                return child;
+        }
+
+        return null;
+    }
+
+    private Vector3 ResolveCameraAnchorBasePosition()
+    {
+        var anchorSource = ResolveCameraAnchorSource();
+        if (anchorSource != null)
+        {
+            var presentationRoot = GetPresentationRootTransform();
+            if (_cameraAnchorSourceMode == CameraAnchorSourceMode.PresentationRoot && presentationRoot != null)
+                return ResolveYawOnlyAnchorOffsetPosition(presentationRoot, cameraAnchorPresentationLocalOffset);
+
+            if (_cameraAnchorSourceMode == CameraAnchorSourceMode.RootTransform)
+                return ResolveYawOnlyAnchorOffsetPosition(transform, cameraAnchorFallbackRootLocalOffset);
+
+            return anchorSource.position;
+        }
+
+        var presentationFallback = GetPresentationRootTransform();
+        if (presentationFallback != null)
+            return ResolveYawOnlyAnchorOffsetPosition(presentationFallback, cameraAnchorPresentationLocalOffset);
+
+        return ResolveYawOnlyAnchorOffsetPosition(transform, cameraAnchorFallbackRootLocalOffset);
+    }
+
+    private Vector3 ResolveCameraAnchorDesiredPosition(bool includeOwnerProxyBias)
+    {
+        var settings = ResolveCameraAnchorFollowSettings();
+        var basePosition = ResolveCameraAnchorBasePosition();
+        if (!includeOwnerProxyBias)
+            return basePosition;
+
+        return basePosition
+             + ResolveOwnerProxyCameraAnchorLead(settings.ownerProxyLeadScale)
+             + ResolveOwnerProxyCameraAnchorCorrection(
+                 settings.ownerProxyCorrectionScale,
+                 settings.maxOwnerProxyCorrectionDistance);
+    }
+
+    private static Vector3 ResolveYawOnlyAnchorOffsetPosition(Transform basis, Vector3 localOffset)
+    {
+        if (basis == null)
+            return localOffset;
+
+        var yawOnlyRotation = Quaternion.Euler(0f, basis.eulerAngles.y, 0f);
+        return basis.position + yawOnlyRotation * localOffset;
+    }
+
+    private Vector3 ResolveOwnerProxyCameraAnchorLead(float leadScale)
+    {
+        if (!IsOwnerProxy || ShouldUseHardPhysicsPresentation())
+            return Vector3.zero;
+        if (NetworkedIsBeingGrabbed || IsDraggedByPhysics() || IsGrabFacingLocked())
+            return Vector3.zero;
+        if (leadScale <= 0.0001f)
+            return Vector3.zero;
+
+        var localMove = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+        if (localMove.sqrMagnitude <= 0.0001f)
+            return Vector3.zero;
+
+        var moveDirection = ResolvePresentationMoveDirection(localMove);
+        moveDirection.y = 0f;
+        if (moveDirection.sqrMagnitude <= 0.0001f)
+            return Vector3.zero;
+
+        var moveMagnitude = Mathf.Clamp01(localMove.magnitude);
+        return moveDirection.normalized * (cameraAnchorOwnerProxyLeadDistance * leadScale * moveMagnitude);
+    }
+
+    private Vector3 ResolveOwnerProxyCameraAnchorCorrection(float correctionScale, float maxCorrectionDistance)
+    {
+        if (!IsOwnerProxy || ShouldUseHardPhysicsPresentation())
+            return Vector3.zero;
+        if (NetworkedIsBeingGrabbed || IsDraggedByPhysics() || IsGrabFacingLocked())
+            return Vector3.zero;
+        if (correctionScale <= 0.0001f || maxCorrectionDistance <= 0.0001f)
+            return Vector3.zero;
+        if (_cameraAnchorSourceMode == CameraAnchorSourceMode.ExplicitCameraTarget ||
+            _cameraAnchorSourceMode == CameraAnchorSourceMode.LegacyNamedTarget)
+        {
+            return Vector3.zero;
+        }
+
+        var presentationRoot = GetPresentationRootTransform();
+        if (presentationRoot == null)
+            return Vector3.zero;
+
+        var planarGap = presentationRoot.position - transform.position;
+        planarGap.y = 0f;
+        if (planarGap.sqrMagnitude <= 0.0001f)
+            return Vector3.zero;
+
+        return Vector3.ClampMagnitude(planarGap * correctionScale, maxCorrectionDistance);
+    }
+
+    private CameraAnchorFollowSettings ResolveCameraAnchorFollowSettings()
+    {
+        if (ShouldUseHardPhysicsPresentation())
+        {
+            return new CameraAnchorFollowSettings(
+                cameraAnchorHardPhysicsFollowSpeed,
+                cameraAnchorHardPhysicsVerticalFollowMultiplier,
+                cameraAnchorSnapDistance * 1.35f,
+                0f,
+                0f,
+                0f);
+        }
+
+        var phase = GetPhysicalPhase();
+        if (phase == PhysicalPhase.Holding ||
+            phase == PhysicalPhase.CarryingStunned ||
+            phase == PhysicalPhase.GrabIntent)
+        {
+            return new CameraAnchorFollowSettings(
+                cameraAnchorHoldingFollowSpeed,
+                cameraAnchorHoldingVerticalFollowMultiplier,
+                cameraAnchorSnapDistance * cameraAnchorHoldingSnapMultiplier,
+                1f,
+                cameraAnchorOwnerProxyPresentationCorrectionScale * 0.5f,
+                cameraAnchorOwnerProxyMaxCorrectionDistance * 0.5f);
+        }
+
+        if (phase == PhysicalPhase.Unstable || phase == PhysicalPhase.Recovering)
+        {
+            return new CameraAnchorFollowSettings(
+                cameraAnchorRecoveringFollowSpeed,
+                cameraAnchorVerticalFollowMultiplier,
+                cameraAnchorSnapDistance * cameraAnchorRecoveringSnapMultiplier,
+                0.45f,
+                cameraAnchorOwnerProxyPresentationCorrectionScale * 0.25f,
+                cameraAnchorOwnerProxyMaxCorrectionDistance * 0.35f);
+        }
+
+        if (phase == PhysicalPhase.BeingGrabbed ||
+            phase == PhysicalPhase.Dragged ||
+            phase == PhysicalPhase.Stunned ||
+            phase == PhysicalPhase.BeingCarriedStunned)
+        {
+            return new CameraAnchorFollowSettings(
+                cameraAnchorHardPhysicsFollowSpeed,
+                cameraAnchorHardPhysicsVerticalFollowMultiplier,
+                cameraAnchorSnapDistance * 1.35f,
+                0f,
+                0f,
+                0f);
+        }
+
+        if (IsCameraAnchorAirborneState())
+        {
+            return new CameraAnchorFollowSettings(
+                cameraAnchorStableAirborneFollowSpeed,
+                cameraAnchorStableAirborneVerticalFollowMultiplier,
+                cameraAnchorSnapDistance * cameraAnchorStableAirborneSnapMultiplier,
+                0.85f,
+                cameraAnchorOwnerProxyPresentationCorrectionScale * 0.2f,
+                cameraAnchorOwnerProxyMaxCorrectionDistance * 0.25f);
+        }
+
+        return new CameraAnchorFollowSettings(
+            cameraAnchorStableFollowSpeed,
+            cameraAnchorVerticalFollowMultiplier,
+            cameraAnchorSnapDistance,
+            1f,
+            cameraAnchorOwnerProxyPresentationCorrectionScale,
+            cameraAnchorOwnerProxyMaxCorrectionDistance);
+    }
+
+    private bool IsCameraAnchorAirborneState()
+    {
+        if (_isGrounded)
+            return false;
+
+        if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
+            return false;
+
+        var phase = GetPhysicalPhase();
+        return phase == PhysicalPhase.Stable ||
+               phase == PhysicalPhase.GrabIntent ||
+               phase == PhysicalPhase.WeaponEquipped;
     }
 
     private float ResolvePresentationYawFromTransform()
@@ -563,6 +923,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     private void OnDestroy()
     {
+        DestroyLocalGhostMode();
         CleanupDetachedCameraRoots();
         if (_cameraFollowAnchor != null)
             Destroy(_cameraFollowAnchor.gameObject);
@@ -573,6 +934,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         InitializeInternal();
         MarkItemBuffNetworkReady();
         MarkItemWorldEffectNetworkReady();
+        EnsureVitalStateInitialized();
 
         if (HasStateAuthority)
         {
@@ -622,6 +984,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     private void InitializeInternal()
     {
+        EnsureVitalStateInitialized();
+
         if (syncPhysicsObjects == null || syncPhysicsObjects.Length == 0)
             syncPhysicsObjects = GetComponentsInChildren<SyncPhysicsObject>(true);
 
@@ -649,6 +1013,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         _targetRoot = _puppetMaster != null ? _puppetMaster.targetRoot : null;
         MarkPhysicsPoseBindingsDirty();
         _bodyPartPhysicsManager = GetComponentInChildren<SSAFYPlayTime.Character.BodyPartPhysicsManager>(true);
+        _grabAntiStretchController = GetComponent<SSAFYPlayTime.Character.GrabAntiStretchController>();
+        if (_grabAntiStretchController == null)
+            _grabAntiStretchController = gameObject.AddComponent<SSAFYPlayTime.Character.GrabAntiStretchController>();
 
         _handGrabHandlers = GetComponentsInChildren<HandGrabHandler>(true);
         EnsureItemRuntimeIntegration();
@@ -671,6 +1038,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         EnsureAnimatorBinding();
         SetPresentationVisualYaw(ResolvePresentationYawFromTransform());
         CacheOwnedPresentationComponents();
+
+        if (GetComponent<PlayerStats>() == null)
+            gameObject.AddComponent<PlayerStats>();
     }
 
     private void EnsureItemRuntimeIntegration()
@@ -942,8 +1312,12 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     {
         if (_cameraFollowAnchor != null) return;
         var go = new GameObject("_CameraFollowAnchor");
-        go.transform.position = transform.position;
+        var initialPosition = ResolveCameraAnchorDesiredPosition(includeOwnerProxyBias: false);
+        go.transform.position = initialPosition;
         _cameraFollowAnchor = go.transform;
+
+        var context = go.AddComponent<SSAFYPlayTime.Character.CameraFollowAnchorContext>();
+        context.SetOwner(this);
     }
 
     /// <summary>
@@ -957,11 +1331,26 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         // 1f - Exp(-speed * dt): 프레임레이트 독립적 지수 감쇠 보간
         // (Time.deltaTime * speed 방식은 fps에 따라 카메라 반응 속도가 달라지는 문제 수정)
-        var speed = _isActiveRagdoll ? 25f : 6f;
-        _cameraFollowAnchor.position = Vector3.Lerp(
-            _cameraFollowAnchor.position,
-            transform.position,
-            1f - Mathf.Exp(-speed * Time.deltaTime));
+        var desiredPosition = ResolveCameraAnchorDesiredPosition(includeOwnerProxyBias: true);
+        var settings = ResolveCameraAnchorFollowSettings();
+
+        var snapDistance = settings.snapDistance;
+        if ((_cameraFollowAnchor.position - desiredPosition).sqrMagnitude > snapDistance * snapDistance)
+        {
+            _cameraFollowAnchor.position = desiredPosition;
+            return;
+        }
+
+        var followSpeed = Mathf.Max(0.01f, settings.planarFollowSpeed);
+        var planarAlpha = 1f - Mathf.Exp(-followSpeed * Time.deltaTime);
+        var verticalAlpha = 1f - Mathf.Exp(-(followSpeed * Mathf.Max(0.01f, settings.verticalFollowMultiplier)) * Time.deltaTime);
+
+        var nextPosition = _cameraFollowAnchor.position;
+        nextPosition.x = Mathf.Lerp(nextPosition.x, desiredPosition.x, planarAlpha);
+        nextPosition.z = Mathf.Lerp(nextPosition.z, desiredPosition.z, planarAlpha);
+        nextPosition.y = Mathf.Lerp(nextPosition.y, desiredPosition.y, verticalAlpha);
+
+        _cameraFollowAnchor.position = nextPosition;
     }
 
     internal void TraceCameraDeltaDiagnostics()
@@ -999,10 +1388,14 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             return;
 
         var rootAnchorGap = (rootPos - anchorPos).magnitude;
+        var presentationAnchorGap = (presentationPos - anchorPos).magnitude;
+        var anchorSource = ResolveCameraAnchorSource();
+        var anchorSourceName = anchorSource != null ? $"{anchorSource.name}/{_cameraAnchorSourceMode}" : "PresentationOffset";
         Debug.Log(
             $"[CamDeltaDiag] name={name} auth={HasStateAuthority} " +
             $"rootDelta={rootDelta:F4} anchorDelta={anchorDelta:F4} presentationDelta={presentationDelta:F4} " +
-            $"rootToAnchor={rootAnchorGap:F4} phase={GetPhysicalPhase()} dt={Time.deltaTime:F4}",
+            $"rootToAnchor={rootAnchorGap:F4} presentationToAnchor={presentationAnchorGap:F4} " +
+            $"anchorSource={anchorSourceName} phase={GetPhysicalPhase()} dt={Time.deltaTime:F4}",
             this);
     }
 

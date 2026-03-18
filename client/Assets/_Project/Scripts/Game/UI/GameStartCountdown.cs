@@ -53,8 +53,9 @@ public class GameStartCountdown : NetworkBehaviour
 
     private void UpdateHUD()
     {
-        var hud = FindObjectOfType<GameHUD>();
-        if (hud == null) return;
+        var hud = GameHUD.FindOrCreate();
+        if (hud == null)
+            return;
 
         switch (CountdownValue)
         {
