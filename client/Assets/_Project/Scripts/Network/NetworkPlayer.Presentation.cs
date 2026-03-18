@@ -13,6 +13,12 @@ public sealed partial class NetworkPlayer
     private const float PM_LocomotionThreshold = 0.1f;
     private const float PM_AttackLockDuration = 0.7f;
     private const float PM_ThrowLockDuration = 0.85f;
+    private const float OwnerRecoveringHipsLerpScale = 0.35f;
+    private const float OwnerRecoveringHipsDeadzone = 0.12f;
+    private const float OwnerUnstableHipsLerpScale = 0.55f;
+    private const float OwnerUnstableHipsDeadzone = 0.08f;
+    private const float OwnerRecoveringBoneRotationLerpScale = 0.3f;
+    private const float OwnerUnstableBoneRotationLerpScale = 0.55f;
     private bool _pmNextAttackLeft;
 
     // OwnerProxy 로컬 예측 reconcile
@@ -45,8 +51,10 @@ public sealed partial class NetworkPlayer
 
     public override void Render()
     {
+        UpdateRemotePhysicsPresentationResetWindow();
         UpdateAnimationParameters();
         ApplyReplicatedAnimationEvent();
+        TraceProxyAnimationDiagnostics("Render-Begin");
 
         if (Object == null || !Object.IsValid)
             return;
@@ -55,6 +63,7 @@ public sealed partial class NetworkPlayer
         if (HasStateAuthority)
         {
             // AuthorityOwner: 물리 시뮬레이션이 직접 뼈를 구동 → 보간 불필요
+            UpdateCharacterPresentationEffects();
             return;
         }
 
@@ -69,14 +78,17 @@ public sealed partial class NetworkPlayer
         else
         {
             // RemoteProxy: 순수 원격 — 항상 뼈 보간 + 상태 동기화
-            InterpolateRemoteBoneRotations();
             SyncRemoteActiveRagdollState();
+            if (ShouldUsePhysicalPhasePresentation())
+                InterpolateRemoteBoneRotations();
             // grab/carry 애니메이터 파라미터 동기화
             SyncGrabbingAnimatorFromNetwork();
         }
 
         UpdatePhysicsDrivenVisualPose();
         ApplyProxyPresentationRotation();
+        UpdateCharacterPresentationEffects();
+        TraceProxyAnimationDiagnostics("Render-End");
     }
 
     /// <summary>
@@ -91,7 +103,7 @@ public sealed partial class NetworkPlayer
 
         // 2) 내가 기절(ragdoll) 또는 잡힌 상태일 때만 뼈 보간 적용
         //    → 호스트가 물리로 끌고 있는 결과를 따라가야 하므로
-        bool isInConfirmedRagdoll = !_isActiveRagdoll || NetworkedIsBeingGrabbed;
+        bool isInConfirmedRagdoll = ShouldUsePhysicalPhasePresentation();
         if (isInConfirmedRagdoll)
             InterpolateRemoteBoneRotations();
     }
@@ -126,12 +138,6 @@ public sealed partial class NetworkPlayer
         }
 
         // BodyPartPhysicsManager 상태 전환
-        if (_bodyPartPhysicsManager != null)
-        {
-            _bodyPartPhysicsManager.SetState(isRecovering
-                ? SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState.Recovering
-                : SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState.Stunned);
-        }
 
         Debug.Log($"[Remote] ActiveRagdoll 전환: {(isRecovering ? "회복" : "기절")}");
     }
@@ -140,11 +146,15 @@ public sealed partial class NetworkPlayer
     {
         // 카메라 앵커 업데이트 — CameraRig.LateUpdate 이전에 위치를 갱신해야
         // 같은 프레임에서 카메라가 최신 앵커 위치를 따라간다.
+        UpdateRemotePhysicsPresentationResetWindow();
         UpdateCameraFollowAnchor();
         UpdatePhysicsDrivenVisualPose();
 
         if (Runner == null)
             UpdateAnimationParameters();
+
+        UpdateCharacterPresentationEffects();
+        TraceProxyAnimationDiagnostics("LateUpdate");
     }
 
     private void InterpolateRemoteBoneRotations()
@@ -153,6 +163,7 @@ public sealed partial class NetworkPlayer
             return;
 
         var interpolator = new NetworkBehaviourBufferInterpolator(this);
+        var rotationAlpha = ResolveBoneRotationInterpolationAlpha(interpolator.Alpha);
 
         // Hips(muscles[0]) 절대 위치 보간 — 잡기로 끌려갈 때 원격에서 위치 추적
         // Human Fall Flat 방식: 루트 뼈 절대 위치를 직접 동기화
@@ -160,13 +171,17 @@ public sealed partial class NetworkPlayer
         {
             var hipsTarget = NetworkedHipsPosition;
             var hipsCurrent = syncPhysicsObjects[0].transform.position;
+            var hipsDelta = hipsTarget - hipsCurrent;
+            var deadzone = ResolveOwnerProxyHipsDeadzone();
 
             // 텔레포트 방지: 거리가 너무 크면 즉시 스냅 (HFF 방식, sqrMag > 15)
             if ((hipsTarget - hipsCurrent).sqrMagnitude > 15f)
                 syncPhysicsObjects[0].transform.position = hipsTarget;
+            else if (deadzone > 0f && hipsDelta.sqrMagnitude <= deadzone * deadzone)
+                syncPhysicsObjects[0].transform.position = hipsCurrent;
             else
                 syncPhysicsObjects[0].transform.position = Vector3.Lerp(
-                    hipsCurrent, hipsTarget, interpolator.Alpha);
+                    hipsCurrent, hipsTarget, ResolveHipsInterpolationAlpha(interpolator.Alpha));
         }
 
         // 뼈 회전 보간
@@ -176,8 +191,47 @@ public sealed partial class NetworkPlayer
             syncPhysicsObjects[i].transform.localRotation = Quaternion.Slerp(
                 syncPhysicsObjects[i].transform.localRotation,
                 BoneRotations.Get(i),
-                interpolator.Alpha);
+                rotationAlpha);
         }
+    }
+
+    private float ResolveHipsInterpolationAlpha(float baseAlpha)
+    {
+        if (!IsOwnerProxy)
+            return baseAlpha;
+
+        return GetPhysicalPhase() switch
+        {
+            PhysicalPhase.Recovering => Mathf.Clamp01(baseAlpha * OwnerRecoveringHipsLerpScale),
+            PhysicalPhase.Unstable => Mathf.Clamp01(baseAlpha * OwnerUnstableHipsLerpScale),
+            _ => baseAlpha
+        };
+    }
+
+    private float ResolveOwnerProxyHipsDeadzone()
+    {
+        if (!IsOwnerProxy)
+            return 0f;
+
+        return GetPhysicalPhase() switch
+        {
+            PhysicalPhase.Recovering => OwnerRecoveringHipsDeadzone,
+            PhysicalPhase.Unstable => OwnerUnstableHipsDeadzone,
+            _ => 0f
+        };
+    }
+
+    private float ResolveBoneRotationInterpolationAlpha(float baseAlpha)
+    {
+        if (!IsOwnerProxy)
+            return baseAlpha;
+
+        return GetPhysicalPhase() switch
+        {
+            PhysicalPhase.Recovering => Mathf.Clamp01(baseAlpha * OwnerRecoveringBoneRotationLerpScale),
+            PhysicalPhase.Unstable => Mathf.Clamp01(baseAlpha * OwnerUnstableBoneRotationLerpScale),
+            _ => baseAlpha
+        };
     }
 
     private void UpdateAnimationParameters()
@@ -187,6 +241,9 @@ public sealed partial class NetworkPlayer
             return;
 
         if (animator == null)
+            return;
+
+        if (ShouldUseHardPhysicsPresentation())
             return;
 
         var (speed, state) = ResolveAnimationParameters();
@@ -239,7 +296,7 @@ public sealed partial class NetworkPlayer
 
     private void ApplyProxyPresentationRotation()
     {
-        if (HasStateAuthority || NetworkedIsBeingGrabbed || ShouldUsePhysicsPosePresentation())
+        if (HasStateAuthority || ShouldUseHardPhysicsPresentation())
             return;
 
         var presentationRoot = GetPresentationRootTransform();
@@ -265,6 +322,8 @@ public sealed partial class NetworkPlayer
         yaw = 0f;
 
         if (!IsOwnerProxy)
+            return false;
+        if (IsGrabFacingLocked())
             return false;
 
         var localMove = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
@@ -321,6 +380,7 @@ public sealed partial class NetworkPlayer
         animator.Update(0f);
 
         DetectPuppetMasterAnimationMode();
+        MarkPresentationEffectsDirty();
     }
 
     /// <summary>
