@@ -14,9 +14,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   maxSpeed: 3
   acceleration: 30
+  airAcceleration: 9
+  brakingAcceleration: 55
   rotateSpeedDeg: 300
-  jumpImpulse: 20
-  extraGravity: 10
+  sprintSpeedMultiplier: 1.8
+  groundStickForce: 8
+  stopSpeedEpsilon: 0.08
+  jumpImpulse: 70
+  extraGravity: 5
   groundProbeRadius: 0.1
   groundProbeDistance: 0.5
   fallEnterSec: 0.8
