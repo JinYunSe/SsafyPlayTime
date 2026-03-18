@@ -236,7 +236,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             foreach (var pair in catalog.Definitions)
             {
                 var definition = pair.Value;
-                if (definition == null || !definition.Master.Enabled)
+                if (definition == null || !definition.Master.Enabled || !IsSpawnableForMvp(definition))
                 {
                     continue;
                 }
@@ -251,6 +251,16 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             DebugLog($"Cached spawnable item definitions: count={_spawnableDefinitions.Count}");
+        }
+
+        private static bool IsSpawnableForMvp(ItemDefinition definition)
+        {
+            if (definition == null)
+            {
+                return false;
+            }
+
+            return !string.Equals(definition.Master.ItemId, ItemIds.WaterMelonSword, System.StringComparison.Ordinal);
         }
 
         private void ScheduleNextSpawn()
