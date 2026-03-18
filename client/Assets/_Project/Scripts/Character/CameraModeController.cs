@@ -31,7 +31,8 @@ public class CameraModeController : MonoBehaviour
             return;
         }
 
-        Debug.LogError($"CameraModeController: 로컬 플레이어를 못 찾음, Tag={localPlayerTag} 확인 필요");
+        // 네트워크 환경에서는 NetworkPlayer.Spawned()에서 BindLocalPlayer()를 직접 호출하므로 정상
+        Debug.LogWarning($"CameraModeController: Start()에서 로컬 플레이어를 못 찾음 (Tag={localPlayerTag}). 네트워크 스폰 후 BindLocalPlayer()로 바인딩 예정.");
     }
 
     public void BindLocalPlayer(GameObject localPlayer)
