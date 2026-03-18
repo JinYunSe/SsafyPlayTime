@@ -28,7 +28,8 @@
       "Bash(grep -rn \"input.Punch\\\\|PUNCH\\\\|OnPlayerBodyPartHit\" C:/Users/admin/Desktop/temp/S14P21D104/client/Assets/_Project/Scripts/Network/ --include=*.cs)",
       "Bash(grep -rn \"ExecutePunchHitDetection\\\\|private void.*Punch\" C:/Users/admin/Desktop/temp/S14P21D104/client/Assets/_Project/Scripts/Network/ --include=*.cs)",
       "Bash(grep -n \"GetCameraFollowTarget\\\\|_cameraFollowAnchor\\\\|cameraFollowTarget\" Assets/_Project/Scripts/Network/NetworkPlayer*.cs)",
-      "Bash(grep -n \"UpdateCameraFollowAnchor\\\\|EnsureCameraFollowAnchor\" C:/Users/admin/Desktop/temp/S14P21D104/client/Assets/_Project/Scripts/Network/NetworkPlayer*.cs)"
+      "Bash(grep -n \"UpdateCameraFollowAnchor\\\\|EnsureCameraFollowAnchor\" C:/Users/admin/Desktop/temp/S14P21D104/client/Assets/_Project/Scripts/Network/NetworkPlayer*.cs)",
+      "mcp__UnityMCP__find_gameobjects"
     ]
   }
 }

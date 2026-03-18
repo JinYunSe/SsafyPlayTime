@@ -3120,6 +3120,7 @@ GameObject:
   - component: {fileID: 7663240486625969133}
   - component: {fileID: -3072525174819799080}
   - component: {fileID: 8762998777785654494}
+  - component: {fileID: 2629994904645801565}
   m_Layer: 0
   m_Name: FitCharacterAndCameraAndPuppet
   m_TagString: Untagged
@@ -3339,6 +3340,8 @@ MonoBehaviour:
     _value: 0
   _NetworkedIsBeingGrabbed:
     _value: 0
+  _NetworkedIsDragged:
+    _value: 0
   itemWorldEffectMask:
     serializedVersion: 2
     m_Bits: 119
@@ -3367,6 +3370,7 @@ MonoBehaviour:
   flamethrowerMuzzleLocalOffset: {x: 0, y: 0, z: 0.5}
   flamethrowerMuzzleLocalEulerOffset: {x: 0, y: 0, z: 0}
   enableItemWorldEffectLog: 0
+  enableProxyAnimationDiagnostics: 1
 --- !u!114 &6785930196581349814
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3383,8 +3387,9 @@ MonoBehaviour:
   rigidbody3D: {fileID: 4090427127990152766}
   locomotionThreshold: 0.1
   grabHoldThreshold: 0.2
-  attackLockDuration: 0.7
+  attackLockDuration: 0.28
   throwLockDuration: 0.85
+  enableAnimationDriverDiagnostics: 1
 --- !u!114 &6851957619677159938
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3405,6 +3410,18 @@ MonoBehaviour:
   reachDistance: 0.6
   handReachForce: 115
   handDamping: 8
+  anchorBlend: 0.6
+  holdForwardOffset: 0.45
+  holdSideOffset: 0.24
+  holdHeightOffset: 0.82
+  holdVerticalClamp: 0.55
+  holdLateralClamp: 0.35
+  anchorAssistScale: 0.4
+  torsoReactionScale: 0.3
+  behindBackThreshold: -0.08
+  behindBackForce: 90
+  behindBackTurnTorque: 20
+  carryPoseProfile: {fileID: 11400000, guid: 1d3a4c4bf11833b45871d1178b5a5909, type: 2}
 --- !u!114 &6759588162524855768
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3536,7 +3553,49 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   profile: {fileID: 11400000, guid: c79c878183ccc3d44809d4fc7f5f98a5, type: 2}
   puppetMaster: {fileID: 0}
+  motionReference: {fileID: 0}
+  motionRigidbody: {fileID: 0}
+  networkPlayer: {fileID: 0}
   lerpSpeed: 8
+  enableDynamicWobble: 1
+  wobbleBlendSpeed: 6
+  speedForMaxWobble: 4
+  turnRateForMaxWobble: 220
+  airborneWobbleBonus: 0.08
+  headPinMultiplier: 0.72
+  headMuscleMultiplier: 0.58
+  armPinMultiplier: 0.64
+  armMuscleMultiplier: 0.52
+  handPinMultiplier: 0.82
+  handMuscleMultiplier: 0.72
+  grabbedLooseBonus: 0.16
+  unstableLooseBonus: 0.1
+  draggedLooseBonus: 0.08
+--- !u!114 &2629994904645801565
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5318593706682879629}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0023c20ea383d824088caf3cc07bba5b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  puppetMaster: {fileID: 0}
+  windUpDuration: 0.05
+  impactDuration: 0.07
+  recoveryDuration: 0.16
+  punchReach: 0.6
+  punchSideOffset: 0.22
+  punchHeight: 0.85
+  windUpPullBack: 0.15
+  handPunchForce: 180
+  handReturnForce: 100
+  handDamping: 10
+  torsoForwardReaction: 0.25
+  torsoCounterReaction: 0.15
 --- !u!1 &5413706484301116359
 GameObject:
   m_ObjectHideFlags: 0

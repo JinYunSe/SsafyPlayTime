@@ -17,6 +17,18 @@ public sealed partial class NetworkPlayer
     private const float UnstableExitThreshold = 0.26f;
     private const float DragPlanarSpeedThreshold = 1.75f;
     private const float DragAngularSpeedThreshold = 3.5f;
+    private const float StunLaunchKnockbackScale = 0f;
+    private const float StunEntryRootPlanarVelocityScale = 0.14f;
+    private const float StunEntryRootPlanarSpeedCap = 0.95f;
+    private const float StunEntryRootAngularVelocityScale = 0.08f;
+    private const float StunEntryMusclePlanarVelocityScale = 0.18f;
+    private const float StunEntryMusclePlanarSpeedCap = 0.75f;
+    private const float StunEntryMuscleAngularVelocityScale = 0.12f;
+    private const float StunnedRootPlanarSpeedCap = 0.85f;
+    private const float StunnedMusclePlanarSpeedCap = 0.70f;
+    private const float StunnedRootAngularSpeedCap = 2.4f;
+    private const float StunnedMuscleAngularSpeedCap = 3.2f;
+    private const float StunRootUpwardSyncStep = 0.08f;
 
     private void DoPhysicsStep(PlayerNetworkInput input, float dt)
     {
@@ -83,6 +95,10 @@ public sealed partial class NetworkPlayer
     private bool _isRecoverStabilizing;
     private float _recoverStabilizeTimer;
     private const float RECOVER_STABILIZE_DURATION = 0.4f;
+    private float _recoverMinColliderY = float.NegativeInfinity;
+    private bool _hasRecoverAnchorPose;
+    private Vector3 _recoverAnchorPosition;
+    private Quaternion _recoverAnchorRotation = Quaternion.identity;
 
     private void UpdateRecoveringWindow(float dt)
     {
@@ -95,10 +111,21 @@ public sealed partial class NetworkPlayer
         if (!_isRecovering)
             return;
 
+        // recover 중에도 root를 pelvis에 동기화 유지
+        MaintainRecoveringHorizontalAnchor();
+        MaintainRecoveringUprightRotation();
+        MaintainRecoveringAboveGround();
+        SyncRootToPhysicsBody();
+        TraceStunnedMotionSample("UpdateRecoveringWindow");
+
         _recoveringTimer -= dt;
         if (_recoveringTimer <= 0f)
         {
             _isRecovering = false;
+            _recoverMinColliderY = float.NegativeInfinity;
+            _hasRecoverAnchorPose = false;
+            // 복구 완료 시 최종 root-to-pelvis 스냅
+            SyncRootToPhysicsBody();
             SetLocalPhysicalPhase(PhysicalPhase.Stable, 0f, false);
             FlagPhysicsPresentationReset();
         }
@@ -241,16 +268,40 @@ public sealed partial class NetworkPlayer
 
         victimPlayer.ApplyStunDamage(_activePunchStunDamage, 1.0f, _activePunchAttackerSpeed, _activePunchKnockbackForce);
         var isStunnedByHit = !victimPlayer._isActiveRagdoll;
-        var appliedKnockback = isStunnedByHit ? finalKnockback * 0.4f : finalKnockback;
+        var appliedKnockback = isStunnedByHit ? finalKnockback * StunLaunchKnockbackScale : finalKnockback;
 
         var victimRb = victimPlayer.rigidbody3D;
+        var victimVelocityBeforeForce = victimRb != null && !victimRb.isKinematic
+            ? victimRb.velocity
+            : Vector3.zero;
         if (victimRb != null && !victimRb.isKinematic)
+        {
             victimRb.AddForce(knockbackDir * appliedKnockback, ForceMode.Impulse);
+            if (!isStunnedByHit)
+            {
+                victimRb.AddForceAtPosition(
+                    knockbackDir * appliedKnockback * 0.28f,
+                    hitPoint,
+                    ForceMode.Impulse);
+            }
+        }
+        victimPlayer.TraceStunForceEvent(
+            "PunchRoot",
+            victimRb,
+            knockbackDir * appliedKnockback,
+            ForceMode.Impulse,
+            victimVelocityBeforeForce,
+            victimRb != null && !victimRb.isKinematic ? victimRb.velocity : victimVelocityBeforeForce,
+            appliedKnockback > 0.0001f,
+            $"isStunnedByHit={isStunnedByHit}");
 
+        ApplyPunchFollowThrough(knockbackDir, finalKnockback);
         ApplyMuscleImpulseOnHit(victimPlayer, hitPoint, knockbackDir, appliedKnockback);
         if (isStunnedByHit)
             victimPlayer.DampenStunEntryVelocities();
 
+        TriggerAttackCameraKick(forward, finalKnockback);
+        victimPlayer.TriggerVictimCameraKick(knockbackDir, appliedKnockback);
         ApplyLocalHitStop(victimPlayer);
     }
 
@@ -266,10 +317,10 @@ public sealed partial class NetworkPlayer
         if (dirToVictim.sqrMagnitude < 0.0001f)
             dirToVictim = planarForward;
 
-        var blendedPlanar = (dirToVictim.normalized * 0.7f + planarForward.normalized * 0.3f).normalized;
-        var upwardBias = victimPlayer._isGrounded ? 0.05f : 0.1f;
+        var blendedPlanar = (dirToVictim.normalized * 0.55f + planarForward.normalized * 0.45f).normalized;
+        var upwardBias = victimPlayer._isGrounded ? 0.025f : 0.08f;
         var knockbackDir = (blendedPlanar + Vector3.up * upwardBias).normalized;
-        knockbackDir.y = Mathf.Clamp(knockbackDir.y, -0.02f, 0.12f);
+        knockbackDir.y = Mathf.Clamp(knockbackDir.y, -0.02f, 0.09f);
         return knockbackDir.normalized;
     }
 
@@ -301,6 +352,12 @@ public sealed partial class NetworkPlayer
         }
 
         // 물리 뼈 각속도 지속 감쇠
+        if (rigidbody3D != null && !rigidbody3D.isKinematic)
+        {
+            rigidbody3D.velocity *= 0.6f;
+            rigidbody3D.angularVelocity *= 0.6f;
+        }
+
         if (_puppetMaster != null && _puppetMaster.muscles != null)
         {
             foreach (var muscle in _puppetMaster.muscles)
@@ -308,9 +365,19 @@ public sealed partial class NetworkPlayer
                 if (muscle.joint == null) continue;
                 var rb = muscle.joint.GetComponent<Rigidbody>();
                 if (rb != null && !rb.isKinematic)
-                    rb.angularVelocity *= 0.8f;
+                {
+                    rb.velocity *= 0.6f;
+                    rb.angularVelocity *= 0.6f;
+                }
             }
         }
+
+        // recover 중에도 root를 pelvis에 동기화 — NetworkTransform이 stale 위치를 보내지 않도록
+        // 주의: stabilization 동안에는 MaintainRecoveringAboveGround를 호출하지 않음.
+        // 스프링 점진 복원과 전신 텔레포트가 동시에 일어나면 떨림의 원인이 됨.
+        MaintainRecoveringHorizontalAnchor();
+        MaintainRecoveringUprightRotation();
+        SyncRootToPhysicsBody();
 
         if (_recoverStabilizeTimer <= 0f)
         {
@@ -342,13 +409,23 @@ public sealed partial class NetworkPlayer
         if (_isActiveRagdoll)
             return false;
 
-        SetLocalPhysicalPhase(PhysicalPhase.Stunned, 1f, false);
+        var stunnedPhase = _beingGrabbedRefCount > 0
+            ? PhysicalPhase.BeingCarriedStunned
+            : PhysicalPhase.Stunned;
+        SetLocalPhysicalPhase(stunnedPhase, 1f, false);
 
         var remaining = GetStunTimeRemaining() - dt;
         SetStunTimeRemaining(remaining);
 
         if (remaining <= 0f)
+        {
             ForceRecover();
+            if (_isActiveRagdoll)
+                return true;
+        }
+
+        ClampStunnedMotion();
+        TraceStunnedMotionSample("TryTickStunnedState");
 
         // 기절 중 물리 뼈(메인 리지드바디)가 잡기 조인트 등에 의해 끌려갈 수 있으므로
         // 루트 트랜스폼을 메인 리지드바디 위치에 맞춘다.
@@ -387,6 +464,18 @@ public sealed partial class NetworkPlayer
             return;
         }
 
+        if (_hasRecoverAnchorPose && (_isRecovering || _isRecoverStabilizing))
+        {
+            targetPos.x = _recoverAnchorPosition.x;
+            targetPos.z = _recoverAnchorPosition.z;
+        }
+
+        if ((!_isActiveRagdoll || _isRecovering || _isRecoverStabilizing) &&
+            targetPos.y > transform.position.y + StunRootUpwardSyncStep)
+        {
+            targetPos.y = transform.position.y + StunRootUpwardSyncStep;
+        }
+
         var delta = targetPos - transform.position;
         if (delta.sqrMagnitude < 0.001f)
             return;
@@ -414,6 +503,10 @@ public sealed partial class NetworkPlayer
         var gravityMultiplier = buffApplier != null ? buffApplier.CurrentGravityMultiplier : 1f;
         var jumpMultiplier = buffApplier != null ? buffApplier.CurrentJumpMultiplier : 1f;
 
+        // 기절자 양손 운반 시 이동 속도 제한
+        if (_localPhysicalPhase == PhysicalPhase.CarryingStunned)
+            moveSpeedMultiplier *= 0.7f;
+
         // 스프린트 속도 배율 적용
         if (input.Sprint)
         {
@@ -430,7 +523,12 @@ public sealed partial class NetworkPlayer
 
         // Coyote time: 착지 직후 떨어지면 짧은 유예 시간 동안 점프 허용
         if (_isGrounded)
+        {
             _coyoteTimeRemaining = COYOTE_TIME;
+            // 안정적으로 서 있을 때 안전 위치 기억 — recover 시 활용
+            if (_isActiveRagdoll && !_isRecovering)
+                RememberSafeTransform(transform.position, transform.rotation);
+        }
         else
         {
             _coyoteTimeRemaining -= dt;
@@ -775,10 +873,18 @@ public sealed partial class NetworkPlayer
             return PhysicalPhase.BeingGrabbed;
 
         if (anyHolding)
+        {
+            if (IsDualGrabbingStunnedPlayer)
+                return PhysicalPhase.CarryingStunned;
             return PhysicalPhase.Holding;
+        }
 
         if (_isGrabActive)
             return PhysicalPhase.GrabIntent;
+
+        // 장비 아이템(수박칼, 화염방사기 등) 장착 중
+        if (_itemRuntimeHost != null && _itemRuntimeHost.IsHeldItemEquipment)
+            return PhysicalPhase.WeaponEquipped;
 
         return PhysicalPhase.Stable;
     }
@@ -893,10 +999,18 @@ public sealed partial class NetworkPlayer
         _isLeftGrabActive = false;
         _isRightGrabActive = false;
         _isGrabActive = false;
+
+        // 기절 시 장비 아이템 드롭
+        _itemRuntimeHost?.NotifyStunned();
         SetStunTimeRemaining(duration);
         SetAccumulatedStun(0f);
+        ArmStunForceDiagnostics("TriggerStun", $"duration={duration:F2}");
         DampenStunEntryVelocities();
         SetLocalPhysicalPhase(PhysicalPhase.Stunned, 1f, false);
+        _bodyPartPhysicsManager?.SetStateImmediate(
+            _beingGrabbedRefCount > 0
+                ? SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned
+                : SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState.Stunned);
         FlagPhysicsPresentationReset();
         RaiseAnimationEvent(AnimationEventType.StunFall, H_StunFall);
         SynchronizeStunPresentationPhase();
@@ -904,19 +1018,32 @@ public sealed partial class NetworkPlayer
         // 기절 비주얼: 애니메이션 비주얼 숨기고 물리 타겟 스켈레톤(래그돌)을 보여줌
         SetStunVisualMode(true);
 
-        Debug.Log($"[Combat] 기절! 시간: {duration:F1}초");
+        // 호스트: 회복 래치가 켜져 있으면 해제하고 mappingWeight 복원 (래그돌 포즈가 보여야 하므로)
+        DeactivateAuthorityAnimatorVisualLatch();
+
+        // 로컬 플레이어 기절 시 슬로우모션 연출
+        TriggerStunSlowMotion();
+
     }
 
     private void DampenStunEntryVelocities()
     {
+        var rootVelocityBefore = rigidbody3D != null && !rigidbody3D.isKinematic
+            ? rigidbody3D.velocity
+            : Vector3.zero;
+        var rootAngularBefore = rigidbody3D != null && !rigidbody3D.isKinematic
+            ? rigidbody3D.angularVelocity
+            : Vector3.zero;
+        float maxMusclePlanarBefore = 0f;
+        float maxMusclePlanarAfter = 0f;
+
         if (rigidbody3D != null && !rigidbody3D.isKinematic)
         {
-            var velocity = rigidbody3D.velocity;
-            velocity.x *= 0.4f;
-            velocity.z *= 0.4f;
-            velocity.y = Mathf.Min(velocity.y, 0.15f);
-            rigidbody3D.velocity = velocity;
-            rigidbody3D.angularVelocity *= 0.2f;
+            rigidbody3D.velocity = DampenStunEntryVelocity(
+                rigidbody3D.velocity,
+                StunEntryRootPlanarVelocityScale,
+                StunEntryRootPlanarSpeedCap);
+            rigidbody3D.angularVelocity *= StunEntryRootAngularVelocityScale;
         }
 
         if (_puppetMaster == null || _puppetMaster.muscles == null)
@@ -931,19 +1058,98 @@ public sealed partial class NetworkPlayer
             if (rb == null || rb.isKinematic)
                 continue;
 
-            var velocity = rb.velocity;
-            velocity.x *= 0.45f;
-            velocity.z *= 0.45f;
-            velocity.y = Mathf.Min(velocity.y, 0.1f);
-            rb.velocity = velocity;
-            rb.angularVelocity *= 0.25f;
+            var planarBefore = new Vector3(rb.velocity.x, 0f, rb.velocity.z).magnitude;
+            if (planarBefore > maxMusclePlanarBefore)
+                maxMusclePlanarBefore = planarBefore;
+
+            rb.velocity = DampenStunEntryVelocity(
+                rb.velocity,
+                StunEntryMusclePlanarVelocityScale,
+                StunEntryMusclePlanarSpeedCap);
+            rb.angularVelocity *= StunEntryMuscleAngularVelocityScale;
+
+            var planarAfter = new Vector3(rb.velocity.x, 0f, rb.velocity.z).magnitude;
+            if (planarAfter > maxMusclePlanarAfter)
+                maxMusclePlanarAfter = planarAfter;
         }
+
+        var rootVelocityAfter = rigidbody3D != null && !rigidbody3D.isKinematic
+            ? rigidbody3D.velocity
+            : Vector3.zero;
+        var rootAngularAfter = rigidbody3D != null && !rigidbody3D.isKinematic
+            ? rigidbody3D.angularVelocity
+            : Vector3.zero;
+        TraceStunVelocityClamp(
+            "DampenStunEntryVelocities",
+            rootVelocityBefore,
+            rootVelocityAfter,
+            rootAngularBefore,
+            rootAngularAfter,
+            maxMusclePlanarBefore,
+            maxMusclePlanarAfter);
+    }
+
+    private static Vector3 DampenStunEntryVelocity(Vector3 velocity, float planarScale, float planarSpeedCap)
+    {
+        var planarVelocity = new Vector3(velocity.x, 0f, velocity.z) * planarScale;
+        planarVelocity = Vector3.ClampMagnitude(planarVelocity, planarSpeedCap);
+
+        velocity.x = planarVelocity.x;
+        velocity.z = planarVelocity.z;
+        velocity.y = Mathf.Min(velocity.y, 0f);
+        return velocity;
+    }
+
+    private void ClampStunnedMotion()
+    {
+        if (rigidbody3D != null && !rigidbody3D.isKinematic)
+        {
+            rigidbody3D.velocity = ClampStunnedVelocity(rigidbody3D.velocity, StunnedRootPlanarSpeedCap);
+            rigidbody3D.angularVelocity = Vector3.ClampMagnitude(
+                rigidbody3D.angularVelocity,
+                StunnedRootAngularSpeedCap);
+        }
+
+        if (_puppetMaster == null || _puppetMaster.muscles == null)
+            return;
+
+        foreach (var muscle in _puppetMaster.muscles)
+        {
+            if (muscle.joint == null)
+                continue;
+
+            var rb = muscle.joint.GetComponent<Rigidbody>();
+            if (rb == null || rb.isKinematic)
+                continue;
+
+            rb.velocity = ClampStunnedVelocity(rb.velocity, StunnedMusclePlanarSpeedCap);
+            rb.angularVelocity = Vector3.ClampMagnitude(
+                rb.angularVelocity,
+                StunnedMuscleAngularSpeedCap);
+        }
+    }
+
+    private static Vector3 ClampStunnedVelocity(Vector3 velocity, float planarSpeedCap)
+    {
+        var planarVelocity = new Vector3(velocity.x, 0f, velocity.z);
+        planarVelocity = Vector3.ClampMagnitude(planarVelocity, planarSpeedCap);
+
+        velocity.x = planarVelocity.x;
+        velocity.z = planarVelocity.z;
+        velocity.y = Mathf.Min(velocity.y, 0f);
+        return velocity;
     }
 
     private void ForceRecover()
     {
         if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
             return;
+
+        if (!TryResolveRecoveryTransform(out var recoveryPosition, out var recoveryRotation))
+        {
+            recoveryPosition = transform.position;
+            recoveryRotation = transform.rotation;
+        }
 
         _localMoveSpeed = 0f;
         _localPresentationLocomotionState = PresentationLocomotionState.Idle;
@@ -958,7 +1164,10 @@ public sealed partial class NetworkPlayer
         DampenAllPhysicsBoneVelocities();
 
         // ── 2) 기립 정렬: 캐릭터를 월드 업 방향으로 세움 ──
-        AlignCharacterUpright();
+        AlignCharacterUpright(recoveryRotation);
+
+        // ── 2.5) 안전 위치 텔레포트: 바닥 침투 방지 ──
+        TeleportToSafeStandUpPosition(recoveryPosition, recoveryRotation);
 
         // ── 3) 스프링을 0으로 시작 → stabilization 단계에서 점진적으로 복원 ──
         if (!ShouldDisablePhysicsAnimationSync && mainJoint != null)
@@ -990,18 +1199,20 @@ public sealed partial class NetworkPlayer
         SetStunTimeRemaining(0f);
         SetAccumulatedStun(0f);
         SetLocalPhysicalPhase(PhysicalPhase.Recovering, Mathf.Max(_localInstability, 0.45f), false);
+        ArmStunForceDiagnostics("ForceRecover");
         FlagPhysicsPresentationReset();
         RaiseAnimationEvent(AnimationEventType.StunRecover, H_StunRecover);
         SynchronizeStunPresentationPhase();
 
         // ── 4) 기립 보조: 약한 위쪽 충격량으로 일어나는 느낌 ──
-        if (rigidbody3D != null && !rigidbody3D.isKinematic && config != null)
-            rigidbody3D.AddForce(Vector3.up * config.jumpImpulse * 0.25f, ForceMode.Impulse);
-
         // 회복 비주얼: 물리 타겟 스켈레톤 숨기고 애니메이션 비주얼 복원
         SetStunVisualMode(false);
 
-        Debug.Log("[Combat] 회복! (안정화 0.4초 + 취약 2초)");
+        // 호스트: PuppetMaster.Map()이 target skeleton을 덮어쓰지 않도록 즉시 래치 활성화.
+        // LateUpdate의 SynchronizePhysicsPresentationState() 전환 감지를 기다리지 않고
+        // ForceRecover 시점에 바로 mappingWeight=0을 적용한다.
+        ActivateAuthorityAnimatorVisualLatch();
+
     }
 
     // ─── 회복 안정화 헬퍼 ───
@@ -1028,8 +1239,8 @@ public sealed partial class NetworkPlayer
                 var rb = muscle.joint.GetComponent<Rigidbody>();
                 if (rb != null && !rb.isKinematic)
                 {
-                    rb.velocity *= 0.1f;
-                    rb.angularVelocity *= 0.1f;
+                    rb.velocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
                 }
             }
         }
@@ -1040,12 +1251,11 @@ public sealed partial class NetworkPlayer
     /// 기절 중 옆으로 눕거나 뒤집힌 상태에서 회복 시 서있는 자세로 복원.
     /// yaw(수평 회전)는 유지하고 roll/pitch만 제거.
     /// </summary>
-    private void AlignCharacterUpright()
+    private void AlignCharacterUpright(Quaternion referenceRotation)
     {
         if (rigidbody3D == null) return;
 
-        var euler = rigidbody3D.rotation.eulerAngles;
-        var uprightRotation = Quaternion.Euler(0f, euler.y, 0f);
+        var uprightRotation = Quaternion.Euler(0f, referenceRotation.eulerAngles.y, 0f);
         rigidbody3D.rotation = uprightRotation;
         rigidbody3D.angularVelocity = Vector3.zero;
         transform.rotation = uprightRotation;
@@ -1057,15 +1267,286 @@ public sealed partial class NetworkPlayer
         SetPresentationVisualYaw(uprightRotation.eulerAngles.y);
     }
 
+    /// <summary>
+    /// 회복 시 pelvis 기준 지면 raycast로 안전한 기립 위치를 계산하여 텔레포트.
+    /// 바닥에 반쯤 박힌 상태에서 recover가 시작되는 문제를 방지.
+    /// </summary>
+    private void TeleportToSafeStandUpPosition(Vector3 recoveryPosition, Quaternion recoveryRotation)
+    {
+        // pelvis(muscles[0]) 위치를 기준점으로 사용
+        Vector3 basePos;
+        if (_puppetMaster != null && _puppetMaster.muscles != null && _puppetMaster.muscles.Length > 0
+            && _puppetMaster.muscles[0].joint != null)
+        {
+            basePos = _puppetMaster.muscles[0].joint.transform.position;
+        }
+        else if (rigidbody3D != null)
+        {
+            basePos = rigidbody3D.position;
+        }
+        else
+        {
+            return;
+        }
+
+        // 지면 감지: pelvis에서 아래로 raycast (자기 자신 제외)
+        const float rayOriginOffset = 1.5f;
+        const float rayDistance = 5f;
+        const float standUpHeightOffset = 0.15f;
+        const float pelvisHeightAboveGround = 0.85f;
+        const float minColliderClearance = 0.04f;
+
+        var recoveryAnchor = recoveryPosition;
+        var rayOrigin = new Vector3(
+            recoveryAnchor.x,
+            Mathf.Max(basePos.y, recoveryAnchor.y) + rayOriginOffset,
+            recoveryAnchor.z);
+        Vector3 safePos;
+
+        var hits = Physics.RaycastAll(rayOrigin, Vector3.down, rayDistance);
+        var foundGround = false;
+        var closestDist = float.MaxValue;
+        var groundPoint = Vector3.zero;
+        foreach (var h in hits)
+        {
+            // 자기 자신의 물리 뼈/콜라이더 제외
+            if (h.transform.root == transform.root)
+                continue;
+            if (h.distance < closestDist)
+            {
+                closestDist = h.distance;
+                groundPoint = h.point;
+                foundGround = true;
+            }
+        }
+
+        if (foundGround)
+        {
+            safePos = new Vector3(recoveryAnchor.x, groundPoint.y + standUpHeightOffset, recoveryAnchor.z);
+        }
+        else
+        {
+            // raycast 실패 시 현재 pelvis 위치에 약간의 y 보정만 적용
+            safePos = new Vector3(
+                recoveryAnchor.x,
+                Mathf.Max(basePos.y, recoveryAnchor.y) + standUpHeightOffset,
+                recoveryAnchor.z);
+        }
+
+        // pelvis는 엉덩이 높이에 배치, root는 pelvis를 따라가므로 같은 위치로
+        var pelvisPos = new Vector3(safePos.x, safePos.y + pelvisHeightAboveGround, safePos.z);
+        var lowestColliderY = basePos.y - pelvisHeightAboveGround;
+        if (!TryGetCharacterLowestColliderY(out lowestColliderY))
+            lowestColliderY = basePos.y - pelvisHeightAboveGround;
+
+        var desiredLowestColliderY = foundGround
+            ? groundPoint.y + minColliderClearance
+            : safePos.y;
+        var shiftY = Mathf.Max(pelvisPos.y - basePos.y, desiredLowestColliderY - lowestColliderY);
+        var delta = new Vector3(safePos.x - basePos.x, shiftY, safePos.z - basePos.z);
+
+        // root/rigidbody/targetRoot → pelvis 높이로 재배치 (SyncRootToPhysicsBody가 root=pelvis 기준)
+        TranslateRecoveringPhysicsBodies(delta, true);
+        _recoverAnchorPosition = safePos;
+        _recoverAnchorRotation = Quaternion.Euler(0f, recoveryRotation.eulerAngles.y, 0f);
+        _hasRecoverAnchorPose = true;
+        _recoverMinColliderY = desiredLowestColliderY;
+
+        // pelvis 물리 뼈도 같은 엉덩이 높이로
+        ArmStunForceDiagnostics(
+            "TeleportToSafeStandUpPosition",
+            $"delta={FormatStunForceDiagnosticsVector(delta)} anchor={FormatStunForceDiagnosticsVector(_recoverAnchorPosition)} yaw={_recoverAnchorRotation.eulerAngles.y:F1} minColliderY={_recoverMinColliderY:F2}");
+    }
+
     // ─── 맨손 펀치 히트 판정 ───
 
     // CSV PUNCH 수치 폴백 (CombatSettings에서 로드 실패 시)
+    /// <summary>
+    /// 양방향 지면 보정: 하체 콜라이더가 기준선 아래면 올리고, 너무 위면 내린다.
+    /// 한 프레임당 최대 보정량을 제한하여 스프링 복원과의 충돌을 방지.
+    /// </summary>
+    private void MaintainRecoveringAboveGround()
+    {
+        if (!_isRecovering && !_isRecoverStabilizing)
+            return;
+
+        if (!float.IsFinite(_recoverMinColliderY))
+            return;
+
+        if (!TryGetCharacterLowestColliderY(out var lowestColliderY))
+            return;
+
+        var correction = _recoverMinColliderY - lowestColliderY;
+
+        // 데드존: 아주 작은 오차는 무시
+        if (Mathf.Abs(correction) <= 0.005f)
+            return;
+
+        // 프레임당 최대 보정량 제한 — 급격한 텔레포트 방지
+        const float maxCorrectionPerFrame = 0.15f;
+        correction = Mathf.Clamp(correction, -maxCorrectionPerFrame, maxCorrectionPerFrame);
+
+        // 위로 올릴 때만 velocity reset, 내릴 때는 자연스럽게
+        var resetVel = correction > 0f;
+        TranslateRecoveringPhysicsBodies(new Vector3(0f, correction, 0f), resetVel);
+    }
+
+    private void MaintainRecoveringHorizontalAnchor()
+    {
+        if ((!_isRecovering && !_isRecoverStabilizing) || !_hasRecoverAnchorPose)
+            return;
+
+        if (!TryGetRecoverReferencePosition(out var referencePosition))
+            return;
+
+        var correction = new Vector3(
+            _recoverAnchorPosition.x - referencePosition.x,
+            0f,
+            _recoverAnchorPosition.z - referencePosition.z);
+
+        if (correction.sqrMagnitude <= 0.0004f)
+            return;
+
+        const float maxCorrectionPerFrame = 0.08f;
+        correction = Vector3.ClampMagnitude(correction, maxCorrectionPerFrame);
+        TranslateRecoveringPhysicsBodies(correction, true);
+    }
+
+    private void MaintainRecoveringUprightRotation()
+    {
+        if ((!_isRecovering && !_isRecoverStabilizing) || !_hasRecoverAnchorPose)
+            return;
+
+        if (rigidbody3D != null && !rigidbody3D.isKinematic)
+        {
+            rigidbody3D.rotation = _recoverAnchorRotation;
+            rigidbody3D.angularVelocity = Vector3.zero;
+        }
+
+        transform.rotation = _recoverAnchorRotation;
+        if (_targetRoot != null)
+            _targetRoot.rotation = _recoverAnchorRotation;
+
+        SetPresentationVisualYaw(_recoverAnchorRotation.eulerAngles.y);
+    }
+
+    // 지면 보정 기준으로 사용할 muscle 인덱스 (Hips, 양 다리)
+    // PuppetMaster 기본 매핑: 0=Hips, 1=Spine~, 하체는 보통 뒤쪽 인덱스.
+    // 정확한 인덱스 대신 muscle 이름에 Leg/Foot/Hips가 포함된 것만 사용.
+    private static readonly string[] _lowerBodyBoneNames = { "Hips", "UpperLeg", "LowerLeg", "Foot", "Toes" };
+
+    private bool TryGetCharacterLowestColliderY(out float lowestY)
+    {
+        lowestY = float.PositiveInfinity;
+
+        // root rigidbody 자체의 collider
+        if (rigidbody3D != null)
+        {
+            var rootCol = rigidbody3D.GetComponent<Collider>();
+            if (rootCol != null && rootCol.enabled && !rootCol.isTrigger)
+            {
+                var minY = rootCol.bounds.min.y;
+                if (float.IsFinite(minY) && minY < lowestY)
+                    lowestY = minY;
+            }
+        }
+
+        // PuppetMaster muscle 중 하체(Hips/Leg/Foot)만 탐색
+        if (_puppetMaster != null && _puppetMaster.muscles != null)
+        {
+            foreach (var muscle in _puppetMaster.muscles)
+            {
+                if (muscle.joint == null) continue;
+                var boneName = muscle.joint.name;
+                var isLowerBody = false;
+                for (var i = 0; i < _lowerBodyBoneNames.Length; i++)
+                {
+                    if (boneName.IndexOf(_lowerBodyBoneNames[i], System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        isLowerBody = true;
+                        break;
+                    }
+                }
+                if (!isLowerBody) continue;
+
+                var col = muscle.joint.GetComponent<Collider>();
+                if (col == null || !col.enabled || col.isTrigger) continue;
+                var minY = col.bounds.min.y;
+                if (float.IsFinite(minY) && minY < lowestY)
+                    lowestY = minY;
+            }
+        }
+
+        return !float.IsPositiveInfinity(lowestY);
+    }
+
+    private bool TryGetRecoverReferencePosition(out Vector3 referencePosition)
+    {
+        if (_puppetMaster != null && _puppetMaster.muscles != null && _puppetMaster.muscles.Length > 0)
+        {
+            var pelvisMuscle = _puppetMaster.muscles[0];
+            if (pelvisMuscle.joint != null)
+            {
+                referencePosition = pelvisMuscle.joint.transform.position;
+                return true;
+            }
+        }
+
+        if (rigidbody3D != null)
+        {
+            referencePosition = rigidbody3D.position;
+            return true;
+        }
+
+        referencePosition = Vector3.zero;
+        return false;
+    }
+
+    private void TranslateRecoveringPhysicsBodies(Vector3 delta, bool resetVelocities)
+    {
+        if (delta.sqrMagnitude <= 0.000001f)
+            return;
+
+        var nextRootPosition = transform.position + delta;
+        if (rigidbody3D != null && !rigidbody3D.isKinematic)
+        {
+            rigidbody3D.position = nextRootPosition;
+            if (resetVelocities)
+            {
+                rigidbody3D.velocity = Vector3.zero;
+                rigidbody3D.angularVelocity = Vector3.zero;
+            }
+        }
+
+        transform.position = nextRootPosition;
+
+        if (_puppetMaster == null || _puppetMaster.muscles == null)
+            return;
+
+        foreach (var muscle in _puppetMaster.muscles)
+        {
+            if (muscle.joint == null)
+                continue;
+
+            var rb = muscle.joint.GetComponent<Rigidbody>();
+            if (rb == null || rb.isKinematic || rb == rigidbody3D)
+                continue;
+
+            rb.position += delta;
+            if (resetVelocities)
+            {
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+        }
+    }
+
     private const string PunchCombatStatId = "PUNCH";
     private const float FallbackPunchStunDamage = 12f;
     private const float FallbackPunchKnockbackForce = 10f;
     private const float PunchHitRadius = 0.38f;
     private const float PunchHitForwardOffset = 0.18f;
-    private const float PunchActiveWindowSeconds = 0.14f;
+    private const float PunchActiveWindowSeconds = 0.10f;
     private const float PunchFallbackReach = 0.8f;
     private const int PunchHitBufferSize = 16;
     private int _punchCooldownUntilTick;
@@ -1082,8 +1563,48 @@ public sealed partial class NetworkPlayer
     private float _hitStopEndTime;
     private Vector3 _hitStopSavedVelocity;
     private Vector3 _hitStopSavedAngularVelocity;
-    private const float HIT_STOP_DURATION = 0.06f;
-    private const float HIT_STOP_VELOCITY_SCALE = 0.05f;
+    private const float HIT_STOP_DURATION = 0.075f;
+    private const float HIT_STOP_VELOCITY_SCALE = 0.02f;
+
+    // ─── 기절 슬로우모션 (로컬 전용) ───
+    private bool _stunSlowMotionActive;
+    private float _stunSlowMotionHoldEnd;    // unscaledTime 기준
+    private float _stunSlowMotionRampEnd;    // unscaledTime 기준
+    private const float STUN_SLOWMO_SCALE = 0.15f;        // 85% 감속
+    private const float STUN_SLOWMO_HOLD_DURATION = 0.25f; // 최저 유지 시간 (realtime)
+    private const float STUN_SLOWMO_RAMP_DURATION = 0.35f; // 복원 램프 시간 (realtime)
+
+    internal float GetConfiguredPunchCooldown()
+    {
+        var stat = CombatSettings.Instance?.GetAttackStat(PunchCombatStatId);
+        if (stat.HasValue)
+            return Mathf.Max(stat.Value.CooldownSec, PunchActiveWindowSeconds);
+
+        return 0.35f;
+    }
+
+    internal bool TryBeginPunchHitDetection(bool isLeft)
+    {
+        if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
+            return false;
+
+        var stat = CombatSettings.Instance?.GetAttackStat(PunchCombatStatId);
+        var cooldown = GetConfiguredPunchCooldown();
+        var currentTick = ResolveCurrentSimulationTick();
+        var tickRate = Runner != null ? (int)Runner.TickRate : Mathf.Max(1, Mathf.RoundToInt(1f / Time.fixedDeltaTime));
+        var cooldownTicks = Mathf.Max(1, Mathf.RoundToInt(cooldown * tickRate));
+        if (currentTick < _punchCooldownUntilTick)
+            return false;
+
+        _punchCooldownUntilTick = currentTick + cooldownTicks;
+        _activePunchIsLeft = isLeft;
+        _activePunchHasPreviousSample = false;
+        _activePunchStunDamage = stat.HasValue ? stat.Value.StunDamage : FallbackPunchStunDamage;
+        _activePunchKnockbackForce = stat.HasValue ? stat.Value.KnockbackForce : FallbackPunchKnockbackForce;
+        _activePunchAttackerSpeed = rigidbody3D != null ? rigidbody3D.velocity.magnitude : 0f;
+        _activePunchWindowEndTick = currentTick + Mathf.Max(1, Mathf.RoundToInt(PunchActiveWindowSeconds * tickRate));
+        return true;
+    }
 
     internal void ExecutePunchHitDetection(bool isLeft)
     {
@@ -1092,7 +1613,7 @@ public sealed partial class NetworkPlayer
             return;
 
         // 쿨다운 체크 (Fusion tick 기반 — 재시뮬레이션에서도 결정적)
-        var cooldown = 0.4f;
+        var cooldown = 0.35f;
         var stat = CombatSettings.Instance?.GetAttackStat(PunchCombatStatId);
         if (stat.HasValue) cooldown = stat.Value.CooldownSec;
 
@@ -1140,11 +1661,23 @@ public sealed partial class NetworkPlayer
             // 속도 보너스: 달리면서 때리면 최대 1.5배
             var speedBonus = 1f + Mathf.Clamp01(attackerSpeed / 8f) * 0.5f;
             var finalKnockback = knockbackForce * speedBonus;
-            var appliedKnockback = isStunnedByHit ? finalKnockback * 0.4f : finalKnockback;
+            var appliedKnockback = isStunnedByHit ? finalKnockback * StunLaunchKnockbackScale : finalKnockback;
 
             var victimRb = victimPlayer.rigidbody3D;
+            var victimVelocityBeforeForce = victimRb != null && !victimRb.isKinematic
+                ? victimRb.velocity
+                : Vector3.zero;
             if (victimRb != null && !victimRb.isKinematic)
                 victimRb.AddForce(knockbackDir * appliedKnockback, ForceMode.Impulse);
+            victimPlayer.TraceStunForceEvent(
+                "PunchRootLegacy",
+                victimRb,
+                knockbackDir * appliedKnockback,
+                ForceMode.Impulse,
+                victimVelocityBeforeForce,
+                victimRb != null && !victimRb.isKinematic ? victimRb.velocity : victimVelocityBeforeForce,
+                appliedKnockback > 0.0001f,
+                $"isStunnedByHit={isStunnedByHit}");
 
             // 피격 muscle 직접 임펄스 — 맞은 부위가 물리적으로 밀림
             ApplyMuscleImpulseOnHit(victimPlayer, hit.transform.position, knockbackDir, appliedKnockback);
@@ -1170,8 +1703,14 @@ public sealed partial class NetworkPlayer
 
         var muscles = victim._puppetMaster.muscles;
         var stunnedVictim = !victim._isActiveRagdoll;
-        var focusedImpulseScale = stunnedVictim ? 0.18f : 0.35f;
-        var spreadImpulseScale = stunnedVictim ? 0.02f : 0.08f;
+        var impactBlend = NormalizePunchImpact(force);
+        var focusedImpulseScale = stunnedVictim
+            ? 0f
+            : Mathf.Lerp(0.42f, 0.62f, impactBlend);
+        var spreadImpulseScale = stunnedVictim
+            ? 0f
+            : Mathf.Lerp(0.10f, 0.18f, impactBlend);
+        var twistTorqueScale = stunnedVictim ? 0f : 0.06f;
         float closestDist = float.MaxValue;
         int closestIdx = -1;
 
@@ -1192,12 +1731,27 @@ public sealed partial class NetworkPlayer
 
         if (closestIdx < 0) return;
 
-        // 가장 가까운 muscle에 집중 임펄스 (50%)
+        var targetMuscleName = muscles[closestIdx].joint != null ? muscles[closestIdx].joint.name : "unknown";
+        victim.TraceStunImpulseSummary(
+            "ApplyMuscleImpulseOnHit",
+            force,
+            focusedImpulseScale,
+            spreadImpulseScale,
+            twistTorqueScale,
+            targetMuscleName);
+
         var closestRb = muscles[closestIdx].joint.GetComponent<Rigidbody>();
         if (closestRb != null && !closestRb.isKinematic)
-            closestRb.AddForce(knockbackDir * force * focusedImpulseScale, ForceMode.Impulse);
+        {
+            closestRb.AddForceAtPosition(
+                knockbackDir * force * focusedImpulseScale,
+                hitPoint,
+                ForceMode.Impulse);
+            closestRb.AddTorque(
+                Vector3.Cross(Vector3.up, knockbackDir) * force * twistTorqueScale,
+                ForceMode.Impulse);
+        }
 
-        // 나머지 muscle에 분산 임펄스 (15%)
         for (int i = 0; i < muscles.Length; i++)
         {
             if (i == closestIdx || muscles[i].joint == null) continue;
@@ -1272,5 +1826,62 @@ public sealed partial class NetworkPlayer
         }
 
         _hitStopEndTime = 0f;
+    }
+
+    // ─── 기절 슬로우모션 ───
+
+    /// <summary>
+    /// 로컬 플레이어가 기절할 때 호출. Time.timeScale을 순간적으로 낮춘다.
+    /// Fusion의 FixedUpdateNetwork는 Runner.DeltaTime을 사용하므로 네트워크 시뮬레이션에 영향 없음.
+    /// </summary>
+    private void TriggerStunSlowMotion()
+    {
+        // 로컬 플레이어만 — HasInputAuthority 체크
+        if (Runner != null && Object != null && Object.IsValid && !HasInputAuthority)
+            return;
+
+        if (_stunSlowMotionActive)
+            return;
+
+        _stunSlowMotionActive = true;
+        Time.timeScale = STUN_SLOWMO_SCALE;
+        Time.fixedDeltaTime = 0.02f * STUN_SLOWMO_SCALE; // physics step도 비례 축소
+
+        float now = Time.unscaledTime;
+        _stunSlowMotionHoldEnd = now + STUN_SLOWMO_HOLD_DURATION;
+        _stunSlowMotionRampEnd = now + STUN_SLOWMO_HOLD_DURATION + STUN_SLOWMO_RAMP_DURATION;
+
+        Debug.Log($"[StunSlowMo] 시작: timeScale={STUN_SLOWMO_SCALE}");
+    }
+
+    /// <summary>
+    /// Update (또는 LateUpdate)에서 매 프레임 호출.
+    /// hold 구간 후 timeScale을 1.0까지 부드럽게 복원.
+    /// </summary>
+    internal void TickStunSlowMotion()
+    {
+        if (!_stunSlowMotionActive)
+            return;
+
+        float now = Time.unscaledTime;
+
+        if (now < _stunSlowMotionHoldEnd)
+            return; // hold 구간 — 낮은 timeScale 유지
+
+        if (now >= _stunSlowMotionRampEnd)
+        {
+            // 복원 완료
+            Time.timeScale = 1f;
+            Time.fixedDeltaTime = 0.02f;
+            _stunSlowMotionActive = false;
+            Debug.Log("[StunSlowMo] 복원 완료");
+            return;
+        }
+
+        // ramp 구간 — STUN_SLOWMO_SCALE → 1.0 으로 선형 보간
+        float t = (now - _stunSlowMotionHoldEnd) / STUN_SLOWMO_RAMP_DURATION;
+        float scale = Mathf.Lerp(STUN_SLOWMO_SCALE, 1f, t);
+        Time.timeScale = scale;
+        Time.fixedDeltaTime = 0.02f * scale;
     }
 }

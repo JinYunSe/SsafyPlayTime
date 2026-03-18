@@ -41,6 +41,7 @@ namespace SSAFYPlayTime.Character
             Grabbed,
             Unstable,
             Stunned,
+            CarriedStunned,
             Recovering
         }
 
@@ -77,11 +78,21 @@ namespace SSAFYPlayTime.Character
         [Header("Stunned")]
         public StateProfile stunned = new StateProfile
         {
-            hand = new BodyPartSettings { pinWeight = 0f, muscleWeight = 0f, mappingWeight = 1f, staticFriction = 0.20f, dynamicFriction = 0.10f, frictionCombine = PhysicMaterialCombine.Minimum },
-            arm = new BodyPartSettings { pinWeight = 0f, muscleWeight = 0f, mappingWeight = 1f, staticFriction = 0.20f, dynamicFriction = 0.10f, frictionCombine = PhysicMaterialCombine.Minimum },
-            head = new BodyPartSettings { pinWeight = 0f, muscleWeight = 0f, mappingWeight = 1f, staticFriction = 0.15f, dynamicFriction = 0.08f, frictionCombine = PhysicMaterialCombine.Minimum },
-            torso = new BodyPartSettings { pinWeight = 0f, muscleWeight = 0f, mappingWeight = 1f, staticFriction = 0.50f, dynamicFriction = 0.30f, frictionCombine = PhysicMaterialCombine.Average },
-            leg = new BodyPartSettings { pinWeight = 0f, muscleWeight = 0f, mappingWeight = 1f, staticFriction = 0.30f, dynamicFriction = 0.20f, frictionCombine = PhysicMaterialCombine.Average }
+            hand = new BodyPartSettings { pinWeight = 0.04f, muscleWeight = 0.03f, mappingWeight = 1f, staticFriction = 0.45f, dynamicFriction = 0.28f, frictionCombine = PhysicMaterialCombine.Average },
+            arm = new BodyPartSettings { pinWeight = 0.06f, muscleWeight = 0.04f, mappingWeight = 1f, staticFriction = 0.40f, dynamicFriction = 0.25f, frictionCombine = PhysicMaterialCombine.Average },
+            head = new BodyPartSettings { pinWeight = 0.08f, muscleWeight = 0.05f, mappingWeight = 1f, staticFriction = 0.35f, dynamicFriction = 0.22f, frictionCombine = PhysicMaterialCombine.Average },
+            torso = new BodyPartSettings { pinWeight = 0.24f, muscleWeight = 0.16f, mappingWeight = 1f, staticFriction = 1.20f, dynamicFriction = 0.95f, frictionCombine = PhysicMaterialCombine.Maximum },
+            leg = new BodyPartSettings { pinWeight = 0.18f, muscleWeight = 0.12f, mappingWeight = 1f, staticFriction = 1.35f, dynamicFriction = 1.05f, frictionCombine = PhysicMaterialCombine.Maximum }
+        };
+
+        [Header("Carried Stunned (기절 + 운반 중 — 형태 유지용 최소 pin/muscle)")]
+        public StateProfile carriedStunned = new StateProfile
+        {
+            hand = new BodyPartSettings { pinWeight = 0.05f, muscleWeight = 0.05f, mappingWeight = 1f, staticFriction = 0.20f, dynamicFriction = 0.10f, frictionCombine = PhysicMaterialCombine.Minimum },
+            arm = new BodyPartSettings { pinWeight = 0.08f, muscleWeight = 0.06f, mappingWeight = 1f, staticFriction = 0.20f, dynamicFriction = 0.10f, frictionCombine = PhysicMaterialCombine.Minimum },
+            head = new BodyPartSettings { pinWeight = 0.15f, muscleWeight = 0.12f, mappingWeight = 1f, staticFriction = 0.15f, dynamicFriction = 0.08f, frictionCombine = PhysicMaterialCombine.Minimum },
+            torso = new BodyPartSettings { pinWeight = 0.22f, muscleWeight = 0.18f, mappingWeight = 1f, staticFriction = 0.50f, dynamicFriction = 0.30f, frictionCombine = PhysicMaterialCombine.Average },
+            leg = new BodyPartSettings { pinWeight = 0.10f, muscleWeight = 0.08f, mappingWeight = 1f, staticFriction = 0.30f, dynamicFriction = 0.20f, frictionCombine = PhysicMaterialCombine.Average }
         };
 
         [Header("Recovering")]
@@ -101,6 +112,7 @@ namespace SSAFYPlayTime.Character
                 CharacterPhysicsState.Grabbed => grabbed,
                 CharacterPhysicsState.Unstable => unstable,
                 CharacterPhysicsState.Stunned => stunned,
+                CharacterPhysicsState.CarriedStunned => carriedStunned,
                 CharacterPhysicsState.Recovering => recovering,
                 _ => normal
             };
