@@ -113774,6 +113774,19 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 9012606667406675970}
   m_Mesh: {fileID: 5351647918496399499, guid: ab672a2d34156d24cac7bc6c2f5753c2, type: 3}
+--- !u!114 &9012606667406675975
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9012606667406675970}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b1caefe2f71c98c28f6d572be7a4c8a6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  surfaceThreshold: 0.8
 --- !u!33 &4755461450467269960
 MeshFilter:
   m_ObjectHideFlags: 0
@@ -208862,6 +208875,7 @@ GameObject:
   - component: {fileID: 9012606667406675972}
   - component: {fileID: 9012606667406675974}
   - component: {fileID: 9012606667406675973}
+  - component: {fileID: 9012606667406675975}
   m_Layer: 0
   m_Name: Water
   m_TagString: Untagged

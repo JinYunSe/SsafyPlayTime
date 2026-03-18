@@ -9,6 +9,7 @@ namespace SSAFYPlayTime.Character
         Jump,        // 점프 직후
         Fall,        // 짧게 공중에 뜬 상태 (fallEnterSec 이상)
         FreeFall,    // 장시간 낙하 상태 (freeFallEnterSec 이상)
-        Unconscious  // 기절 상태 (미사용 예약)
+        Unconscious, // 기절 상태 (미사용 예약)
+        Swimming     // 수영 상태 (물 안)
     }
 }
