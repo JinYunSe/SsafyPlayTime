@@ -49,11 +49,11 @@ public sealed partial class NetworkPlayer
     [SerializeField] private float blackholeThrowSpeed = 8f;
     [SerializeField] private float blackholeThrowArc = 0.35f;
     [SerializeField] private bool enableReplicatedBlackholeSecondaryFx;
-    [SerializeField] private float blackholePullStrengthMultiplier = 2.25f;
+    [SerializeField] private float blackholePullStrengthMultiplier = 3.25f;
     [SerializeField] private float blackholeExpandSpeedMultiplier = 1.5f;
-    [SerializeField] private float blackholePlayerPullMultiplier = 1.5f;
+    [SerializeField] private float blackholePlayerPullMultiplier = 2.5f;
     [SerializeField] private float blackholeItemPullMultiplier = 1.5f;
-    [SerializeField] private float blackholePlayerEscapeDamping = 0.2f;
+    [SerializeField] private float blackholePlayerEscapeDamping = 0.45f;
     [SerializeField] private bool enableReplicatedBlackholeTargetOutline = true;
     [SerializeField] private Color replicatedBlackholeTargetOutlineColor = new(0.72f, 0.56f, 1f, 0.9f);
     [SerializeField] private float replicatedBlackholeTargetOutlineScaleMultiplier = 1.045f;
@@ -696,6 +696,10 @@ public sealed partial class NetworkPlayer
             if (root != null && root.CompareTag("Player"))
             {
                 ApplyBlackholeEscapeDamping(body, toCenter.normalized);
+                var inwardVelocityBoost = toCenter.normalized *
+                                          ((force * 0.06f) + (ramp * 0.45f)) /
+                                          Mathf.Max(0.75f, Mathf.Sqrt(distance));
+                body.AddForce(inwardVelocityBoost, ForceMode.VelocityChange);
             }
 
             body.AddForce(toCenter.normalized * pullStrength, ForceMode.Acceleration);

@@ -26,9 +26,9 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
 
                 var useInstancedMaterials = ShouldUseInstancedMaterials(renderer);
-                var materials = useInstancedMaterials
+                var materials = SanitizeMaterials(useInstancedMaterials
                     ? renderer.materials
-                    : renderer.sharedMaterials;
+                    : renderer.sharedMaterials);
                 if (materials == null || materials.Length == 0)
                 {
                     continue;
@@ -38,6 +38,11 @@ namespace SSAFYPlayTime.Gameplay.Items
                 for (var m = 0; m < materials.Length; m++)
                 {
                     var source = materials[m];
+                    if (source == null)
+                    {
+                        continue;
+                    }
+
                     if (!forceLitOverride && !NeedsFallback(source) && !ShouldForceGlowFallback(renderer, source))
                     {
                         continue;
@@ -175,18 +180,25 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return true;
             }
 
-            var materials = useInstancedMaterials
+            var materials = SanitizeMaterials(useInstancedMaterials
                 ? renderer.materials
-                : renderer.sharedMaterials;
+                : renderer.sharedMaterials);
             if (materials == null || materials.Length == 0)
             {
                 return false;
             }
 
+            var hasValidMaterial = false;
             for (var i = 0; i < materials.Length; i++)
             {
                 var material = materials[i];
-                if (material == null || material.shader == null)
+                if (material == null)
+                {
+                    continue;
+                }
+
+                hasValidMaterial = true;
+                if (material.shader == null)
                 {
                     return true;
                 }
@@ -203,7 +215,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
             }
 
-            return false;
+            return !hasValidMaterial;
         }
 
         private static bool ShouldUseInstancedMaterials(Renderer renderer)
@@ -493,6 +505,47 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             return false;
+        }
+
+        private static Material[] SanitizeMaterials(Material[] materials)
+        {
+            if (materials == null || materials.Length == 0)
+            {
+                return Array.Empty<Material>();
+            }
+
+            var validCount = 0;
+            for (var i = 0; i < materials.Length; i++)
+            {
+                if (materials[i] != null)
+                {
+                    validCount++;
+                }
+            }
+
+            if (validCount == materials.Length)
+            {
+                return materials;
+            }
+
+            if (validCount == 0)
+            {
+                return Array.Empty<Material>();
+            }
+
+            var sanitized = new Material[validCount];
+            var nextIndex = 0;
+            for (var i = 0; i < materials.Length; i++)
+            {
+                if (materials[i] == null)
+                {
+                    continue;
+                }
+
+                sanitized[nextIndex++] = materials[i];
+            }
+
+            return sanitized;
         }
     }
 }
