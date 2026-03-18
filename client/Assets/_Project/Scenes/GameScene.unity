@@ -1053,8 +1053,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b6029b7dacccbd44eaf11aec148a2cb2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  damageAmount: 10
-  damageInterval: 1
+  mapData: {fileID: 11400000, guid: 667d0c8a4d4d6a64ab7ad659b2651d6e, type: 2}
 --- !u!65 &403653134
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -1153,10 +1152,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 917bde95913f24541bfda23e1b9307f9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  sinkingSpeed: 0
-  maxWaterLevel: -3.5
-  checkInterval: 1
-  riseDuration: 0
+  seaLevelData: {fileID: 11400000, guid: a18aeb1b64fe0a54aa3b1ef7c297a99b, type: 2}
 --- !u!114 &403653139
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1174,6 +1170,7 @@ MonoBehaviour:
   Flags: 1
   NestedObjects: []
   NetworkedBehaviours:
+  - {fileID: 403653133}
   - {fileID: 403653138}
   ForceRemoteRenderTimeframe: 0
 --- !u!1 &425342455 stripped
@@ -3405,7 +3402,7 @@ GameObject:
   - component: {fileID: 1075062199}
   - component: {fileID: 1075062197}
   m_Layer: 0
-  m_Name: ImmediateDeath
+  m_Name: Stage
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -3563,7 +3560,7 @@ Transform:
   m_GameObject: {fileID: 1086269083}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -26.92, y: 17.62, z: 79.49}
+  m_LocalPosition: {x: -26.92, y: 17.05, z: 79.49}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -6310,6 +6307,71 @@ PrefabInstance:
       insertIndex: -1
       addedObject: {fileID: 1538866689}
   m_SourcePrefab: {fileID: 100100000, guid: 23f8c0ffe3ff1e340aa225c155cea12b, type: 3}
+--- !u!1 &1766432998
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1766432999}
+  - component: {fileID: 1766433001}
+  - component: {fileID: 1766433000}
+  m_Layer: 0
+  m_Name: MapManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1766432999
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1766432998}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1766433000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1766432998}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  SortKey: 3647115941
+  ObjectInterest: 1
+  Flags: 262145
+  NestedObjects: []
+  NetworkedBehaviours:
+  - {fileID: 1766433001}
+  ForceRemoteRenderTimeframe: 0
+--- !u!114 &1766433001
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1766432998}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1eb7a316e1e1ff6468e81736f14f0274, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  mapData: {fileID: 11400000, guid: 667d0c8a4d4d6a64ab7ad659b2651d6e, type: 2}
 --- !u!1001 &1789324728
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -125136,6 +125198,7 @@ GameObject:
   - component: {fileID: 5543608262851899589}
   - component: {fileID: 101773963997269820}
   - component: {fileID: 6000729640231429455}
+  - component: {fileID: 6000729640231429456}
   m_Layer: 0
   m_Name: bridge_001
   m_TagString: Untagged
@@ -143763,6 +143826,33 @@ MeshCollider:
   m_Convex: 0
   m_CookingOptions: 30
   m_Mesh: {fileID: 5962774803535209831, guid: a4496ecf1d6c46247b9bfed5dd558878, type: 3}
+--- !u!54 &6000729640231429456
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5162544593547651711}
+  serializedVersion: 4
+  m_Mass: 1
+  m_Drag: 0
+  m_AngularDrag: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 1
+  m_IsKinematic: 1
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
 --- !u!23 &6001033074639136471
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -199050,6 +199140,7 @@ GameObject:
   - component: {fileID: 9135987909997812432}
   - component: {fileID: 3697107989961581865}
   - component: {fileID: 7017040404717309786}
+  - component: {fileID: 9135987909997812433}
   m_Layer: 0
   m_Name: bridge_001
   m_TagString: Untagged
@@ -210033,10 +210124,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 917bde95913f24541bfda23e1b9307f9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  sinkingSpeed: 0
-  maxWaterLevel: 5
-  checkInterval: 1
-  riseDuration: 0
+  seaLevelData: {fileID: 11400000, guid: 10b884d320eea414aaac994c7ac39189, type: 2}
 --- !u!114 &9012606667406675972
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -213072,6 +213160,33 @@ Transform:
   m_Children: []
   m_Father: {fileID: 2349868956447622096}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!54 &9135987909997812433
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8467431635956957290}
+  serializedVersion: 4
+  m_Mass: 1
+  m_Drag: 0
+  m_AngularDrag: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 1
+  m_IsKinematic: 1
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
 --- !u!4 &9137287651635393982
 Transform:
   m_ObjectHideFlags: 0
@@ -214757,3 +214872,4 @@ SceneRoots:
   - {fileID: 1501624216}
   - {fileID: 1930726947}
   - {fileID: 390723930}
+  - {fileID: 1766432999}
