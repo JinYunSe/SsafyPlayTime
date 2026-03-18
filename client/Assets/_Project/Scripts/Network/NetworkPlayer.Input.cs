@@ -250,10 +250,18 @@ public sealed partial class NetworkPlayer
 
         _nextOutOfBoundsRecoverAt = now + 0.5f;
 
-        var outOfBoundsDamage = CombatSettings.Instance != null
-            ? CombatSettings.Instance.outOfBoundsHpDamage
-            : 9999f;
+        if (!TryResolveRecoveryTransform(out var recoveryPosition, out var recoveryRotation))
+            recoveryRotation = transform.rotation;
 
-        ApplyHpDamage(outOfBoundsDamage);
+        rigidbody3D.position = recoveryPosition;
+        rigidbody3D.rotation = recoveryRotation;
+        transform.SetPositionAndRotation(recoveryPosition, recoveryRotation);
+        if (rigidbody3D != null && !rigidbody3D.isKinematic)
+        {
+            rigidbody3D.velocity = Vector3.zero;
+            rigidbody3D.angularVelocity = Vector3.zero;
+        }
+        RememberSafeTransform(recoveryPosition, recoveryRotation);
+        ForceRecover();
     }
 }
