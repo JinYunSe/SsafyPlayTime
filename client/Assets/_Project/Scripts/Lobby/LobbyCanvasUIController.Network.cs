@@ -556,7 +556,112 @@ namespace SSAFYPlayTime
         private bool _netRightMouseDown;
         private float _netRightMouseDownTime;
         private bool _netRightMouseConsumedAsGrab;
+        private bool _netPunchQueued;
+        private bool _netThrowQueued;
+        private bool _netJumpQueued;
+        private bool _netDropQueued;
+        private bool _netHeadbuttQueued;
+        private Vector2 _netMoveInput;
+        private float _netCameraYaw;
+        private bool _netSprintHeld;
         private const float NET_GRAB_HOLD_THRESHOLD = 0.15f;
+
+        private void CaptureNetworkInputState()
+        {
+            if (_runner == null || !_runner.IsRunning || !GameStartCountdown.InputEnabled)
+            {
+                ResetLatchedNetworkInputState();
+                return;
+            }
+
+            _netMoveInput = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
+            _netCameraYaw = Camera.main != null ? Camera.main.transform.eulerAngles.y : 0f;
+            _netSprintHeld = Input.GetKey(KeyCode.LeftShift);
+
+            if (Input.GetMouseButtonDown(0))
+            {
+                _netLeftMouseDown = true;
+                _netLeftMouseDownTime = Time.time;
+                _netLeftMouseConsumedAsGrab = false;
+            }
+
+            if (_netLeftMouseDown && Input.GetMouseButton(0) &&
+                Time.time - _netLeftMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
+            {
+                _netLeftMouseConsumedAsGrab = true;
+            }
+
+            if (Input.GetMouseButtonUp(0))
+            {
+                if (_netLeftMouseDown &&
+                    !_netLeftMouseConsumedAsGrab &&
+                    Time.time - _netLeftMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
+                {
+                    _netPunchQueued = true;
+                }
+
+                _netLeftMouseDown = false;
+                _netLeftMouseConsumedAsGrab = false;
+            }
+
+            if (Input.GetMouseButtonDown(1))
+            {
+                _netRightMouseDown = true;
+                _netRightMouseDownTime = Time.time;
+                _netRightMouseConsumedAsGrab = false;
+            }
+
+            if (_netRightMouseDown && Input.GetMouseButton(1) &&
+                Time.time - _netRightMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
+            {
+                _netRightMouseConsumedAsGrab = true;
+            }
+
+            if (Input.GetMouseButtonUp(1))
+            {
+                if (_netRightMouseDown &&
+                    !_netRightMouseConsumedAsGrab &&
+                    Time.time - _netRightMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
+                {
+                    _netThrowQueued = true;
+                }
+
+                _netRightMouseDown = false;
+                _netRightMouseConsumedAsGrab = false;
+            }
+
+            if (Input.GetKeyDown(KeyCode.Space))
+                _netJumpQueued = true;
+
+            if (Input.GetKeyDown(KeyCode.F))
+                _netDropQueued = true;
+
+            if (Input.GetMouseButtonDown(2))
+                _netHeadbuttQueued = true;
+        }
+
+        private void ResetLatchedNetworkInputState()
+        {
+            _netLeftMouseDown = false;
+            _netLeftMouseConsumedAsGrab = false;
+            _netRightMouseDown = false;
+            _netRightMouseConsumedAsGrab = false;
+            _netPunchQueued = false;
+            _netThrowQueued = false;
+            _netJumpQueued = false;
+            _netDropQueued = false;
+            _netHeadbuttQueued = false;
+            _netMoveInput = Vector2.zero;
+            _netCameraYaw = 0f;
+            _netSprintHeld = false;
+        }
+
+        private static bool ConsumeLatchedNetworkFlag(ref bool queued)
+        {
+            var value = queued;
+            queued = false;
+            return value;
+        }
 
         // 매 네트워크 틱마다 로컬 플레이어의 입력을 수집해 Fusion에 전달한다.
         // 좌클릭 짧게 = 아이템 사용(Punch), 좌클릭 꾹(0.15초+) = 왼손 그랩
@@ -565,8 +670,27 @@ namespace SSAFYPlayTime
         {
             if (!GameStartCountdown.InputEnabled) return;
 
+            var latchedLeftGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
+            var latchedRightGrabHold = _netRightMouseDown && _netRightMouseConsumedAsGrab;
+
+            input.Set(new PlayerNetworkInput
+            {
+                Move = _netMoveInput,
+                CameraYaw = _netCameraYaw,
+                Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
+                Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
+                Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
+                Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
+                LeftGrabHold = latchedLeftGrabHold,
+                RightGrabHold = latchedRightGrabHold,
+                Headbutt = ConsumeLatchedNetworkFlag(ref _netHeadbuttQueued),
+                Sprint = _netSprintHeld
+            });
+            return;
+
             bool isPunch = false;
             bool isThrow = false;
+
 
             // 좌클릭 상태 추적 (왼손 그랩)
             if (Input.GetMouseButtonDown(0))
@@ -576,13 +700,13 @@ namespace SSAFYPlayTime
                 _netLeftMouseConsumedAsGrab = false;
             }
 
-            if (Input.GetMouseButton(0) && _netLeftMouseDown)
+            if (runner == null && Input.GetMouseButton(0) && _netLeftMouseDown)
             {
                 if (Time.time - _netLeftMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
                     _netLeftMouseConsumedAsGrab = true;
             }
 
-            if (Input.GetMouseButtonUp(0))
+            if (runner == null && Input.GetMouseButtonUp(0))
             {
                 if (!_netLeftMouseConsumedAsGrab && Time.time - _netLeftMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
                     isPunch = true;
@@ -591,20 +715,20 @@ namespace SSAFYPlayTime
             }
 
             // 우클릭 상태 추적 (오른손 그랩)
-            if (Input.GetMouseButtonDown(1))
+            if (runner == null && Input.GetMouseButtonDown(1))
             {
                 _netRightMouseDown = true;
                 _netRightMouseDownTime = Time.time;
                 _netRightMouseConsumedAsGrab = false;
             }
 
-            if (Input.GetMouseButton(1) && _netRightMouseDown)
+            if (runner == null && Input.GetMouseButton(1) && _netRightMouseDown)
             {
                 if (Time.time - _netRightMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
                     _netRightMouseConsumedAsGrab = true;
             }
 
-            if (Input.GetMouseButtonUp(1))
+            if (runner == null && Input.GetMouseButtonUp(1))
             {
                 if (!_netRightMouseConsumedAsGrab && Time.time - _netRightMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
                     isThrow = true;
@@ -614,20 +738,19 @@ namespace SSAFYPlayTime
 
             bool isLeftGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
             bool isRightGrabHold = _netRightMouseDown && _netRightMouseConsumedAsGrab;
-            var cameraYaw = Camera.main != null ? Camera.main.transform.eulerAngles.y : 0f;
 
             input.Set(new PlayerNetworkInput
             {
-                Move = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical")),
-                CameraYaw = cameraYaw,
-                Jump = Input.GetKeyDown(KeyCode.Space),
-                Punch = isPunch,
-                Drop = Input.GetKeyDown(KeyCode.F),
-                Throw = isThrow,
+                Move = _netMoveInput,
+                CameraYaw = _netCameraYaw,
+                Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
+                Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
+                Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
+                Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
                 LeftGrabHold = isLeftGrabHold,
                 RightGrabHold = isRightGrabHold,
-                Headbutt = Input.GetMouseButtonDown(2),
-                Sprint = Input.GetKey(KeyCode.LeftShift)
+                Headbutt = ConsumeLatchedNetworkFlag(ref _netHeadbuttQueued),
+                Sprint = _netSprintHeld
             });
         }
         void INetworkRunnerCallbacks.OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
