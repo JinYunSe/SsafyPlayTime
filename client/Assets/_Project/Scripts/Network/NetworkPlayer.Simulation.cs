@@ -428,15 +428,6 @@ public sealed partial class NetworkPlayer
             config.groundProbeRadius,
             config.groundProbeDistance);
 
-        // 수영 분기: 물 안에 있으면 별도 물리 처리
-        if (_isInWater)
-        {
-            ApplySwimmingPhysics(input, dt, jumpMultiplier, moveSpeedMultiplier);
-            return;
-        }
-
-        _stateMachine.SetSwimming(false);
-
         // Coyote time: 착지 직후 떨어지면 짧은 유예 시간 동안 점프 허용
         if (_isGrounded)
             _coyoteTimeRemaining = COYOTE_TIME;
@@ -667,55 +658,6 @@ public sealed partial class NetworkPlayer
         // 소비: 더블점프 방지
         _coyoteTimeRemaining = 0f;
         _jumpBufferRemaining = 0f;
-    }
-
-    private void ApplySwimmingPhysics(PlayerNetworkInput input, float dt, float jumpMultiplier, float moveSpeedMultiplier)
-    {
-        // 부력: 수면 아래에 있을 때 위 방향 힘 적용 (추가 중력 상쇄)
-        var surfaceY = _activeWaterZone != null ? _activeWaterZone.SurfaceY : rigidbody3D.position.y;
-        var depth = surfaceY - rigidbody3D.position.y;
-        if (depth > 0f)
-            rigidbody3D.AddForce(Vector3.up * config.swimBuoyancy, ForceMode.Acceleration);
-
-        // 수영 중 수직 속도 감쇠 (급격한 가라앉음 방지)
-        var vel = rigidbody3D.velocity;
-        if (vel.y < 0f)
-            rigidbody3D.velocity = new Vector3(vel.x, vel.y * Mathf.Pow(0.85f, dt * 60f), vel.z);
-
-        // 수평 이동 (수영 속도 배율 적용)
-        var moveInput = new Vector3(input.Move.x, 0f, input.Move.y);
-        var cameraRelativeMove = Quaternion.Euler(0f, input.CameraYaw, 0f) * moveInput;
-        var inputMagnitude = Mathf.Clamp01(moveInput.magnitude);
-        var moveDirection = cameraRelativeMove.sqrMagnitude > 0.0001f
-            ? cameraRelativeMove.normalized
-            : Vector3.zero;
-
-        RotateTowardInput(cameraRelativeMove, inputMagnitude, dt);
-        ApplyMovementForce(moveDirection, inputMagnitude, config.swimSpeedMultiplier * moveSpeedMultiplier, dt);
-
-        // 수면 근처에서만 점프 허용 → 물 밖으로 탈출 가능
-        var isNearSurface = _activeWaterZone == null || _activeWaterZone.IsNearSurface(rigidbody3D.position.y);
-        if (isNearSurface)
-        {
-            _coyoteTimeRemaining = COYOTE_TIME;
-            ApplyJumpIfPossible(input.Jump, jumpMultiplier);
-        }
-        else
-        {
-            _coyoteTimeRemaining = 0f;
-            _jumpBufferRemaining = 0f;
-        }
-
-        _stateMachine.SetSwimming(true);
-
-        var planarVelocity = rigidbody3D.velocity;
-        planarVelocity.y = 0f;
-        var normalizedMoveSpeed = planarVelocity.magnitude * 0.4f;
-        var locomotionState = ResolveLocomotionState(normalizedMoveSpeed, false);
-        SetMotorPresentationState(normalizedMoveSpeed, (int)_stateMachine.CurrentState, locomotionState);
-
-        if (Runner != null && Object != null && Object.IsValid)
-            NetworkedIsSprinting = false;
     }
 
     private void SynchronizeMotorPresentation()
