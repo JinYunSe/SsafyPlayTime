@@ -575,7 +575,9 @@ namespace SSAFYPlayTime
             }
 
             _netMoveInput = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
-            _netCameraYaw = Camera.main != null ? Camera.main.transform.eulerAngles.y : 0f;
+            // Camera.main이 null이면 직전 유효 yaw를 그대로 유지 (0으로 리셋하면 이동 방향이 북쪽으로 고정됨)
+            if (Camera.main != null)
+                _netCameraYaw = Camera.main.transform.eulerAngles.y;
             _netSprintHeld = Input.GetKey(KeyCode.LeftShift);
 
             if (Input.GetMouseButtonDown(0))
