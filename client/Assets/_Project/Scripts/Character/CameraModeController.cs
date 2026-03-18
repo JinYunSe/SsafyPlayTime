@@ -66,6 +66,8 @@ public class CameraModeController : MonoBehaviour
         Debug.Log($"CameraModeController: Alive mode, target = {localPlayer.name}");
     }
 
+    public void ForceHandleLocalPlayerDied(PlayerStats dead) => HandleLocalPlayerDied(dead);
+
     private void HandleLocalPlayerDied(PlayerStats dead)
     {
         Debug.Log($"CameraModeController: Local player died -> {dead.gameObject.name}, switch to spectator");
