@@ -2783,6 +2783,37 @@ Transform:
   - {fileID: 8376927926462176653}
   m_Father: {fileID: 1639850141031448514}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &5073536985502801093
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6137003032260221217}
+  m_Layer: 0
+  m_Name: GhostThrowSpawnPoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6137003032260221217
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5073536985502801093}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.67, y: 0, z: 2.18}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 5783864079064507161}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &5162449252453046917
 GameObject:
   m_ObjectHideFlags: 0
@@ -4224,6 +4255,8 @@ GameObject:
   - component: {fileID: 2653967396604278305}
   - component: {fileID: 264341386449131616}
   - component: {fileID: 964483268536491044}
+  - component: {fileID: 871762644500709784}
+  - component: {fileID: 394049066348431589}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -4240,10 +4273,11 @@ Transform:
   m_GameObject: {fileID: 7761395685847284647}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 4, y: -5, z: -10}
+  m_LocalPosition: {x: 0, y: 0, z: -10}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 6137003032260221217}
   m_Father: {fileID: 4022499257010193187}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!20 &1047001073462432665
@@ -4319,6 +4353,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   target: {fileID: 0}
   autoFindPlayerTag: Player
+  autoFindTargetName: Test
   autoFindTargetWhenNull: 1
   pivotOffset: {x: 0, y: 1.2, z: 0}
   distance: 8
@@ -4332,6 +4367,7 @@ MonoBehaviour:
   lockCursor: 1
   lookDeadZone: 0.01
   followSmooth: 14
+  rotateSmooth: 18
   obstructionMask:
     serializedVersion: 2
     m_Bits: 119
@@ -4382,6 +4418,59 @@ MonoBehaviour:
     m_MipBias: 0
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
+--- !u!114 &871762644500709784
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7761395685847284647}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 999abe0970d285b48acfe988bc41410e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  mapCenter: {x: 0, y: 0, z: 0}
+  orbitRadius: 40
+  orbitHeight: 15
+  orbitSpeed: 60
+  moveSpeed: 5
+--- !u!114 &394049066348431589
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7761395685847284647}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 225aa0b6136b5ef4cb50de0fe4fa2dbc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  enableOnlyAfterDeath: 1
+  localPlayerTag: Player
+  manualLocalTarget: {fileID: 0}
+  cooldown: 1
+  throwForce: 20
+  spawnForwardOffset: 2
+  spawnHeight: 3
+  arcHeight: 8
+  maxHorizontalSpeed: 25
+  spawnLaunchOffset: 8
+  ghostThrowSpawnPoint: {fileID: 6137003032260221217}
+  hitLayer:
+    serializedVersion: 2
+    m_Bits: 119
+  cubePrefabOffline: {fileID: 2247541176841469660, guid: d967a8594241ca54d96fa911a702b77e,
+    type: 3}
+  cubePrefabOnline:
+    RawGuidValue: d967a8594241ca54d96fa911a702b77e
+  cubePrefabOnlineObject: {fileID: 0}
+  bananaPrefabOffline: {fileID: 1407451490957870, guid: 3ce32ffa6ccf60e4ab65d9e396f43433,
+    type: 3}
+  bananaPrefabOnline:
+    RawGuidValue: 3ce32ffa6ccf60e4ab65d9e396f43433
+  bananaPrefabOnlineObject: {fileID: 0}
 --- !u!1 &7818269253471217244
 GameObject:
   m_ObjectHideFlags: 0
@@ -5140,7 +5229,7 @@ Transform:
   m_GameObject: {fileID: 8705436626796712522}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -4, y: 5, z: 10}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -5345,6 +5434,9 @@ MonoBehaviour:
     _value: 0
   _NetworkedIsDragged:
     _value: 0
+  _NetworkedHp: 0
+  _IsDeadNetworked:
+    _value: 0
   itemWorldEffectMask:
     serializedVersion: 2
     m_Bits: 119
@@ -5471,8 +5563,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   puppetMaster: {fileID: 2635947696373288516}
   behaviourPuppet: {fileID: 2896362300633973046}
-  respawnDelay: 3
-  respawnPoint: {fileID: 0}
   freezeAfterDeathTime: 5
 --- !u!114 &2497017319830200292
 MonoBehaviour:
