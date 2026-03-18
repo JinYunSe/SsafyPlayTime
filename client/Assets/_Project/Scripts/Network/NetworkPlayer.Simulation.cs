@@ -20,8 +20,6 @@ public sealed partial class NetworkPlayer
 
     private void DoPhysicsStep(PlayerNetworkInput input, float dt)
     {
-        EnsureCoreReferences();
-
         if (config == null || rigidbody3D == null || mainJoint == null)
             return;
 
@@ -67,12 +65,6 @@ public sealed partial class NetworkPlayer
 
         if (accumulated >= threshold)
             TriggerStun(CalculateStunDuration(attackerVelocity, impulseMagnitude));
-
-        // ─── HP 차감: 펀치 고정 데미지 ────────────────────────────
-        var hpDmg = CombatSettings.Instance != null
-            ? CombatSettings.Instance.punchHpDamage
-            : 4f;
-        ApplyHpDamage(hpDmg);
     }
 
     public void OnPlayerBodyPartHit()
