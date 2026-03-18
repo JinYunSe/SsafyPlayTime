@@ -155,8 +155,9 @@ public sealed partial class NetworkPlayer
         if (animator == null)
             return;
 
-        var isCarrying = IsAnyHandHoldingThrowableTarget();
-        var isGrabbing = _isGrabActive && !isCarrying;
+        var phase = GetPhysicalPhase();
+        var isCarrying = phase == PhysicalPhase.Holding && IsAnyHandHoldingThrowableTarget();
+        var isGrabbing = (phase == PhysicalPhase.GrabIntent || phase == PhysicalPhase.Holding) && !isCarrying;
 
         animator.SetBool(H_IsGrabbing, isGrabbing);
         animator.SetBool("isCarrying", isCarrying);
@@ -179,7 +180,8 @@ public sealed partial class NetworkPlayer
     {
         if (animator == null) return;
 
-        bool confirmedHolding = NetworkedLeftGrabHolding || NetworkedRightGrabHolding;
+        var phase = GetPhysicalPhase();
+        bool confirmedHolding = phase == PhysicalPhase.Holding;
 
         // OwnerProxy 예측: 로컬 입력 즉시 반영 → 호스트 미확정 시 타임아웃 롤백
         bool localPredicting = HasInputAuthority && !HasStateAuthority
@@ -196,12 +198,12 @@ public sealed partial class NetworkPlayer
         else
         {
             _grabPredictionStart = -1f;
-            showGrab = confirmedHolding || localPredicting;
+            showGrab = phase == PhysicalPhase.GrabIntent || confirmedHolding || localPredicting;
         }
 
         // Carry 판별: 확정된 grab 대상이 기절 상태이면 carrying
-        bool isCarrying = showGrab && IsConfirmedGrabTargetStunned();
-        bool isGrabbing = showGrab && !isCarrying;
+        bool isCarrying = confirmedHolding && IsConfirmedGrabTargetStunned();
+        bool isGrabbing = showGrab && !isCarrying && !UsesPhysicsPosePresentation(phase);
 
         animator.SetBool(H_IsGrabbing, isGrabbing);
         animator.SetBool("isCarrying", isCarrying);

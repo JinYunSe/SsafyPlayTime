@@ -18,6 +18,7 @@ namespace SSAFYPlayTime
 {
     public sealed partial class LobbyCanvasUIController : MonoBehaviour, INetworkRunnerCallbacks
     {
+
         private sealed class RoomSnapshot
         {
             public string Name;
@@ -82,6 +83,9 @@ namespace SSAFYPlayTime
         private const int PlayerSlotCount = 4;
         private const int CharacterOptionCount = 5;
 
+        [Header("Debug")]
+        [Tooltip("체크 시 1인 방에서도 게임 시작 가능. PlayMode Inspector에서 바로 조작 가능.")]
+        [SerializeField] private bool allowSoloStart;
         [Header("Panels")]
         [SerializeField] private GameObject nicknamePanel;
         [SerializeField] private GameObject lobbyPanel;
@@ -375,6 +379,8 @@ namespace SSAFYPlayTime
         // 매 프레임 호스트 F5 게임 시작 단축키 처리 및 캐릭터 배치·정렬을 갱신한다.
         private void Update()
         {
+            CaptureNetworkInputState();
+
             if (roomPanel != null && roomPanel.activeSelf && _runner != null && _runner.IsRunning && _runner.IsServer)
             {
                 if (Input.GetKeyDown(KeyCode.F5))
@@ -472,6 +478,10 @@ namespace SSAFYPlayTime
             {
                 nicknameInput.onValueChanged.AddListener(_ => EnforceNameInputLimit(nicknameInput));
             }
+            if (editNicknameInput != null)
+            {
+                editNicknameInput.onValueChanged.AddListener(_ => EnforceNameInputLimit(editNicknameInput));
+            }
 
             createPrivateToggle.onValueChanged.AddListener(OnPrivateToggleChanged);
             createConfirmButton.onClick.AddListener(OnCreateRoomConfirmed);
@@ -513,6 +523,7 @@ namespace SSAFYPlayTime
             {
                 readyButton.onClick.AddListener(OnReadyButtonClicked);
             }
+
 
             if (selectSsatyCharacterButton != null)
             {
@@ -889,7 +900,7 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            if (_runner.SessionInfo.PlayerCount <= 1)
+            if (!allowSoloStart && _runner.SessionInfo.PlayerCount <= 1)
             {
                 return;
             }
@@ -2062,6 +2073,7 @@ namespace SSAFYPlayTime
             ToggleLocalPlayerReady();
         }
 
+
         // 로컬 플레이어의 준비 상태를 토글하고 방장에게 전파한다.
         private void ToggleLocalPlayerReady()
         {
@@ -2399,7 +2411,7 @@ namespace SSAFYPlayTime
             var btnText = startGameButton.GetComponentInChildren<TMP_Text>();
             if (isHost)
             {
-                startGameButton.interactable = currentPlayers > 1 && AreAllNonHostPlayersReady();
+                startGameButton.interactable = allowSoloStart || (currentPlayers > 1 && AreAllNonHostPlayersReady());
                 if (btnText != null) btnText.text = "게임 시작";
                 return;
             }

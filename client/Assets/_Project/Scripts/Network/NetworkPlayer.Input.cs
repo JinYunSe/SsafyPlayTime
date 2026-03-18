@@ -44,8 +44,9 @@ public sealed partial class NetworkPlayer
         if (GetInput(out PlayerNetworkInput input))
             DoPhysicsStep(input, Runner.DeltaTime);
 
-        SynchronizeNetworkSimulationState();
         UpdateGrabHandlers();
+        UpdatePhysicalPhaseState(Runner.DeltaTime);
+        SynchronizeNetworkSimulationState();
         ClampOutOfBoundsCharacter();
     }
 
@@ -166,6 +167,9 @@ public sealed partial class NetworkPlayer
         }
 
         NetworkedIsActiveRagdoll = _isActiveRagdoll;
+        NetworkedPhysicalPhase = (byte)_localPhysicalPhase;
+        NetworkedInstability = _localInstability;
+        NetworkedIsDragged = _localIsDragged;
         SynchronizeStunPresentationPhase();
     }
 
