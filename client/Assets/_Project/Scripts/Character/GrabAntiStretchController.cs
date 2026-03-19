@@ -34,7 +34,6 @@ namespace SSAFYPlayTime.Character
         [SerializeField] private float carriedVictimCoreSpringMultiplier = 2.2f;
         [SerializeField] private float carriedVictimCoreDamperMultiplier = 1.35f;
         [SerializeField] private bool verboseWarnings;
-        [SerializeField] private bool debugLog;
 
         private RuntimeLink[] _links;
         private RuntimeDriveLink[] _coreDriveLinks;
@@ -83,14 +82,11 @@ namespace SSAFYPlayTime.Character
 
         private void Awake()
         {
-            debugLog = true; // 디버그 진단용 강제 활성화
             ResolveReferences();
-            NormalizeTuning();
             BuildLinkDefinitions();
             BuildCoreDriveDefinitions();
             TryResolveLinkBodies();
             TryResolveCoreDriveJoints();
-            debugLog = false;
         }
 
         private void FixedUpdate()
@@ -129,26 +125,9 @@ namespace SSAFYPlayTime.Character
 
             var shouldEnable = ShouldEnableAntiStretch();
             if (shouldEnable && !_active)
-            {
-                if (debugLog)
-                    Debug.Log($"[AntiStretch] {name}: ENABLING anti-stretch, " +
-                        $"phase={networkPlayer?.GetPhysicalPhase()}, resolved={_resolved}", this);
                 EnableAntiStretch();
-            }
             else if (!shouldEnable && _active)
-            {
-                if (debugLog)
-                    Debug.Log($"[AntiStretch] {name}: DISABLING anti-stretch, " +
-                        $"phase={networkPlayer?.GetPhysicalPhase()}", this);
                 DisableAntiStretch();
-            }
-
-            var desiredCoreDrive = ResolveCoreDriveMode();
-            if (debugLog && desiredCoreDrive != _currentCoreDriveMode)
-            {
-                Debug.Log($"[AntiStretch] {name}: coreDrive {_currentCoreDriveMode} → {desiredCoreDrive}, " +
-                    $"phase={networkPlayer?.GetPhysicalPhase()}, active={_active}", this);
-            }
 
             RefreshCoreDrive(force: false);
         }
@@ -656,28 +635,6 @@ namespace SSAFYPlayTime.Character
 
         private void ResolveCoreDriveMultipliers(CoreDriveMode mode, out float springMultiplier, out float damperMultiplier)
         {
-            // CarrySolveFrame: CarryPhysicsProfile이 있으면 그 값 우선
-            if (networkPlayer != null)
-            {
-                var carryProfile = networkPlayer.GetCarryPhysicsProfile();
-                if (carryProfile != null)
-                {
-                    var carryMode = networkPlayer.GetLocalCarryMode();
-                    if (carryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None)
-                    {
-                        var settings = carryProfile.GetSettings(carryMode);
-                        // victim 쪽은 victimCoreDrive 사용, carrier 쪽은 carrierTorsoReaction으로 대체
-                        if (mode == CoreDriveMode.CarriedVictim)
-                        {
-                            springMultiplier = settings.victimCoreDriveSpringMultiplier;
-                            damperMultiplier = settings.victimCoreDriveDamperMultiplier;
-                            return;
-                        }
-                    }
-                }
-            }
-
-            // 폴백: 기존 Inspector 값
             switch (mode)
             {
                 case CoreDriveMode.Carrying:
@@ -745,7 +702,7 @@ namespace SSAFYPlayTime.Character
             if (_active)
                 EnsureJoint(link);
 
-            if (debugLog)
+            if (verboseWarnings)
                 Debug.Log($"[AntiStretch] {name}: Added dynamic link {link.label}, " +
                     $"limb={link.limbBody?.name}, anchor={link.anchorBody?.name}", this);
         }
@@ -766,7 +723,7 @@ namespace SSAFYPlayTime.Character
                     Destroy(link.joint);
                 _dynamicGrabLinks.RemoveAt(i);
 
-                if (debugLog)
+                if (verboseWarnings)
                     Debug.Log($"[AntiStretch] {name}: Removed dynamic link {link.label}", this);
             }
         }

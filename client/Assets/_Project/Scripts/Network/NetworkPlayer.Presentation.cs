@@ -29,6 +29,10 @@ public sealed partial class NetworkPlayer
     private const float CarryProxyRootSnapDistance = 1.10f;
     private const float CarryResidualRootGapThreshold = 0.90f;
     private const float CarryRootDebugGapThreshold = 1.35f;
+    private const float RemoteStablePresentationRootFollowSpeed = 18f;
+    private const float RemoteBufferedPresentationRootFollowSpeed = 12f;
+    private const float OwnerBufferedPresentationRootFollowSpeed = 9f;
+    private const float ProxyPresentationRootSnapDistance = 2.75f;
     private bool _pmNextAttackLeft;
 
     // OwnerProxy 로컬 예측 reconcile
@@ -59,6 +63,7 @@ public sealed partial class NetworkPlayer
     private Vector3 _hipsSnapshotFrom;
     private Vector3 _hipsSnapshotTo;
     private bool _snapshotBufferInitialized;
+    private bool _proxyPresentationRootSmoothingActive;
 
     // CarrySolveFrame: carry 진입/종료 시 snapshot 재시드용
     private bool _wasCarryPhaseLastFrame;
@@ -102,12 +107,13 @@ public sealed partial class NetworkPlayer
         {
             // RemoteProxy: 순수 원격 — 항상 뼈 보간 + 상태 동기화
             SyncRemoteActiveRagdollState();
-            if (ShouldUsePhysicalPhasePresentation())
+            if (ShouldUseBufferedProxyPoseInterpolation())
                 InterpolateRemoteBoneRotations();
             // grab/carry 애니메이터 파라미터 동기화
             SyncGrabbingAnimatorFromNetwork();
         }
 
+        UpdateProxyPresentationRoot();
         UpdatePhysicsDrivenVisualPose();
         ApplyProxyPresentationRotation();
         UpdateCharacterPresentationEffects();
@@ -125,7 +131,7 @@ public sealed partial class NetworkPlayer
 
         // 2) 내가 기절(ragdoll) 또는 잡힌 상태일 때만 뼈 보간 적용
         //    → 호스트가 물리로 끌고 있는 결과를 따라가야 하므로
-        bool isInConfirmedRagdoll = ShouldUsePhysicalPhasePresentation();
+        bool isInConfirmedRagdoll = ShouldUseBufferedProxyPoseInterpolation();
         if (isInConfirmedRagdoll)
             InterpolateRemoteBoneRotations();
     }
@@ -161,6 +167,10 @@ public sealed partial class NetworkPlayer
 
         // BodyPartPhysicsManager 상태 전환
 
+        // 비호스트 비주얼 모드 동기화: 호스트의 SetStunVisualMode 호출을 미러링
+        // 기절 진입 → 래그돌 메시 표시, 회복 → 애니메이션 메시 복원
+        SetStunVisualMode(!isRecovering);
+
         // 로컬 플레이어(OwnerProxy)가 기절 진입 시 슬로우모션 연출
         if (!isRecovering && HasInputAuthority)
             TriggerStunSlowMotion();
@@ -177,6 +187,7 @@ public sealed partial class NetworkPlayer
         // 앵커가 최종 표시 비주얼 위치를 기준으로 추적한다.
         UpdateRemotePhysicsPresentationResetWindow();
         UpdatePhysicsDrivenVisualPose();
+        UpdateProxyPresentationRoot();
 
         if (Runner == null)
             UpdateAnimationParameters();
@@ -187,10 +198,12 @@ public sealed partial class NetworkPlayer
         UpdateCameraFollowAnchor();
 
         TraceCameraDeltaDiagnostics();
+        TraceMoveProxyState("LateUpdate");
 
         // 기절 슬로우모션 timeScale 복원 틱 (로컬 플레이어만)
         TickKnockoutConfirmSlowMotion();
         TickStunSlowMotion();
+        UpdateMoveSyncDiagnosticsHotkey();
         UpdateStunForceDiagnosticsHotkey();
     }
 
@@ -198,6 +211,81 @@ public sealed partial class NetworkPlayer
     {
         return phase == PhysicalPhase.BeingCarriedStunned ||
                phase == PhysicalPhase.CarryingStunned;
+    }
+
+    private static bool UsesBufferedProxyPosePhase(PhysicalPhase phase)
+    {
+        return phase == PhysicalPhase.Holding ||
+               phase == PhysicalPhase.GrabIntent ||
+               phase == PhysicalPhase.Recovering ||
+               phase == PhysicalPhase.CarryingStunned ||
+               UsesPhysicsPosePresentation(phase);
+    }
+
+    private bool ShouldUseBufferedProxyPoseInterpolation()
+    {
+        return GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing ||
+               UsesBufferedProxyPosePhase(GetPhysicalPhase()) ||
+               IsRemotePhysicsPresentationResetLocked();
+    }
+
+    private bool ShouldSmoothProxyPresentationRoot(Transform presentationRoot)
+    {
+        if (presentationRoot == null || presentationRoot == transform)
+            return false;
+
+        if (HasStateAuthority || ShouldUseHardPhysicsVisualMode())
+            return false;
+
+        if (!HasInputAuthority)
+            return true;
+
+        return UsesBufferedProxyPosePhase(GetPhysicalPhase());
+    }
+
+    private float ResolveProxyPresentationRootFollowSpeed()
+    {
+        if (!HasInputAuthority)
+        {
+            return ShouldUseBufferedProxyPoseInterpolation()
+                ? RemoteBufferedPresentationRootFollowSpeed
+                : RemoteStablePresentationRootFollowSpeed;
+        }
+
+        return OwnerBufferedPresentationRootFollowSpeed;
+    }
+
+    private void UpdateProxyPresentationRoot()
+    {
+        var presentationRoot = GetPresentationRootTransform();
+        if (presentationRoot == null || presentationRoot == transform)
+            return;
+
+        var targetPosition = transform.position;
+        if (!ShouldSmoothProxyPresentationRoot(presentationRoot))
+        {
+            if (_proxyPresentationRootSmoothingActive &&
+                (presentationRoot.position - targetPosition).sqrMagnitude > 0.0001f)
+            {
+                presentationRoot.position = targetPosition;
+            }
+
+            _proxyPresentationRootSmoothingActive = false;
+            return;
+        }
+
+        if (!_proxyPresentationRootSmoothingActive ||
+            (presentationRoot.position - targetPosition).sqrMagnitude >
+            ProxyPresentationRootSnapDistance * ProxyPresentationRootSnapDistance)
+        {
+            presentationRoot.position = targetPosition;
+            _proxyPresentationRootSmoothingActive = true;
+            return;
+        }
+
+        var alpha = 1f - Mathf.Exp(-ResolveProxyPresentationRootFollowSpeed() * Time.deltaTime);
+        presentationRoot.position = Vector3.Lerp(presentationRoot.position, targetPosition, alpha);
+        _proxyPresentationRootSmoothingActive = true;
     }
 
     private bool TryApplyCarryProxyRootCorrection(

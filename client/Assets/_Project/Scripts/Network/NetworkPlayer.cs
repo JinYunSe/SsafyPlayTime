@@ -177,6 +177,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     // 카메라 Follow 앵커 - transform.position이 SyncRootToPhysicsBody로 급격히 변해도
     // 카메라는 이 앵커를 따라가므로 부드럽게 추적한다.
+    private const string ExplicitCameraAnchorName = "CameraFollowAnchor";
+    private const string ExplicitPresentationAnchorName = "PresentationAnchor";
+
     private Transform _cameraFollowAnchor;
     private Transform _cameraAnchorSourceCache;
     private Transform _cameraAnchorSourceRootCache;
@@ -328,10 +331,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private enum CameraAnchorSourceMode : byte
     {
         None = 0,
-        ExplicitCameraTarget = 1,
-        LegacyNamedTarget = 2,
-        PresentationRoot = 3,
-        RootTransform = 4
+        ExplicitPresentationAnchor = 1,
+        ExplicitCameraTarget = 2,
+        LegacyNamedTarget = 3,
+        PresentationRoot = 4,
+        RootTransform = 5
     }
 
     private readonly struct CameraAnchorFollowSettings
@@ -669,6 +673,15 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (searchRoot == null)
             return null;
 
+        var explicitAnchor = FindNamedTransformRecursive(searchRoot, ExplicitCameraAnchorName)
+            ?? FindNamedTransformRecursive(searchRoot, ExplicitPresentationAnchorName);
+        if (explicitAnchor != null)
+        {
+            _cameraAnchorSourceCache = explicitAnchor;
+            _cameraAnchorSourceMode = CameraAnchorSourceMode.ExplicitPresentationAnchor;
+            return _cameraAnchorSourceCache;
+        }
+
         var directCameraTarget = FindNamedTransformRecursive(searchRoot, "CameraTarget");
         if (directCameraTarget != null)
         {
@@ -794,7 +807,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             return Vector3.zero;
         if (correctionScale <= 0.0001f || maxCorrectionDistance <= 0.0001f)
             return Vector3.zero;
-        if (_cameraAnchorSourceMode == CameraAnchorSourceMode.ExplicitCameraTarget ||
+        if (_cameraAnchorSourceMode == CameraAnchorSourceMode.ExplicitPresentationAnchor ||
+            _cameraAnchorSourceMode == CameraAnchorSourceMode.ExplicitCameraTarget ||
             _cameraAnchorSourceMode == CameraAnchorSourceMode.LegacyNamedTarget)
         {
             return Vector3.zero;
