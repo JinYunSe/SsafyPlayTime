@@ -17,15 +17,17 @@ public class SeaLevelController : NetworkBehaviour
     private const int PhaseRising = 1;
     private const int PhaseCompleted = 2;
 
-    [Header("Height Settings")]
+    [Header("Data Source")]
+    public SeaLevelData seaLevelData; // SO 에셋을 연결할 변수
+
     // 상승 속도
-    public float sinkingSpeed = 0.05f;
+    private float sinkingSpeed;
     // 도달할 최대 높이
-    public float maxWaterLevel = 5.0f;
+    private float maxWaterLevel;
     // 상승을 시작할 주기 (예: 1초마다 조금씩)
-    public float checkInterval = 1.0f;
+    private float checkInterval;
     // 한 스텝을 부드럽게 올리는 시간
-    public float riseDuration = 0.5f;
+    private float riseDuration;
 
     [Networked] private int WaterPhase { get; set; }
     [Networked] private int PhaseStartTick { get; set; }
@@ -59,6 +61,14 @@ public class SeaLevelController : NetworkBehaviour
 
     public override void Spawned()
     {
+        if (seaLevelData != null)
+        {
+            sinkingSpeed = seaLevelData.sinkingSpeed;
+            maxWaterLevel = seaLevelData.maxWaterLevel;
+            checkInterval = seaLevelData.checkInterval;
+            riseDuration = seaLevelData.riseDuration;
+        }
+
         if (HasStateAuthority)
         {
             EnsureNetworkStateInitialized();
