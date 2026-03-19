@@ -371,31 +371,28 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            var healthApplied = false;
-            var stunApplied = false;
-            var healthInt = Mathf.Max(0, Mathf.RoundToInt(healthDamage));
+            var networkPlayer = targetRoot.GetComponentInParent<NetworkPlayer>();
+            if (networkPlayer != null)
+            {
+                networkPlayer.ApplyCombinedDamage(
+                    healthDamage,
+                    stunDamage,
+                    "SatelliteStrike",
+                    0f,
+                    explosionForce);
+                return;
+            }
 
             var playerStats = targetRoot.GetComponentInParent<PlayerStats>();
+            var healthInt = Mathf.Max(0, Mathf.RoundToInt(healthDamage));
             if (playerStats != null && healthInt > 0)
             {
                 playerStats.TakeDamage(healthInt);
-                healthApplied = true;
+                return;
             }
 
-            var networkPlayer = targetRoot.GetComponentInParent<NetworkPlayer>();
-            if (networkPlayer != null && stunDamage > 0f)
-            {
-                // 빔에 닿아 있는 동안 스턴 게이지가 계속 누적되도록 틱 단위로 적용한다.
-                networkPlayer.ApplyStunDamage(stunDamage, 1f, 0f, explosionForce);
-                stunApplied = true;
-            }
-
-            var pendingHealth = healthApplied ? 0f : healthDamage;
-            var pendingStun = stunApplied ? 0f : stunDamage;
-            if (pendingHealth > 0f || pendingStun > 0f)
-            {
-                TryApplyDamageToTarget(targetRoot, pendingHealth, pendingStun, "SatelliteStrike");
-            }
+            if (healthDamage > 0f || stunDamage > 0f)
+                TryApplyDamageToTarget(targetRoot, healthDamage, stunDamage, "SatelliteStrike");
         }
 
         private static Transform ResolveSatelliteStrikeTargetRoot(Collider hitCollider)

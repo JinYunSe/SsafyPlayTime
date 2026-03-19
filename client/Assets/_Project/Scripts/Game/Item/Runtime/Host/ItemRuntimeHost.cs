@@ -47,6 +47,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         public bool IsReady => _controller != null;
         public string HeldItemId => _controller?.HeldItemId ?? string.Empty;
         public bool IsFlamethrowerActive => _controller != null && _controller.IsFlamethrowerActive;
+        public bool IsHeldItemEquipment => _controller != null && _controller.IsHeldItemEquipment;
         public IReadOnlyList<string> LoadWarnings => _loadWarnings;
         public string LastError => _lastError;
         public Transform OwnerTransform => ownerTransform;
