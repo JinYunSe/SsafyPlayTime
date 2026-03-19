@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemBlackholeVisualAuthoring 스크립트가 들어 있는 파일이다.
  * - World 계층에서 필드 드랍, 획득, 스폰, 배치, 프리팹 해석처럼 월드 오브젝트와 연결되는 책임을 맡는다.
@@ -89,66 +89,10 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            if (shellMaterial != null && rootRenderer.sharedMaterial != shellMaterial)
-            {
-                rootRenderer.sharedMaterial = shellMaterial;
-            }
-
-            var material = Application.isPlaying
-                ? rootRenderer.material
-                : GetEditableMaterial(rootRenderer);
-            if (material == null)
-            {
-                return;
-            }
-
-            // 가운데 구체는 요청값에 맞춰 0.4 투명도를 기본값으로 유지한다.
-            var shellColor = new Color(0.07f, 0.07f, 0.08f, shellAlpha);
-            if (material.HasProperty("_BaseColor"))
-            {
-                material.SetColor("_BaseColor", shellColor);
-            }
-            if (material.HasProperty("_Color"))
-            {
-                material.SetColor("_Color", shellColor);
-            }
-
-            if (material.HasProperty("_Surface"))
-            {
-                material.SetFloat("_Surface", 1f);
-            }
-            if (material.HasProperty("_Blend"))
-            {
-                material.SetFloat("_Blend", 0f);
-            }
-            if (material.HasProperty("_SrcBlend"))
-            {
-                material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            }
-            if (material.HasProperty("_DstBlend"))
-            {
-                material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            }
-            if (material.HasProperty("_ZWrite"))
-            {
-                material.SetFloat("_ZWrite", 0f);
-            }
-            if (material.HasProperty("_Mode"))
-            {
-                material.SetFloat("_Mode", 3f);
-            }
-
-            material.SetOverrideTag("RenderType", "Transparent");
-            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
-            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-            material.EnableKeyword("_ALPHABLEND_ON");
-            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
-            rootRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-
-            if (!Application.isPlaying)
-            {
-                rootRenderer.sharedMaterial = material;
-            }
+            // 코어 쌓 구체는 플레이모드에서 숨긴다.
+            // ItemBlackholeVisualAuthoring의 루트 MeshRenderer(Visual 검은 구체)는
+            // 사용자 요청에 따라 빌드/플레이 중 불필요하다.
+            rootRenderer.enabled = false;
         }
 
         private bool IsPrefabAssetContext()
@@ -197,6 +141,10 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
+            // ApplyConfiguredEffectBindings가 이름 기반으로 머티리얼을 할당하지만,
+            // 바인딩되지 않은 나머지 렌더러에 Polygon Arsenal 셰이더가 남아 핑크로 보일 수 있다.
+            // 평가 후 URP 폴백을 한 번 더 적용해 남은 비URP 셰이더를 추가 교체한다.
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(effectRoot.gameObject);
             DisableUnsupportedDistortionRenderers(effectRoot.gameObject);
             ApplyEffectTint(effectRoot.gameObject);
         }
