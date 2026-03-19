@@ -12,16 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8868e1f255c733b45b3df8c45f5b2a19, type: 3}
   m_Name: DefaultPlayerMotorConfig
   m_EditorClassIdentifier: 
-  maxSpeed: 3
-  acceleration: 30
-  airAcceleration: 9
+  maxSpeed: 5
+  acceleration: 38
+  airAcceleration: 14
   brakingAcceleration: 55
   rotateSpeedDeg: 300
   sprintSpeedMultiplier: 1.8
   groundStickForce: 8
   stopSpeedEpsilon: 0.08
-  jumpImpulse: 70
-  extraGravity: 5
+  jumpImpulse: 100
+  extraGravity: 3
   groundProbeRadius: 0.1
   groundProbeDistance: 0.5
   fallEnterSec: 0.8
