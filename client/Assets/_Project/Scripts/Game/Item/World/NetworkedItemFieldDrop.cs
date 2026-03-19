@@ -1,5 +1,6 @@
 using Fusion;
 using UnityEngine;
+using System.Collections.Generic;
 
 namespace SSAFYPlayTime.Gameplay.Items
 {
@@ -9,6 +10,8 @@ namespace SSAFYPlayTime.Gameplay.Items
     [RequireComponent(typeof(NetworkTransform))]
     public sealed class NetworkedItemFieldDrop : NetworkBehaviour
     {
+        private static readonly Dictionary<string, ItemDefinition> s_definitionCache = new(System.StringComparer.Ordinal);
+
         [SerializeField] private bool enableDebugLog;
 
         [Networked] private NetworkString<_32> NetworkedItemId { get; set; }
@@ -20,11 +23,34 @@ namespace SSAFYPlayTime.Gameplay.Items
         private NetworkTransform _networkTransform;
         private ItemFieldDrop _fieldDrop;
         private GameObject _visualRoot;
+        private string _attachedVisualItemId = string.Empty;
 
         public void InitializeMetadata(string itemId)
         {
             NetworkedItemId = itemId ?? string.Empty;
             ApplyMetadataToFieldDrop();
+        }
+
+        public void ResetForSpawn(string itemId, Vector3 position, Quaternion rotation)
+        {
+            NetworkedItemId = itemId ?? string.Empty;
+            _attachedVisualItemId = string.Empty;
+            _visualRoot = null;
+
+            CacheComponents();
+            if (_fieldDrop != null)
+            {
+                _fieldDrop.SetItemId(itemId);
+            }
+
+            transform.SetPositionAndRotation(position, rotation);
+
+            if (enableDebugLog)
+            {
+                Debug.Log(
+                    $"[NetworkedItemFieldDrop] ResetForSpawn itemId={itemId}, pos={position}, rot={rotation.eulerAngles}",
+                    this);
+            }
         }
 
         public override void Spawned()
@@ -43,6 +69,11 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
         }
 
+        public override void Despawned(NetworkRunner runner, bool hasState)
+        {
+            ResetForDespawn();
+        }
+
         public override void FixedUpdateNetwork()
         {
             CacheComponents();
@@ -54,6 +85,25 @@ namespace SSAFYPlayTime.Gameplay.Items
             CacheComponents();
             ApplyMetadataToFieldDrop();
             TryEnsureVisual();
+        }
+
+        public void ResetForDespawn()
+        {
+            CacheComponents();
+            if (_fieldDrop != null)
+            {
+                _fieldDrop.ResetForDespawn();
+            }
+
+            if (enableDebugLog)
+            {
+                Debug.Log(
+                    $"[NetworkedItemFieldDrop] ResetForDespawn itemId={_attachedVisualItemId}, pos={transform.position}",
+                    this);
+            }
+
+            _visualRoot = null;
+            _attachedVisualItemId = string.Empty;
         }
 
         private void CacheComponents()
@@ -95,15 +145,22 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private void TryEnsureVisual()
         {
-            if (_visualRoot != null)
-            {
-                return;
-            }
-
             var itemId = NetworkedItemId.ToString();
             if (string.IsNullOrWhiteSpace(itemId))
             {
                 return;
+            }
+
+            if (_visualRoot != null && string.Equals(_attachedVisualItemId, itemId, System.StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (_visualRoot != null && !string.Equals(_attachedVisualItemId, itemId, System.StringComparison.Ordinal))
+            {
+                ItemFieldDropFactory.ReleaseFieldVisual(gameObject, _attachedVisualItemId);
+                _visualRoot = null;
+                _attachedVisualItemId = string.Empty;
             }
 
             if (!TryGetItemDefinition(itemId, out var definition))
@@ -112,28 +169,48 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             _visualRoot = ItemFieldDropFactory.CreateFieldVisualInstance(definition, _prefabResolver, transform);
+            _attachedVisualItemId = itemId;
             if (_fieldDrop != null)
             {
                 _fieldDrop.SetItemId(itemId);
                 _fieldDrop.EnsureRuntimeSetup();
             }
+
+            if (enableDebugLog)
+            {
+                Debug.Log(
+                    $"[NetworkedItemFieldDrop] Attached visual itemId={itemId}, visual={(_visualRoot != null ? _visualRoot.name : "null")}, pos={transform.position}",
+                    this);
+            }
         }
 
         private bool TryGetItemDefinition(string itemId, out ItemDefinition definition)
         {
-            definition = null;
             if (string.IsNullOrWhiteSpace(itemId))
             {
+                definition = null;
                 return false;
+            }
+
+            if (s_definitionCache.TryGetValue(itemId, out definition) && definition != null)
+            {
+                return true;
             }
 
             var options = ItemCatalogLoader.CreateDefaultOptions();
             if (!_catalogProvider.TryGetCatalog(options, out var catalog, out _))
             {
+                definition = null;
                 return false;
             }
 
-            return catalog.TryGetDefinition(itemId, out definition);
+            if (!catalog.TryGetDefinition(itemId, out definition) || definition == null)
+            {
+                return false;
+            }
+
+            s_definitionCache[itemId] = definition;
+            return true;
         }
 
         private void InitializeNetworkTransformState()
