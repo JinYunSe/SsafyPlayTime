@@ -12749,16 +12749,6 @@ PrefabInstance:
       propertyPath: m_IsKinematic
       value: 1
       objectReference: {fileID: 0}
-    - target: {fileID: 2207186028006840218, guid: f29327e0646462940b61cbb3daaf84e6,
-        type: 3}
-      propertyPath: m_Enabled
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 8396545917965579891, guid: f29327e0646462940b61cbb3daaf84e6,
-        type: 3}
-      propertyPath: m_IsActive
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 348058667930669166, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: mainJoint
@@ -12868,6 +12858,16 @@ PrefabInstance:
         type: 3}
       propertyPath: lifecycleManager
       value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2207186028006840218, guid: f29327e0646462940b61cbb3daaf84e6,
+        type: 3}
+      propertyPath: m_Enabled
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 8396545917965579891, guid: f29327e0646462940b61cbb3daaf84e6,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 1
       objectReference: {fileID: 0}
     m_RemovedComponents:
     - {fileID: 8554732968465362057, guid: e741400b47183824e890e9d1ff5a829e, type: 3}
