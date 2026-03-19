@@ -459,6 +459,18 @@ AnimatorController:
     m_IKPass: 0
     m_SyncedLayerAffectsTiming: 0
     m_Controller: {fileID: 9100000}
+  - serializedVersion: 5
+    m_Name: GameplayUpper
+    m_StateMachine: {fileID: -8852184431749437687}
+    m_Mask: {fileID: 31900000, guid: 5f42aca37fe399e4b9c9f82f93e8e1be, type: 2}
+    m_Motions: []
+    m_Behaviours: []
+    m_BlendingMode: 0
+    m_SyncedLayerIndex: -1
+    m_DefaultWeight: 1
+    m_IKPass: 0
+    m_SyncedLayerAffectsTiming: 0
+    m_Controller: {fileID: 9100000}
 --- !u!1101 &65953346936785659
 AnimatorStateTransition:
   m_ObjectHideFlags: 1
