@@ -1,8 +1,11 @@
 using System.Collections;
 using System.Collections.Generic;
+
+using Fusion;
+
 using UnityEngine;
 
-public class Tornado : MonoBehaviour
+public class Tornado : NetworkBehaviour
 {
     /*[Header("Force Settings")]
     public float pullStrength = 10f;    // 중심으로 당기는 힘
@@ -71,8 +74,11 @@ public class Tornado : MonoBehaviour
     public float spinSpeed = 300f;
 
     [Header("Launch Settings")]
-    public float launchUpForce = 10f;    // 위로 솟구치는 힘
-    public float launchOutForce = 10f;   // 바깥으로 밀어내는 힘
+    public float launchUpForce = 10f;
+    public float launchOutForce = 10f;
+
+    [Header("Data Asset")]
+    public TornadoData data;
 
     private Collider tornadoCollider;
 
