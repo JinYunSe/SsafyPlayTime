@@ -715,7 +715,7 @@ namespace SSAFYPlayTime
             networkPlayer.OnNetworkPlayerDied += HandleTrackedGameplayPlayerDied;
             _trackedGameplayPlayersByPlayerId[playerId] = networkPlayer;
 
-            if (networkPlayer.IsDeadNetworked)
+            if (networkPlayer.IsDeadState)
                 _deadGameplayPlayerIds.Add(playerId);
         }
 

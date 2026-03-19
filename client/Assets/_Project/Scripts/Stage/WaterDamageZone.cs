@@ -4,7 +4,7 @@ using UnityEngine;
 
 // 물 트리거 영역. MeshCollider(IsTrigger=true)와 함께 Water 오브젝트에 부착한다.
 // 플레이어가 물 안에 머무르는 동안 일정 간격마다 데미지를 입힌다.
-// 데미지는 StateAuthority에서만 처리된다 (ApplyHpDamage 내부 가드).
+// 데미지는 StateAuthority에서만 처리된다 (ApplyHealthDamage 내부 가드).
 public class WaterDamageZone : MonoBehaviour
 {
     [Header("Damage Settings")]
@@ -41,9 +41,9 @@ public class WaterDamageZone : MonoBehaviour
     {
         yield return new WaitForSeconds(initialDelay);
 
-        while (player != null && !player.IsDeadNetworked)
+        while (player != null && !player.IsDeadState)
         {
-            player.ApplyHpDamage(damageAmount);
+            player.ApplyHealthDamage(damageAmount);
             yield return new WaitForSeconds(damageInterval);
         }
 

@@ -11,9 +11,9 @@ public sealed partial class NetworkPlayer
     private const float DefaultRecentHealthDamageWindow = 3.5f;
     private const float DefaultRecentHealthDamageCap = 85f;
     private const float DefaultLowHealthStunBonus = 0.35f;
-    private const float DefaultDeathFreezeDuration = 1.25f;
+
     private const float LocalDeathCameraHoldDuration = 0.8f;
-    private const float DeadMotionDamping = 0.94f;
+
 
     [Networked] private int NetworkedMaxHealth { get; set; }
     [Networked] private int NetworkedCurrentHealth { get; set; }
@@ -216,31 +216,20 @@ public sealed partial class NetworkPlayer
         SetRecentHealthDamage(0f);
         SetRecentHealthWindowRemaining(0f);
         SetHealthHitImmunityRemaining(0f);
-        SetDeathFreezeRemaining(DefaultDeathFreezeDuration);
+        SetDeathFreezeRemaining(0f);
 
         TryForceDropHeldContentOnDeath();
 
-        if (_isActiveRagdoll)
-        {
-            TriggerStun(ResolveConfiguredDeathCollapseDuration(), applyEntryDamping: true);
-        }
-        else
-        {
-            ClearPunchHitDetectionWindow();
-            _isLeftGrabActive = false;
-            _isRightGrabActive = false;
-            _isGrabActive = false;
-            SetStunTimeRemaining(0f);
-            SetAccumulatedStun(0f);
-            CaptureCollapseAnchorPose(transform.position, transform.rotation);
-            SetLocalPhysicalPhase(PhysicalPhase.Stunned, 1f, false);
-            SynchronizeStunPresentationPhase();
-            SetStunVisualMode(true);
-            FlagPhysicsPresentationReset();
-        }
-
+        // 레그돌/스턴 없이 즉시 입력·물리 상태 초기화
+        _isLeftGrabActive = false;
+        _isRightGrabActive = false;
+        _isGrabActive = false;
+        SetStunTimeRemaining(0f);
+        SetAccumulatedStun(0f);
+        ClearPunchHitDetectionWindow();
         _localMoveSpeed = 0f;
         _localPresentationLocomotionState = PresentationLocomotionState.Idle;
+
         if (IsNetworkReady)
         {
             NetworkedMoveSpeed = 0f;
@@ -248,7 +237,71 @@ public sealed partial class NetworkPlayer
             NetworkedIsSprinting = false;
         }
 
+        // StateAuthority: 루트 리지드바디를 (0,0,0)에 즉시 고정
+        // Fusion이 이 위치를 모든 클라이언트에 복제한다.
+        // 외관·물리 전체 처리는 UpdateLocalDeathPresentation에서 모든 클라이언트가 담당.
+        if (HasStateAuthority || !IsNetworkReady)
+            ApplyDeathImmobilize();
+
         Debug.Log($"[NetworkPlayer] {name} died. source={source}", this);
+    }
+
+    /// <summary>
+    /// 루트 리지드바디를 (0,0,0) 키네마틱으로 즉시 고정.
+    /// StateAuthority에서 호출 → Fusion이 위치를 전체 클라이언트에 복제.
+    /// </summary>
+    private void ApplyDeathImmobilize()
+    {
+        if (rigidbody3D != null)
+        {
+            rigidbody3D.velocity = Vector3.zero;
+            rigidbody3D.angularVelocity = Vector3.zero;
+            rigidbody3D.isKinematic = true;
+            rigidbody3D.position = Vector3.zero;
+            rigidbody3D.rotation = Quaternion.identity;
+        }
+
+        transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+    }
+
+    /// <summary>
+    /// 렌더러·콜라이더 비활성화 + 모든 리지드바디 키네마틱 + PuppetMaster 정지.
+    /// UpdateLocalDeathPresentation에서 모든 클라이언트가 호출한다.
+    /// </summary>
+    private void ApplyDeathPhysicsAndVisuals()
+    {
+        // 외관 숨김 (렌더러)
+        var renderers = GetComponentsInChildren<Renderer>(true);
+        for (var i = 0; i < renderers.Length; i++)
+            if (renderers[i] != null)
+                renderers[i].enabled = false;
+
+        // 콜라이더 비활성화 (피격·충돌 차단)
+        var colliders = GetComponentsInChildren<Collider>(true);
+        for (var i = 0; i < colliders.Length; i++)
+            if (colliders[i] != null)
+                colliders[i].enabled = false;
+
+        // 레그돌 포함 모든 리지드바디 즉시 키네마틱
+        var bodies = GetComponentsInChildren<Rigidbody>(true);
+        for (var i = 0; i < bodies.Length; i++)
+        {
+            var body = bodies[i];
+            if (body == null) continue;
+            body.velocity = Vector3.zero;
+            body.angularVelocity = Vector3.zero;
+            body.isKinematic = true;
+        }
+
+        // PuppetMaster 완전 정지
+        if (_puppetMaster != null)
+        {
+            foreach (var behaviour in _puppetMaster.behaviours)
+                if (behaviour != null)
+                    behaviour.enabled = false;
+
+            _puppetMaster.enabled = false;
+        }
     }
 
     private void TryForceDropHeldContentOnDeath()
@@ -277,42 +330,11 @@ public sealed partial class NetworkPlayer
         if (!GetIsDeadState())
             return false;
 
-        SetLocalPhysicalPhase(PhysicalPhase.Stunned, 1f, false);
-        SetStunTimeRemaining(0f);
-        ClampStunnedMotion();
-        SyncRootToPhysicsBody();
-
-        if (GetDeathFreezeRemaining() > 0f)
-            return true;
-
-        DampenDeadMotion();
-        return true;
-    }
-
-    private void DampenDeadMotion()
-    {
+        // 루트 리지드바디가 아직 kinematic이 아니면 고정 (BeginDeath 직후 1틱 지연 보정)
         if (rigidbody3D != null && !rigidbody3D.isKinematic)
-        {
-            rigidbody3D.velocity *= DeadMotionDamping;
-            rigidbody3D.angularVelocity *= DeadMotionDamping;
-        }
+            ApplyDeathImmobilize();
 
-        if (_puppetMaster == null || _puppetMaster.muscles == null)
-            return;
-
-        for (var i = 0; i < _puppetMaster.muscles.Length; i++)
-        {
-            var joint = _puppetMaster.muscles[i].joint;
-            if (joint == null)
-                continue;
-
-            var muscleBody = joint.GetComponent<Rigidbody>();
-            if (muscleBody == null || muscleBody.isKinematic)
-                continue;
-
-            muscleBody.velocity *= DeadMotionDamping;
-            muscleBody.angularVelocity *= DeadMotionDamping;
-        }
+        return true;
     }
 
     private float ResolveLowHealthStunMultiplier()
@@ -327,14 +349,23 @@ public sealed partial class NetworkPlayer
 
     private void UpdateLocalDeathPresentation()
     {
-        if (!HasLocalPresentationAuthority() || !GetIsDeadState())
+        if (!GetIsDeadState())
             return;
 
         var deathSequence = GetDeathSequence();
         if (_lastPresentedDeathSequence == deathSequence)
             return;
 
+        // 모든 클라이언트에서 한 번씩 실행 (IsDeadState 네트워크 복제 후 첫 Update 틱)
         _lastPresentedDeathSequence = deathSequence;
+        OnNetworkPlayerDied?.Invoke(this);
+
+        // 외관 숨김 + 물리 완전 정지 (본인 화면 + 다른 플레이어 화면 모두)
+        ApplyDeathPhysicsAndVisuals();
+
+        if (!HasLocalPresentationAuthority())
+            return;
+
         if (_localDeathTransitionCoroutine != null)
             StopCoroutine(_localDeathTransitionCoroutine);
 
@@ -357,27 +388,127 @@ public sealed partial class NetworkPlayer
         if (!HasLocalPresentationAuthority() || _localGhostRoot != null)
             return;
 
-        var focusPoint = ResolveGhostFocusPoint();
-        var startPosition = focusPoint + new Vector3(0f, 10f, -16f);
+        CacheOwnedPresentationComponents();
 
-        _localGhostRoot = new GameObject($"{name}_LocalGhostMode");
-        _localGhostRoot.transform.position = startPosition;
-        _localGhostRoot.transform.rotation = Quaternion.LookRotation((focusPoint - startPosition).normalized, Vector3.up);
+        // 플레이어 추적 중단
+        if (_ownedCameraRigsCache != null)
+            for (var i = 0; i < _ownedCameraRigsCache.Length; i++)
+                if (_ownedCameraRigsCache[i] != null)
+                    _ownedCameraRigsCache[i].enabled = false;
 
-        _localGhostCamera = _localGhostRoot.AddComponent<Camera>();
-        _localGhostCamera.tag = "MainCamera";
-        _localGhostCamera.fieldOfView = 60f;
-        _localGhostCamera.nearClipPlane = 0.03f;
-        _localGhostCamera.farClipPlane = 400f;
+        if (_ownedCameraModeControllersCache != null)
+            for (var i = 0; i < _ownedCameraModeControllersCache.Length; i++)
+                if (_ownedCameraModeControllersCache[i] != null)
+                    _ownedCameraModeControllersCache[i].enabled = false;
 
-        _localGhostRoot.AddComponent<AudioListener>();
+        // 프리팹 카메라에 이미 붙어있는 GhostSpectatorCamera + GhostThrowManager를 우선 사용.
+        // 이 방식이면 GhostThrowManager에 인스펙터로 설정된 bomb/banana 프리팹 참조가
+        // 그대로 살아있어 멀티플레이 네트워크 스폰(RPC → FindManagerForPlayer → GetComponentInChildren)이 정상 작동한다.
+        Camera ghostCamera = null;
+        GhostSpectatorCamera spectatorCam = null;
+        GhostThrowManager throwManager = null;
 
-        _localGhostSpectatorCamera = _localGhostRoot.AddComponent<GhostSpectatorCamera>();
-        _localGhostThrowManager = _localGhostRoot.AddComponent<GhostThrowManager>();
-        _localGhostThrowManager.SetGhostControlEnabled(true);
-        _localGhostThrowManager.SetEnableOutOfBoundsKillCheck(false);
+        if (_ownedCamerasCache != null)
+        {
+            for (var i = 0; i < _ownedCamerasCache.Length; i++)
+            {
+                var cam = _ownedCamerasCache[i];
+                if (cam == null) continue;
 
-        SetLocalCharacterPresentationEnabled(false);
+                var sc = cam.GetComponent<GhostSpectatorCamera>();
+                if (sc == null) continue;
+
+                ghostCamera = cam;
+                spectatorCam = sc;
+                throwManager = cam.GetComponent<GhostThrowManager>();
+                break;
+            }
+        }
+
+        if (ghostCamera != null)
+        {
+            // 나머지 소유 카메라 비활성화
+            if (_ownedCamerasCache != null)
+                for (var i = 0; i < _ownedCamerasCache.Length; i++)
+                {
+                    var cam = _ownedCamerasCache[i];
+                    if (cam == null || cam == ghostCamera) continue;
+                    cam.enabled = false;
+                    if (cam.CompareTag("MainCamera")) cam.tag = "Untagged";
+                }
+
+            // 고스트 카메라 GO가 아닌 AudioListener 비활성화
+            if (_ownedListenersCache != null)
+                for (var i = 0; i < _ownedListenersCache.Length; i++)
+                {
+                    var l = _ownedListenersCache[i];
+                    if (l == null || l.gameObject == ghostCamera.gameObject) continue;
+                    l.enabled = false;
+                }
+
+            // 고스트 카메라 활성화
+            ghostCamera.enabled = true;
+            ghostCamera.tag = "MainCamera";
+            spectatorCam.enabled = true;
+
+            if (throwManager != null)
+            {
+                throwManager.enabled = true;
+                throwManager.ForceEnableGhostThrow($"{name} death");
+                // 캐릭터가 0,0,0에 고정됐으므로 스폰 포인트를 null로 → 카메라 기반 발사 위치 사용
+                throwManager.SetGhostThrowSpawnPoint(null);
+            }
+
+            // 프리팹 카메라를 재사용하므로 Destroy하지 않도록 _localGhostCamera는 null 유지
+            _localGhostRoot = ghostCamera.gameObject;
+        }
+        else
+        {
+            // 폴백: 프리팹에 GhostSpectatorCamera가 없는 경우 런타임으로 생성
+            if (_ownedCamerasCache != null)
+                for (var i = 0; i < _ownedCamerasCache.Length; i++)
+                {
+                    var cam = _ownedCamerasCache[i];
+                    if (cam == null) continue;
+                    cam.enabled = false;
+                    if (cam.CompareTag("MainCamera")) cam.tag = "Untagged";
+                }
+
+            if (_ownedListenersCache != null)
+                for (var i = 0; i < _ownedListenersCache.Length; i++)
+                    if (_ownedListenersCache[i] != null)
+                        _ownedListenersCache[i].enabled = false;
+
+            var focusPoint = ResolveGhostFocusPoint();
+            var startPosition = focusPoint + new Vector3(0f, 10f, -16f);
+
+            _localGhostRoot = new GameObject($"{name}_LocalGhostMode");
+            _localGhostRoot.transform.position = startPosition;
+            _localGhostRoot.transform.rotation = Quaternion.LookRotation(
+                (focusPoint - startPosition).normalized, Vector3.up);
+
+            _localGhostCamera = _localGhostRoot.AddComponent<Camera>();
+            _localGhostCamera.tag = "MainCamera";
+            _localGhostCamera.fieldOfView = 60f;
+            _localGhostCamera.nearClipPlane = 0.03f;
+            _localGhostCamera.farClipPlane = 400f;
+
+            _localGhostRoot.AddComponent<AudioListener>();
+
+            _localGhostSpectatorCamera = _localGhostRoot.AddComponent<GhostSpectatorCamera>();
+            _localGhostThrowManager = _localGhostRoot.AddComponent<GhostThrowManager>();
+            _localGhostThrowManager.SetGhostControlEnabled(true);
+            _localGhostThrowManager.SetEnableOutOfBoundsKillCheck(false);
+            _localGhostThrowManager.ForceEnableGhostThrow($"{name} death fallback");
+        }
+
+        // 회색 오버레이 제거 → 고스트 카메라 뷰가 가려지지 않도록
+        GameHUD.FindOrCreate()?.HideDeathOverlayImmediate();
+
+        // 고스트 모드: 마우스 커서를 표시해 투척 목적지를 화면에서 직접 지정할 수 있게 한다.
+        // TryThrow()는 Camera.main.ScreenPointToRay(Input.mousePosition)로 커서 위치를 타겟으로 삼는다.
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
     }
 
     private void DestroyLocalGhostMode()
@@ -388,7 +519,9 @@ public sealed partial class NetworkPlayer
             _localDeathTransitionCoroutine = null;
         }
 
-        if (_localGhostRoot != null)
+        // _localGhostCamera가 null이면 프리팹 카메라를 재사용한 것이므로 Destroy하지 않음
+        // (NetworkPlayer와 함께 소멸하거나, 씬 오브젝트로 계속 남음)
+        if (_localGhostRoot != null && _localGhostCamera != null)
             Destroy(_localGhostRoot);
 
         _localGhostRoot = null;
