@@ -16,6 +16,9 @@ public class SpectatorCamera : MonoBehaviour
     [SerializeField] private float maxHeight = 22f;
     [SerializeField] private float zoomFactor = 0.6f;
 
+    [Header("Fallback (no alive players)")]
+    [SerializeField] private Vector3 mapCenter = Vector3.zero;
+
     private bool _enabledSpectator;
 
     public void EnableSpectator(bool enabled)
@@ -35,7 +38,11 @@ public class SpectatorCamera : MonoBehaviour
 
         targets.RemoveAll(t => t == null || !t.gameObject.activeInHierarchy);
         if (targets.Count == 0)
+        {
+            transform.rotation = Quaternion.Slerp(transform.rotation,
+                Quaternion.LookRotation(mapCenter - transform.position, Vector3.up), Time.deltaTime * smooth);
             return;
+        }
 
         var center = GetCenter(targets);
         var maxDist = GetMaxDistanceFromCenter(targets, center);
