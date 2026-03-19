@@ -112,6 +112,7 @@ namespace SSAFYPlayTime
             {
                 try
                 {
+                    UntrackGameplayPlayer(player.PlayerId);
                     runner.Despawn(spawned);
                 }
                 catch (Exception e)
@@ -119,8 +120,10 @@ namespace SSAFYPlayTime
                     Debug.LogWarning($"[Lobby] Failed to despawn player character. player={player.PlayerId}, error={e.Message}");
                 }
             }
+            UntrackGameplayPlayer(player.PlayerId);
             _spawnedGameplayNetworkCharacters.Remove(player.PlayerId);
             _spawnedCharacterIndexByPlayerId.Remove(player.PlayerId);
+            _deadGameplayPlayerIds.Remove(player.PlayerId);
 
             if (player.IsRealPlayer)
             {
@@ -574,6 +577,12 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            if (IsGhostThrowInputModeActive())
+            {
+                ResetLatchedNetworkInputState();
+                return;
+            }
+
             _netMoveInput = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
             // Camera.main이 null이면 직전 유효 yaw를 그대로 유지 (0으로 리셋하면 이동 방향이 북쪽으로 고정됨)
             if (Camera.main != null)
@@ -663,6 +672,19 @@ namespace SSAFYPlayTime
             var value = queued;
             queued = false;
             return value;
+        }
+
+        private bool IsGhostThrowInputModeActive()
+        {
+            var ghostManagers = UnityEngine.Object.FindObjectsByType<SSAFYPlayTime.Game.GhostThrow.GhostThrowManager>(FindObjectsSortMode.None);
+            for (var i = 0; i < ghostManagers.Length; i++)
+            {
+                var manager = ghostManagers[i];
+                if (manager != null && manager.IsGhostThrowEnabled)
+                    return true;
+            }
+
+            return false;
         }
 
         // 매 네트워크 틱마다 로컬 플레이어의 입력을 수집해 Fusion에 전달한다.
@@ -869,6 +891,8 @@ namespace SSAFYPlayTime
 
             _spawnedGameplayNetworkCharacters.Clear();
             _spawnedCharacterIndexByPlayerId.Clear();
+            UntrackAllGameplayPlayers();
+            _deadGameplayPlayerIds.Clear();
             _cachedSpawnPointGroup = null;
             _gameplaySceneSpawnBootstrapComplete = false;
 
