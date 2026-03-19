@@ -63,6 +63,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private GameObject _shieldEffectInstance;
         private GameObject _dustEffectInstance;
+        private bool _shieldVisualConfigured;
         private Transform _animatedVisualRoot;
         private Vector3 _baseVisualScale = Vector3.one;
         private float _baseDrag;
@@ -489,6 +490,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (_shieldEffectInstance == null)
             {
                 _shieldEffectInstance = CreateEffectInstance(ShieldPrefabPath, ShieldObjectName);
+                _shieldVisualConfigured = false;
             }
 
             if (_shieldEffectInstance == null)
@@ -499,7 +501,8 @@ namespace SSAFYPlayTime.Gameplay.Items
             _shieldEffectInstance.transform.localPosition = shieldLocalOffset;
             _shieldEffectInstance.transform.localRotation = Quaternion.identity;
             _shieldEffectInstance.transform.localScale = Vector3.Scale(ResolveShieldScale(), Vector3.one * snapshot.ScaleMultiplier);
-            EnsureShieldEffectVisualState();
+            EnsureShieldEffectVisualState(configureMaterials: !_shieldVisualConfigured);
+            _shieldVisualConfigured = true;
         }
 
         private void UpdateDustEffect(ItemBuffSnapshot snapshot)
@@ -543,7 +546,10 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             var instance = Instantiate(prefab, characterRoot);
             instance.name = objectName;
-            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
+            if (!string.Equals(objectName, ShieldObjectName, StringComparison.Ordinal))
+            {
+                ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
+            }
             DisableRuntimePhysics(instance);
             ItemRuntimeLog.Info(objectName, $"보조 이펙트 생성: path={prefabPath}", this);
             return instance;
@@ -557,7 +563,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 Mathf.Max(MinimumShieldScaleAxis, shieldScale.z));
         }
 
-        private void EnsureShieldEffectVisualState()
+        private void EnsureShieldEffectVisualState(bool configureMaterials = false)
         {
             if (_shieldEffectInstance == null)
             {
@@ -574,7 +580,10 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
 
                 renderer.enabled = true;
-                ApplyShieldRendererColors(renderer);
+                if (configureMaterials)
+                {
+                    ApplyShieldRendererColors(renderer);
+                }
             }
 
             var particleSystems = _shieldEffectInstance.GetComponentsInChildren<ParticleSystem>(true);
@@ -593,11 +602,6 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
 
                 var main = particleSystem.main;
-                if (string.Equals(particleObject.name, ShieldStartObjectName, StringComparison.Ordinal))
-                {
-                    main.loop = true;
-                }
-
                 if (main.loop && !particleSystem.isPlaying)
                 {
                     particleSystem.Play(withChildren: true);
@@ -615,16 +619,16 @@ namespace SSAFYPlayTime.Gameplay.Items
             var rendererName = renderer.gameObject.name ?? string.Empty;
             var isShieldBody = string.Equals(rendererName, "ShieldYellow", StringComparison.Ordinal);
             var baseColor = string.Equals(rendererName, ShieldSparksObjectName, StringComparison.Ordinal)
-                ? new Color(1f, 0.84f, 0.2f, 0.85f)
+                ? new Color(1f, 0.84f, 0.2f, 0.3f)
                 : isShieldBody
-                    ? new Color(1f, 0.82f, 0.18f, 0.55f)
-                    : new Color(1f, 0.78f, 0.14f, 0.68f);
+                    ? new Color(1f, 0.82f, 0.18f, 0.3f)
+                    : new Color(1f, 0.78f, 0.14f, 0.35f);
             var rimColor = isShieldBody
-                ? new Color(1f, 0.84f, 0.2f, 1f)
-                : new Color(1f, 0.84f, 0.2f, 0.95f);
+                ? new Color(1f, 0.84f, 0.2f, 0.55f)
+                : new Color(1f, 0.84f, 0.2f, 0.45f);
             var innerColor = isShieldBody
-                ? new Color(0.52f, 0.28f, 0.03f, 0.95f)
-                : new Color(0.42f, 0.22f, 0.02f, 0.92f);
+                ? new Color(0.52f, 0.28f, 0.03f, 0.35f)
+                : new Color(0.42f, 0.22f, 0.02f, 0.32f);
 
             var materials = renderer.materials;
             for (var i = 0; i < materials.Length; i++)
@@ -660,9 +664,46 @@ namespace SSAFYPlayTime.Gameplay.Items
                     material.SetColor("_EmissionColor", rimColor * 0.65f);
                     material.EnableKeyword("_EMISSION");
                 }
+
+                EnsureTransparentShieldMaterial(material);
             }
 
             renderer.materials = materials;
+        }
+
+        private static void EnsureTransparentShieldMaterial(Material material)
+        {
+            if (material == null)
+            {
+                return;
+            }
+
+            if (material.HasProperty("_Surface"))
+            {
+                material.SetFloat("_Surface", 1f);
+            }
+            if (material.HasProperty("_Blend"))
+            {
+                material.SetFloat("_Blend", 0f);
+            }
+            if (material.HasProperty("_SrcBlend"))
+            {
+                material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            }
+            if (material.HasProperty("_DstBlend"))
+            {
+                material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            }
+            if (material.HasProperty("_ZWrite"))
+            {
+                material.SetFloat("_ZWrite", 0f);
+            }
+
+            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.EnableKeyword("_ALPHABLEND_ON");
+            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            material.SetOverrideTag("RenderType", "Transparent");
+            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
         }
 
         private static void DisableRuntimePhysics(GameObject root)
@@ -716,6 +757,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             Destroy(_shieldEffectInstance);
             _shieldEffectInstance = null;
+            _shieldVisualConfigured = false;
         }
 
         private void DestroyDustEffect()
