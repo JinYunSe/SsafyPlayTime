@@ -44,20 +44,29 @@ namespace SSAFYPlayTime.Game.GhostThrow
         public override void Spawned()
         {
             if (HasStateAuthority)
+            {
                 LifeTimer = TickTimer.CreateFromSeconds(Runner, lifeTime);
 
-            // 모든 클라이언트: 호스트가 onBeforeSpawned에서 저장한 초기 속도를 적용.
-            // NetworkRigidbody 없이 탄도를 동기화하는 핵심 처리.
-            if (NetworkedInitialVelocity.sqrMagnitude > 0.001f)
-            {
-                var rb = GetComponent<Rigidbody>();
-                if (rb != null)
+                // StateAuthority(호스트)만 Rigidbody 초기 속도를 적용해 물리 시뮬레이션을 실행.
+                // NetworkTransform이 매 틱마다 위치를 클라이언트에 동기화한다.
+                if (NetworkedInitialVelocity.sqrMagnitude > 0.001f)
                 {
-                    rb.drag = 0f;
-                    rb.angularDrag = 0.05f;
-                    rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-                    rb.velocity = NetworkedInitialVelocity;
+                    var rb = GetComponent<Rigidbody>();
+                    if (rb != null)
+                    {
+                        rb.drag = 0f;
+                        rb.angularDrag = 0.05f;
+                        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                        rb.velocity = NetworkedInitialVelocity;
+                    }
                 }
+            }
+            else
+            {
+                // 비-StateAuthority 클라이언트: Rigidbody를 kinematic으로 설정해
+                // 로컬 물리 시뮬레이션을 비활성화. NetworkTransform이 호스트의 위치를 복제한다.
+                var rb = GetComponent<Rigidbody>();
+                if (rb != null) rb.isKinematic = true;
             }
         }
 
@@ -150,9 +159,16 @@ namespace SSAFYPlayTime.Game.GhostThrow
             _hasExploded = true;
 
             ApplyExplosionKnockback(transform.position);
-            SpawnExplosionEffect(transform.position);
+            // 모든 클라이언트에 폭발 이펙트 동기화 (Instantiate는 로컬 전용이므로 RPC 사용)
+            Rpc_SpawnExplosionEffect(transform.position);
 
             Runner.Despawn(Object);
+        }
+
+        [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+        private void Rpc_SpawnExplosionEffect(Vector3 pos)
+        {
+            SpawnExplosionEffect(pos);
         }
 
         /// <summary>오프라인/테스트 환경 폭발.</summary>
