@@ -6,6 +6,7 @@
  */
 using Fusion;
 using UnityEngine;
+using System.Collections.Generic;
 
 namespace SSAFYPlayTime.Gameplay.Items
 {
@@ -28,6 +29,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private const float SpecialFieldFriction = 1f;
         private const float SpecialFieldBounciness = 0f;
         private static PhysicMaterial s_specialEquipmentFieldMaterial;
+        private static readonly Dictionary<string, SphereColliderProfile> s_colliderProfiles = new(System.StringComparer.Ordinal);
 
         private readonly IItemFieldPrefabResolver _prefabResolver;
 
@@ -101,7 +103,14 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return null;
             }
 
-            GameObject instance;
+            var pooled = ItemFieldVisualPool.Acquire(itemId, parent);
+            if (pooled != null)
+            {
+                ApplyVisualRuntimeSetup(pooled, itemId);
+                return pooled;
+            }
+
+            GameObject instance = null;
             var prefab = prefabResolver?.Resolve(prefabPath);
             if (prefab != null)
             {
@@ -119,6 +128,8 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             PrepareVisualInstance(instance, itemId);
+            ItemFieldVisualPool.RegisterNew(itemId, instance);
+            ApplyVisualRuntimeSetup(instance, itemId);
             return instance;
         }
 
@@ -130,25 +141,28 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             var visualRoot = ResolveVisualRoot(root.transform);
-            if (visualRoot != null)
-            {
-                if (string.Equals(itemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal))
-                {
-                    ConfigureBlackholeVisual(visualRoot.gameObject, true);
-                }
-                else
-                {
-                    ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(visualRoot.gameObject);
-
-                    if (string.Equals(itemId, ItemIds.WaterMelonSword, System.StringComparison.Ordinal))
-                    {
-                        ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(visualRoot.gameObject, true);
-                    }
-                }
-            }
+            ApplyVisualRuntimeSetup(visualRoot != null ? visualRoot.gameObject : null, itemId);
 
             EnsureCollider(root, visualRoot, itemId);
             EnsureDynamicRigidbody(root, itemId);
+        }
+
+        internal static void ReleaseFieldVisual(GameObject root, string itemId)
+        {
+            if (root == null || string.IsNullOrWhiteSpace(itemId))
+            {
+                return;
+            }
+
+            var visualRoot = string.Equals(root.name, VisualRootName, System.StringComparison.Ordinal)
+                ? root.transform
+                : root.transform.Find(VisualRootName);
+            if (visualRoot == null)
+            {
+                return;
+            }
+
+            ItemFieldVisualPool.Release(itemId, visualRoot.gameObject);
         }
 
         private static GameObject CreateFallbackVisual(string itemId, Transform parent)
@@ -181,6 +195,27 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
         }
 
+        private static void ApplyVisualRuntimeSetup(GameObject visualRoot, string itemId)
+        {
+            if (visualRoot == null || string.IsNullOrWhiteSpace(itemId))
+            {
+                return;
+            }
+
+            if (string.Equals(itemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal))
+            {
+                ConfigureBlackholeVisual(visualRoot, true);
+                return;
+            }
+
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(visualRoot);
+
+            if (string.Equals(itemId, ItemIds.WaterMelonSword, System.StringComparison.Ordinal))
+            {
+                ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(visualRoot, true);
+            }
+        }
+
         private static void StripNetworkComponents(GameObject root)
         {
             if (root == null)
@@ -188,21 +223,12 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            var networkBehaviours = root.GetComponentsInChildren<NetworkBehaviour>(true);
-            for (var i = 0; i < networkBehaviours.Length; i++)
+            var networkedDrops = root.GetComponentsInChildren<NetworkedItemFieldDrop>(true);
+            for (var i = 0; i < networkedDrops.Length; i++)
             {
-                if (networkBehaviours[i] != null)
+                if (networkedDrops[i] != null)
                 {
-                    Object.Destroy(networkBehaviours[i]);
-                }
-            }
-
-            var networkObjects = root.GetComponentsInChildren<NetworkObject>(true);
-            for (var i = 0; i < networkObjects.Length; i++)
-            {
-                if (networkObjects[i] != null)
-                {
-                    Object.Destroy(networkObjects[i]);
+                    Object.Destroy(networkedDrops[i]);
                 }
             }
 
@@ -215,12 +241,33 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
             }
 
-            var networkedDrops = root.GetComponentsInChildren<NetworkedItemFieldDrop>(true);
-            for (var i = 0; i < networkedDrops.Length; i++)
+            var networkTransforms = root.GetComponentsInChildren<NetworkTransform>(true);
+            for (var i = 0; i < networkTransforms.Length; i++)
             {
-                if (networkedDrops[i] != null)
+                if (networkTransforms[i] != null)
                 {
-                    Object.Destroy(networkedDrops[i]);
+                    Object.Destroy(networkTransforms[i]);
+                }
+            }
+
+            var networkObjects = root.GetComponentsInChildren<NetworkObject>(true);
+            for (var i = 0; i < networkObjects.Length; i++)
+            {
+                if (networkObjects[i] != null)
+                {
+                    Object.Destroy(networkObjects[i]);
+                }
+            }
+
+            var networkBehaviours = root.GetComponentsInChildren<NetworkBehaviour>(true);
+            for (var i = 0; i < networkBehaviours.Length; i++)
+            {
+                var behaviour = networkBehaviours[i];
+                if (behaviour != null &&
+                    !(behaviour is NetworkedItemFieldDrop) &&
+                    !(behaviour is NetworkTransform))
+                {
+                    Object.Destroy(behaviour);
                 }
             }
         }
@@ -309,18 +356,15 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            if (!TryCalculateWorldBounds(visualRoot, out var bounds))
+            if (!TryGetOrCreateColliderProfile(itemId, visualRoot, out var profile))
             {
                 sphereCollider.center = Vector3.zero;
                 sphereCollider.radius = DefaultFieldColliderRadius;
                 return;
             }
 
-            sphereCollider.center = root.transform.InverseTransformPoint(bounds.center);
-            var extents = bounds.extents;
-            sphereCollider.radius = Mathf.Max(
-                DefaultFieldColliderRadius,
-                Mathf.Max(extents.x, Mathf.Max(extents.y, extents.z)));
+            sphereCollider.center = profile.Center;
+            sphereCollider.radius = profile.Radius;
         }
 
         private static bool TryCalculateWorldBounds(Transform visualRoot, out Bounds bounds)
@@ -448,6 +492,44 @@ namespace SSAFYPlayTime.Gameplay.Items
                    string.Equals(itemId, ItemIds.Shrink, System.StringComparison.Ordinal) ||
                    string.Equals(itemId, ItemIds.Invisibility, System.StringComparison.Ordinal) ||
                    string.Equals(itemId, ItemIds.Americano, System.StringComparison.Ordinal);
+        }
+
+        private static bool TryGetOrCreateColliderProfile(string itemId, Transform visualRoot, out SphereColliderProfile profile)
+        {
+            if (!string.IsNullOrWhiteSpace(itemId) && s_colliderProfiles.TryGetValue(itemId, out profile))
+            {
+                return true;
+            }
+
+            if (!TryCalculateWorldBounds(visualRoot, out var bounds))
+            {
+                profile = default;
+                return false;
+            }
+
+            var extents = bounds.extents;
+            profile = new SphereColliderProfile
+            {
+                Center = visualRoot != null && visualRoot.parent != null
+                    ? visualRoot.parent.InverseTransformPoint(bounds.center)
+                    : bounds.center,
+                Radius = Mathf.Max(
+                    DefaultFieldColliderRadius,
+                    Mathf.Max(extents.x, Mathf.Max(extents.y, extents.z)))
+            };
+
+            if (!string.IsNullOrWhiteSpace(itemId))
+            {
+                s_colliderProfiles[itemId] = profile;
+            }
+
+            return true;
+        }
+
+        private struct SphereColliderProfile
+        {
+            public Vector3 Center;
+            public float Radius;
         }
     }
 }

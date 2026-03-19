@@ -72,6 +72,9 @@ public class ImmediateDeath : MonoBehaviour
         if (!destroyFieldItems)
             return;
 
+        if (ShouldIgnoreFieldItemsInThisZone())
+            return;
+
         var drop = other.GetComponentInParent<ItemFieldDrop>();
         if (drop == null)
             drop = other.GetComponent<ItemFieldDrop>();
@@ -97,6 +100,28 @@ public class ImmediateDeath : MonoBehaviour
 
         DebugLog($"Fallback field item removed: itemId={drop.ItemId}, instanceId={drop.InstanceId}");
         Destroy(drop.gameObject);
+    }
+
+    private bool ShouldIgnoreFieldItemsInThisZone()
+    {
+        return ContainsNameToken(transform, "WaterFloor");
+    }
+
+    private static bool ContainsNameToken(Transform target, string token)
+    {
+        var current = target;
+        while (current != null)
+        {
+            if (!string.IsNullOrWhiteSpace(current.name) &&
+                current.name.IndexOf(token, System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            current = current.parent;
+        }
+
+        return false;
     }
 
     private void DebugLog(string message)
