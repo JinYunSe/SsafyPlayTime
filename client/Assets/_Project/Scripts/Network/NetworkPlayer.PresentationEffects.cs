@@ -11,7 +11,10 @@ public sealed partial class NetworkPlayer
     private const float FootDustProbeDistance = 0.9f;
     private const float FootDustSurfaceOffset = 0.02f;
     private const float FootDustFallbackOffset = 0.18f;
-    private const float FootDustLifetime = 2f;
+
+    // Object Pool — 씬 전체에서 공유하는 static 풀
+    private static readonly Stack<GameObject> s_runDustPool = new();
+    private static Vector3 s_runDustBaseScale = Vector3.one;
     private const float IdleUpperBodySwayMultiplier = 0.18f;
     private const float WalkUpperBodySwayMultiplier = 0.34f;
     private const float SprintUpperBodySwayMultiplier = 0.48f;
@@ -97,8 +100,8 @@ public sealed partial class NetworkPlayer
             }
         }
 
-        TryAddUpperBodySwayBinding(HumanBodyBones.Neck, 0.16f, physicsByName);
-        TryAddUpperBodySwayBinding(HumanBodyBones.Head, 0.24f, physicsByName);
+        TryAddUpperBodySwayBinding(HumanBodyBones.Neck, 0.38f, physicsByName);
+        TryAddUpperBodySwayBinding(HumanBodyBones.Head, 0.46f, physicsByName);
         TryAddUpperBodySwayBinding(HumanBodyBones.Chest, 0.12f, physicsByName);
         TryAddUpperBodySwayBinding(HumanBodyBones.LeftUpperArm, 0.42f, physicsByName);
         TryAddUpperBodySwayBinding(HumanBodyBones.LeftLowerArm, 0.52f, physicsByName);
@@ -188,7 +191,7 @@ public sealed partial class NetworkPlayer
         }
 
         var locomotionState = ResolvePresentationLocomotionState();
-        if (locomotionState == PresentationLocomotionState.Idle)
+        if (locomotionState != PresentationLocomotionState.Sprint)
         {
             ResetRunDustCadence();
             return;
@@ -204,15 +207,10 @@ public sealed partial class NetworkPlayer
         if (dustPrefab == null)
             return;
 
-        var instance = Instantiate(dustPrefab, position, rotation);
-        var scale = locomotionState == PresentationLocomotionState.Sprint ? 0.95f : 0.78f;
-        instance.transform.localScale *= scale;
-        Destroy(instance, FootDustLifetime);
+        RentRunDust(dustPrefab, position, rotation, 0.95f);
 
         _nextDustLeftFoot = !_nextDustLeftFoot;
-        _nextDustAt = Time.time + (locomotionState == PresentationLocomotionState.Sprint
-            ? SprintDustInterval
-            : WalkDustInterval);
+        _nextDustAt = Time.time + SprintDustInterval;
     }
 
     private void ResetRunDustCadence()
@@ -286,5 +284,42 @@ public sealed partial class NetworkPlayer
             _runDustPrefab = Resources.Load<GameObject>(RunDustResourcePath);
 
         return _runDustPrefab;
+    }
+
+    // ── Object Pool ────────────────────────────────────────────────────────────
+
+    private static void RentRunDust(GameObject prefab, Vector3 position, Quaternion rotation, float scaleMultiplier)
+    {
+        var go = GetOrCreateRunDust(prefab);
+        go.transform.SetPositionAndRotation(position, rotation);
+        go.transform.localScale = s_runDustBaseScale * scaleMultiplier;
+        go.SetActive(true);
+
+        var ps = go.GetComponentInChildren<ParticleSystem>(true);
+        if (ps != null)
+        {
+            ps.Clear(true);
+            ps.Play(true);
+        }
+
+        var handle = go.GetComponent<RunDustPoolHandle>();
+        if (handle != null)
+            handle.pool = s_runDustPool;
+    }
+
+    private static GameObject GetOrCreateRunDust(GameObject prefab)
+    {
+        while (s_runDustPool.Count > 0)
+        {
+            var pooled = s_runDustPool.Pop();
+            if (pooled != null)
+                return pooled;
+            // null이면 씬 언로드로 소멸된 것 — 새로 생성
+        }
+
+        var go = Instantiate(prefab);
+        s_runDustBaseScale = go.transform.localScale;
+        go.AddComponent<RunDustPoolHandle>();
+        return go;
     }
 }

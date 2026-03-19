@@ -12,9 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8868e1f255c733b45b3df8c45f5b2a19, type: 3}
   m_Name: DefaultMotorConfig
   m_EditorClassIdentifier: 
-  maxSpeed: 2.7
-  acceleration: 20
-  airAcceleration: 6
+  maxSpeed: 5
+  acceleration: 38
+  airAcceleration: 14
   brakingAcceleration: 28
   rotateSpeedDeg: 210
   sprintSpeedMultiplier: 1.55
@@ -23,8 +23,8 @@ MonoBehaviour:
   grabYawSoftLimitDeg: 60
   grabYawHardLimitDeg: 75
   grabTurnSpeedScale: 0.45
-  jumpImpulse: 62
-  extraGravity: 7
+  jumpImpulse: 100
+  extraGravity: 3
   groundProbeRadius: 0.1
   groundProbeDistance: 0.5
   fallEnterSec: 0.75

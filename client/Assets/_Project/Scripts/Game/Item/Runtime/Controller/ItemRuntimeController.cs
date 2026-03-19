@@ -47,6 +47,17 @@ namespace SSAFYPlayTime.Gameplay.Items
         public ItemBuffMask ActiveBuffMask => _activeBuffMask;
         public float EquipmentEndAtSec => _equipmentEndAt;
 
+        /// <summary>현재 들고 있는 아이템이 Equipment 타입인지 여부</summary>
+        public bool IsHeldItemEquipment
+        {
+            get
+            {
+                if (string.IsNullOrWhiteSpace(_heldItemId)) return false;
+                return _catalog.TryGetDefinition(_heldItemId, out var def)
+                    && def.Master.ItemType == ItemType.Equipment;
+            }
+        }
+
         public bool TryPickup(string itemId, out string reason)
         {
             reason = string.Empty;
