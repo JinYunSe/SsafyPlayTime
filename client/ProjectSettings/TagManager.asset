@@ -9,15 +9,15 @@ TagManager:
   - Default
   - TransparentFX
   - Ignore Raycast
-  - 
+  - Map
   - Water
   - UI
   - Ground
   - 
-  - 
-  - 
-  - 
-  - 
+  - Character
+  - Ragdoll
+  - GrabHurtbox
+  - GrabSensor
   - 
   - 
   - 

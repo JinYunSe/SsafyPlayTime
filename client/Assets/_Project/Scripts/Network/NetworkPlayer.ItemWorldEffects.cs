@@ -14,9 +14,11 @@ public sealed partial class NetworkPlayer
     private const string ReplicatedSatelliteChargeName = "Item_SatelliteStrike_Charge";
     private const string ReplicatedSatelliteBeamName = "Item_SatelliteStrike_Beam";
     private const string ReplicatedFlamethrowerFxName = "Item_FlamethrowerFx_Replicated";
+    private const string NetworkedItemEffectProxyAssetPath = "Assets/_Project/Prefabs/Effects/NetworkedItemEffectProxy.prefab";
+    private const string NetworkedItemEffectProxyResourcePath = "_Project/Prefabs/Effects/NetworkedItemEffectProxy";
     private const string BlackholeVisualAssetPath = "Assets/_Project/Prefabs/Items/BlackholeBomb.prefab";
     private const string BlackholeVisualResourcePath = "_Project/Prefabs/Items/BlackholeBomb";
-    private const string BlackholeEffectResourcePath = "Effect_02_BlackHole";
+    private const string BlackholeEffectResourcePath = "Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple";
     private const string FlamethrowerEffectAssetPath = "Assets/Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky.prefab";
     private const string FlamethrowerEffectResourcePath = "Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky";
     private const string SatelliteProjectileAssetPath =
@@ -47,11 +49,11 @@ public sealed partial class NetworkPlayer
     [SerializeField] private float blackholeThrowSpeed = 8f;
     [SerializeField] private float blackholeThrowArc = 0.35f;
     [SerializeField] private bool enableReplicatedBlackholeSecondaryFx;
-    [SerializeField] private float blackholePullStrengthMultiplier = 2.25f;
+    [SerializeField] private float blackholePullStrengthMultiplier = 3.25f;
     [SerializeField] private float blackholeExpandSpeedMultiplier = 1.5f;
-    [SerializeField] private float blackholePlayerPullMultiplier = 1.5f;
+    [SerializeField] private float blackholePlayerPullMultiplier = 2.5f;
     [SerializeField] private float blackholeItemPullMultiplier = 1.5f;
-    [SerializeField] private float blackholePlayerEscapeDamping = 0.2f;
+    [SerializeField] private float blackholePlayerEscapeDamping = 0.45f;
     [SerializeField] private bool enableReplicatedBlackholeTargetOutline = true;
     [SerializeField] private Color replicatedBlackholeTargetOutlineColor = new(0.72f, 0.56f, 1f, 0.9f);
     [SerializeField] private float replicatedBlackholeTargetOutlineScaleMultiplier = 1.045f;
@@ -67,6 +69,7 @@ public sealed partial class NetworkPlayer
     private readonly Collider[] _replicatedBlackholeOverlapBuffer = new Collider[256];
     private readonly Collider[] _replicatedSatelliteOverlapBuffer = new Collider[256];
     private readonly DefaultItemFieldPrefabResolver _replicatedEffectPrefabResolver = new();
+    private static PhysicMaterial s_blackholeProjectileLowFrictionMaterial;
 
     private bool _itemWorldEffectNetworkReady;
     private bool _itemWorldEffectEventsBound;
@@ -85,21 +88,31 @@ public sealed partial class NetworkPlayer
     private GameObject _satelliteChargeupPrefabCache;
     private GameObject _satelliteCloudPrefabCache;
     private GameObject _satelliteCylinderPrefabCache;
+    private GameObject _networkedItemEffectProxyPrefabCache;
     private GameObject _replicatedFlamethrowerFxRoot;
     private ParticleSystem[] _replicatedFlamethrowerParticles = System.Array.Empty<ParticleSystem>();
     private float _nextItemGameplayRunnerLookupTime;
     private bool _cachedHasItemGameplayRunner;
     private Material _replicatedBlackholeTargetOutlineMaterial;
     private readonly Dictionary<Transform, ReplicatedBlackholeOutlineState> _replicatedBlackholeOutlineStates = new();
+    private NetworkObject _activeBlackholeEffectProxy;
+    private NetworkObject _activeSatelliteProjectileEffectProxy;
+    private NetworkObject _activeSatelliteChargeEffectProxy;
+    private NetworkObject _activeSatelliteBeamEffectProxy;
+    private NetworkObject _activeFlamethrowerEffectProxy;
 
     [Networked] private int NetworkedBlackholeSeq { get; set; }
     [Networked] private Vector3 NetworkedBlackholeCenter { get; set; }
+    [Networked] private Vector3 NetworkedBlackholeOrigin { get; set; }
+    [Networked] private Vector3 NetworkedBlackholeForward { get; set; }
     [Networked] private float NetworkedBlackholeDelaySec { get; set; }
     [Networked] private float NetworkedBlackholeDurationSec { get; set; }
     [Networked] private float NetworkedBlackholeRadius { get; set; }
     [Networked] private float NetworkedBlackholeForce { get; set; }
     [Networked] private int NetworkedSatelliteStrikeSeq { get; set; }
     [Networked] private Vector3 NetworkedSatelliteStrikeCenter { get; set; }
+    [Networked] private Vector3 NetworkedSatelliteStrikeOrigin { get; set; }
+    [Networked] private Vector3 NetworkedSatelliteStrikeForward { get; set; }
     [Networked] private float NetworkedSatelliteStrikeWarningSec { get; set; }
     [Networked] private float NetworkedSatelliteStrikeDurationSec { get; set; }
     [Networked] private float NetworkedSatelliteStrikeRadius { get; set; }
@@ -194,17 +207,19 @@ public sealed partial class NetworkPlayer
     {
         if (!CanWriteItemWorldEffectState())
         {
-            ItemRuntimeLog.Warn(ItemIds.BlackholeBomb, "블랙홀 네트워크 기록 실패: StateAuthority 없음", this);
+            ItemRuntimeLog.Warn(ItemIds.BlackholeBomb, "Blackhole request ignored because this peer does not have StateAuthority.", this);
             return;
         }
 
         NetworkedBlackholeCenter = request.Center;
+        NetworkedBlackholeOrigin = request.Origin;
+        NetworkedBlackholeForward = request.Forward;
         NetworkedBlackholeDelaySec = request.DelaySec;
         NetworkedBlackholeDurationSec = request.DurationSec;
         NetworkedBlackholeRadius = request.Radius;
         NetworkedBlackholeForce = request.Force;
         NetworkedBlackholeSeq++;
-        ItemRuntimeLog.Info(ItemIds.BlackholeBomb, $"블랙홀 네트워크 기록: seq={NetworkedBlackholeSeq}, center={request.Center}, radius={request.Radius:0.00}", this);
+        ItemRuntimeLog.Info(ItemIds.BlackholeBomb, $"Blackhole request replicated: seq={NetworkedBlackholeSeq}, center={request.Center}, radius={request.Radius:0.00}", this);
 
         StartReplicatedBlackhole(request, applyGameplay: true);
     }
@@ -213,11 +228,13 @@ public sealed partial class NetworkPlayer
     {
         if (!CanWriteItemWorldEffectState())
         {
-            ItemRuntimeLog.Warn(ItemIds.SatelliteStrike, "위성 네트워크 기록 실패: StateAuthority 없음", this);
+            ItemRuntimeLog.Warn(ItemIds.SatelliteStrike, "Satellite strike request ignored because this peer does not have StateAuthority.", this);
             return;
         }
 
         NetworkedSatelliteStrikeCenter = request.Center;
+        NetworkedSatelliteStrikeOrigin = request.Origin;
+        NetworkedSatelliteStrikeForward = request.Forward;
         NetworkedSatelliteStrikeWarningSec = request.WarningSec;
         NetworkedSatelliteStrikeDurationSec = request.DurationSec;
         NetworkedSatelliteStrikeRadius = request.Radius;
@@ -225,7 +242,7 @@ public sealed partial class NetworkPlayer
         NetworkedSatelliteStrikeBaseDamage = request.BaseDamage;
         NetworkedSatelliteStrikeStunDamage = request.StunDamage;
         NetworkedSatelliteStrikeSeq++;
-        ItemRuntimeLog.Info(ItemIds.SatelliteStrike, $"위성 네트워크 기록: seq={NetworkedSatelliteStrikeSeq}, center={request.Center}, radius={request.Radius:0.00}", this);
+        ItemRuntimeLog.Info(ItemIds.SatelliteStrike, $"Satellite strike request replicated: seq={NetworkedSatelliteStrikeSeq}, center={request.Center}, radius={request.Radius:0.00}", this);
 
         StartReplicatedSatelliteStrike(request, applyGameplay: true);
     }
@@ -234,24 +251,31 @@ public sealed partial class NetworkPlayer
     {
         if (!CanWriteItemWorldEffectState())
         {
-            ItemRuntimeLog.Warn(itemId, "화염 시작 네트워크 기록 실패: StateAuthority 없음", this);
+            ItemRuntimeLog.Warn(itemId, "Flamethrower start ignored because this peer does not have StateAuthority.", this);
             return;
         }
 
         NetworkedFlamethrowerActive = true;
-        ItemRuntimeLog.Info(itemId, $"화염 시작 네트워크 기록: endAt={endAtSec:0.00}", this);
-        if (ShouldDriveFlamethrowerVisualLocally())
+        ItemRuntimeLog.Info(itemId, $"Flamethrower start replicated: endAt={endAtSec:0.00}", this);
+        var forward = Quaternion.Euler(0f, GetNetworkedVisualYaw(), 0f) * Vector3.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude <= 0.0001f)
         {
-            EnsureReplicatedFlamethrowerVisual();
-            PlayReplicatedFlamethrowerParticles();
+            forward = transform.forward.sqrMagnitude > 0.0001f ? transform.forward.normalized : Vector3.forward;
         }
+        var origin = ResolveFlamethrowerEffectOrigin(forward);
+        EnsureOrUpdateFlamethrowerEffectProxy(
+            origin,
+            forward,
+            Mathf.Max(1f, NetworkedFlamethrowerRange),
+            Mathf.Max(0.25f, NetworkedFlamethrowerRadius));
     }
 
     private void HandleFlamethrowerTicked(FlamethrowerTickRequest request)
     {
         if (!CanWriteItemWorldEffectState())
         {
-            ItemRuntimeLog.Warn(ItemIds.Flamethrower, "화염 틱 네트워크 기록 실패: StateAuthority 없음", this);
+            ItemRuntimeLog.Warn(ItemIds.Flamethrower, "Flamethrower tick ignored because this peer does not have StateAuthority.", this);
             return;
         }
 
@@ -261,40 +285,35 @@ public sealed partial class NetworkPlayer
         NetworkedFlamethrowerRange = request.Range;
         NetworkedFlamethrowerRadius = request.Radius;
         NetworkedFlamethrowerTickSeq++;
-        ItemRuntimeLog.Info(ItemIds.Flamethrower, $"화염 틱 네트워크 기록: seq={NetworkedFlamethrowerTickSeq}, origin={request.Origin}, range={request.Range:0.00}, radius={request.Radius:0.00}", this);
+        ItemRuntimeLog.Info(ItemIds.Flamethrower, $"Flamethrower tick replicated: seq={NetworkedFlamethrowerTickSeq}, origin={request.Origin}, range={request.Range:0.00}, radius={request.Radius:0.00}", this);
 
-        if (ShouldDriveFlamethrowerVisualLocally())
-        {
-            ApplyReplicatedFlamethrowerTick(request.Origin, request.Forward, request.Range, request.Radius);
-        }
+        var safeForward = request.Forward.sqrMagnitude > 0.0001f ? request.Forward.normalized : transform.forward;
+        EnsureOrUpdateFlamethrowerEffectProxy(request.Origin, safeForward, request.Range, request.Radius);
     }
 
     private void HandleFlamethrowerStopped(string itemId)
     {
         if (!CanWriteItemWorldEffectState())
         {
-            ItemRuntimeLog.Warn(itemId, "화염 종료 네트워크 기록 실패: StateAuthority 없음", this);
+            ItemRuntimeLog.Warn(itemId, "Flamethrower stop ignored because this peer does not have StateAuthority.", this);
             return;
         }
 
         NetworkedFlamethrowerActive = false;
         NetworkedFlamethrowerStopSeq++;
-        ItemRuntimeLog.Info(itemId, $"화염 종료 네트워크 기록: seq={NetworkedFlamethrowerStopSeq}", this);
-        if (ShouldDriveFlamethrowerVisualLocally())
-        {
-            StopReplicatedFlamethrowerVisual();
-        }
+        ItemRuntimeLog.Info(itemId, $"Flamethrower stop replicated: seq={NetworkedFlamethrowerStopSeq}", this);
+        StopReplicatedFlamethrowerVisual();
     }
 
     private void HandleItemConsumed(string itemId)
     {
         if (!CanWriteItemWorldEffectState())
         {
-            ItemRuntimeLog.Warn(itemId, "아이템 소비 네트워크 기록 실패: StateAuthority 없음", this);
+            ItemRuntimeLog.Warn(itemId, "Item consume broadcast ignored because this peer does not have StateAuthority.", this);
             return;
         }
 
-        ItemRuntimeLog.Info(itemId, "아이템 소비 RPC 브로드캐스트", this);
+        ItemRuntimeLog.Info(itemId, "Item consume broadcast requested.", this);
         BroadcastItemConsumed(itemId);
     }
 
@@ -302,13 +321,13 @@ public sealed partial class NetworkPlayer
     {
         if (!CanWriteItemWorldEffectState())
         {
-            ItemRuntimeLog.Warn(request.ItemId, "근접 스윙 네트워크 기록 실패: StateAuthority 없음", this);
+            ItemRuntimeLog.Warn(request.ItemId, "Melee swing replication ignored because this peer does not have StateAuthority.", this);
             return;
         }
 
         NetworkedMeleeSwingDuration = request.ActiveDurationSec;
         NetworkedMeleeSwingSeq++;
-        ItemRuntimeLog.Info(request.ItemId, $"근접 스윙 네트워크 기록: seq={NetworkedMeleeSwingSeq}, duration={request.ActiveDurationSec:0.00}", this);
+        ItemRuntimeLog.Info(request.ItemId, $"Melee swing replicated: seq={NetworkedMeleeSwingSeq}, duration={request.ActiveDurationSec:0.00}", this);
     }
 
     private void ApplyReplicatedWorldItemEffects()
@@ -318,60 +337,10 @@ public sealed partial class NetworkPlayer
             return;
         }
 
-        if (NetworkedBlackholeSeq > 0 && _lastAppliedBlackholeSeq != NetworkedBlackholeSeq)
-        {
-            _lastAppliedBlackholeSeq = NetworkedBlackholeSeq;
-            ItemRuntimeLog.Info(ItemIds.BlackholeBomb, $"원격 블랙홀 반영: seq={NetworkedBlackholeSeq}, center={NetworkedBlackholeCenter}, radius={NetworkedBlackholeRadius:0.00}", this);
-            StartReplicatedBlackhole(
-                new BlackholeSkillRequest(
-                    NetworkedBlackholeCenter,
-                    NetworkedBlackholeDelaySec,
-                    NetworkedBlackholeDurationSec,
-                    NetworkedBlackholeRadius,
-                    NetworkedBlackholeForce),
-                applyGameplay: false);
-        }
-
-        if (NetworkedSatelliteStrikeSeq > 0 && _lastAppliedSatelliteStrikeSeq != NetworkedSatelliteStrikeSeq)
-        {
-            _lastAppliedSatelliteStrikeSeq = NetworkedSatelliteStrikeSeq;
-            ItemRuntimeLog.Info(ItemIds.SatelliteStrike, $"원격 위성 반영: seq={NetworkedSatelliteStrikeSeq}, center={NetworkedSatelliteStrikeCenter}, radius={NetworkedSatelliteStrikeRadius:0.00}", this);
-            StartReplicatedSatelliteStrike(
-                new SatelliteStrikeRequest(
-                    NetworkedSatelliteStrikeCenter,
-                    transform.position,
-                    transform.forward,
-                    NetworkedSatelliteStrikeWarningSec,
-                    NetworkedSatelliteStrikeDurationSec,
-                    NetworkedSatelliteStrikeRadius,
-                    NetworkedSatelliteStrikeForce,
-                    NetworkedSatelliteStrikeBaseDamage,
-                    NetworkedSatelliteStrikeStunDamage),
-                applyGameplay: false);
-        }
-
-        if (NetworkedFlamethrowerActive && _lastAppliedFlamethrowerTickSeq != NetworkedFlamethrowerTickSeq)
-        {
-            _lastAppliedFlamethrowerTickSeq = NetworkedFlamethrowerTickSeq;
-            ItemRuntimeLog.Info(ItemIds.Flamethrower, $"원격 화염 틱 반영: seq={NetworkedFlamethrowerTickSeq}, origin={NetworkedFlamethrowerOrigin}", this);
-            ApplyReplicatedFlamethrowerTick(
-                NetworkedFlamethrowerOrigin,
-                NetworkedFlamethrowerForward,
-                NetworkedFlamethrowerRange,
-                NetworkedFlamethrowerRadius);
-        }
-
-        if (!NetworkedFlamethrowerActive && _lastAppliedFlamethrowerStopSeq != NetworkedFlamethrowerStopSeq)
-        {
-            _lastAppliedFlamethrowerStopSeq = NetworkedFlamethrowerStopSeq;
-            ItemRuntimeLog.Info(ItemIds.Flamethrower, $"원격 화염 종료 반영: seq={NetworkedFlamethrowerStopSeq}", this);
-            StopReplicatedFlamethrowerVisual();
-        }
-
         if (NetworkedMeleeSwingSeq > 0 && _lastAppliedMeleeSwingSeq != NetworkedMeleeSwingSeq)
         {
             _lastAppliedMeleeSwingSeq = NetworkedMeleeSwingSeq;
-            ItemRuntimeLog.Info(ItemIds.WaterMelonSword, $"원격 근접 스윙 반영: seq={NetworkedMeleeSwingSeq}, duration={NetworkedMeleeSwingDuration:0.00}", this);
+            ItemRuntimeLog.Info(ItemIds.WaterMelonSword, $"Replicated melee swing applied: seq={NetworkedMeleeSwingSeq}, duration={NetworkedMeleeSwingDuration:0.00}", this);
             TriggerReplicatedMeleeSwing();
         }
     }
@@ -381,7 +350,7 @@ public sealed partial class NetworkPlayer
         var handler = GetComponentInChildren<ItemCharacterMeleeSwingHandler>(true);
         if (handler == null)
         {
-            ItemRuntimeLog.Warn(ItemIds.WaterMelonSword, "원격 근접 스윙 실패: ItemCharacterMeleeSwingHandler 없음", this);
+            ItemRuntimeLog.Warn(ItemIds.WaterMelonSword, "Replicated melee swing skipped because ItemCharacterMeleeSwingHandler is missing.", this);
             return;
         }
 
@@ -423,33 +392,52 @@ public sealed partial class NetworkPlayer
         }
 
         StopReplicatedFlamethrowerVisual();
+        DespawnNetworkedItemEffectProxy(ref _activeBlackholeEffectProxy);
+        DespawnNetworkedItemEffectProxy(ref _activeSatelliteProjectileEffectProxy);
+        DespawnNetworkedItemEffectProxy(ref _activeSatelliteChargeEffectProxy);
+        DespawnNetworkedItemEffectProxy(ref _activeSatelliteBeamEffectProxy);
         ReleaseAllReplicatedBlackholeTargetOutlines();
     }
 
     private IEnumerator CoReplicatedBlackhole(BlackholeSkillRequest request, bool applyGameplay)
     {
-        var startPosition = transform.position + Vector3.up * blackholeLaunchHeightOffset + transform.forward * blackholeLaunchForwardOffset;
-        var visualRoot = CreateReplicatedBlackholeVisual(startPosition);
-        var center = request.Center;
-        var throwForward = ResolveReplicatedThrowForward(request.Center);
-        var throwDirection = (throwForward + Vector3.up * blackholeThrowArc).normalized;
+        if (!HasStateAuthority || Runner == null)
+        {
+            _activeReplicatedBlackholeRoutine = null;
+            yield break;
+        }
+
+        var throwForward = ResolveReplicatedThrowForward(request.Forward, request.Center);
+        var startPosition = request.Origin + Vector3.up * blackholeLaunchHeightOffset + throwForward * blackholeLaunchForwardOffset;
+        var center = ResolveSatelliteGroundCenter(request.Center);
+        var startRotation = throwForward.sqrMagnitude > 0.0001f
+            ? Quaternion.LookRotation(throwForward, Vector3.up)
+            : Quaternion.identity;
         var outlinedTargets = new HashSet<Transform>();
         var outlinedTargetsThisFrame = new HashSet<Transform>();
-        var bombCollider = visualRoot != null ? visualRoot.GetComponent<Collider>() : null;
-        if (bombCollider == null && visualRoot != null)
+
+        DespawnNetworkedItemEffectProxy(ref _activeBlackholeEffectProxy);
+        _activeBlackholeEffectProxy = SpawnNetworkedItemEffectProxy(
+            startPosition,
+            startRotation,
+            proxy => proxy.InitializeBlackhole(request.Radius, throwForward));
+
+        var visualRoot = _activeBlackholeEffectProxy != null ? _activeBlackholeEffectProxy.gameObject : null;
+        var bombBody = visualRoot != null ? visualRoot.GetComponent<Rigidbody>() : null;
+        var bombProxy = visualRoot != null ? visualRoot.GetComponent<NetworkedItemEffectProxy>() : null;
+        var bombCollider = visualRoot != null ? visualRoot.GetComponent<SphereCollider>() : null;
+        if (visualRoot == null || bombBody == null || bombProxy == null)
         {
-            bombCollider = visualRoot.AddComponent<SphereCollider>();
+            _activeReplicatedBlackholeRoutine = null;
+            yield break;
         }
 
         if (bombCollider != null)
         {
-            bombCollider.enabled = true;
-        }
-
-        var bombBody = visualRoot != null ? visualRoot.GetComponent<Rigidbody>() : null;
-        if (bombBody == null && visualRoot != null)
-        {
-            bombBody = visualRoot.AddComponent<Rigidbody>();
+            bombCollider.radius = 0.225f;
+            bombCollider.center = Vector3.zero;
+            bombCollider.sharedMaterial = GetOrCreateBlackholeProjectileContactMaterial();
+            IgnoreOwnerCollisions(bombCollider);
         }
 
         if (bombBody != null)
@@ -459,44 +447,39 @@ public sealed partial class NetworkPlayer
             bombBody.angularDrag = 0.1f;
             bombBody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
             bombBody.interpolation = RigidbodyInterpolation.Interpolate;
-            bombBody.isKinematic = false;
-            bombBody.useGravity = true;
+            bombBody.constraints = RigidbodyConstraints.None;
             bombBody.velocity = Vector3.zero;
             bombBody.angularVelocity = Vector3.zero;
-            bombBody.AddForce(throwDirection * blackholeThrowSpeed, ForceMode.VelocityChange);
-            bombBody.AddTorque(UnityEngine.Random.onUnitSphere * 4f, ForceMode.VelocityChange);
+            bombBody.isKinematic = false;
+            bombBody.useGravity = true;
         }
 
         var delaySec = Mathf.Max(0f, request.DelaySec);
+        var projectileCenter = startPosition;
         if (delaySec > 0f)
         {
-            yield return new WaitForSeconds(delaySec);
-        }
+            var launchVelocity =
+                (throwForward + Vector3.up * blackholeThrowArc).normalized *
+                Mathf.Max(0.1f, blackholeThrowSpeed);
+            bombBody.AddForce(launchVelocity, ForceMode.VelocityChange);
 
-        center = visualRoot != null ? visualRoot.transform.position : request.Center;
-        if (bombBody != null)
-        {
-            bombBody.velocity = Vector3.zero;
-            bombBody.angularVelocity = Vector3.zero;
-            bombBody.isKinematic = true;
-        }
-
-        if (bombCollider != null)
-        {
-            bombCollider.enabled = false;
-        }
-
-        if (visualRoot != null)
-        {
-            var bombRenderer = visualRoot.GetComponent<Renderer>();
-            if (bombRenderer != null)
+            var flightStartTime = Time.time;
+            while (Time.time - flightStartTime < delaySec)
             {
-                // 한국어: 빌드에서는 내부 블랙홀 FX만으로는 발동이 거의 보이지 않는 경우가 있어
-                // 한국어: 발동 단계에서도 코어 구체를 완전히 끄지 않고 반투명 상태로 유지한다.
-                ApplyTransparentSphereVisual(visualRoot, new Color(0.07f, 0.07f, 0.08f, 0.6f));
-                bombRenderer.enabled = true;
+                projectileCenter = bombBody != null ? bombBody.position : visualRoot.transform.position;
+                yield return null;
             }
         }
+
+        center = bombBody != null ? bombBody.position : projectileCenter;
+        bombBody.velocity = Vector3.zero;
+        bombBody.angularVelocity = Vector3.zero;
+        bombBody.isKinematic = true;
+        bombBody.useGravity = false;
+        bombBody.constraints = RigidbodyConstraints.None;
+        bombProxy.Radius = request.Radius;
+        bombProxy.SetActivated(true);
+        bombProxy.SyncNetworkPose(center, Quaternion.identity, zeroVelocity: true, teleportNetwork: true);
 
         var duration = Mathf.Max(0.1f, request.DurationSec);
         var radius = Mathf.Max(0.1f, request.Radius);
@@ -508,11 +491,9 @@ public sealed partial class NetworkPlayer
         {
             var activeElapsed = Time.time - blackholeStartTime;
             var ramp = Mathf.Clamp01(activeElapsed / expandDuration);
-            var targetScale = Mathf.Max(0.4f, radius * Mathf.Max(0.08f, blackholeVisualScale * 0.22f));
-            targetScale *= Mathf.Max(1f, blackholeActivationScaleMultiplier);
-            visualRoot.transform.localScale = Vector3.one * Mathf.Lerp(0.28f, targetScale, ramp);
-            visualRoot.transform.Rotate(Vector3.up, 220f * Time.deltaTime, Space.World);
             visualRoot.transform.position = center;
+            visualRoot.transform.rotation = Quaternion.identity;
+            bombProxy.SyncNetworkPose(center, Quaternion.identity, teleportNetwork: false);
 
             if (applyGameplay)
             {
@@ -548,21 +529,47 @@ public sealed partial class NetworkPlayer
             ReleaseReplicatedBlackholeOutlineForTarget(target);
         }
 
-        Destroy(visualRoot);
+        DespawnNetworkedItemEffectProxy(ref _activeBlackholeEffectProxy);
         _activeReplicatedBlackholeRoutine = null;
     }
 
     private IEnumerator CoReplicatedSatelliteStrike(SatelliteStrikeRequest request, bool applyGameplay)
     {
+        if (!HasStateAuthority || Runner == null)
+        {
+            _activeReplicatedSatelliteRoutine = null;
+            yield break;
+        }
+
         var center = ResolveSatelliteGroundCenter(request.Center);
-        var launchOrigin = transform.position + Vector3.up * blackholeLaunchHeightOffset + transform.forward * blackholeLaunchForwardOffset;
-        var projectile = CreateReplicatedSatelliteProjectile(launchOrigin);
-        var throwForward = ResolveReplicatedThrowForward(request.Center);
+        var throwForward = ResolveReplicatedThrowForward(request.Forward, request.Center);
+        var launchOrigin = request.Origin + Vector3.up * blackholeLaunchHeightOffset + throwForward * blackholeLaunchForwardOffset;
         var throwDirection = (throwForward + Vector3.up * blackholeThrowArc).normalized;
         var velocity = throwDirection * Mathf.Max(0.1f, blackholeThrowSpeed);
         var gravity = Physics.gravity;
         var travelStartTime = Time.time;
         var current = launchOrigin;
+
+        DespawnNetworkedItemEffectProxy(ref _activeSatelliteProjectileEffectProxy);
+        _activeSatelliteProjectileEffectProxy = SpawnNetworkedItemEffectProxy(
+            launchOrigin,
+            Quaternion.identity,
+            proxy => proxy.InitializeSatelliteProjectile(request.Radius, throwForward));
+
+        var projectile = _activeSatelliteProjectileEffectProxy != null ? _activeSatelliteProjectileEffectProxy.gameObject : null;
+        var projectileBody = projectile != null ? projectile.GetComponent<Rigidbody>() : null;
+        var projectileProxy = projectile != null ? projectile.GetComponent<NetworkedItemEffectProxy>() : null;
+        if (projectileBody != null)
+        {
+            projectileBody.mass = 1.5f;
+            projectileBody.drag = 0.15f;
+            projectileBody.angularDrag = 0.05f;
+            projectileBody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            projectileBody.interpolation = RigidbodyInterpolation.Interpolate;
+            projectileBody.isKinematic = false;
+            projectileBody.useGravity = true;
+            projectileBody.velocity = velocity;
+        }
 
         while (Time.time - travelStartTime < 3f)
         {
@@ -586,6 +593,7 @@ public sealed partial class NetworkPlayer
                 if (projectile != null)
                 {
                     projectile.transform.position = center;
+                    projectileProxy?.SyncNetworkPose(center, projectile.transform.rotation, zeroVelocity: true);
                 }
                 break;
             }
@@ -598,6 +606,8 @@ public sealed partial class NetworkPlayer
                 {
                     projectile.transform.rotation = Quaternion.LookRotation(lookDirection, Vector3.up);
                 }
+
+                projectileProxy?.SyncNetworkPose(projectile.transform.position, projectile.transform.rotation);
             }
 
             current = next;
@@ -606,18 +616,26 @@ public sealed partial class NetworkPlayer
             yield return null;
         }
 
-        Destroy(projectile);
+        DespawnNetworkedItemEffectProxy(ref _activeSatelliteProjectileEffectProxy);
 
-        var charge = CreateReplicatedSatelliteCharge(center, request.Radius);
+        DespawnNetworkedItemEffectProxy(ref _activeSatelliteChargeEffectProxy);
+        _activeSatelliteChargeEffectProxy = SpawnNetworkedItemEffectProxy(
+            center + Vector3.up * 0.05f,
+            Quaternion.identity,
+            proxy => proxy.InitializeSatelliteCharge(request.Radius));
 
         if (request.WarningSec > 0f)
         {
             yield return new WaitForSeconds(request.WarningSec);
         }
 
-        Destroy(charge);
+        DespawnNetworkedItemEffectProxy(ref _activeSatelliteChargeEffectProxy);
 
-        var beam = CreateReplicatedSatelliteBeam(center, request.Radius);
+        DespawnNetworkedItemEffectProxy(ref _activeSatelliteBeamEffectProxy);
+        _activeSatelliteBeamEffectProxy = SpawnNetworkedItemEffectProxy(
+            center,
+            Quaternion.identity,
+            proxy => proxy.InitializeSatelliteBeam(request.Radius));
 
         var duration = Mathf.Max(0.1f, request.DurationSec);
         var tickInterval = 0.25f;
@@ -648,7 +666,7 @@ public sealed partial class NetworkPlayer
             }
         }
 
-        Destroy(beam);
+        DespawnNetworkedItemEffectProxy(ref _activeSatelliteBeamEffectProxy);
         _activeReplicatedSatelliteRoutine = null;
     }
 
@@ -675,14 +693,16 @@ public sealed partial class NetworkPlayer
                 continue;
             }
 
-            var body = hitCollider.attachedRigidbody;
+            var targetPlayer = hitCollider.GetComponentInParent<NetworkPlayer>();
+            var body = targetPlayer != null ? targetPlayer.rigidbody3D : hitCollider.attachedRigidbody;
             if (body == null || body.isKinematic)
             {
                 continue;
             }
 
-            var root = body.transform.root;
-            var toCenter = center - body.worldCenterOfMass;
+            var root = targetPlayer != null ? targetPlayer.transform : body.transform.root;
+            var centerOfMass = targetPlayer != null ? body.worldCenterOfMass : body.worldCenterOfMass;
+            var toCenter = center - centerOfMass;
             if (toCenter.sqrMagnitude <= 0.0001f)
             {
                 continue;
@@ -698,15 +718,20 @@ public sealed partial class NetworkPlayer
             }
 
             var distance = Mathf.Max(toCenter.magnitude, 0.35f);
-            var pullMultiplier = root != null && root.CompareTag("Player")
+            var isPlayerTarget = targetPlayer != null || (root != null && root.CompareTag("Player"));
+            var pullMultiplier = isPlayerTarget
                 ? Mathf.Max(0.05f, blackholePlayerPullMultiplier)
                 : Mathf.Max(0.05f, blackholeItemPullMultiplier);
             var pullStrength = (force * blackholePullStrengthMultiplier * (0.4f + ramp * 1.6f)) /
                                Mathf.Sqrt(distance) * pullMultiplier;
 
-            if (root != null && root.CompareTag("Player"))
+            if (isPlayerTarget)
             {
                 ApplyBlackholeEscapeDamping(body, toCenter.normalized);
+                var inwardVelocityBoost = toCenter.normalized *
+                                          ((force * 0.12f) + (ramp * 0.9f)) /
+                                          Mathf.Max(0.75f, Mathf.Sqrt(distance));
+                body.AddForce(inwardVelocityBoost, ForceMode.VelocityChange);
             }
 
             body.AddForce(toCenter.normalized * pullStrength, ForceMode.Acceleration);
@@ -1061,19 +1086,13 @@ public sealed partial class NetworkPlayer
             var targetPlayer = hitCollider.GetComponentInParent<NetworkPlayer>();
             if (targetPlayer != null && targetPlayer != this)
             {
-                if (damagePerTick > 0f)
-                {
-                    var playerStats = targetPlayer.GetComponentInParent<PlayerStats>();
-                    if (playerStats != null)
-                    {
-                        playerStats.TakeDamage(Mathf.Max(0, Mathf.RoundToInt(damagePerTick)));
-                    }
-                }
-
-                if (stunPerTick > 0f)
-                {
-                    targetPlayer.ApplyStunDamage(stunPerTick, 1f, 0f, explosionForce);
-                }
+                targetPlayer.ApplyCombinedDamage(
+                    damagePerTick,
+                    stunPerTick,
+                    "SatelliteStrike",
+                    0f,
+                    explosionForce,
+                    instigator: this);
             }
 
             var body = hitCollider.attachedRigidbody;
@@ -1110,10 +1129,23 @@ public sealed partial class NetworkPlayer
         return requestedCenter + Vector3.up * 0.02f;
     }
 
-    private Vector3 ResolveReplicatedThrowForward(Vector3 targetPosition)
+    private Vector3 ResolveReplicatedThrowForward(Vector3 requestedForward, Vector3 targetPosition)
     {
-        var forward = targetPosition - transform.position;
+        var forward = requestedForward;
         forward.y = 0f;
+        if (forward.sqrMagnitude > 0.0001f)
+        {
+            return forward.normalized;
+        }
+
+        forward = targetPosition - transform.position;
+        forward.y = 0f;
+        if (forward.sqrMagnitude <= 0.0001f)
+        {
+            var yawForward = Quaternion.Euler(0f, GetNetworkedVisualYaw(), 0f) * Vector3.forward;
+            yawForward.y = 0f;
+            forward = yawForward;
+        }
         if (forward.sqrMagnitude <= 0.0001f)
         {
             forward = transform.forward;
@@ -1138,7 +1170,7 @@ public sealed partial class NetworkPlayer
             PrepareReplicatedVisualInstance(instance, false);
             RefreshReplicatedPrefabVisual(instance);
             PlayAllParticles(instance);
-            ItemRuntimeLog.Info(ItemIds.BlackholeBomb, $"블랙홀 비주얼 프리팹 사용: {prefab.name}", this);
+            ItemRuntimeLog.Info(ItemIds.BlackholeBomb, $"Replicated blackhole visual prefab used: {prefab.name}", this);
             return instance;
         }
 
@@ -1150,7 +1182,7 @@ public sealed partial class NetworkPlayer
         ApplyTransparentSphereVisual(fallback, new Color(0.07f, 0.07f, 0.08f, 0.14f));
         TryAttachReplicatedBlackholeFx(fallback.transform);
         EnsureVisibleBlackholeShell(fallback.transform);
-        ItemRuntimeLog.Warn(ItemIds.BlackholeBomb, "블랙홀 비주얼 프리팹 로드 실패: primitive fallback 사용", this);
+        ItemRuntimeLog.Warn(ItemIds.BlackholeBomb, "Replicated blackhole visual prefab missing. Using primitive fallback.", this);
         return fallback;
     }
 
@@ -1172,7 +1204,7 @@ public sealed partial class NetworkPlayer
             shellObject.transform.localScale = Vector3.one * 0.28f;
             DisableCollider(shellObject);
             ApplyTransparentSphereVisual(shellObject, new Color(0.08f, 0.08f, 0.1f, 0.32f));
-            ItemRuntimeLog.InfoOnce("BlackholeShellCreated", ItemIds.BlackholeBomb, "블랙홀 가시 셸 생성", this);
+            ItemRuntimeLog.InfoOnce("BlackholeShellCreated", ItemIds.BlackholeBomb, "Replicated blackhole shell created.", this);
             return;
         }
 
@@ -1192,7 +1224,7 @@ public sealed partial class NetworkPlayer
             PrepareReplicatedVisualInstance(instance, false);
             RefreshReplicatedPrefabVisual(instance);
             PlayAllParticles(instance);
-            ItemRuntimeLog.Info(ItemIds.SatelliteStrike, $"위성 투사체 프리팹 사용: {prefab.name}", this);
+            ItemRuntimeLog.Info(ItemIds.SatelliteStrike, $"Replicated satellite projectile prefab used: {prefab.name}", this);
             return instance;
         }
 
@@ -1202,7 +1234,7 @@ public sealed partial class NetworkPlayer
         fallback.transform.localScale = Vector3.one * 0.3f;
         DisableCollider(fallback);
         ApplyTransparentSphereVisual(fallback, new Color(0.95f, 0.3f, 0.3f, 0.7f));
-        ItemRuntimeLog.Warn(ItemIds.SatelliteStrike, "위성 투사체 프리팹 로드 실패: primitive fallback 사용", this);
+        ItemRuntimeLog.Warn(ItemIds.SatelliteStrike, "Replicated satellite projectile prefab missing. Using primitive fallback.", this);
         return fallback;
     }
 
@@ -1216,7 +1248,7 @@ public sealed partial class NetworkPlayer
             TryAttachReplicatedEffectChild(root.transform, TryLoadReplicatedSatelliteCloudPrefab(), "Cloud", Vector3.one * Mathf.Max(1f, radius * 0.3f));
         if (attached)
         {
-            ItemRuntimeLog.Info(ItemIds.SatelliteStrike, "위성 차징 이펙트 프리팹 사용", this);
+            ItemRuntimeLog.Info(ItemIds.SatelliteStrike, "Replicated satellite charge effect prefab used.", this);
             return root;
         }
 
@@ -1230,7 +1262,7 @@ public sealed partial class NetworkPlayer
             Mathf.Max(0.35f, radius * 0.2f));
         DisableCollider(fallback);
         ApplyTransparentSphereVisual(fallback, new Color(0.35f, 0.7f, 1f, 0.35f));
-        ItemRuntimeLog.Warn(ItemIds.SatelliteStrike, "위성 차징 이펙트 로드 실패: cylinder fallback 사용", this);
+        ItemRuntimeLog.Warn(ItemIds.SatelliteStrike, "Replicated satellite charge effect missing. Using cylinder fallback.", this);
         return root;
     }
 
@@ -1251,7 +1283,7 @@ public sealed partial class NetworkPlayer
             Vector3.one * Mathf.Max(1f, radius * 0.3f));
         if (attachedCloud || attachedBeam)
         {
-            ItemRuntimeLog.Info(ItemIds.SatelliteStrike, "위성 빔 이펙트 프리팹 사용", this);
+            ItemRuntimeLog.Info(ItemIds.SatelliteStrike, "Replicated satellite beam effect prefab used.", this);
             return root;
         }
 
@@ -1265,7 +1297,7 @@ public sealed partial class NetworkPlayer
             Mathf.Max(0.35f, radius * 0.28f));
         DisableCollider(fallback);
         ApplyTransparentSphereVisual(fallback, new Color(0.35f, 0.7f, 1f, 0.45f));
-        ItemRuntimeLog.Warn(ItemIds.SatelliteStrike, "위성 빔 이펙트 로드 실패: cylinder fallback 사용", this);
+        ItemRuntimeLog.Warn(ItemIds.SatelliteStrike, "Replicated satellite beam effect missing. Using cylinder fallback.", this);
         return root;
     }
 
@@ -1278,7 +1310,10 @@ public sealed partial class NetworkPlayer
 
         DisableColliders(instance);
         DisableBehaviours(instance);
-        ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
+        if (instance.GetComponent<ItemBlackholeVisualAuthoring>() == null)
+        {
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
+        }
         if (attachBlackholeFx)
         {
             TryAttachReplicatedBlackholeFx(instance.transform);
@@ -1319,12 +1354,7 @@ public sealed partial class NetworkPlayer
 
     private void UpdateReplicatedFlamethrowerVisualFollow()
     {
-        if (Object == null || !Object.IsValid || !NetworkedFlamethrowerActive || _replicatedFlamethrowerFxRoot == null)
-        {
-            return;
-        }
-
-        if (!ShouldDriveFlamethrowerVisualLocally())
+        if (!HasStateAuthority || !NetworkedFlamethrowerActive)
         {
             return;
         }
@@ -1332,8 +1362,8 @@ public sealed partial class NetworkPlayer
         var forward = NetworkedFlamethrowerForward.sqrMagnitude > 0.0001f
             ? NetworkedFlamethrowerForward.normalized
             : transform.forward;
-        var origin = transform.position + Vector3.up * flamethrowerVisualHeightOffset + forward * flamethrowerVisualForwardOffset;
-        ApplyReplicatedFlamethrowerTick(origin, forward, NetworkedFlamethrowerRange, NetworkedFlamethrowerRadius);
+        var origin = ResolveFlamethrowerEffectOrigin(forward);
+        EnsureOrUpdateFlamethrowerEffectProxy(origin, forward, NetworkedFlamethrowerRange, NetworkedFlamethrowerRadius);
     }
 
     private void ApplyReplicatedFlamethrowerTick(Vector3 origin, Vector3 forward, float range, float radius)
@@ -1375,7 +1405,7 @@ public sealed partial class NetworkPlayer
             ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_replicatedFlamethrowerFxRoot);
             _replicatedFlamethrowerParticles = _replicatedFlamethrowerFxRoot.GetComponentsInChildren<ParticleSystem>(true);
             ConfigureReplicatedFlamethrowerParticles();
-            ItemRuntimeLog.Info(ItemIds.Flamethrower, $"화염 이펙트 프리팹 사용: {prefab.name}", this);
+            ItemRuntimeLog.Info(ItemIds.Flamethrower, $"Replicated flamethrower effect prefab used: {prefab.name}", this);
             return;
         }
 
@@ -1405,7 +1435,7 @@ public sealed partial class NetworkPlayer
         shape.radius = 0.12f;
         shape.length = 0.6f;
         shape.randomDirectionAmount = 0.2f;
-        ItemRuntimeLog.Warn(ItemIds.Flamethrower, "화염 이펙트 프리팹 로드 실패: 기본 파티클 fallback 생성", this);
+            ItemRuntimeLog.Warn(ItemIds.Flamethrower, "Replicated flamethrower effect missing. Using particle fallback.", this);
     }
 
     private GameObject TryLoadReplicatedFlamethrowerEffectPrefab()
@@ -1418,18 +1448,18 @@ public sealed partial class NetworkPlayer
         _flamethrowerEffectPrefabCache = _replicatedEffectPrefabResolver.Resolve(FlamethrowerEffectAssetPath);
         if (_flamethrowerEffectPrefabCache != null)
         {
-            ItemRuntimeLog.InfoOnce("FlamethrowerEffectAsset", ItemIds.Flamethrower, $"화염 이펙트 에셋 로드 성공: {FlamethrowerEffectAssetPath}", this);
+            ItemRuntimeLog.InfoOnce("FlamethrowerEffectAsset", ItemIds.Flamethrower, $"Flamethrower effect prefab loaded from asset path: {FlamethrowerEffectAssetPath}", this);
             return _flamethrowerEffectPrefabCache;
         }
 
         _flamethrowerEffectPrefabCache = Resources.Load<GameObject>(FlamethrowerEffectResourcePath);
         if (_flamethrowerEffectPrefabCache != null)
         {
-            ItemRuntimeLog.InfoOnce("FlamethrowerEffectResource", ItemIds.Flamethrower, $"화염 이펙트 리소스 로드 성공: {FlamethrowerEffectResourcePath}", this);
+            ItemRuntimeLog.InfoOnce("FlamethrowerEffectResource", ItemIds.Flamethrower, $"Flamethrower effect prefab loaded from Resources: {FlamethrowerEffectResourcePath}", this);
         }
         else
         {
-            ItemRuntimeLog.WarnOnce("FlamethrowerEffectMissing", ItemIds.Flamethrower, $"화염 이펙트 로드 실패: asset={FlamethrowerEffectAssetPath}, resource={FlamethrowerEffectResourcePath}", this);
+            ItemRuntimeLog.WarnOnce("FlamethrowerEffectMissing", ItemIds.Flamethrower, $"Flamethrower effect prefab load failed: asset={FlamethrowerEffectAssetPath}, resource={FlamethrowerEffectResourcePath}", this);
         }
         return _flamethrowerEffectPrefabCache;
     }
@@ -1442,6 +1472,47 @@ public sealed partial class NetworkPlayer
         }
 
         return transform;
+    }
+
+    private Vector3 ResolveFlamethrowerEffectOrigin(Vector3 forward)
+    {
+        var anchor = ResolveFlamethrowerEffectAnchor();
+        if (_heldItemPresenter != null && _heldItemPresenter.CurrentHeldVisualRoot != null && anchor == _heldItemPresenter.CurrentHeldVisualRoot)
+        {
+            return anchor.TransformPoint(flamethrowerMuzzleLocalOffset);
+        }
+
+        return transform.position + Vector3.up * flamethrowerVisualHeightOffset + forward * flamethrowerVisualForwardOffset;
+    }
+
+    private void EnsureOrUpdateFlamethrowerEffectProxy(Vector3 origin, Vector3 forward, float range, float radius)
+    {
+        if (!HasStateAuthority || Runner == null)
+        {
+            return;
+        }
+
+        var safeForward = forward.sqrMagnitude > 0.0001f ? forward.normalized : transform.forward;
+        var rotation = Quaternion.LookRotation(safeForward, Vector3.up);
+        var safeRange = Mathf.Max(0.5f, range);
+        var safeRadius = Mathf.Max(0.1f, radius);
+
+        if (_activeFlamethrowerEffectProxy == null || !_activeFlamethrowerEffectProxy || !_activeFlamethrowerEffectProxy.gameObject.activeInHierarchy)
+        {
+            _activeFlamethrowerEffectProxy = SpawnNetworkedItemEffectProxy(
+                origin,
+                rotation,
+                proxy => proxy.InitializeFlamethrower(safeRange, safeRadius, safeForward));
+            return;
+        }
+
+        _activeFlamethrowerEffectProxy.transform.SetPositionAndRotation(origin, rotation);
+        var proxyBehaviour = _activeFlamethrowerEffectProxy.GetComponent<NetworkedItemEffectProxy>();
+        if (proxyBehaviour != null)
+        {
+            proxyBehaviour.InitializeFlamethrower(safeRange, safeRadius, safeForward);
+            proxyBehaviour.SyncNetworkPose(origin, rotation, zeroVelocity: true);
+        }
     }
 
     private void AttachReplicatedFlamethrowerVisualToAnchor(Vector3 origin, Vector3 forward)
@@ -1464,7 +1535,7 @@ public sealed partial class NetworkPlayer
 
         if (hasHeldFlamethrower)
         {
-            // 한국어: hyekang 원본처럼 총구 이펙트를 무기 자식으로 붙여 총구 위치를 유지한다.
+            // 손에 든 화염방사기 시각 효과는 총구 오프셋을 그대로 따라가게 한다.
             _replicatedFlamethrowerFxRoot.transform.localPosition = flamethrowerMuzzleLocalOffset;
             _replicatedFlamethrowerFxRoot.transform.localRotation = Quaternion.Euler(flamethrowerMuzzleLocalEulerOffset);
             _replicatedFlamethrowerFxRoot.transform.localScale = Vector3.one * Mathf.Max(0.01f, flamethrowerVisualScale);
@@ -1474,6 +1545,62 @@ public sealed partial class NetworkPlayer
         _replicatedFlamethrowerFxRoot.transform.position = origin;
         _replicatedFlamethrowerFxRoot.transform.rotation = Quaternion.LookRotation(forward, Vector3.up);
         _replicatedFlamethrowerFxRoot.transform.localScale = Vector3.one * Mathf.Max(0.01f, flamethrowerVisualScale);
+    }
+
+    private GameObject TryLoadNetworkedItemEffectProxyPrefab()
+    {
+        if (_networkedItemEffectProxyPrefabCache != null)
+        {
+            return _networkedItemEffectProxyPrefabCache;
+        }
+
+        _networkedItemEffectProxyPrefabCache = _replicatedEffectPrefabResolver.Resolve(NetworkedItemEffectProxyAssetPath);
+        if (_networkedItemEffectProxyPrefabCache != null)
+        {
+            return _networkedItemEffectProxyPrefabCache;
+        }
+
+        _networkedItemEffectProxyPrefabCache = Resources.Load<GameObject>(NetworkedItemEffectProxyResourcePath);
+        if (_networkedItemEffectProxyPrefabCache == null)
+        {
+            ItemRuntimeLog.WarnOnce("NetworkedItemEffectProxyMissing", "ItemWorldEffect", $"Networked item effect proxy load failed: asset={NetworkedItemEffectProxyAssetPath}, resource={NetworkedItemEffectProxyResourcePath}", this);
+        }
+
+        return _networkedItemEffectProxyPrefabCache;
+    }
+
+    private NetworkObject SpawnNetworkedItemEffectProxy(Vector3 position, Quaternion rotation, System.Action<NetworkedItemEffectProxy> initialize)
+    {
+        if (!HasStateAuthority || Runner == null)
+        {
+            return null;
+        }
+
+        var prefab = TryLoadNetworkedItemEffectProxyPrefab();
+        if (prefab == null)
+        {
+            return null;
+        }
+
+        return Runner.Spawn(
+            prefab,
+            position,
+            rotation,
+            onBeforeSpawned: (_, obj) =>
+            {
+                var proxy = obj.GetComponent<NetworkedItemEffectProxy>();
+                initialize?.Invoke(proxy);
+            });
+    }
+
+    private void DespawnNetworkedItemEffectProxy(ref NetworkObject proxy)
+    {
+        if (proxy != null && Runner != null && Runner.IsRunning && HasStateAuthority)
+        {
+            Runner.Despawn(proxy);
+        }
+
+        proxy = null;
     }
 
     private GameObject TryLoadReplicatedBlackholeVisualPrefab()
@@ -1486,18 +1613,18 @@ public sealed partial class NetworkPlayer
         _blackholeVisualPrefabCache = _replicatedEffectPrefabResolver.Resolve(BlackholeVisualAssetPath);
         if (_blackholeVisualPrefabCache != null)
         {
-            ItemRuntimeLog.InfoOnce("BlackholeVisualAsset", ItemIds.BlackholeBomb, $"블랙홀 에셋 로드 성공: {BlackholeVisualAssetPath}", this);
+            ItemRuntimeLog.InfoOnce("BlackholeVisualAsset", ItemIds.BlackholeBomb, $"Blackhole visual prefab loaded from asset path: {BlackholeVisualAssetPath}", this);
             return _blackholeVisualPrefabCache;
         }
 
         _blackholeVisualPrefabCache = Resources.Load<GameObject>(BlackholeVisualResourcePath);
         if (_blackholeVisualPrefabCache != null)
         {
-            ItemRuntimeLog.InfoOnce("BlackholeVisualResource", ItemIds.BlackholeBomb, $"블랙홀 리소스 로드 성공: {BlackholeVisualResourcePath}", this);
+            ItemRuntimeLog.InfoOnce("BlackholeVisualResource", ItemIds.BlackholeBomb, $"Blackhole visual prefab loaded from Resources: {BlackholeVisualResourcePath}", this);
         }
         else
         {
-            ItemRuntimeLog.WarnOnce("BlackholeVisualMissing", ItemIds.BlackholeBomb, $"블랙홀 비주얼 로드 실패: asset={BlackholeVisualAssetPath}, resource={BlackholeVisualResourcePath}", this);
+            ItemRuntimeLog.WarnOnce("BlackholeVisualMissing", ItemIds.BlackholeBomb, $"Blackhole visual prefab load failed: asset={BlackholeVisualAssetPath}, resource={BlackholeVisualResourcePath}", this);
         }
         return _blackholeVisualPrefabCache;
     }
@@ -1512,18 +1639,18 @@ public sealed partial class NetworkPlayer
         _satelliteProjectilePrefabCache = _replicatedEffectPrefabResolver.Resolve(SatelliteProjectileAssetPath);
         if (_satelliteProjectilePrefabCache != null)
         {
-            ItemRuntimeLog.InfoOnce("SatelliteProjectileAsset", ItemIds.SatelliteStrike, $"위성 투사체 에셋 로드 성공: {SatelliteProjectileAssetPath}", this);
+            ItemRuntimeLog.InfoOnce("SatelliteProjectileAsset", ItemIds.SatelliteStrike, $"Satellite projectile prefab loaded from asset path: {SatelliteProjectileAssetPath}", this);
             return _satelliteProjectilePrefabCache;
         }
 
         _satelliteProjectilePrefabCache = Resources.Load<GameObject>(SatelliteProjectileResourcePath);
         if (_satelliteProjectilePrefabCache != null)
         {
-            ItemRuntimeLog.InfoOnce("SatelliteProjectileResource", ItemIds.SatelliteStrike, $"위성 투사체 리소스 로드 성공: {SatelliteProjectileResourcePath}", this);
+            ItemRuntimeLog.InfoOnce("SatelliteProjectileResource", ItemIds.SatelliteStrike, $"Satellite projectile prefab loaded from Resources: {SatelliteProjectileResourcePath}", this);
         }
         else
         {
-            ItemRuntimeLog.WarnOnce("SatelliteProjectileMissing", ItemIds.SatelliteStrike, $"위성 투사체 로드 실패: asset={SatelliteProjectileAssetPath}, resource={SatelliteProjectileResourcePath}", this);
+            ItemRuntimeLog.WarnOnce("SatelliteProjectileMissing", ItemIds.SatelliteStrike, $"Satellite projectile prefab load failed: asset={SatelliteProjectileAssetPath}, resource={SatelliteProjectileResourcePath}", this);
         }
         return _satelliteProjectilePrefabCache;
     }
@@ -1538,18 +1665,18 @@ public sealed partial class NetworkPlayer
         _satelliteChargeupPrefabCache = _replicatedEffectPrefabResolver.Resolve(SatelliteChargeupAssetPath);
         if (_satelliteChargeupPrefabCache != null)
         {
-            ItemRuntimeLog.InfoOnce("SatelliteChargeAsset", ItemIds.SatelliteStrike, $"위성 차징 에셋 로드 성공: {SatelliteChargeupAssetPath}", this);
+            ItemRuntimeLog.InfoOnce("SatelliteChargeAsset", ItemIds.SatelliteStrike, $"Satellite charge prefab loaded from asset path: {SatelliteChargeupAssetPath}", this);
             return _satelliteChargeupPrefabCache;
         }
 
         _satelliteChargeupPrefabCache = Resources.Load<GameObject>(SatelliteChargeupResourcePath);
         if (_satelliteChargeupPrefabCache != null)
         {
-            ItemRuntimeLog.InfoOnce("SatelliteChargeResource", ItemIds.SatelliteStrike, $"위성 차징 리소스 로드 성공: {SatelliteChargeupResourcePath}", this);
+            ItemRuntimeLog.InfoOnce("SatelliteChargeResource", ItemIds.SatelliteStrike, $"Satellite charge prefab loaded from Resources: {SatelliteChargeupResourcePath}", this);
         }
         else
         {
-            ItemRuntimeLog.WarnOnce("SatelliteChargeMissing", ItemIds.SatelliteStrike, $"위성 차징 로드 실패: asset={SatelliteChargeupAssetPath}, resource={SatelliteChargeupResourcePath}", this);
+            ItemRuntimeLog.WarnOnce("SatelliteChargeMissing", ItemIds.SatelliteStrike, $"Satellite charge prefab load failed: asset={SatelliteChargeupAssetPath}, resource={SatelliteChargeupResourcePath}", this);
         }
         return _satelliteChargeupPrefabCache;
     }
@@ -1564,18 +1691,18 @@ public sealed partial class NetworkPlayer
         _satelliteCloudPrefabCache = _replicatedEffectPrefabResolver.Resolve(SatelliteCloudAssetPath);
         if (_satelliteCloudPrefabCache != null)
         {
-            ItemRuntimeLog.InfoOnce("SatelliteCloudAsset", ItemIds.SatelliteStrike, $"위성 클라우드 에셋 로드 성공: {SatelliteCloudAssetPath}", this);
+            ItemRuntimeLog.InfoOnce("SatelliteCloudAsset", ItemIds.SatelliteStrike, $"Satellite cloud prefab loaded from asset path: {SatelliteCloudAssetPath}", this);
             return _satelliteCloudPrefabCache;
         }
 
         _satelliteCloudPrefabCache = Resources.Load<GameObject>(SatelliteCloudResourcePath);
         if (_satelliteCloudPrefabCache != null)
         {
-            ItemRuntimeLog.InfoOnce("SatelliteCloudResource", ItemIds.SatelliteStrike, $"위성 클라우드 리소스 로드 성공: {SatelliteCloudResourcePath}", this);
+            ItemRuntimeLog.InfoOnce("SatelliteCloudResource", ItemIds.SatelliteStrike, $"Satellite cloud prefab loaded from Resources: {SatelliteCloudResourcePath}", this);
         }
         else
         {
-            ItemRuntimeLog.WarnOnce("SatelliteCloudMissing", ItemIds.SatelliteStrike, $"위성 클라우드 로드 실패: asset={SatelliteCloudAssetPath}, resource={SatelliteCloudResourcePath}", this);
+            ItemRuntimeLog.WarnOnce("SatelliteCloudMissing", ItemIds.SatelliteStrike, $"Satellite cloud prefab load failed: asset={SatelliteCloudAssetPath}, resource={SatelliteCloudResourcePath}", this);
         }
         return _satelliteCloudPrefabCache;
     }
@@ -1590,18 +1717,18 @@ public sealed partial class NetworkPlayer
         _satelliteCylinderPrefabCache = _replicatedEffectPrefabResolver.Resolve(SatelliteCylinderAssetPath);
         if (_satelliteCylinderPrefabCache != null)
         {
-            ItemRuntimeLog.InfoOnce("SatelliteCylinderAsset", ItemIds.SatelliteStrike, $"위성 빔 에셋 로드 성공: {SatelliteCylinderAssetPath}", this);
+            ItemRuntimeLog.InfoOnce("SatelliteCylinderAsset", ItemIds.SatelliteStrike, $"Satellite beam prefab loaded from asset path: {SatelliteCylinderAssetPath}", this);
             return _satelliteCylinderPrefabCache;
         }
 
         _satelliteCylinderPrefabCache = Resources.Load<GameObject>(SatelliteCylinderResourcePath);
         if (_satelliteCylinderPrefabCache != null)
         {
-            ItemRuntimeLog.InfoOnce("SatelliteCylinderResource", ItemIds.SatelliteStrike, $"위성 빔 리소스 로드 성공: {SatelliteCylinderResourcePath}", this);
+            ItemRuntimeLog.InfoOnce("SatelliteCylinderResource", ItemIds.SatelliteStrike, $"Satellite beam prefab loaded from Resources: {SatelliteCylinderResourcePath}", this);
         }
         else
         {
-            ItemRuntimeLog.WarnOnce("SatelliteCylinderMissing", ItemIds.SatelliteStrike, $"위성 빔 로드 실패: asset={SatelliteCylinderAssetPath}, resource={SatelliteCylinderResourcePath}", this);
+            ItemRuntimeLog.WarnOnce("SatelliteCylinderMissing", ItemIds.SatelliteStrike, $"Satellite beam prefab load failed: asset={SatelliteCylinderAssetPath}, resource={SatelliteCylinderResourcePath}", this);
         }
         return _satelliteCylinderPrefabCache;
     }
@@ -1712,6 +1839,8 @@ public sealed partial class NetworkPlayer
 
     private void StopReplicatedFlamethrowerVisual()
     {
+        DespawnNetworkedItemEffectProxy(ref _activeFlamethrowerEffectProxy);
+
         if (_replicatedFlamethrowerParticles != null)
         {
             for (var i = 0; i < _replicatedFlamethrowerParticles.Length; i++)
@@ -1748,7 +1877,7 @@ public sealed partial class NetworkPlayer
 
         if (_blackholeEffectPrefabCache == null)
         {
-            ItemRuntimeLog.WarnOnce("BlackholeFxMissing", ItemIds.BlackholeBomb, $"블랙홀 부가 이펙트 로드 실패: resource={BlackholeEffectResourcePath}", this);
+            ItemRuntimeLog.WarnOnce("BlackholeFxMissing", ItemIds.BlackholeBomb, $"Blackhole FX resource load failed: resource={BlackholeEffectResourcePath}", this);
             return;
         }
 
@@ -1757,9 +1886,8 @@ public sealed partial class NetworkPlayer
         instance.transform.localPosition = Vector3.zero;
         instance.transform.localRotation = Quaternion.identity;
         instance.transform.localScale = Vector3.one * Mathf.Max(0.001f, blackholeVisualScale);
-        ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
         PlayAllParticles(instance);
-        ItemRuntimeLog.InfoOnce("BlackholeFxLoaded", ItemIds.BlackholeBomb, $"블랙홀 부가 이펙트 로드 성공: {instance.name}", this);
+        ItemRuntimeLog.InfoOnce("BlackholeFxLoaded", ItemIds.BlackholeBomb, $"Blackhole FX resource loaded: {instance.name}", this);
 
         var colliders = instance.GetComponentsInChildren<Collider>(true);
         for (var i = 0; i < colliders.Length; i++)
@@ -1780,6 +1908,43 @@ public sealed partial class NetworkPlayer
         {
             colliders[i].enabled = false;
         }
+    }
+
+    private void IgnoreOwnerCollisions(Collider projectileCollider)
+    {
+        if (projectileCollider == null)
+        {
+            return;
+        }
+
+        var ownerColliders = GetComponentsInChildren<Collider>(true);
+        for (var i = 0; i < ownerColliders.Length; i++)
+        {
+            var ownerCollider = ownerColliders[i];
+            if (ownerCollider != null && ownerCollider != projectileCollider)
+            {
+                Physics.IgnoreCollision(projectileCollider, ownerCollider, true);
+            }
+        }
+    }
+
+    private static PhysicMaterial GetOrCreateBlackholeProjectileContactMaterial()
+    {
+        if (s_blackholeProjectileLowFrictionMaterial != null)
+        {
+            return s_blackholeProjectileLowFrictionMaterial;
+        }
+
+        s_blackholeProjectileLowFrictionMaterial = new PhysicMaterial("BlackholeProjectile_Contact")
+        {
+            dynamicFriction = 0.45f,
+            staticFriction = 0.45f,
+            frictionCombine = PhysicMaterialCombine.Average,
+            bounciness = 0f,
+            bounceCombine = PhysicMaterialCombine.Minimum
+        };
+
+        return s_blackholeProjectileLowFrictionMaterial;
     }
 
     private static void PlayAllParticles(GameObject root)

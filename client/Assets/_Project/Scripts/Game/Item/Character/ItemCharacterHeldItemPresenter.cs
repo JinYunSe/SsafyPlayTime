@@ -1,10 +1,11 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemCharacterHeldItemPresenter 스크립트가 들어 있는 파일이다.
  * - Character 계층에서 캐릭터와 아이템 시스템의 결합 지점을 담당한다.
  * - 입력, 손 장착, 근접 판정, 버프 반영 같은 캐릭터 쪽 연결만 여기서 다루고, 실제 상태 전이는 Runtime 계층에서 유지한다.
  */
 using System;
+using Fusion;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Gameplay.Items
@@ -177,8 +178,14 @@ namespace SSAFYPlayTime.Gameplay.Items
             _spawnedHeldVisual = Instantiate(prefab, handAnchor);
             _spawnedHeldVisual.name = $"HeldItem_{heldItemId}";
             var isWatermelonSword = string.Equals(heldItemId, ItemIds.WaterMelonSword, StringComparison.Ordinal);
-            // 수박칼은 조건과 무관하게 Lit 셰이더로 강제 교체해 마젠타를 방지한다.
-            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_spawnedHeldVisual, isWatermelonSword);
+            var isBlackhole = string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal);
+            if (!isBlackhole)
+            {
+                // 수박칼은 조건과 무관하게 Lit 셰이더로 강제 교체해 마젠타를 방지한다.
+                ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_spawnedHeldVisual, isWatermelonSword);
+            }
+            RefreshBlackholeHeldVisualIfNeeded(heldItemId, _spawnedHeldVisual);
+            StripNetworkComponentsForHeldVisual(_spawnedHeldVisual);
             DisableNonHeldVisualEffects(heldItemId, _spawnedHeldVisual);
             ApplyPose(heldItemId, _spawnedHeldVisual.transform);
             DisablePhysicsForHeldVisual(_spawnedHeldVisual);
@@ -447,6 +454,61 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
         }
 
+        private static void StripNetworkComponentsForHeldVisual(GameObject visualRoot)
+        {
+            if (visualRoot == null)
+            {
+                return;
+            }
+
+            // NetworkedItemFieldDrop은 [RequireComponent(typeof(NetworkTransform))]를 선언하므로
+            // NetworkBehaviour 루프보다 먼저 즉시 제거해야 의존성 에러가 발생하지 않는다.
+            var networkedDrops = visualRoot.GetComponentsInChildren<NetworkedItemFieldDrop>(true);
+            for (var i = 0; i < networkedDrops.Length; i++)
+            {
+                if (networkedDrops[i] != null)
+                {
+                    DestroyImmediate(networkedDrops[i]);
+                }
+            }
+
+            var networkBehaviours = visualRoot.GetComponentsInChildren<NetworkBehaviour>(true);
+            for (var i = 0; i < networkBehaviours.Length; i++)
+            {
+                if (networkBehaviours[i] != null)
+                {
+                    Destroy(networkBehaviours[i]);
+                }
+            }
+
+            var fieldDrops = visualRoot.GetComponentsInChildren<ItemFieldDrop>(true);
+            for (var i = 0; i < fieldDrops.Length; i++)
+            {
+                if (fieldDrops[i] != null)
+                {
+                    Destroy(fieldDrops[i]);
+                }
+            }
+
+            var networkTransforms = visualRoot.GetComponentsInChildren<NetworkTransform>(true);
+            for (var i = 0; i < networkTransforms.Length; i++)
+            {
+                if (networkTransforms[i] != null)
+                {
+                    Destroy(networkTransforms[i]);
+                }
+            }
+
+            var networkObjects = visualRoot.GetComponentsInChildren<NetworkObject>(true);
+            for (var i = 0; i < networkObjects.Length; i++)
+            {
+                if (networkObjects[i] != null)
+                {
+                    Destroy(networkObjects[i]);
+                }
+            }
+        }
+
         private static void DisableNonHeldVisualEffects(string heldItemId, GameObject visualRoot)
         {
             if (visualRoot == null)
@@ -454,9 +516,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            var isBlackhole = string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal);
             var isSatellite = string.Equals(heldItemId, ItemIds.SatelliteStrike, StringComparison.Ordinal);
-            if (!isBlackhole && !isSatellite)
+            if (!isSatellite)
             {
                 return;
             }
@@ -484,123 +545,18 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
         }
 
-        private static void ApplyUrpMaterialFallbackForHeldVisual(GameObject root, bool forceLitOverride)
+        private static void RefreshBlackholeHeldVisualIfNeeded(string heldItemId, GameObject visualRoot)
         {
-            if (root == null)
+            if (!string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal) || visualRoot == null)
             {
                 return;
             }
 
-            var renderers = root.GetComponentsInChildren<Renderer>(true);
-            for (var i = 0; i < renderers.Length; i++)
+            var authoring = visualRoot.GetComponent<ItemBlackholeVisualAuthoring>();
+            if (authoring != null)
             {
-                var renderer = renderers[i];
-                if (renderer == null)
-                {
-                    continue;
-                }
-
-                var materials = renderer.materials;
-                var replaced = false;
-                for (var m = 0; m < materials.Length; m++)
-                {
-                    var source = materials[m];
-                    if (source == null)
-                    {
-                        continue;
-                    }
-
-                    if (!forceLitOverride && !NeedsUrpFallback(source))
-                    {
-                        continue;
-                    }
-
-                    var fallbackShader =
-                        Shader.Find("Universal Render Pipeline/Lit") ??
-                        Shader.Find("Universal Render Pipeline/Unlit") ??
-                        Shader.Find("Universal Render Pipeline/Simple Lit");
-                    if (fallbackShader == null)
-                    {
-                        continue;
-                    }
-
-                    var fallback = new Material(fallbackShader)
-                    {
-                        name = $"{source.name}_HeldFallback"
-                    };
-
-                    var sourceTexture = source.HasProperty("_BaseMap")
-                        ? source.GetTexture("_BaseMap")
-                        : source.HasProperty("_MainTex")
-                            ? source.GetTexture("_MainTex")
-                            : null;
-                    if (sourceTexture != null)
-                    {
-                        if (fallback.HasProperty("_BaseMap"))
-                        {
-                            fallback.SetTexture("_BaseMap", sourceTexture);
-                        }
-                        else if (fallback.HasProperty("_MainTex"))
-                        {
-                            fallback.SetTexture("_MainTex", sourceTexture);
-                        }
-                    }
-
-                    var sourceColor = source.HasProperty("_BaseColor")
-                        ? source.GetColor("_BaseColor")
-                        : source.HasProperty("_Color")
-                            ? source.GetColor("_Color")
-                            : Color.white;
-                    if (fallback.HasProperty("_BaseColor"))
-                    {
-                        fallback.SetColor("_BaseColor", sourceColor);
-                    }
-                    if (fallback.HasProperty("_Color"))
-                    {
-                        fallback.SetColor("_Color", sourceColor);
-                    }
-
-                    materials[m] = fallback;
-                    replaced = true;
-                }
-
-                if (replaced)
-                {
-                    renderer.materials = materials;
-                }
+                authoring.RefreshVisual();
             }
-        }
-
-        private static bool NeedsUrpFallback(Material source)
-        {
-            if (source == null)
-            {
-                return false;
-            }
-
-            var shader = source.shader;
-            if (shader == null)
-            {
-                return true;
-            }
-
-            if (!shader.isSupported)
-            {
-                return true;
-            }
-
-            var shaderName = shader.name ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(shaderName))
-            {
-                return true;
-            }
-
-            if (shaderName.IndexOf("Hidden/InternalErrorShader", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return true;
-            }
-
-            return false;
         }
 
         private void ClearHeldVisual()

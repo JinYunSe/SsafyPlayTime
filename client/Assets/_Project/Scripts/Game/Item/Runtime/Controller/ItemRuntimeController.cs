@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemRuntimeController 스크립트가 들어 있는 파일이다.
  * - Runtime/Controller 계층에서 아이템 상태 전이, 사용 요청 처리, 공용 브리지 호출을 조합한다.
@@ -46,6 +46,17 @@ namespace SSAFYPlayTime.Gameplay.Items
         public bool IsFlamethrowerActive => _isFlamethrowerActive;
         public ItemBuffMask ActiveBuffMask => _activeBuffMask;
         public float EquipmentEndAtSec => _equipmentEndAt;
+
+        /// <summary>현재 들고 있는 아이템이 Equipment 타입인지 여부</summary>
+        public bool IsHeldItemEquipment
+        {
+            get
+            {
+                if (string.IsNullOrWhiteSpace(_heldItemId)) return false;
+                return _catalog.TryGetDefinition(_heldItemId, out var def)
+                    && def.Master.ItemType == ItemType.Equipment;
+            }
+        }
 
         public bool TryPickup(string itemId, out string reason)
         {

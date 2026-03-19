@@ -128,6 +128,7 @@ Transform:
   - {fileID: 6012218629915579165}
   - {fileID: 7854547322513433261}
   - {fileID: 973091155829553415}
+  - {fileID: 3035048476409425318}
   m_Father: {fileID: 5513831657824662227}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &985309731565749317
@@ -434,6 +435,7 @@ MonoBehaviour:
   colliderToIgnore:
   - {fileID: 742241100056322856}
   - {fileID: 1677840333710936871}
+  ignoreAllChildColliders: 1
 --- !u!114 &5049438400442397843
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -458,7 +460,29 @@ MonoBehaviour:
   holdPoint: {fileID: 0}
   _CharacterTypeIndex: -1
   _BoneRotations: []
+  _NetworkedHipsPosition: {x: 0, y: 0, z: 0}
   _NetworkedIsActiveRagdoll:
+    _value: 0
+  _NetworkedLeftGrabHolding:
+    _value: 0
+  _NetworkedRightGrabHolding:
+    _value: 0
+  _LeftGrabTargetId:
+    Raw: 0
+  _RightGrabTargetId:
+    Raw: 0
+  _LeftGrabAnchorLocal: {x: 0, y: 0, z: 0}
+  _RightGrabAnchorLocal: {x: 0, y: 0, z: 0}
+  _LeftGrabConfirmed:
+    _value: 0
+  _RightGrabConfirmed:
+    _value: 0
+  _NetworkedIsBeingGrabbed:
+    _value: 0
+  _NetworkedIsDragged:
+    _value: 0
+  _NetworkedHp: 0
+  _IsDeadNetworked:
     _value: 0
   itemWorldEffectMask:
     serializedVersion: 2
@@ -467,14 +491,28 @@ MonoBehaviour:
   blackholeLaunchHeightOffset: 1.2
   blackholeLaunchVisualDuration: 0.35
   blackholeVisualScale: 0.7
+  blackholeActivationScaleMultiplier: 3
+  blackholeVisualGroundOffset: 0.35
+  blackholeThrowSpeed: 8
+  blackholeThrowArc: 0.35
+  enableReplicatedBlackholeSecondaryFx: 0
   blackholePullStrengthMultiplier: 2.25
   blackholeExpandSpeedMultiplier: 1.5
   blackholePlayerPullMultiplier: 1.5
   blackholeItemPullMultiplier: 1.5
   blackholePlayerEscapeDamping: 0.2
+  enableReplicatedBlackholeTargetOutline: 1
+  replicatedBlackholeTargetOutlineColor: {r: 0.72, g: 0.56, b: 1, a: 0.9}
+  replicatedBlackholeTargetOutlineScaleMultiplier: 1.045
   satelliteProjectileTravelSec: 0.35
   satelliteBeamHeight: 24
+  flamethrowerVisualForwardOffset: 0.7
+  flamethrowerVisualHeightOffset: 1.2
+  flamethrowerVisualScale: 2
+  flamethrowerMuzzleLocalOffset: {x: 0, y: 0, z: 0.5}
+  flamethrowerMuzzleLocalEulerOffset: {x: 0, y: 0, z: 0}
   enableItemWorldEffectLog: 0
+  enableProxyAnimationDiagnostics: 1
 --- !u!114 &8267896573600908199
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -489,6 +527,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  repeatedHitCooldown: 0.2
 --- !u!114 &4233826266652006441
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -715,7 +754,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dc81d8401fd80724199a03ece649b9b0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  handSide: 0
   animator: {fileID: 0}
+  grabProfile: {fileID: 0}
+  breakForce: 2000
+  breakTorque: 2000
+  dualGrabBreakMultiplier: 3
+  maxGrabDistance: 2.5
+  grabbedPinWeight: 0.3
+  grabbedMuscleWeight: 0.3
 --- !u!1 &2186973252745244542
 GameObject:
   m_ObjectHideFlags: 0
@@ -933,6 +980,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  repeatedHitCooldown: 0.2
 --- !u!1 &2246664138852703750
 GameObject:
   m_ObjectHideFlags: 0
@@ -1150,6 +1198,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  repeatedHitCooldown: 0.2
 --- !u!1 &2287533884520273105
 GameObject:
   m_ObjectHideFlags: 0
@@ -1302,6 +1351,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  repeatedHitCooldown: 0.2
 --- !u!1 &2824971365335069949
 GameObject:
   m_ObjectHideFlags: 0
@@ -1407,13 +1457,14 @@ GameObject:
   - component: {fileID: 1023068617517195665}
   - component: {fileID: 3716154165237251278}
   - component: {fileID: 3386663249259908847}
+  - component: {fileID: 9170000000000001001}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &2243572341375061517
 Transform:
   m_ObjectHideFlags: 0
@@ -1567,6 +1618,44 @@ MonoBehaviour:
   collisionRadius: 0.2
   collisionBuffer: 0.1
   minDistance: 1.25
+--- !u!114 &9170000000000001001
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3275150748056025194}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 225aa0b6136b5ef4cb50de0fe4fa2dbc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  enableOnlyAfterDeath: 1
+  localPlayerTag: Player
+  manualLocalTarget: {fileID: 0}
+  cooldown: 1
+  throwForce: 20
+  spawnForwardOffset: 2
+  spawnHeight: 3
+  arcHeight: 20
+  maxHorizontalSpeed: 25
+  spawnLaunchOffset: 8
+  ghostThrowSpawnPoint: {fileID: 0}
+  hitLayer:
+    serializedVersion: 2
+    m_Bits: 119
+  cubePrefabOffline: {fileID: 2247541176841469660, guid: d967a8594241ca54d96fa911a702b77e,
+    type: 3}
+  cubePrefabOnline:
+    RawGuidValue: 00000000000000000000000000000000
+  cubePrefabOnlineObject: {fileID: 2247541176841469660, guid: d967a8594241ca54d96fa911a702b77e,
+    type: 3}
+  bananaPrefabOffline: {fileID: 1407451490957870, guid: 3ce32ffa6ccf60e4ab65d9e396f43433,
+    type: 3}
+  bananaPrefabOnline:
+    RawGuidValue: 00000000000000000000000000000000
+  bananaPrefabOnlineObject: {fileID: 1407451490957870, guid: 3ce32ffa6ccf60e4ab65d9e396f43433,
+    type: 3}
 --- !u!1 &3358183651257745206
 GameObject:
   m_ObjectHideFlags: 0
@@ -1737,6 +1826,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  repeatedHitCooldown: 0.2
 --- !u!1 &3499750388558288620
 GameObject:
   m_ObjectHideFlags: 0
@@ -1828,6 +1918,37 @@ Transform:
   m_Children:
   - {fileID: 1699129183694310262}
   m_Father: {fileID: 8850679688794842580}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &3647339889385241087
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 3035048476409425318}
+  m_Layer: 0
+  m_Name: CameraTarget
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &3035048476409425318
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3647339889385241087}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.12, z: 0.08}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1699129183694310262}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &3777579098330725656
 GameObject:
@@ -2218,7 +2339,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dc81d8401fd80724199a03ece649b9b0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  handSide: 0
   animator: {fileID: 0}
+  grabProfile: {fileID: 0}
+  breakForce: 2000
+  breakTorque: 2000
+  dualGrabBreakMultiplier: 3
+  maxGrabDistance: 2.5
+  grabbedPinWeight: 0.3
+  grabbedMuscleWeight: 0.3
 --- !u!1 &4380157515154608142
 GameObject:
   m_ObjectHideFlags: 0
@@ -2625,6 +2754,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  repeatedHitCooldown: 0.2
 --- !u!1 &6718381531147037878
 GameObject:
   m_ObjectHideFlags: 0
@@ -3136,6 +3266,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  repeatedHitCooldown: 0.2
 --- !u!1 &7679819293510569543
 GameObject:
   m_ObjectHideFlags: 0

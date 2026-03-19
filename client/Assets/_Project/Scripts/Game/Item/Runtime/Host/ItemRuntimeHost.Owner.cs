@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemRuntimeHost.Owner 스크립트가 들어 있는 파일이다.
  * - Runtime/Host 계층에서 MonoBehaviour 기반 진입점과 외부 시스템 이벤트 연결을 담당한다.
@@ -36,7 +36,20 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private Vector3 ResolveOwnerForward()
         {
-            var forward = ownerTransform != null ? ownerTransform.forward : transform.forward;
+            var owner = ownerTransform != null ? ownerTransform : transform;
+            var networkPlayer = owner != null ? owner.GetComponentInParent<global::NetworkPlayer>() : null;
+            if (networkPlayer != null)
+            {
+                var visualYaw = networkPlayer.GetNetworkedVisualYaw();
+                var visualForward = Quaternion.Euler(0f, visualYaw, 0f) * Vector3.forward;
+                visualForward.y = 0f;
+                if (visualForward.sqrMagnitude >= 0.0001f)
+                {
+                    return visualForward.normalized;
+                }
+            }
+
+            var forward = owner.forward;
             forward.y = 0f;
             if (forward.sqrMagnitude < 0.0001f)
             {

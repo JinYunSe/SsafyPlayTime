@@ -1,0 +1,131 @@
+using System.Collections;
+using System.Collections.Generic;
+using Fusion;
+using SSAFYPlayTime.Gameplay.Items;
+using UnityEngine;
+
+// 물 트리거 존.
+// 플레이어가 물에 머무는 동안 일정 간격으로 데미지를 주고,
+// 필드 아이템이 닿으면 정리한다.
+public class WaterDamageZone : MonoBehaviour
+{
+    [Header("데미지 설정")]
+    [SerializeField] private bool destroyFieldItems = true;
+
+    [Header("데이터 소스")]
+    public MapData mapData;
+
+    private float damageAmount;
+    private float damageInterval;
+    private float initialDelay;
+
+    private readonly Dictionary<NetworkPlayer, Coroutine> _damageCoroutines = new();
+
+    private void Awake()
+    {
+        if (mapData != null)
+        {
+            damageAmount = mapData.DamageAmount;
+            damageInterval = mapData.DamageInterval;
+            initialDelay = mapData.InitialDelay;
+        }
+        else
+        {
+            Debug.LogWarning($"{gameObject.name}: MapData가 할당되지 않았습니다.");
+            damageAmount = 20f;
+            damageInterval = 1f;
+            initialDelay = 0.5f;
+        }
+    }
+
+    private void OnTriggerEnter(Collider other)
+    {
+        TryHandleFieldItem(other);
+
+        var networkPlayer = other.GetComponentInParent<NetworkPlayer>();
+        if (networkPlayer == null || _damageCoroutines.ContainsKey(networkPlayer))
+        {
+            return;
+        }
+
+        var routine = StartCoroutine(DamageTickRoutine(networkPlayer));
+        _damageCoroutines.Add(networkPlayer, routine);
+    }
+
+    private void OnTriggerExit(Collider other)
+    {
+        var networkPlayer = other.GetComponentInParent<NetworkPlayer>();
+        if (networkPlayer == null)
+        {
+            return;
+        }
+
+        if (_damageCoroutines.TryGetValue(networkPlayer, out var routine))
+        {
+            StopCoroutine(routine);
+            _damageCoroutines.Remove(networkPlayer);
+        }
+    }
+
+    private IEnumerator DamageTickRoutine(NetworkPlayer player)
+    {
+        yield return new WaitForSeconds(initialDelay);
+
+        while (player != null && !player.IsDeadState)
+        {
+            player.ApplyHealthDamage(damageAmount);
+            yield return new WaitForSeconds(damageInterval);
+        }
+
+        if (_damageCoroutines.ContainsKey(player))
+        {
+            _damageCoroutines.Remove(player);
+        }
+    }
+
+    private void TryHandleFieldItem(Collider other)
+    {
+        if (!destroyFieldItems || other == null)
+        {
+            return;
+        }
+
+        var drop = other.GetComponentInParent<ItemFieldDrop>();
+        if (drop == null)
+        {
+            drop = other.GetComponent<ItemFieldDrop>();
+        }
+
+        if (drop == null)
+        {
+            return;
+        }
+
+        var networkObject = drop.GetComponent<NetworkObject>();
+        if (networkObject != null && networkObject.Id.IsValid && !networkObject.HasStateAuthority)
+        {
+            return;
+        }
+
+        var managers = FindObjectsOfType<ItemRandomSpawnManager>(true);
+        for (var i = 0; i < managers.Length; i++)
+        {
+            var manager = managers[i];
+            if (manager == null || !manager.IsManagedFieldDrop(drop))
+            {
+                continue;
+            }
+
+            manager.HandleManagedFieldDropEnteredWater(drop);
+            return;
+        }
+
+        if (networkObject != null && networkObject.Id.IsValid && networkObject.Runner != null && networkObject.HasStateAuthority)
+        {
+            networkObject.Runner.Despawn(networkObject);
+            return;
+        }
+
+        Destroy(drop.gameObject);
+    }
+}

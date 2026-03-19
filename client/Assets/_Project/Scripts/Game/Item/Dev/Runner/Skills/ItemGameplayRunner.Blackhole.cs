@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemGameplayRunner.Blackhole 스크립트가 들어 있는 파일이다.
  * - Dev/Runner/Skills 계층에서 블랙홀, 화염방사기, 위성폭격 같은 개별 스킬의 테스트 실행 로직을 담당한다.
@@ -207,7 +207,6 @@ namespace SSAFYPlayTime.Gameplay.Items
                 colliders[i].enabled = false;
             }
 
-            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
             DisableUnsupportedGrabPassRenderers(instance);
             ConfigureBlackholeOuterLayerVisual(instance);
         }
@@ -298,7 +297,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return _blackholeEffectPrefabCache;
             }
 
-            _blackholeEffectPrefabCache = Resources.Load<GameObject>("Effect_02_BlackHole");
+            _blackholeEffectPrefabCache = Resources.Load<GameObject>(
+                "Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple");
             return _blackholeEffectPrefabCache;
         }
 

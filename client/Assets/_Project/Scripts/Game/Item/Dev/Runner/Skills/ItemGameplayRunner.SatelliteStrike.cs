@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemGameplayRunner.SatelliteStrike 스크립트가 들어 있는 파일이다.
  * - Dev/Runner/Skills 계층에서 블랙홀, 화염방사기, 위성폭격 같은 개별 스킬의 테스트 실행 로직을 담당한다.
@@ -371,31 +371,28 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            var healthApplied = false;
-            var stunApplied = false;
-            var healthInt = Mathf.Max(0, Mathf.RoundToInt(healthDamage));
+            var networkPlayer = targetRoot.GetComponentInParent<NetworkPlayer>();
+            if (networkPlayer != null)
+            {
+                networkPlayer.ApplyCombinedDamage(
+                    healthDamage,
+                    stunDamage,
+                    "SatelliteStrike",
+                    0f,
+                    explosionForce);
+                return;
+            }
 
             var playerStats = targetRoot.GetComponentInParent<PlayerStats>();
+            var healthInt = Mathf.Max(0, Mathf.RoundToInt(healthDamage));
             if (playerStats != null && healthInt > 0)
             {
                 playerStats.TakeDamage(healthInt);
-                healthApplied = true;
+                return;
             }
 
-            var networkPlayer = targetRoot.GetComponentInParent<NetworkPlayer>();
-            if (networkPlayer != null && stunDamage > 0f)
-            {
-                // 빔에 닿아 있는 동안 스턴 게이지가 계속 누적되도록 틱 단위로 적용한다.
-                networkPlayer.ApplyStunDamage(stunDamage, 1f, 0f, explosionForce);
-                stunApplied = true;
-            }
-
-            var pendingHealth = healthApplied ? 0f : healthDamage;
-            var pendingStun = stunApplied ? 0f : stunDamage;
-            if (pendingHealth > 0f || pendingStun > 0f)
-            {
-                TryApplyDamageToTarget(targetRoot, pendingHealth, pendingStun, "SatelliteStrike");
-            }
+            if (healthDamage > 0f || stunDamage > 0f)
+                TryApplyDamageToTarget(targetRoot, healthDamage, stunDamage, "SatelliteStrike");
         }
 
         private static Transform ResolveSatelliteStrikeTargetRoot(Collider hitCollider)

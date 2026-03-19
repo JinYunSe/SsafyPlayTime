@@ -14,6 +14,9 @@ GameObject:
   - component: {fileID: 6630660391484063506}
   - component: {fileID: 7720005742533067468}
   - component: {fileID: 7838653867194396386}
+  - component: {fileID: 4748577112317399250}
+  - component: {fileID: 6455953278950548713}
+  - component: {fileID: 2694691921121362040}
   m_Layer: 0
   m_Name: BlackholeBomb
   m_TagString: Untagged
@@ -146,6 +149,55 @@ MonoBehaviour:
   glowMaterial: {fileID: 2100000, guid: b1e9c4b4d9c24f7ea1c6d3b4f6a7b8c9, type: 2}
   spriteMaterial: {fileID: 2100000, guid: c2f0a5c5e0d34a8fb2d7e4c5a7b8c9d0, type: 2}
   solidMaterial: {fileID: 2100000, guid: d3a1b6d6f1e45b90c3e8f5d6b8c9d0e1, type: 2}
+--- !u!114 &4748577112317399250
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7508760481764195224}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  SortKey: 2801674048
+  ObjectInterest: 1
+  Flags: 262145
+  NestedObjects: []
+  NetworkedBehaviours:
+  - {fileID: 6455953278950548713}
+  - {fileID: 2694691921121362040}
+  ForceRemoteRenderTimeframe: 0
+--- !u!114 &6455953278950548713
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7508760481764195224}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 158639473, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _stateAuthorityChangeErrorCorrectionDelta: 0
+  SyncScale: 0
+  SyncParent: 0
+  _autoAOIOverride: 1
+  DisableSharedModeInterpolation: 0
+--- !u!114 &2694691921121362040
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7508760481764195224}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b8c40f9d12c1ec4e8ab43c8ccfc83a5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1001 &478213741743302759
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -157,7 +209,7 @@ PrefabInstance:
     - target: {fileID: 4686379108935336100, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.size
-      value: 1
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 4686379108935336100, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
@@ -172,7 +224,7 @@ PrefabInstance:
     - target: {fileID: 4687703638559184048, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.size
-      value: 1
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 4687703638559184048, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
@@ -183,11 +235,11 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Materials.Array.data[1]
       value: 
-      objectReference: {fileID: 2100000, guid: d3a1b6d6f1e45b90c3e8f5d6b8c9d0e1, type: 2}
+      objectReference: {fileID: 2100000, guid: b1e9c4b4d9c24f7ea1c6d3b4f6a7b8c9, type: 2}
     - target: {fileID: 4687850901955369162, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_Materials.Array.size
-      value: 1
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 4687850901955369162, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
@@ -217,17 +269,17 @@ PrefabInstance:
     - target: {fileID: 4883250842768799222, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_LocalScale.x
-      value: 0.6
+      value: 1.2
       objectReference: {fileID: 0}
     - target: {fileID: 4883250842768799222, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_LocalScale.y
-      value: 0.6
+      value: 1.2
       objectReference: {fileID: 0}
     - target: {fileID: 4883250842768799222, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
       propertyPath: m_LocalScale.z
-      value: 0.6
+      value: 1.2
       objectReference: {fileID: 0}
     - target: {fileID: 4883250842768799222, guid: 75f5ad6880835f54a861b2b0b26203a0,
         type: 3}
