@@ -207,7 +207,6 @@ namespace SSAFYPlayTime.Gameplay.Items
                 colliders[i].enabled = false;
             }
 
-            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
             DisableUnsupportedGrabPassRenderers(instance);
             ConfigureBlackholeOuterLayerVisual(instance);
         }

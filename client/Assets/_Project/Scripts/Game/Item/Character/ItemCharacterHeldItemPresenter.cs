@@ -178,8 +178,12 @@ namespace SSAFYPlayTime.Gameplay.Items
             _spawnedHeldVisual = Instantiate(prefab, handAnchor);
             _spawnedHeldVisual.name = $"HeldItem_{heldItemId}";
             var isWatermelonSword = string.Equals(heldItemId, ItemIds.WaterMelonSword, StringComparison.Ordinal);
-            // 수박칼은 조건과 무관하게 Lit 셰이더로 강제 교체해 마젠타를 방지한다.
-            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_spawnedHeldVisual, isWatermelonSword);
+            var isBlackhole = string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal);
+            if (!isBlackhole)
+            {
+                // 수박칼은 조건과 무관하게 Lit 셰이더로 강제 교체해 마젠타를 방지한다.
+                ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_spawnedHeldVisual, isWatermelonSword);
+            }
             RefreshBlackholeHeldVisualIfNeeded(heldItemId, _spawnedHeldVisual);
             StripNetworkComponentsForHeldVisual(_spawnedHeldVisual);
             DisableNonHeldVisualEffects(heldItemId, _spawnedHeldVisual);
@@ -466,6 +470,24 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
             }
 
+            var networkedDrops = visualRoot.GetComponentsInChildren<NetworkedItemFieldDrop>(true);
+            for (var i = 0; i < networkedDrops.Length; i++)
+            {
+                if (networkedDrops[i] != null)
+                {
+                    Destroy(networkedDrops[i]);
+                }
+            }
+
+            var fieldDrops = visualRoot.GetComponentsInChildren<ItemFieldDrop>(true);
+            for (var i = 0; i < fieldDrops.Length; i++)
+            {
+                if (fieldDrops[i] != null)
+                {
+                    Destroy(fieldDrops[i]);
+                }
+            }
+
             var networkTransforms = visualRoot.GetComponentsInChildren<NetworkTransform>(true);
             for (var i = 0; i < networkTransforms.Length; i++)
             {
@@ -481,24 +503,6 @@ namespace SSAFYPlayTime.Gameplay.Items
                 if (networkObjects[i] != null)
                 {
                     Destroy(networkObjects[i]);
-                }
-            }
-
-            var fieldDrops = visualRoot.GetComponentsInChildren<ItemFieldDrop>(true);
-            for (var i = 0; i < fieldDrops.Length; i++)
-            {
-                if (fieldDrops[i] != null)
-                {
-                    Destroy(fieldDrops[i]);
-                }
-            }
-
-            var networkedDrops = visualRoot.GetComponentsInChildren<NetworkedItemFieldDrop>(true);
-            for (var i = 0; i < networkedDrops.Length; i++)
-            {
-                if (networkedDrops[i] != null)
-                {
-                    Destroy(networkedDrops[i]);
                 }
             }
         }

@@ -132,16 +132,18 @@ namespace SSAFYPlayTime.Gameplay.Items
             var visualRoot = ResolveVisualRoot(root.transform);
             if (visualRoot != null)
             {
-                ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(visualRoot.gameObject);
-
-                if (string.Equals(itemId, ItemIds.WaterMelonSword, System.StringComparison.Ordinal))
-                {
-                    ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(visualRoot.gameObject, true);
-                }
-
                 if (string.Equals(itemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal))
                 {
                     ConfigureBlackholeVisual(visualRoot.gameObject, true);
+                }
+                else
+                {
+                    ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(visualRoot.gameObject);
+
+                    if (string.Equals(itemId, ItemIds.WaterMelonSword, System.StringComparison.Ordinal))
+                    {
+                        ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(visualRoot.gameObject, true);
+                    }
                 }
             }
 

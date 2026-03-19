@@ -1,8 +1,8 @@
 /*
- * 파일 개요:
- * - ItemBlackholeVisualAuthoring 스크립트가 들어 있는 파일이다.
- * - World 계층에서 필드 드랍, 획득, 스폰, 배치, 프리팹 해석처럼 월드 오브젝트와 연결되는 책임을 맡는다.
- * - 필드 공통 규칙을 바꾸면 모든 아이템 획득 흐름에 영향이 가므로 개별 아이템 예외와 분리해서 수정해야 한다.
+ * File overview:
+ * - Contains ItemBlackholeVisualAuthoring.
+ * - Owns the blackhole core shell and inner FX setup in the world layer.
+ * - Changes here affect field, held, projectile, and activation visuals together.
  */
 using UnityEngine;
 #if UNITY_EDITOR
@@ -12,7 +12,7 @@ using UnityEditor;
 namespace SSAFYPlayTime.Gameplay.Items
 {
     /// <summary>
-    /// 블랙홀 프리팹의 외형(코어 투명도 + 이펙트 자식)을 자동으로 구성한다.
+    /// Builds the blackhole look from a core shell plus inner FX child objects.
     /// </summary>
     [ExecuteAlways]
     [DisallowMultipleComponent]
@@ -29,7 +29,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private const string SpriteMaterialAssetPath = "Assets/_Project/Materials/BlackholeFx_Sprite_URP.mat";
         private const string SolidMaterialAssetPath = "Assets/_Project/Materials/BlackholeFx_Solid_URP.mat";
 
-        [Header("비주얼")]
+        [Header("Visuals")]
         [SerializeField] private float shellAlpha = 0.4f;
         [SerializeField] private Vector3 effectLocalScale = Vector3.one * 1.2f;
         [SerializeField] private Color effectTintColor = new(0.55f, 0.18f, 0.95f, 0.85f);
@@ -57,7 +57,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         }
 
         /// <summary>
-        /// 코어 쉘과 이펙트를 현재 설정값으로 갱신한다.
+        /// Refreshes the shell and inner FX using the current inspector settings.
         /// </summary>
         public void RefreshVisual()
         {
@@ -89,9 +89,9 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            // 코어 쌓 구체는 플레이모드에서 숨긴다.
-            // ItemBlackholeVisualAuthoring의 루트 MeshRenderer(Visual 검은 구체)는
-            // 사용자 요청에 따라 빌드/플레이 중 불필요하다.
+            // Hide the black core shell during play mode.
+            // The root MeshRenderer is only the shell carrier for this authoring component.
+            // Actual gameplay visuals should come from the inner FX child only.
             rootRenderer.enabled = false;
         }
 
@@ -112,6 +112,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             var effectRoot = transform.Find(EffectChildName);
+            var createdEffectChild = false;
             if (effectRoot == null)
             {
                 var effectPrefab = LoadEffectPrefab();
@@ -128,25 +129,27 @@ namespace SSAFYPlayTime.Gameplay.Items
 
                 effectInstance.name = EffectChildName;
                 effectRoot = effectInstance.transform;
+                createdEffectChild = true;
             }
 
             effectRoot.localPosition = Vector3.zero;
             effectRoot.localRotation = Quaternion.identity;
             effectRoot.localScale = effectLocalScale;
             DisableColliders(effectRoot.gameObject);
-            ApplyConfiguredEffectBindings(effectRoot.gameObject);
 
             if (!Application.isPlaying)
             {
+                ApplyConfiguredEffectBindings(effectRoot.gameObject);
                 return;
             }
 
-            // ApplyConfiguredEffectBindings가 이름 기반으로 머티리얼을 할당하지만,
-            // 바인딩되지 않은 나머지 렌더러에 Polygon Arsenal 셰이더가 남아 핑크로 보일 수 있다.
-            // 평가 후 URP 폴백을 한 번 더 적용해 남은 비URP 셰이더를 추가 교체한다.
-            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(effectRoot.gameObject);
+            if (createdEffectChild)
+            {
+                ApplyConfiguredEffectBindings(effectRoot.gameObject);
+                ApplyEffectTint(effectRoot.gameObject);
+            }
+
             DisableUnsupportedDistortionRenderers(effectRoot.gameObject);
-            ApplyEffectTint(effectRoot.gameObject);
         }
 
         private GameObject LoadEffectPrefab()
@@ -256,8 +259,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                         continue;
                     }
 
-                    // 한국어: 블랙홀 이펙트는 빌드에서 fallback 머티리얼로 바뀌며 흰색이 되는 경우가 있어,
-                    // 한국어: 보라 계열 틴트와 emission을 다시 강제로 넣어 원본 분위기를 유지한다.
+                    // In builds, blackhole FX materials can fall back and lose their intended tint.
+                    // Re-apply the purple tint and emission so the original mood stays intact.
                     if (material.HasProperty("_BaseColor"))
                     {
                         material.SetColor("_BaseColor", effectTintColor);
