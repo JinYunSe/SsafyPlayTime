@@ -1,10 +1,10 @@
 using System.Collections.Generic;
-using UnityEngine;
 using RootMotion.Dynamics;
+using UnityEngine;
 
 /// <summary>
 /// 카메라로부터의 거리에 따라 PuppetMaster를 비활성화/활성화한다.
-/// 비활성화 시 Root Rigidbody를 kinematic으로 변환하여 바닥 추락 방지.
+/// 비활성화 시 Root Rigidbody를 kinematic으로 바꿔 낙하를 막는다.
 /// </summary>
 public class PuppetMasterLOD : MonoBehaviour
 {
@@ -20,7 +20,7 @@ public class PuppetMasterLOD : MonoBehaviour
     PuppetMaster _pm;
     Transform _root;
     Rigidbody _rootRb;
-    NetworkPlayer _networkPlayer;
+    PlayerStats _playerStats;
     bool _isDeactivated;
     bool _wasKinematic;
     Vector3 _lastSafePosition;
@@ -30,7 +30,7 @@ public class PuppetMasterLOD : MonoBehaviour
         _pm = GetComponentInChildren<PuppetMaster>();
         _root = transform;
         _rootRb = GetComponent<Rigidbody>();
-        _networkPlayer = GetComponent<NetworkPlayer>();
+        _playerStats = GetComponent<PlayerStats>();
     }
 
     void OnEnable() { All.Add(this); }
@@ -38,10 +38,10 @@ public class PuppetMasterLOD : MonoBehaviour
 
     void LateUpdate()
     {
-        if (_networkPlayer != null && _networkPlayer.IsDeadNetworked)
+        if (_playerStats != null && _playerStats.IsDead)
             return;
 
-        // 바닥 추락 안전장치: Y가 너무 낮으면 마지막 안전 위치로 복원
+        // 살아 있는 상태에서만 마지막 안전 위치로 복구한다.
         if (_root.position.y < minY)
         {
             if (_rootRb != null)
@@ -49,9 +49,9 @@ public class PuppetMasterLOD : MonoBehaviour
                 _rootRb.velocity = Vector3.zero;
                 _rootRb.angularVelocity = Vector3.zero;
             }
+
             _root.position = _lastSafePosition;
 
-            // 래그돌도 텔레포트
             if (_pm != null)
                 _pm.Teleport(_lastSafePosition, _root.rotation, true);
         }
@@ -84,7 +84,6 @@ public class PuppetMasterLOD : MonoBehaviour
     {
         if (_pm == null || !_isDeactivated) return;
 
-        // Root Rigidbody를 원래 상태로 복원
         if (_rootRb != null)
             _rootRb.isKinematic = _wasKinematic;
 
@@ -96,7 +95,6 @@ public class PuppetMasterLOD : MonoBehaviour
     {
         if (_pm == null || _isDeactivated) return;
 
-        // Root Rigidbody를 kinematic으로 → 래그돌 꺼져도 추락 방지
         if (_rootRb != null)
         {
             _wasKinematic = _rootRb.isKinematic;

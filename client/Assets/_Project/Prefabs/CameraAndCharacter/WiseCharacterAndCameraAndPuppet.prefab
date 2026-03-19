@@ -2608,6 +2608,24 @@ MonoBehaviour:
   useAnimatedVisualOnly: 1
   disablePhysicsAnimationSync: 1
   holdPoint: {fileID: 0}
+  cameraAnchorPresentationLocalOffset: {x: 0, y: 1.35, z: 0}
+  cameraAnchorFallbackRootLocalOffset: {x: 0, y: 1.25, z: 0}
+  cameraAnchorStableFollowSpeed: 25
+  cameraAnchorStableAirborneFollowSpeed: 18
+  cameraAnchorHoldingFollowSpeed: 18
+  cameraAnchorRecoveringFollowSpeed: 12
+  cameraAnchorHardPhysicsFollowSpeed: 6
+  cameraAnchorVerticalFollowMultiplier: 0.75
+  cameraAnchorStableAirborneVerticalFollowMultiplier: 0.9
+  cameraAnchorHoldingVerticalFollowMultiplier: 0.82
+  cameraAnchorHardPhysicsVerticalFollowMultiplier: 0.58
+  cameraAnchorSnapDistance: 2
+  cameraAnchorStableAirborneSnapMultiplier: 0.9
+  cameraAnchorHoldingSnapMultiplier: 0.85
+  cameraAnchorRecoveringSnapMultiplier: 1.1
+  cameraAnchorOwnerProxyLeadDistance: 0.18
+  cameraAnchorOwnerProxyPresentationCorrectionScale: 0.35
+  cameraAnchorOwnerProxyMaxCorrectionDistance: 0.12
   _CharacterTypeIndex: -1
   _BoneRotations: []
   _NetworkedHipsPosition: {x: 0, y: 0, z: 0}
@@ -2663,6 +2681,10 @@ MonoBehaviour:
   flamethrowerMuzzleLocalEulerOffset: {x: 0, y: 0, z: 0}
   enableItemWorldEffectLog: 0
   enableProxyAnimationDiagnostics: 1
+  enableStunForceDiagnostics: 0
+  stunForceDiagnosticsIncludeProxies: 1
+  stunForceDiagnosticsWindow: 1.5
+  stunForceDiagnosticsSampleInterval: 0.12
 --- !u!114 &5313437311825199975
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2679,7 +2701,8 @@ MonoBehaviour:
   rigidbody3D: {fileID: 579119098799606861}
   locomotionThreshold: 0.1
   grabHoldThreshold: 0.2
-  attackLockDuration: 0.7
+  attackLockDuration: 0.08
+  attackVisualDuration: 0.3
   throwLockDuration: 0.85
   enableAnimationDriverDiagnostics: 1
 --- !u!114 &4767097696738593016
@@ -2702,6 +2725,7 @@ MonoBehaviour:
   reachDistance: 0.6
   handReachForce: 115
   handDamping: 8
+  holdIKRotationWeight: 0.5
   anchorBlend: 0.6
   holdForwardOffset: 0.45
   holdSideOffset: 0.24
@@ -2713,6 +2737,7 @@ MonoBehaviour:
   behindBackThreshold: -0.08
   behindBackForce: 90
   behindBackTurnTorque: 20
+  carryPoseProfile: {fileID: 0}
 --- !u!114 &3948311823849651178
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2822,8 +2847,8 @@ MonoBehaviour:
   speedForMaxWobble: 4
   turnRateForMaxWobble: 220
   airborneWobbleBonus: 0.08
-  headPinMultiplier: 0.72
-  headMuscleMultiplier: 0.58
+  headPinMultiplier: 0.48
+  headMuscleMultiplier: 0.38
   armPinMultiplier: 0.64
   armMuscleMultiplier: 0.52
   handPinMultiplier: 0.82
@@ -3037,6 +3062,7 @@ MonoBehaviour:
   breakTorque: 2000
   dualGrabBreakMultiplier: 3
   maxGrabDistance: 2.5
+  palmAnchorOffset: {x: 0, y: -0.02, z: 0.06}
   grabbedPinWeight: 0.3
   grabbedMuscleWeight: 0.3
 --- !u!1 &2841255010662427130
@@ -3226,6 +3252,37 @@ ConfigurableJoint:
   m_EnablePreprocessing: 1
   m_MassScale: 1
   m_ConnectedMassScale: 1
+--- !u!1 &3171630389436105749
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 3474401494302585599}
+  m_Layer: 0
+  m_Name: CameraTarget
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &3474401494302585599
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3171630389436105749}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.12, z: 0.08}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 4353041842793161182}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &3181931508587462471
 GameObject:
   m_ObjectHideFlags: 0
@@ -4027,6 +4084,7 @@ Transform:
   - {fileID: 5440384065171812100}
   - {fileID: 5823250091579224845}
   - {fileID: 6286845688837715965}
+  - {fileID: 3474401494302585599}
   m_Father: {fileID: 7629118904379669332}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &5967641855958712867
@@ -4696,6 +4754,7 @@ MonoBehaviour:
   breakTorque: 2000
   dualGrabBreakMultiplier: 3
   maxGrabDistance: 2.5
+  palmAnchorOffset: {x: 0, y: -0.02, z: 0.06}
   grabbedPinWeight: 0.3
   grabbedMuscleWeight: 0.3
 --- !u!1 &8322807894606037367
@@ -4863,6 +4922,8 @@ MonoBehaviour:
   weightBlendSpeed: 2.2
   lookAtHeightOffset: 0.8
   scanInterval: 0.2
+  movingWeightScale: 0.3
+  movingSpeedThreshold: 1.5
 --- !u!114 &4643243374150895492
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5258,7 +5319,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   target: {fileID: 0}
   autoFindPlayerTag: Player
-  autoFindTargetName: Test
   autoFindTargetWhenNull: 1
   pivotOffset: {x: 0, y: 1.2, z: 0}
   distance: 8
@@ -5271,14 +5331,15 @@ MonoBehaviour:
   invertY: 0
   lockCursor: 1
   lookDeadZone: 0.01
-  followSmooth: 14
-  rotateSmooth: 18
   obstructionMask:
     serializedVersion: 2
     m_Bits: 119
   collisionRadius: 0.2
   collisionBuffer: 0.1
   minDistance: 1.25
+  impactPositionStrength: 0.22
+  impactRotationStrength: 2.8
+  impactDecay: 16
 --- !u!114 &4024543050421231655
 MonoBehaviour:
   m_ObjectHideFlags: 0
