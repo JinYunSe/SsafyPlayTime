@@ -1026,6 +1026,9 @@ MonoBehaviour:
   m_FallbackFontAssetTable:
   - {fileID: 0}
   - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
   m_CreationSettings:
     sourceFontFileName: 
     sourceFontFileGUID: 9196f5e99cb4741468eda70d29da7fd4
