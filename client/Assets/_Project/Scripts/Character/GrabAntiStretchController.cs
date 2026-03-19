@@ -31,8 +31,8 @@ namespace SSAFYPlayTime.Character
         [SerializeField] private float dualCarryCoreDamperMultiplier = 1.18f;
         [SerializeField] private float grabbedCoreSpringMultiplier = 1.9f;
         [SerializeField] private float grabbedCoreDamperMultiplier = 1.35f;
-        [SerializeField] private float carriedVictimCoreSpringMultiplier = 0.65f;
-        [SerializeField] private float carriedVictimCoreDamperMultiplier = 0.70f;
+        [SerializeField] private float carriedVictimCoreSpringMultiplier = 2.2f;
+        [SerializeField] private float carriedVictimCoreDamperMultiplier = 1.35f;
         [SerializeField] private bool verboseWarnings;
         [SerializeField] private bool debugLog;
 
@@ -103,17 +103,11 @@ namespace SSAFYPlayTime.Character
 
         private void NormalizeTuning()
         {
-            handSlack = Mathf.Min(handSlack, 0.025f);
-            footSlack = Mathf.Min(footSlack, 0.035f);
-            limitSpring = Mathf.Max(limitSpring, 180f);
-            limitDamper = Mathf.Max(limitDamper, 18f);
-            projectionDistance = Mathf.Min(projectionDistance, 0.045f);
-            projectionAngle = Mathf.Min(projectionAngle, 4f);
-
-            grabbedCoreSpringMultiplier = Mathf.Max(grabbedCoreSpringMultiplier, 2.2f);
-            grabbedCoreDamperMultiplier = Mathf.Max(grabbedCoreDamperMultiplier, 1.45f);
-            carriedVictimCoreSpringMultiplier = Mathf.Max(carriedVictimCoreSpringMultiplier, 0.85f);
-            carriedVictimCoreDamperMultiplier = Mathf.Max(carriedVictimCoreDamperMultiplier, 0.9f);
+            // Inspector 값을 존중 — 극단적인 값만 보정
+            handSlack = Mathf.Max(handSlack, 0.01f);
+            footSlack = Mathf.Max(footSlack, 0.01f);
+            limitSpring = Mathf.Max(limitSpring, 10f);
+            limitDamper = Mathf.Max(limitDamper, 1f);
         }
 
         private void LateUpdate()
@@ -250,15 +244,20 @@ namespace SSAFYPlayTime.Character
             if (networkPlayer == null)
                 return false;
 
-            // AntiStretchConstraint가 양보했으므로, 모든 상태에서 패시브 안티스트레치 제공
+            // CL_dev 방식: 특정 상태에서만 anti-stretch 활성화
             var phase = networkPlayer.GetPhysicalPhase();
-            if (phase == NetworkPlayer.PhysicalPhase.BeingCarriedStunned)
-                return false;
-
-            if (phase == NetworkPlayer.PhysicalPhase.Recovering && !applyDuringRecovering)
-                return false;
-
-            return true;
+            switch (phase)
+            {
+                case NetworkPlayer.PhysicalPhase.BeingGrabbed:
+                case NetworkPlayer.PhysicalPhase.Dragged:
+                case NetworkPlayer.PhysicalPhase.Stunned:
+                case NetworkPlayer.PhysicalPhase.BeingCarriedStunned:
+                    return true;
+                case NetworkPlayer.PhysicalPhase.Recovering:
+                    return applyDuringRecovering;
+                default:
+                    return false;
+            }
         }
 
         private CoreDriveMode ResolveCoreDriveMode()

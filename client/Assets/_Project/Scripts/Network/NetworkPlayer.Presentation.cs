@@ -208,7 +208,8 @@ public sealed partial class NetworkPlayer
         out Vector3 rootAfter,
         out float gapBefore,
         out float gapAfter,
-        out bool didSnap)
+        out bool didSnap,
+        bool isSettling = false)
     {
         rootBefore = transform.position;
         rootAfter = rootBefore;
@@ -240,14 +241,15 @@ public sealed partial class NetworkPlayer
             rootAfter = Vector3.MoveTowards(rootBefore, carryRootTarget, step);
         }
 
-        ApplyProxyCarryRootPosition(rootAfter);
+        ApplyProxyCarryRootPosition(rootAfter, isSettling);
         gapAfter = Vector3.Distance(rootAfter, carryRootTarget);
         return (rootAfter - rootBefore).sqrMagnitude > 0.000001f;
     }
 
-    private void ApplyProxyCarryRootPosition(Vector3 nextRootPosition)
+    private void ApplyProxyCarryRootPosition(Vector3 nextRootPosition, bool isSettling = false)
     {
-        if (!HasStateAuthority && rigidbody3D != null && !rigidbody3D.isKinematic)
+        // settle 중에는 rigidbody position을 건드리지 않음 — 물리 velocity 기반 이동 보존
+        if (!isSettling && !HasStateAuthority && rigidbody3D != null && !rigidbody3D.isKinematic)
             rigidbody3D.position = nextRootPosition;
 
         transform.position = nextRootPosition;
@@ -473,7 +475,8 @@ public sealed partial class NetworkPlayer
                     out rootAfterCorrection,
                     out rootGapBeforeCorrection,
                     out rootGapAfterCorrection,
-                    out didRootSnap);
+                    out didRootSnap,
+                    isSettling: true);
 
                 if (_carryReleaseSettleRemaining <= 0f)
                     _carryExitSnapshotAnchor = Vector3.zero;
