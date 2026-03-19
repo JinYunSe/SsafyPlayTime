@@ -9,11 +9,39 @@ using SSAFYPlayTime.Gameplay.Items;
 // 데미지는 StateAuthority에서만 처리된다 (ApplyHealthDamage 내부 가드).
 public class WaterDamageZone : MonoBehaviour
 {
+    /*
     [Header("Damage Settings")]
     [SerializeField] private float damageAmount = 20f;
     [SerializeField] private float damageInterval = 1.0f;
     [SerializeField] private float initialDelay = 0.5f;
     [SerializeField] private bool destroyFieldItems = true;
+    */
+
+    [Header("Data Source")]
+    public MapData mapData; // SO 에셋을 연결할 변수
+
+    private float damageAmount;
+    private float damageInterval;
+    private float initialDelay;
+
+    private void Awake()
+    {
+        // mapData가 인스펙터에서 연결되었는지 확인 후 값 할당
+        if (mapData != null)
+        {
+            damageAmount = mapData.DamageAmount; // 프로퍼티(대문자) 사용
+            damageInterval = mapData.DamageInterval;
+            initialDelay = mapData.InitialDelay;
+        }
+        else
+        {
+            Debug.LogWarning($"{gameObject.name}: MapData가 할당되지 않았습니다!");
+            // 기본값 설정 (에러 방지용)
+            damageAmount = 20f;
+            damageInterval = 1f;
+            initialDelay = 0.5f;
+        }
+    }
 
     private readonly Dictionary<NetworkPlayer, Coroutine> _damageCoroutines = new();
 
