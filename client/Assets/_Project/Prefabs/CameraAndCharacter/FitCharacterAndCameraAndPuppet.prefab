@@ -3599,7 +3599,7 @@ MonoBehaviour:
   dualCarryTorsoReactionMultiplier: 1.35
   carryingTurnAssistMultiplier: 1.1
   dualCarryTurnAssistMultiplier: 1.25
-  carryPoseProfile: {fileID: 0}
+  carryPoseProfile: {fileID: 11400000, guid: 1d3a4c4bf11833b45871d1178b5a5909, type: 2}
 --- !u!114 &6759588162524855768
 MonoBehaviour:
   m_ObjectHideFlags: 0

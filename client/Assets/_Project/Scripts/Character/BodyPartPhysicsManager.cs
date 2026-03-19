@@ -57,6 +57,19 @@ namespace SSAFYPlayTime.Character
         private float[] _currentMuscleWeights;
         private bool _initialized;
 
+        // ─── Combat Flinch Overlay ───
+        // 피격 시 방향성 per-muscle pin drop을 적용하는 임시 오버레이.
+        // 상태 enum 추가 없이 multiplier 채널로 동작.
+        private float[] _combatFlinchMultipliers;
+        private float _combatFlinchTimer;
+        private float _combatFlinchDuration;
+        private bool _combatFlinchActive;
+        private const float CombatFlinchHitSideDropMin = 0.35f;
+        private const float CombatFlinchHitSideDropMax = 0.15f;
+        private const float CombatFlinchOppositeSideDrop = 0.75f;
+        private const float CombatFlinchChestDrop = 0.55f;
+        private const float CombatFlinchHeadDrop = 0.40f;
+
         private Vector3 _lastMotionPosition;
         private float _lastMotionYaw;
         private float _wobbleAmount;
@@ -109,6 +122,7 @@ namespace SSAFYPlayTime.Character
             }
 
             ApplyDynamicWobble(Time.deltaTime);
+            TickCombatFlinch(Time.deltaTime);
         }
 
         public void SetState(BodyPartPhysicsProfile.CharacterPhysicsState newState)
@@ -379,14 +393,14 @@ namespace SSAFYPlayTime.Character
         private static bool IsShapeCriticalState(BodyPartPhysicsProfile.CharacterPhysicsState state)
         {
             return state == BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed ||
-                   state == BodyPartPhysicsProfile.CharacterPhysicsState.Stunned ||
                    state == BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned ||
                    state == BodyPartPhysicsProfile.CharacterPhysicsState.Recovering;
         }
 
         private static bool ShouldApplyStateImmediately(BodyPartPhysicsProfile.CharacterPhysicsState state)
         {
-            return IsShapeCriticalState(state);
+            return IsShapeCriticalState(state) ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse;
         }
 
         private float UpdateWobbleAmount(float dt)
@@ -535,6 +549,102 @@ namespace SSAFYPlayTime.Character
             };
         }
 
+        /// <summary>
+        /// 피격 시 방향성 per-muscle pin drop 오버레이를 건다.
+        /// hitLocalOffset: 피격자 로컬 좌표계에서의 히트 오프셋 (x=좌우, y=높이).
+        /// impactMagnitude: 타격 세기 (0~18+ 범위, 내부에서 정규화).
+        /// duration: 오버레이 지속 시간 (0.08~0.15초 권장).
+        /// </summary>
+        public void ArmCombatFlinch(Vector3 hitLocalOffset, float impactMagnitude, float duration)
+        {
+            if (puppetMaster == null || puppetMaster.muscles == null || !_initialized)
+                return;
+
+            var count = puppetMaster.muscles.Length;
+            if (_combatFlinchMultipliers == null || _combatFlinchMultipliers.Length != count)
+                _combatFlinchMultipliers = new float[count];
+
+            var normalizedImpact = Mathf.InverseLerp(8f, 18f, impactMagnitude);
+            var hitSide = hitLocalOffset.x; // 양수 = 오른쪽, 음수 = 왼쪽
+            var isHighHit = hitLocalOffset.y > 0.4f;
+
+            for (int i = 0; i < count; i++)
+            {
+                var category = _muscleCategories[i];
+                float drop = 1f; // 1 = 변화 없음
+
+                switch (category)
+                {
+                    case BodyPartPhysicsProfile.BodyPartCategory.Head:
+                        // 머리는 항상 강하게 흔들림 (높은 타격일수록 더)
+                        drop = isHighHit
+                            ? Mathf.Lerp(CombatFlinchHeadDrop, CombatFlinchHitSideDropMax, normalizedImpact)
+                            : Mathf.Lerp(CombatFlinchHeadDrop + 0.15f, CombatFlinchHeadDrop, normalizedImpact);
+                        break;
+
+                    case BodyPartPhysicsProfile.BodyPartCategory.Arm:
+                    case BodyPartPhysicsProfile.BodyPartCategory.Hand:
+                    {
+                        // 맞은 쪽 팔은 크게 흔들리고 반대쪽은 적게
+                        var muscleName = puppetMaster.muscles[i].transform != null
+                            ? puppetMaster.muscles[i].transform.name
+                            : "";
+                        var isLeftMuscle = muscleName.Contains("Left");
+                        var hitOnLeft = hitSide < -0.02f;
+                        var isSameSide = (isLeftMuscle && hitOnLeft) || (!isLeftMuscle && !hitOnLeft);
+
+                        drop = isSameSide
+                            ? Mathf.Lerp(CombatFlinchHitSideDropMin, CombatFlinchHitSideDropMax, normalizedImpact)
+                            : CombatFlinchOppositeSideDrop;
+                        break;
+                    }
+
+                    case BodyPartPhysicsProfile.BodyPartCategory.Torso:
+                        drop = Mathf.Lerp(CombatFlinchChestDrop + 0.15f, CombatFlinchChestDrop, normalizedImpact);
+                        break;
+
+                    default:
+                        drop = 1f; // 다리는 건드리지 않음
+                        break;
+                }
+
+                _combatFlinchMultipliers[i] = drop;
+            }
+
+            _combatFlinchDuration = duration;
+            _combatFlinchTimer = duration;
+            _combatFlinchActive = true;
+        }
+
+        private void TickCombatFlinch(float dt)
+        {
+            if (!_combatFlinchActive)
+                return;
+
+            _combatFlinchTimer -= dt;
+            if (_combatFlinchTimer <= 0f)
+            {
+                _combatFlinchActive = false;
+                _combatFlinchTimer = 0f;
+                return;
+            }
+
+            // ease-in 복원: 초반에 느슨하게 유지, 후반에 빠르게 복원
+            var recovery = 1f - Mathf.Clamp01(_combatFlinchTimer / _combatFlinchDuration);
+            var easedRecovery = recovery * recovery;
+
+            var count = puppetMaster.muscles.Length;
+            for (int i = 0; i < count; i++)
+            {
+                if (_combatFlinchMultipliers == null || i >= _combatFlinchMultipliers.Length)
+                    break;
+
+                var targetMultiplier = Mathf.Lerp(_combatFlinchMultipliers[i], 1f, easedRecovery);
+                var muscle = puppetMaster.muscles[i];
+                muscle.props.pinWeight = Mathf.Clamp01(muscle.props.pinWeight * targetMultiplier);
+            }
+        }
+
         private static BodyPartPhysicsProfile.CharacterPhysicsState MapPhysicalPhaseToState(NetworkPlayer.PhysicalPhase phase)
         {
             return phase switch
@@ -542,6 +652,7 @@ namespace SSAFYPlayTime.Character
                 NetworkPlayer.PhysicalPhase.BeingGrabbed => BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed,
                 NetworkPlayer.PhysicalPhase.Dragged => BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed,
                 NetworkPlayer.PhysicalPhase.Unstable => BodyPartPhysicsProfile.CharacterPhysicsState.Unstable,
+                NetworkPlayer.PhysicalPhase.StunnedCollapse => BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse,
                 NetworkPlayer.PhysicalPhase.Stunned => BodyPartPhysicsProfile.CharacterPhysicsState.Stunned,
                 NetworkPlayer.PhysicalPhase.BeingCarriedStunned => BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned,
                 NetworkPlayer.PhysicalPhase.Recovering => BodyPartPhysicsProfile.CharacterPhysicsState.Recovering,

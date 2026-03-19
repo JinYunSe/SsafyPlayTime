@@ -9,6 +9,16 @@ using UnityEngine;
 // 기절(완전 래그돌) ↔ 액티브 래그돌 전환을 지원한다.
 public class SyncPhysicsObject : MonoBehaviour
 {
+    public enum BodyPartType
+    {
+        Core,   // Hip, Waist, Chest — 잡혔을 때 spring 증가 (형태 유지)
+        Head,   // Head — 약간 증가
+        Limb    // UpperArm, ForeArm, Leg — 잡혔을 때 spring 감소 (느슨)
+    }
+
+    [SerializeField]
+    BodyPartType bodyPartType = BodyPartType.Limb;
+
     // 이 오브젝트의 물리 Rigidbody (자동 할당)
     Rigidbody rigidbody3D;
 
@@ -73,6 +83,35 @@ public class SyncPhysicsObject : MonoBehaviour
     // 애니메이션 기반 액티브 래그돌 상태로 돌아간다.
     // 부활(Revive) 시 호출된다.
     public void MakeActiveRagdoll()
+    {
+        if (joint == null) return;
+
+        JointDrive jointDrive = joint.slerpDrive;
+        jointDrive.positionSpring = startSlerpPositionSpring;
+        joint.slerpDrive = jointDrive;
+    }
+
+    // 다른 플레이어에게 잡혔을 때: 부위별로 spring 조정
+    public void MakeGrabbed()
+    {
+        if (joint == null) return;
+
+        var cs = CombatSettings.Instance;
+        float multiplier = bodyPartType switch
+        {
+            BodyPartType.Core => cs != null ? cs.grabbedCoreSpringMultiplier : 2.5f,
+            BodyPartType.Head => cs != null ? cs.grabbedHeadSpringMultiplier : 1.5f,
+            BodyPartType.Limb => cs != null ? cs.grabbedLimbSpringMultiplier : 0.3f,
+            _ => 1f
+        };
+
+        JointDrive jointDrive = joint.slerpDrive;
+        jointDrive.positionSpring = startSlerpPositionSpring * multiplier;
+        joint.slerpDrive = jointDrive;
+    }
+
+    // 놓였을 때: 원래 spring으로 복원
+    public void MakeUnGrabbed()
     {
         if (joint == null) return;
 

@@ -31,9 +31,10 @@ namespace SSAFYPlayTime.Character
         [SerializeField] private float dualCarryCoreDamperMultiplier = 1.18f;
         [SerializeField] private float grabbedCoreSpringMultiplier = 1.9f;
         [SerializeField] private float grabbedCoreDamperMultiplier = 1.35f;
-        [SerializeField] private float carriedVictimCoreSpringMultiplier = 2.2f;
-        [SerializeField] private float carriedVictimCoreDamperMultiplier = 1.5f;
+        [SerializeField] private float carriedVictimCoreSpringMultiplier = 0.65f;
+        [SerializeField] private float carriedVictimCoreDamperMultiplier = 0.70f;
         [SerializeField] private bool verboseWarnings;
+        [SerializeField] private bool debugLog;
 
         private RuntimeLink[] _links;
         private RuntimeDriveLink[] _coreDriveLinks;
@@ -79,11 +80,14 @@ namespace SSAFYPlayTime.Character
 
         private void Awake()
         {
+            debugLog = true; // 디버그 진단용 강제 활성화
             ResolveReferences();
+            NormalizeTuning();
             BuildLinkDefinitions();
             BuildCoreDriveDefinitions();
             TryResolveLinkBodies();
             TryResolveCoreDriveJoints();
+            debugLog = false;
         }
 
         private void FixedUpdate()
@@ -92,6 +96,21 @@ namespace SSAFYPlayTime.Character
                 return;
 
             RefreshCoreDrive(force: true);
+        }
+
+        private void NormalizeTuning()
+        {
+            handSlack = Mathf.Min(handSlack, 0.025f);
+            footSlack = Mathf.Min(footSlack, 0.035f);
+            limitSpring = Mathf.Max(limitSpring, 180f);
+            limitDamper = Mathf.Max(limitDamper, 18f);
+            projectionDistance = Mathf.Min(projectionDistance, 0.045f);
+            projectionAngle = Mathf.Min(projectionAngle, 4f);
+
+            grabbedCoreSpringMultiplier = Mathf.Max(grabbedCoreSpringMultiplier, 2.2f);
+            grabbedCoreDamperMultiplier = Mathf.Max(grabbedCoreDamperMultiplier, 1.45f);
+            carriedVictimCoreSpringMultiplier = Mathf.Max(carriedVictimCoreSpringMultiplier, 0.85f);
+            carriedVictimCoreDamperMultiplier = Mathf.Max(carriedVictimCoreDamperMultiplier, 0.9f);
         }
 
         private void LateUpdate()
@@ -113,9 +132,26 @@ namespace SSAFYPlayTime.Character
 
             var shouldEnable = ShouldEnableAntiStretch();
             if (shouldEnable && !_active)
+            {
+                if (debugLog)
+                    Debug.Log($"[AntiStretch] {name}: ENABLING anti-stretch, " +
+                        $"phase={networkPlayer?.GetPhysicalPhase()}, resolved={_resolved}", this);
                 EnableAntiStretch();
+            }
             else if (!shouldEnable && _active)
+            {
+                if (debugLog)
+                    Debug.Log($"[AntiStretch] {name}: DISABLING anti-stretch, " +
+                        $"phase={networkPlayer?.GetPhysicalPhase()}", this);
                 DisableAntiStretch();
+            }
+
+            var desiredCoreDrive = ResolveCoreDriveMode();
+            if (debugLog && desiredCoreDrive != _currentCoreDriveMode)
+            {
+                Debug.Log($"[AntiStretch] {name}: coreDrive {_currentCoreDriveMode} → {desiredCoreDrive}, " +
+                    $"phase={networkPlayer?.GetPhysicalPhase()}, active={_active}", this);
+            }
 
             RefreshCoreDrive(force: false);
         }
@@ -211,15 +247,15 @@ namespace SSAFYPlayTime.Character
             if (networkPlayer == null)
                 return false;
 
-            return networkPlayer.GetPhysicalPhase() switch
-            {
-                NetworkPlayer.PhysicalPhase.BeingGrabbed => true,
-                NetworkPlayer.PhysicalPhase.Dragged => true,
-                NetworkPlayer.PhysicalPhase.Stunned => true,
-                NetworkPlayer.PhysicalPhase.BeingCarriedStunned => true,
-                NetworkPlayer.PhysicalPhase.Recovering => applyDuringRecovering,
-                _ => false
-            };
+            // AntiStretchConstraint가 양보했으므로, 모든 상태에서 패시브 안티스트레치 제공
+            var phase = networkPlayer.GetPhysicalPhase();
+            if (phase == NetworkPlayer.PhysicalPhase.BeingCarriedStunned)
+                return false;
+
+            if (phase == NetworkPlayer.PhysicalPhase.Recovering && !applyDuringRecovering)
+                return false;
+
+            return true;
         }
 
         private CoreDriveMode ResolveCoreDriveMode()
@@ -605,6 +641,28 @@ namespace SSAFYPlayTime.Character
 
         private void ResolveCoreDriveMultipliers(CoreDriveMode mode, out float springMultiplier, out float damperMultiplier)
         {
+            // CarrySolveFrame: CarryPhysicsProfile이 있으면 그 값 우선
+            if (networkPlayer != null)
+            {
+                var carryProfile = networkPlayer.GetCarryPhysicsProfile();
+                if (carryProfile != null)
+                {
+                    var carryMode = networkPlayer.GetLocalCarryMode();
+                    if (carryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None)
+                    {
+                        var settings = carryProfile.GetSettings(carryMode);
+                        // victim 쪽은 victimCoreDrive 사용, carrier 쪽은 carrierTorsoReaction으로 대체
+                        if (mode == CoreDriveMode.CarriedVictim)
+                        {
+                            springMultiplier = settings.victimCoreDriveSpringMultiplier;
+                            damperMultiplier = settings.victimCoreDriveDamperMultiplier;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // 폴백: 기존 Inspector 값
             switch (mode)
             {
                 case CoreDriveMode.Carrying:

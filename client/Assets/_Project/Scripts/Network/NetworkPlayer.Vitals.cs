@@ -127,7 +127,7 @@ public sealed partial class NetworkPlayer
 
     public bool ApplyCombinedDamage(float healthDamage, float stunDamage, string source)
     {
-        return ApplyCombinedDamage(healthDamage, stunDamage, source, 0f, 0f, 1f, false);
+        return ApplyCombinedDamage(healthDamage, stunDamage, source, 0f, 0f, 1f, false, null);
     }
 
     public bool ApplyCombinedDamage(
@@ -137,7 +137,8 @@ public sealed partial class NetworkPlayer
         float attackerVelocity,
         float impulseMagnitude,
         float bodyPartMultiplier = 1f,
-        bool deferStunEntryDamping = false)
+        bool deferStunEntryDamping = false,
+        NetworkPlayer instigator = null)
     {
         var applied = false;
         if (healthDamage > 0f)
@@ -145,7 +146,7 @@ public sealed partial class NetworkPlayer
 
         if (stunDamage > 0f)
         {
-            ApplyStunDamage(stunDamage, bodyPartMultiplier, attackerVelocity, impulseMagnitude, deferStunEntryDamping);
+            ApplyStunDamage(stunDamage, bodyPartMultiplier, attackerVelocity, impulseMagnitude, deferStunEntryDamping, instigator);
             applied = true;
         }
 
