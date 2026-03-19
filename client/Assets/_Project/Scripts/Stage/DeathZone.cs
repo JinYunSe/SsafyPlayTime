@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using Fusion;
 
 // 데스존 안에 들어온 플레이어를 처리한다.
 public class DeathZone : MonoBehaviour
