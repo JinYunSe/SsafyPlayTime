@@ -252,16 +252,16 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return false;
             }
 
-            var prefab = _prefabResolver.Resolve(definition.Master.PrefabPath);
+            var prefab = ItemFieldDropFactory.TryLoadNetworkedDropPrefab(_prefabResolver);
             if (prefab == null)
             {
-                DebugLog($"Network spawn failed: missing prefab {definition.Master.PrefabPath}");
+                DebugLog($"Network spawn failed: missing networked wrapper prefab for {definition.Master.ItemId}");
                 return false;
             }
 
             if (prefab.GetComponent<NetworkObject>() == null)
             {
-                DebugLog($"Network spawn failed: prefab missing NetworkObject {definition.Master.PrefabPath}");
+                DebugLog($"Network spawn failed: wrapper prefab missing NetworkObject for {definition.Master.ItemId}");
                 return false;
             }
 
@@ -276,13 +276,17 @@ namespace SSAFYPlayTime.Gameplay.Items
                 onBeforeSpawned: (_, obj) =>
                 {
                     var drop = obj.GetComponent<ItemFieldDrop>();
-                    if (drop == null)
+                    if (drop != null)
                     {
-                        return;
+                        drop.SetItemId(definition.Master.ItemId);
+                        drop.SetInstanceId(requestedInstanceId);
                     }
 
-                    drop.SetItemId(definition.Master.ItemId);
-                    drop.SetInstanceId(requestedInstanceId);
+                    var networkedDrop = obj.GetComponent<NetworkedItemFieldDrop>();
+                    if (networkedDrop != null)
+                    {
+                        networkedDrop.InitializeMetadata(definition.Master.ItemId);
+                    }
                 });
 
             if (spawnedObject == null)

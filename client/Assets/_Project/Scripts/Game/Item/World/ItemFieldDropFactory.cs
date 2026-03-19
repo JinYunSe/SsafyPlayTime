@@ -1,9 +1,10 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemFieldDropFactory 스크립트가 들어 있는 파일이다.
  * - World 계층에서 필드 드랍, 획득, 스폰, 배치, 프리팹 해석처럼 월드 오브젝트와 연결되는 책임을 맡는다.
  * - 필드 공통 규칙을 바꾸면 모든 아이템 획득 흐름에 영향이 가므로 개별 아이템 예외와 분리해서 수정해야 한다.
  */
+using Fusion;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Gameplay.Items
@@ -13,12 +14,21 @@ namespace SSAFYPlayTime.Gameplay.Items
     /// </summary>
     public sealed class ItemFieldDropFactory
     {
+        public const string NetworkedDropAssetPath = "Assets/_Project/Prefabs/Items/NetworkedFieldItemDrop.prefab";
+        public const string NetworkedDropResourcePath = "_Project/Prefabs/Items/NetworkedFieldItemDrop";
+
+        private const string VisualRootName = "Visual";
         private const float GrowthFieldColliderRadius = 0.16f;
         private const float ShrinkFieldColliderRadius = 0.18f;
+        private const float DefaultFieldColliderRadius = 0.24f;
         private const float ConsumableFieldDrag = 1.75f;
         private const float ConsumableFieldAngularDrag = 12f;
         private const float EquipmentFieldDrag = 0.15f;
         private const float EquipmentFieldAngularDrag = 0.35f;
+        private const float SpecialFieldFriction = 1f;
+        private const float SpecialFieldBounciness = 0f;
+        private static PhysicMaterial s_specialEquipmentFieldMaterial;
+
         private readonly IItemFieldPrefabResolver _prefabResolver;
 
         public ItemFieldDropFactory(IItemFieldPrefabResolver prefabResolver)
@@ -28,175 +38,194 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         public ItemFieldDrop Create(ItemDefinition definition, Vector3 position, Transform parent = null)
         {
+            if (definition == null || string.IsNullOrWhiteSpace(definition.Master.ItemId))
+            {
+                return null;
+            }
+
+            var root = new GameObject($"FieldItem_{definition.Master.ItemId}");
+            root.transform.SetPositionAndRotation(position, Quaternion.identity);
+            if (parent != null)
+            {
+                root.transform.SetParent(parent, true);
+            }
+
+            var fieldDrop = root.AddComponent<ItemFieldDrop>();
+            fieldDrop.SetItemId(definition.Master.ItemId);
+            fieldDrop.SetInstanceId(string.Empty);
+
+            CreateFieldVisualInstance(definition, _prefabResolver, root.transform);
+            fieldDrop.EnsureRuntimeSetup();
+            return fieldDrop;
+        }
+
+        internal static GameObject TryLoadNetworkedDropPrefab(IItemFieldPrefabResolver prefabResolver)
+        {
+            if (prefabResolver != null)
+            {
+                var prefab = prefabResolver.Resolve(NetworkedDropAssetPath);
+                if (prefab != null)
+                {
+                    return prefab;
+                }
+            }
+
+            return Resources.Load<GameObject>(NetworkedDropResourcePath);
+        }
+
+        internal static GameObject CreateFieldVisualInstance(
+            ItemDefinition definition,
+            IItemFieldPrefabResolver prefabResolver,
+            Transform parent)
+        {
             if (definition == null)
             {
                 return null;
             }
 
+            return CreateFieldVisualInstance(
+                definition.Master.ItemId,
+                definition.Master.PrefabPath,
+                prefabResolver,
+                parent);
+        }
+
+        internal static GameObject CreateFieldVisualInstance(
+            string itemId,
+            string prefabPath,
+            IItemFieldPrefabResolver prefabResolver,
+            Transform parent)
+        {
+            if (parent == null || string.IsNullOrWhiteSpace(itemId))
+            {
+                return null;
+            }
+
             GameObject instance;
-            var prefab = _prefabResolver?.Resolve(definition.Master.PrefabPath);
+            var prefab = prefabResolver?.Resolve(prefabPath);
             if (prefab != null)
             {
-                instance = Object.Instantiate(prefab, position, Quaternion.identity, parent);
+                instance = Object.Instantiate(prefab, parent);
+                instance.name = VisualRootName;
+                instance.transform.localPosition = Vector3.zero;
+                instance.transform.localRotation = Quaternion.identity;
             }
             else
             {
-                if (string.Equals(definition.Master.ItemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal))
+                instance = CreateFallbackVisual(itemId, parent);
+                Debug.LogWarning(
+                    $"[ItemFieldDropFactory] Missing item prefab: {prefabPath}. Using fallback visual for {itemId}.",
+                    parent);
+            }
+
+            PrepareVisualInstance(instance, itemId);
+            return instance;
+        }
+
+        internal static void ApplyFieldDropRuntimeSetup(GameObject root, string itemId)
+        {
+            if (root == null || string.IsNullOrWhiteSpace(itemId))
+            {
+                return;
+            }
+
+            var visualRoot = ResolveVisualRoot(root.transform);
+            if (visualRoot != null)
+            {
+                if (string.Equals(itemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal))
                 {
-                    // 블랙홀은 프리팹 우선 정책을 따르되, 누락 시 임시 생성으로 동작을 유지한다.
-                    instance = CreateBlackholeFieldDropRoot(position, parent);
-                    Debug.LogWarning(
-                        $"[ItemFieldDropFactory] Missing blackhole prefab: {definition.Master.PrefabPath}. Using fallback sphere.",
-                        instance);
+                    ConfigureBlackholeVisual(visualRoot.gameObject, true);
                 }
                 else
                 {
-                    instance = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                    instance.transform.position = position;
-                    instance.transform.localScale = Vector3.one * 0.45f;
-                    if (parent != null)
-                    {
-                        instance.transform.SetParent(parent, true);
-                    }
+                    ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(visualRoot.gameObject);
 
-                    Debug.LogWarning(
-                        $"[ItemFieldDropFactory] Missing item prefab: {definition.Master.PrefabPath}. Using fallback cube for {definition.Master.ItemId}.",
-                        instance);
+                    if (string.Equals(itemId, ItemIds.WaterMelonSword, System.StringComparison.Ordinal))
+                    {
+                        ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(visualRoot.gameObject, true);
+                    }
                 }
             }
 
-            instance.name = $"FieldItem_{definition.Master.ItemId}";
-            var fieldDrop = instance.GetComponent<ItemFieldDrop>();
-            if (fieldDrop == null)
-            {
-                fieldDrop = instance.AddComponent<ItemFieldDrop>();
-            }
-
-            fieldDrop.SetItemId(definition.Master.ItemId);
-            fieldDrop.EnsureRuntimeSetup();
-            return fieldDrop;
+            EnsureCollider(root, visualRoot, itemId);
+            EnsureDynamicRigidbody(root, itemId);
         }
 
-        internal static void ApplyFieldDropRuntimeSetup(GameObject instance, string itemId)
+        private static GameObject CreateFallbackVisual(string itemId, Transform parent)
+        {
+            var fallback = GameObject.CreatePrimitive(
+                string.Equals(itemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal)
+                    ? PrimitiveType.Sphere
+                    : PrimitiveType.Cube);
+            fallback.name = VisualRootName;
+            fallback.transform.SetParent(parent, false);
+            fallback.transform.localPosition = Vector3.zero;
+            fallback.transform.localRotation = Quaternion.identity;
+            fallback.transform.localScale = Vector3.one * 0.45f;
+            return fallback;
+        }
+
+        private static void PrepareVisualInstance(GameObject instance, string itemId)
         {
             if (instance == null)
             {
                 return;
             }
 
-            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
-
-            if (string.Equals(itemId, ItemIds.WaterMelonSword, System.StringComparison.Ordinal))
-            {
-                ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance, true);
-            }
+            StripNetworkComponents(instance);
+            DisableVisualPhysics(instance);
 
             if (string.Equals(itemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal))
             {
-                ConfigureBlackholeVisual(instance);
+                ConfigureBlackholeVisual(instance, true);
             }
-
-            EnsureCollider(instance, itemId);
-            EnsureDynamicRigidbody(instance, itemId);
         }
 
-        private static void ConfigureBlackholeVisual(GameObject root)
+        private static void StripNetworkComponents(GameObject root)
         {
             if (root == null)
             {
                 return;
             }
 
-            var authoring = root.GetComponent<ItemBlackholeVisualAuthoring>();
-            if (authoring != null)
+            var networkBehaviours = root.GetComponentsInChildren<NetworkBehaviour>(true);
+            for (var i = 0; i < networkBehaviours.Length; i++)
             {
-                authoring.RefreshVisual();
-                return;
+                if (networkBehaviours[i] != null)
+                {
+                    Object.Destroy(networkBehaviours[i]);
+                }
             }
 
-            ApplyBlackholeShellTransparency(root);
+            var networkObjects = root.GetComponentsInChildren<NetworkObject>(true);
+            for (var i = 0; i < networkObjects.Length; i++)
+            {
+                if (networkObjects[i] != null)
+                {
+                    Object.Destroy(networkObjects[i]);
+                }
+            }
+
+            var itemDrops = root.GetComponentsInChildren<ItemFieldDrop>(true);
+            for (var i = 0; i < itemDrops.Length; i++)
+            {
+                if (itemDrops[i] != null)
+                {
+                    Object.Destroy(itemDrops[i]);
+                }
+            }
+
+            var networkedDrops = root.GetComponentsInChildren<NetworkedItemFieldDrop>(true);
+            for (var i = 0; i < networkedDrops.Length; i++)
+            {
+                if (networkedDrops[i] != null)
+                {
+                    Object.Destroy(networkedDrops[i]);
+                }
+            }
         }
 
-        private GameObject CreateBlackholeFieldDropRoot(Vector3 position, Transform parent)
-        {
-            var root = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            root.transform.position = position;
-            root.transform.localScale = Vector3.one * 0.45f;
-            if (parent != null)
-            {
-                root.transform.SetParent(parent, true);
-            }
-
-            ApplyBlackholeShellTransparency(root);
-
-            return root;
-        }
-
-        private static void ApplyBlackholeShellTransparency(GameObject root)
-        {
-            if (root == null)
-            {
-                return;
-            }
-
-            var renderer = root.GetComponent<Renderer>();
-            if (renderer == null)
-            {
-                return;
-            }
-
-            // 내부 이펙트가 가려지지 않도록 외곽 구체를 반투명으로 설정한다.
-            var material = renderer.material;
-            if (material == null)
-            {
-                renderer.enabled = false;
-                return;
-            }
-
-            var shellColor = new Color(0.07f, 0.07f, 0.08f, 0.4f);
-            if (material.HasProperty("_BaseColor"))
-            {
-                material.SetColor("_BaseColor", shellColor);
-            }
-            if (material.HasProperty("_Color"))
-            {
-                material.SetColor("_Color", shellColor);
-            }
-
-            if (material.HasProperty("_Surface"))
-            {
-                material.SetFloat("_Surface", 1f);
-            }
-            if (material.HasProperty("_Blend"))
-            {
-                material.SetFloat("_Blend", 0f);
-            }
-            if (material.HasProperty("_SrcBlend"))
-            {
-                material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            }
-            if (material.HasProperty("_DstBlend"))
-            {
-                material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            }
-            if (material.HasProperty("_ZWrite"))
-            {
-                material.SetFloat("_ZWrite", 0f);
-            }
-            if (material.HasProperty("_Mode"))
-            {
-                material.SetFloat("_Mode", 3f);
-            }
-
-            material.SetOverrideTag("RenderType", "Transparent");
-            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
-            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-            material.EnableKeyword("_ALPHABLEND_ON");
-            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
-            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        }
-
-        private static void DisableColliders(GameObject root)
+        private static void DisableVisualPhysics(GameObject root)
         {
             if (root == null)
             {
@@ -208,72 +237,128 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 colliders[i].enabled = false;
             }
+
+            var bodies = root.GetComponentsInChildren<Rigidbody>(true);
+            for (var i = 0; i < bodies.Length; i++)
+            {
+                var body = bodies[i];
+                body.velocity = Vector3.zero;
+                body.angularVelocity = Vector3.zero;
+                body.isKinematic = true;
+                body.useGravity = false;
+            }
         }
 
-        private static void DisableUnsupportedDistortionRenderers(GameObject root)
+        private static void ConfigureBlackholeVisual(GameObject visualRoot, bool fieldDropContext)
+        {
+            if (visualRoot == null)
+            {
+                return;
+            }
+
+            var authoring = visualRoot.GetComponent<ItemBlackholeVisualAuthoring>();
+            if (authoring != null)
+            {
+                authoring.RefreshVisual();
+            }
+
+            var effect = visualRoot.transform.Find("Item_BlackholeFx");
+            if (effect != null && fieldDropContext)
+            {
+                effect.localRotation = Quaternion.Euler(-45f, 0f, 0f);
+            }
+        }
+
+        private static Transform ResolveVisualRoot(Transform root)
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            var visual = root.Find(VisualRootName);
+            return visual != null ? visual : root;
+        }
+
+        private static void EnsureCollider(GameObject root, Transform visualRoot, string itemId)
         {
             if (root == null)
             {
                 return;
             }
 
-            var renderers = root.GetComponentsInChildren<Renderer>(true);
-            for (var i = 0; i < renderers.Length; i++)
+            var sphereCollider = root.GetComponent<SphereCollider>();
+            if (sphereCollider == null)
             {
-                var renderer = renderers[i];
-                if (renderer == null)
-                {
-                    continue;
-                }
-
-                var rendererName = renderer.gameObject.name ?? string.Empty;
-                if (rendererName.IndexOf("Distort", System.StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    renderer.enabled = false;
-                    continue;
-                }
-
-                var materials = renderer.sharedMaterials;
-                for (var m = 0; m < materials.Length; m++)
-                {
-                    var material = materials[m];
-                    if (material == null)
-                    {
-                        continue;
-                    }
-
-                    var shaderName = material.shader != null ? material.shader.name : string.Empty;
-                    if (shaderName.IndexOf("Distortion Effect", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        shaderName.IndexOf("Grab", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        material.name.IndexOf("Distort", System.StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        renderer.enabled = false;
-                        break;
-                    }
-                }
-            }
-        }
-
-        private static void EnsureCollider(GameObject target, string itemId)
-        {
-            if (target.GetComponentInChildren<Collider>() != null)
-            {
-                return;
+                sphereCollider = root.AddComponent<SphereCollider>();
             }
 
-            var sphereCollider = target.AddComponent<SphereCollider>();
+            ConfigureColliderMaterial(sphereCollider, itemId);
+
             if (string.Equals(itemId, ItemIds.Growth, System.StringComparison.Ordinal))
             {
-                // 헬스 아이콘은 파티클 외곽이 넓어 기본 구체 콜라이더가 과하게 크게 느껴져 전용 반경을 쓴다.
+                sphereCollider.center = Vector3.zero;
                 sphereCollider.radius = GrowthFieldColliderRadius;
                 return;
             }
 
             if (string.Equals(itemId, ItemIds.Shrink, System.StringComparison.Ordinal))
             {
-                // 스피드 아이콘은 기본 구체 콜라이더가 시각 대비 지나치게 크게 느껴져 전용 반경을 쓴다.
+                sphereCollider.center = Vector3.zero;
                 sphereCollider.radius = ShrinkFieldColliderRadius;
+                return;
             }
+
+            if (!TryCalculateWorldBounds(visualRoot, out var bounds))
+            {
+                sphereCollider.center = Vector3.zero;
+                sphereCollider.radius = DefaultFieldColliderRadius;
+                return;
+            }
+
+            sphereCollider.center = root.transform.InverseTransformPoint(bounds.center);
+            var extents = bounds.extents;
+            sphereCollider.radius = Mathf.Max(
+                DefaultFieldColliderRadius,
+                Mathf.Max(extents.x, Mathf.Max(extents.y, extents.z)));
+        }
+
+        private static bool TryCalculateWorldBounds(Transform visualRoot, out Bounds bounds)
+        {
+            bounds = default;
+            if (visualRoot == null)
+            {
+                return false;
+            }
+
+            var renderers = visualRoot.GetComponentsInChildren<Renderer>(true);
+            var hasBounds = false;
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                var renderer = renderers[i];
+                if (renderer == null || !renderer.enabled)
+                {
+                    continue;
+                }
+
+                if (renderer is ParticleSystemRenderer ||
+                    renderer is TrailRenderer ||
+                    renderer is LineRenderer)
+                {
+                    continue;
+                }
+
+                if (!hasBounds)
+                {
+                    bounds = renderer.bounds;
+                    hasBounds = true;
+                    continue;
+                }
+
+                bounds.Encapsulate(renderer.bounds);
+            }
+
+            return hasBounds;
         }
 
         private static void EnsureDynamicRigidbody(GameObject target, string itemId)
@@ -283,15 +368,12 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            PrepareDynamicColliders(target);
-
             var body = target.GetComponent<Rigidbody>();
             if (body == null)
             {
                 body = target.AddComponent<Rigidbody>();
             }
 
-            // 필드 스폰 아이템은 기본적으로 물리 반응이 가능하도록 구성한다.
             body.mass = 1f;
             body.interpolation = RigidbodyInterpolation.Interpolate;
             body.collisionDetectionMode = CollisionDetectionMode.Continuous;
@@ -302,7 +384,6 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             if (IsConsumableItem(itemId))
             {
-                // 소비형 아이콘은 구르기보다 제자리에 안정적으로 멈추는 쪽이 플레이 감각에 맞다.
                 body.drag = ConsumableFieldDrag;
                 body.angularDrag = ConsumableFieldAngularDrag;
                 body.maxAngularVelocity = 1f;
@@ -314,108 +395,51 @@ namespace SSAFYPlayTime.Gameplay.Items
                 body.angularDrag = EquipmentFieldAngularDrag;
                 body.maxAngularVelocity = 7f;
                 body.constraints = RigidbodyConstraints.None;
+
+                if (RequiresSpecialFieldFriction(itemId))
+                {
+                    body.drag = 0.55f;
+                    body.angularDrag = 2.5f;
+                }
             }
 
             body.WakeUp();
         }
 
-        private static void PrepareDynamicColliders(GameObject target)
+        private static void ConfigureColliderMaterial(SphereCollider sphereCollider, string itemId)
         {
-            if (target == null)
+            if (sphereCollider == null)
             {
                 return;
             }
 
-            var meshColliders = target.GetComponentsInChildren<MeshCollider>(true);
-            if (meshColliders.Length == 0)
-            {
-                return;
-            }
-
-            if (TryReplaceMeshCollidersWithBoxCollider(target, meshColliders))
-            {
-                return;
-            }
-
-            for (var i = 0; i < meshColliders.Length; i++)
-            {
-                var meshCollider = meshColliders[i];
-                if (meshCollider == null || meshCollider.convex)
-                {
-                    continue;
-                }
-
-                // 한국어: 동적 리지드바디와 함께 쓸 수 있도록 메시 콜라이더를 볼록 형태로 맞춘다.
-                meshCollider.enabled = false;
-                meshCollider.convex = true;
-            }
+            sphereCollider.sharedMaterial = RequiresSpecialFieldFriction(itemId)
+                ? GetOrCreateSpecialFieldMaterial()
+                : null;
         }
 
-        private static bool TryReplaceMeshCollidersWithBoxCollider(GameObject target, MeshCollider[] meshColliders)
+        private static bool RequiresSpecialFieldFriction(string itemId)
         {
-            if (target == null || meshColliders == null || meshColliders.Length == 0)
+            return string.Equals(itemId, ItemIds.BlackholeBomb, System.StringComparison.Ordinal) ||
+                   string.Equals(itemId, ItemIds.SatelliteStrike, System.StringComparison.Ordinal);
+        }
+
+        private static PhysicMaterial GetOrCreateSpecialFieldMaterial()
+        {
+            if (s_specialEquipmentFieldMaterial != null)
             {
-                return false;
+                return s_specialEquipmentFieldMaterial;
             }
 
-            var renderers = target.GetComponentsInChildren<Renderer>(true);
-            if (renderers == null || renderers.Length == 0)
+            s_specialEquipmentFieldMaterial = new PhysicMaterial("ItemFieldDrop_SpecialEquipment")
             {
-                return false;
-            }
-
-            var hasBounds = false;
-            var worldBounds = default(Bounds);
-            for (var i = 0; i < renderers.Length; i++)
-            {
-                var renderer = renderers[i];
-                if (renderer == null || !renderer.enabled)
-                {
-                    continue;
-                }
-
-                if (!hasBounds)
-                {
-                    worldBounds = renderer.bounds;
-                    hasBounds = true;
-                    continue;
-                }
-
-                worldBounds.Encapsulate(renderer.bounds);
-            }
-
-            if (!hasBounds)
-            {
-                return false;
-            }
-
-            for (var i = 0; i < meshColliders.Length; i++)
-            {
-                var meshCollider = meshColliders[i];
-                if (meshCollider != null)
-                {
-                    meshCollider.enabled = false;
-                    Object.Destroy(meshCollider);
-                }
-            }
-
-            var boxCollider = target.GetComponent<BoxCollider>();
-            if (boxCollider == null)
-            {
-                boxCollider = target.AddComponent<BoxCollider>();
-            }
-
-            var localCenter = target.transform.InverseTransformPoint(worldBounds.center);
-            var localSize = target.transform.InverseTransformVector(worldBounds.size);
-            localSize = new Vector3(
-                Mathf.Max(0.1f, Mathf.Abs(localSize.x)),
-                Mathf.Max(0.1f, Mathf.Abs(localSize.y)),
-                Mathf.Max(0.1f, Mathf.Abs(localSize.z)));
-
-            // 한국어: 빌드에서 읽기 불가 메시 충돌이 터지는 장비류는 단순 박스 콜라이더로 대체한다.
-            boxCollider.center = localCenter;
-            boxCollider.size = localSize;
-            return true;
+                dynamicFriction = SpecialFieldFriction,
+                staticFriction = SpecialFieldFriction,
+                frictionCombine = PhysicMaterialCombine.Maximum,
+                bounciness = SpecialFieldBounciness,
+                bounceCombine = PhysicMaterialCombine.Minimum
+            };
+            return s_specialEquipmentFieldMaterial;
         }
 
         private static bool IsConsumableItem(string itemId)
@@ -425,130 +449,5 @@ namespace SSAFYPlayTime.Gameplay.Items
                    string.Equals(itemId, ItemIds.Invisibility, System.StringComparison.Ordinal) ||
                    string.Equals(itemId, ItemIds.Americano, System.StringComparison.Ordinal);
         }
-
-        private static void ApplyUrpMaterialFallback(GameObject root)
-        {
-            if (root == null)
-            {
-                return;
-            }
-
-            var renderers = root.GetComponentsInChildren<Renderer>(true);
-            for (var i = 0; i < renderers.Length; i++)
-            {
-                var renderer = renderers[i];
-                if (renderer == null)
-                {
-                    continue;
-                }
-
-                var materials = renderer.materials;
-                var replaced = false;
-                for (var m = 0; m < materials.Length; m++)
-                {
-                    var source = materials[m];
-                    if (source == null || !NeedsUrpFallback(source))
-                    {
-                        continue;
-                    }
-
-                    var fallbackShader =
-                        Shader.Find("Universal Render Pipeline/Lit") ??
-                        Shader.Find("Universal Render Pipeline/Unlit") ??
-                        Shader.Find("Universal Render Pipeline/Simple Lit");
-                    if (fallbackShader == null)
-                    {
-                        continue;
-                    }
-
-                    // URP 미지원 셰이더(마젠타)를 런타임 호환 머티리얼로 치환한다.
-                    var fallback = new Material(fallbackShader)
-                    {
-                        name = $"{source.name}_URPFallback"
-                    };
-                    CopyMainSurfaceProperties(source, fallback);
-                    materials[m] = fallback;
-                    replaced = true;
-                }
-
-                if (replaced)
-                {
-                    renderer.materials = materials;
-                }
-            }
-        }
-
-        private static bool NeedsUrpFallback(Material material)
-        {
-            if (material == null || material.shader == null)
-            {
-                return true;
-            }
-
-            if (!material.shader.isSupported)
-            {
-                return true;
-            }
-
-            if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline == null)
-            {
-                return false;
-            }
-
-            var shaderName = material.shader.name ?? string.Empty;
-            return string.Equals(shaderName, "Standard", System.StringComparison.OrdinalIgnoreCase) ||
-                   shaderName.StartsWith("Legacy Shaders/", System.StringComparison.OrdinalIgnoreCase) ||
-                   shaderName.StartsWith("Mobile/", System.StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static void CopyMainSurfaceProperties(Material source, Material destination)
-        {
-            if (source == null || destination == null)
-            {
-                return;
-            }
-
-            var color = Color.white;
-            if (source.HasProperty("_BaseColor"))
-            {
-                color = source.GetColor("_BaseColor");
-            }
-            else if (source.HasProperty("_Color"))
-            {
-                color = source.GetColor("_Color");
-            }
-
-            if (destination.HasProperty("_BaseColor"))
-            {
-                destination.SetColor("_BaseColor", color);
-            }
-            if (destination.HasProperty("_Color"))
-            {
-                destination.SetColor("_Color", color);
-            }
-
-            Texture mainTexture = null;
-            if (source.HasProperty("_BaseMap"))
-            {
-                mainTexture = source.GetTexture("_BaseMap");
-            }
-            else if (source.HasProperty("_MainTex"))
-            {
-                mainTexture = source.GetTexture("_MainTex");
-            }
-
-            if (mainTexture != null)
-            {
-                if (destination.HasProperty("_BaseMap"))
-                {
-                    destination.SetTexture("_BaseMap", mainTexture);
-                }
-                if (destination.HasProperty("_MainTex"))
-                {
-                    destination.SetTexture("_MainTex", mainTexture);
-                }
-            }
-        }
     }
 }
-

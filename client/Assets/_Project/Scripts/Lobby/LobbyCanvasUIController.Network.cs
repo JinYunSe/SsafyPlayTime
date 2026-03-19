@@ -665,9 +665,9 @@ namespace SSAFYPlayTime
             return value;
         }
 
-        // 매 네트워크 틱마다 로컬 플레이어의 입력을 수집해 Fusion에 전달한다.
-        // 좌클릭 짧게 = 아이템 사용(Punch), 좌클릭 꾹(0.15초+) = 왼손 그랩
-        // 우클릭 짧게 = 던지기, 우클릭 꾹(0.15초+) = 오른손 그랩
+        // Collect local host-player input and forward it to Fusion.
+        // Short left click = use item / punch, hold left click >= 0.15s = left grab.
+        // Short right click = throw, hold right click >= 0.15s = right grab.
         void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input)
         {
             if (!GameStartCountdown.InputEnabled) return;
@@ -681,6 +681,7 @@ namespace SSAFYPlayTime
                 CameraYaw = _netCameraYaw,
                 Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
                 Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
+                PrimaryUseHold = _netLeftMouseDown,
                 Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
                 Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
                 LeftGrabHold = latchedLeftGrabHold,
@@ -692,7 +693,7 @@ namespace SSAFYPlayTime
 
             bool isPunch = false;
             bool isThrow = false;
-
+            // Track left mouse button state for left-hand grab.
 
             // 좌클릭 상태 추적 (왼손 그랩)
             if (Input.GetMouseButtonDown(0))
@@ -711,7 +712,7 @@ namespace SSAFYPlayTime
             if (runner == null && Input.GetMouseButtonUp(0))
             {
                 if (!_netLeftMouseConsumedAsGrab && Time.time - _netLeftMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
-                    isPunch = true;
+            // Track right mouse button state for right-hand grab.
 
                 _netLeftMouseDown = false;
             }
@@ -747,6 +748,7 @@ namespace SSAFYPlayTime
                 CameraYaw = _netCameraYaw,
                 Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
                 Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
+                PrimaryUseHold = _netLeftMouseDown,
                 Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
                 Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
                 LeftGrabHold = isLeftGrabHold,

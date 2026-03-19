@@ -1,8 +1,8 @@
-﻿/*
- * 파일 개요:
- * - ItemBlackholeVisualAuthoring 스크립트가 들어 있는 파일이다.
- * - World 계층에서 필드 드랍, 획득, 스폰, 배치, 프리팹 해석처럼 월드 오브젝트와 연결되는 책임을 맡는다.
- * - 필드 공통 규칙을 바꾸면 모든 아이템 획득 흐름에 영향이 가므로 개별 아이템 예외와 분리해서 수정해야 한다.
+/*
+ * File overview:
+ * - Contains ItemBlackholeVisualAuthoring.
+ * - Owns the blackhole core shell and inner FX setup in the world layer.
+ * - Changes here affect field, held, projectile, and activation visuals together.
  */
 using UnityEngine;
 #if UNITY_EDITOR
@@ -12,7 +12,7 @@ using UnityEditor;
 namespace SSAFYPlayTime.Gameplay.Items
 {
     /// <summary>
-    /// 블랙홀 프리팹의 외형(코어 투명도 + 이펙트 자식)을 자동으로 구성한다.
+    /// Builds the blackhole look from a core shell plus inner FX child objects.
     /// </summary>
     [ExecuteAlways]
     [DisallowMultipleComponent]
@@ -20,7 +20,8 @@ namespace SSAFYPlayTime.Gameplay.Items
     {
         private const string BlackholeEffectAssetPath =
             "Assets/Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple.prefab";
-        private const string BlackholeEffectResourcePath = "Effect_02_BlackHole";
+        private const string BlackholeEffectResourcePath =
+            "Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple";
         private const string EffectChildName = "Item_BlackholeFx";
         private const string ShellMaterialAssetPath = "Assets/_Project/Materials/ItemBlackholeShell.mat";
         private const string OuterMaterialAssetPath = "Assets/_Project/Materials/BlackholeFx_Outer_URP.mat";
@@ -28,7 +29,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private const string SpriteMaterialAssetPath = "Assets/_Project/Materials/BlackholeFx_Sprite_URP.mat";
         private const string SolidMaterialAssetPath = "Assets/_Project/Materials/BlackholeFx_Solid_URP.mat";
 
-        [Header("비주얼")]
+        [Header("Visuals")]
         [SerializeField] private float shellAlpha = 0.4f;
         [SerializeField] private Vector3 effectLocalScale = Vector3.one * 1.2f;
         [SerializeField] private Color effectTintColor = new(0.55f, 0.18f, 0.95f, 0.85f);
@@ -56,7 +57,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         }
 
         /// <summary>
-        /// 코어 쉘과 이펙트를 현재 설정값으로 갱신한다.
+        /// Refreshes the shell and inner FX using the current inspector settings.
         /// </summary>
         public void RefreshVisual()
         {
@@ -88,66 +89,10 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            if (shellMaterial != null && rootRenderer.sharedMaterial != shellMaterial)
-            {
-                rootRenderer.sharedMaterial = shellMaterial;
-            }
-
-            var material = Application.isPlaying
-                ? rootRenderer.material
-                : GetEditableMaterial(rootRenderer);
-            if (material == null)
-            {
-                return;
-            }
-
-            // 가운데 구체는 요청값에 맞춰 0.4 투명도를 기본값으로 유지한다.
-            var shellColor = new Color(0.07f, 0.07f, 0.08f, shellAlpha);
-            if (material.HasProperty("_BaseColor"))
-            {
-                material.SetColor("_BaseColor", shellColor);
-            }
-            if (material.HasProperty("_Color"))
-            {
-                material.SetColor("_Color", shellColor);
-            }
-
-            if (material.HasProperty("_Surface"))
-            {
-                material.SetFloat("_Surface", 1f);
-            }
-            if (material.HasProperty("_Blend"))
-            {
-                material.SetFloat("_Blend", 0f);
-            }
-            if (material.HasProperty("_SrcBlend"))
-            {
-                material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            }
-            if (material.HasProperty("_DstBlend"))
-            {
-                material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            }
-            if (material.HasProperty("_ZWrite"))
-            {
-                material.SetFloat("_ZWrite", 0f);
-            }
-            if (material.HasProperty("_Mode"))
-            {
-                material.SetFloat("_Mode", 3f);
-            }
-
-            material.SetOverrideTag("RenderType", "Transparent");
-            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
-            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-            material.EnableKeyword("_ALPHABLEND_ON");
-            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
-            rootRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-
-            if (!Application.isPlaying)
-            {
-                rootRenderer.sharedMaterial = material;
-            }
+            // Hide the black core shell during play mode.
+            // The root MeshRenderer is only the shell carrier for this authoring component.
+            // Actual gameplay visuals should come from the inner FX child only.
+            rootRenderer.enabled = false;
         }
 
         private bool IsPrefabAssetContext()
@@ -167,6 +112,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             var effectRoot = transform.Find(EffectChildName);
+            var createdEffectChild = false;
             if (effectRoot == null)
             {
                 var effectPrefab = LoadEffectPrefab();
@@ -183,21 +129,27 @@ namespace SSAFYPlayTime.Gameplay.Items
 
                 effectInstance.name = EffectChildName;
                 effectRoot = effectInstance.transform;
+                createdEffectChild = true;
             }
 
             effectRoot.localPosition = Vector3.zero;
             effectRoot.localRotation = Quaternion.identity;
             effectRoot.localScale = effectLocalScale;
             DisableColliders(effectRoot.gameObject);
-            ApplyConfiguredEffectBindings(effectRoot.gameObject);
 
             if (!Application.isPlaying)
             {
+                ApplyConfiguredEffectBindings(effectRoot.gameObject);
                 return;
             }
 
+            if (createdEffectChild)
+            {
+                ApplyConfiguredEffectBindings(effectRoot.gameObject);
+                ApplyEffectTint(effectRoot.gameObject);
+            }
+
             DisableUnsupportedDistortionRenderers(effectRoot.gameObject);
-            ApplyEffectTint(effectRoot.gameObject);
         }
 
         private GameObject LoadEffectPrefab()
@@ -307,8 +259,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                         continue;
                     }
 
-                    // 한국어: 블랙홀 이펙트는 빌드에서 fallback 머티리얼로 바뀌며 흰색이 되는 경우가 있어,
-                    // 한국어: 보라 계열 틴트와 emission을 다시 강제로 넣어 원본 분위기를 유지한다.
+                    // In builds, blackhole FX materials can fall back and lose their intended tint.
+                    // Re-apply the purple tint and emission so the original mood stays intact.
                     if (material.HasProperty("_BaseColor"))
                     {
                         material.SetColor("_BaseColor", effectTintColor);
@@ -432,32 +384,26 @@ namespace SSAFYPlayTime.Gameplay.Items
                     continue;
                 }
 
+                renderer.enabled = true;
+
                 var name = renderer.gameObject.name;
-                if (string.Equals(name, "OuterLayer", System.StringComparison.Ordinal))
+                if (string.Equals(name, "Glow", System.StringComparison.Ordinal) ||
+                    string.Equals(name, "Particles", System.StringComparison.Ordinal) ||
+                    string.Equals(name, EffectChildName, System.StringComparison.Ordinal))
+                {
+                    if (resolvedGlow != null)
+                    {
+                        AssignRendererMaterials(renderer, resolvedGlow);
+                    }
+
+                    continue;
+                }
+
+                if (string.Equals(name, "Circling", System.StringComparison.Ordinal))
                 {
                     if (resolvedOuter != null)
                     {
                         AssignRendererMaterials(renderer, resolvedOuter);
-                    }
-
-                    continue;
-                }
-
-                if (string.Equals(name, "Glow", System.StringComparison.Ordinal))
-                {
-                    if (resolvedGlow != null)
-                    {
-                        AssignRendererMaterials(renderer, resolvedGlow);
-                    }
-
-                    continue;
-                }
-
-                if (string.Equals(name, EffectChildName, System.StringComparison.Ordinal))
-                {
-                    if (resolvedGlow != null)
-                    {
-                        AssignRendererMaterials(renderer, resolvedGlow);
                     }
 
                     continue;
@@ -509,23 +455,26 @@ namespace SSAFYPlayTime.Gameplay.Items
                     continue;
                 }
 
+                renderer.enabled = true;
+
                 var name = renderer.gameObject.name;
-                if (string.Equals(name, "OuterLayer", System.StringComparison.Ordinal))
-                {
-                    if (outerLayerMaterial != null)
-                    {
-                        renderer.sharedMaterials = new[] { outerLayerMaterial };
-                    }
-
-                    continue;
-                }
-
                 if (string.Equals(name, "Glow", System.StringComparison.Ordinal) ||
+                    string.Equals(name, "Particles", System.StringComparison.Ordinal) ||
                     string.Equals(name, EffectChildName, System.StringComparison.Ordinal))
                 {
                     if (glowMaterial != null)
                     {
                         renderer.sharedMaterials = new[] { glowMaterial };
+                    }
+
+                    continue;
+                }
+
+                if (string.Equals(name, "Circling", System.StringComparison.Ordinal))
+                {
+                    if (outerLayerMaterial != null)
+                    {
+                        renderer.sharedMaterials = new[] { outerLayerMaterial };
                     }
 
                     continue;
