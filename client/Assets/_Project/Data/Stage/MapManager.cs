@@ -20,7 +20,7 @@ public class MapManager : NetworkBehaviour
         }
 
         // 리스트를 돌며 각 기믹 실행
-        foreach (var gimmick in mapData.gimmicks)
+        foreach (var gimmick in mapData.Gimmicks)
         {
             if (ElapsedTime >= gimmick.startDelay)
             {
