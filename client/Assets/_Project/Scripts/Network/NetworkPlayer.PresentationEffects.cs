@@ -100,8 +100,8 @@ public sealed partial class NetworkPlayer
             }
         }
 
-        TryAddUpperBodySwayBinding(HumanBodyBones.Neck, 0.16f, physicsByName);
-        TryAddUpperBodySwayBinding(HumanBodyBones.Head, 0.24f, physicsByName);
+        TryAddUpperBodySwayBinding(HumanBodyBones.Neck, 0.38f, physicsByName);
+        TryAddUpperBodySwayBinding(HumanBodyBones.Head, 0.46f, physicsByName);
         TryAddUpperBodySwayBinding(HumanBodyBones.Chest, 0.12f, physicsByName);
         TryAddUpperBodySwayBinding(HumanBodyBones.LeftUpperArm, 0.42f, physicsByName);
         TryAddUpperBodySwayBinding(HumanBodyBones.LeftLowerArm, 0.52f, physicsByName);
@@ -191,7 +191,7 @@ public sealed partial class NetworkPlayer
         }
 
         var locomotionState = ResolvePresentationLocomotionState();
-        if (locomotionState == PresentationLocomotionState.Idle)
+        if (locomotionState != PresentationLocomotionState.Sprint)
         {
             ResetRunDustCadence();
             return;
@@ -207,13 +207,10 @@ public sealed partial class NetworkPlayer
         if (dustPrefab == null)
             return;
 
-        var scaleMultiplier = locomotionState == PresentationLocomotionState.Sprint ? 0.95f : 0.78f;
-        RentRunDust(dustPrefab, position, rotation, scaleMultiplier);
+        RentRunDust(dustPrefab, position, rotation, 0.95f);
 
         _nextDustLeftFoot = !_nextDustLeftFoot;
-        _nextDustAt = Time.time + (locomotionState == PresentationLocomotionState.Sprint
-            ? SprintDustInterval
-            : WalkDustInterval);
+        _nextDustAt = Time.time + SprintDustInterval;
     }
 
     private void ResetRunDustCadence()
