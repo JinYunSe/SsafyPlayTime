@@ -10,8 +10,8 @@ namespace SSAFYPlayTime.Character
         private const float DefaultSpeedForMaxWobble = 4f;
         private const float DefaultTurnRateForMaxWobble = 220f;
         private const float DefaultAirborneWobbleBonus = 0.08f;
-        private const float DefaultHeadPinMultiplier = 0.72f;
-        private const float DefaultHeadMuscleMultiplier = 0.58f;
+        private const float DefaultHeadPinMultiplier = 0.48f;
+        private const float DefaultHeadMuscleMultiplier = 0.38f;
         private const float DefaultArmPinMultiplier = 0.64f;
         private const float DefaultArmMuscleMultiplier = 0.52f;
         private const float DefaultHandPinMultiplier = 0.82f;
@@ -36,8 +36,8 @@ namespace SSAFYPlayTime.Character
         [SerializeField] private float speedForMaxWobble = 4f;
         [SerializeField] private float turnRateForMaxWobble = 220f;
         [SerializeField, Range(0f, 0.5f)] private float airborneWobbleBonus = 0.08f;
-        [SerializeField, Range(0.25f, 1f)] private float headPinMultiplier = 0.72f;
-        [SerializeField, Range(0.25f, 1f)] private float headMuscleMultiplier = 0.58f;
+        [SerializeField, Range(0.25f, 1f)] private float headPinMultiplier = 0.48f;
+        [SerializeField, Range(0.25f, 1f)] private float headMuscleMultiplier = 0.38f;
         [SerializeField, Range(0.25f, 1f)] private float armPinMultiplier = 0.64f;
         [SerializeField, Range(0.25f, 1f)] private float armMuscleMultiplier = 0.52f;
         [SerializeField, Range(0.25f, 1f)] private float handPinMultiplier = 0.82f;
@@ -96,7 +96,17 @@ namespace SSAFYPlayTime.Character
             SyncStateFromNetworkPlayer();
 
             if (_currentState != _targetState)
-                LerpToTarget(Time.deltaTime);
+            {
+                if (ShouldApplyStateImmediately(_targetState))
+                {
+                    _currentState = _targetState;
+                    ApplyImmediate(_targetState);
+                }
+                else
+                {
+                    LerpToTarget(Time.deltaTime);
+                }
+            }
 
             ApplyDynamicWobble(Time.deltaTime);
         }
@@ -118,11 +128,32 @@ namespace SSAFYPlayTime.Character
             if (!_initialized)
                 return;
 
-            if (lerpSpeed <= 0f)
+            if (lerpSpeed <= 0f || ShouldApplyStateImmediately(newState))
             {
                 _currentState = newState;
                 ApplyImmediate(newState);
             }
+        }
+
+        public void SetStateImmediate(BodyPartPhysicsProfile.CharacterPhysicsState newState)
+        {
+            _targetState = newState;
+
+            if (profile == null)
+                return;
+
+            if (puppetMaster == null)
+                puppetMaster = GetComponentInChildren<PuppetMaster>();
+
+            if (puppetMaster == null)
+                return;
+
+            EnsureInitialized();
+            if (!_initialized)
+                return;
+
+            _currentState = newState;
+            ApplyImmediate(newState);
         }
 
         public void SetProfile(BodyPartPhysicsProfile newProfile)
@@ -280,7 +311,8 @@ namespace SSAFYPlayTime.Character
 
         private void ApplyDynamicWobble(float dt)
         {
-            var wobble = enableDynamicWobble ? UpdateWobbleAmount(dt) : 0f;
+            var preserveShape = IsShapeCriticalState(_currentState) || IsShapeCriticalState(_targetState);
+            var wobble = (!preserveShape && enableDynamicWobble) ? UpdateWobbleAmount(dt) : 0f;
             var isGrabbed = _currentState == BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed ||
                             _targetState == BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed;
             var isUnstable = _currentState == BodyPartPhysicsProfile.CharacterPhysicsState.Unstable ||
@@ -292,23 +324,29 @@ namespace SSAFYPlayTime.Character
                 var category = _muscleCategories[i];
                 var categoryWobble = wobble;
 
-                if (isGrabbed && (category == BodyPartPhysicsProfile.BodyPartCategory.Head ||
-                                  category == BodyPartPhysicsProfile.BodyPartCategory.Arm ||
-                                  category == BodyPartPhysicsProfile.BodyPartCategory.Hand))
+                if (!preserveShape &&
+                    isGrabbed &&
+                    (category == BodyPartPhysicsProfile.BodyPartCategory.Head ||
+                     category == BodyPartPhysicsProfile.BodyPartCategory.Arm ||
+                     category == BodyPartPhysicsProfile.BodyPartCategory.Hand))
                 {
                     categoryWobble = Mathf.Clamp01(categoryWobble + grabbedLooseBonus);
                 }
 
-                if (isUnstable && (category == BodyPartPhysicsProfile.BodyPartCategory.Head ||
-                                   category == BodyPartPhysicsProfile.BodyPartCategory.Arm ||
-                                   category == BodyPartPhysicsProfile.BodyPartCategory.Hand))
+                if (!preserveShape &&
+                    isUnstable &&
+                    (category == BodyPartPhysicsProfile.BodyPartCategory.Head ||
+                     category == BodyPartPhysicsProfile.BodyPartCategory.Arm ||
+                     category == BodyPartPhysicsProfile.BodyPartCategory.Hand))
                 {
                     categoryWobble = Mathf.Clamp01(categoryWobble + unstableLooseBonus);
                 }
 
-                if (isDragged && (category == BodyPartPhysicsProfile.BodyPartCategory.Head ||
-                                  category == BodyPartPhysicsProfile.BodyPartCategory.Arm ||
-                                  category == BodyPartPhysicsProfile.BodyPartCategory.Hand))
+                if (!preserveShape &&
+                    isDragged &&
+                    (category == BodyPartPhysicsProfile.BodyPartCategory.Head ||
+                     category == BodyPartPhysicsProfile.BodyPartCategory.Arm ||
+                     category == BodyPartPhysicsProfile.BodyPartCategory.Hand))
                 {
                     categoryWobble = Mathf.Clamp01(categoryWobble + draggedLooseBonus);
                 }
@@ -336,6 +374,19 @@ namespace SSAFYPlayTime.Character
                 muscle.props.pinWeight = Mathf.Clamp01(_currentPinWeights[i] * pinMultiplier);
                 muscle.props.muscleWeight = Mathf.Clamp01(_currentMuscleWeights[i] * muscleMultiplier);
             }
+        }
+
+        private static bool IsShapeCriticalState(BodyPartPhysicsProfile.CharacterPhysicsState state)
+        {
+            return state == BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.Stunned ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.Recovering;
+        }
+
+        private static bool ShouldApplyStateImmediately(BodyPartPhysicsProfile.CharacterPhysicsState state)
+        {
+            return IsShapeCriticalState(state);
         }
 
         private float UpdateWobbleAmount(float dt)
@@ -492,7 +543,9 @@ namespace SSAFYPlayTime.Character
                 NetworkPlayer.PhysicalPhase.Dragged => BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed,
                 NetworkPlayer.PhysicalPhase.Unstable => BodyPartPhysicsProfile.CharacterPhysicsState.Unstable,
                 NetworkPlayer.PhysicalPhase.Stunned => BodyPartPhysicsProfile.CharacterPhysicsState.Stunned,
+                NetworkPlayer.PhysicalPhase.BeingCarriedStunned => BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned,
                 NetworkPlayer.PhysicalPhase.Recovering => BodyPartPhysicsProfile.CharacterPhysicsState.Recovering,
+                NetworkPlayer.PhysicalPhase.CarryingStunned => BodyPartPhysicsProfile.CharacterPhysicsState.Normal,
                 _ => BodyPartPhysicsProfile.CharacterPhysicsState.Normal
             };
         }

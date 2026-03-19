@@ -18,7 +18,28 @@ public class Trampoline : MonoBehaviour
         // y값이 양수(위쪽 방향)인지 확인하는 것이 가장 확실합니다.
         if (contact.normal.y < -0.5f)
         {
-            Rigidbody rb = collision.gameObject.GetComponent<Rigidbody>();
+            var networkPlayer = collision.transform.root.GetComponent<NetworkPlayer>();
+            if (networkPlayer != null && (networkPlayer.IsStunned || networkPlayer.IsRecovering))
+            {
+                var skippedRb = collision.transform.root.GetComponent<Rigidbody>();
+                var velocity = skippedRb != null ? skippedRb.velocity : Vector3.zero;
+                networkPlayer.TraceStunForceEvent(
+                    "Trampoline",
+                    skippedRb,
+                    Vector3.up * bounceForce,
+                    ForceMode.Impulse,
+                    velocity,
+                    velocity,
+                    false,
+                    "skipped=stunned_or_recovering");
+                return;
+            }
+
+            Rigidbody rb = networkPlayer != null
+                ? collision.transform.root.GetComponent<Rigidbody>()
+                : collision.rigidbody != null
+                    ? collision.rigidbody
+                    : collision.gameObject.GetComponent<Rigidbody>();
 
             if (rb != null)
             {
@@ -28,7 +49,17 @@ public class Trampoline : MonoBehaviour
                 rb.velocity = vel;
 
                 // 위로 쏘아 올리기
+                var velocityBefore = rb.velocity;
                 rb.AddForce(Vector3.up * bounceForce, ForceMode.Impulse);
+                networkPlayer?.TraceStunForceEvent(
+                    "Trampoline",
+                    rb,
+                    Vector3.up * bounceForce,
+                    ForceMode.Impulse,
+                    velocityBefore,
+                    rb.velocity,
+                    true,
+                    "applied");
             }
         }
     }
