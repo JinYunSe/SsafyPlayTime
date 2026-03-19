@@ -23,6 +23,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField, HideInInspector] private bool runtimeInitialized;
 
         private bool _pickedUp;
+        private bool _visualReleased;
 
         public string ItemId => itemId;
         public string InstanceId => ResolveRuntimeInstanceId();
@@ -36,6 +37,16 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 EnsureRuntimeSetup();
             }
+        }
+
+        private void OnDestroy()
+        {
+            if (!ShouldReleaseVisualOnDestroy())
+            {
+                return;
+            }
+
+            ReleaseVisualToPool();
         }
 
         public void SetItemId(string value)
@@ -60,6 +71,37 @@ namespace SSAFYPlayTime.Gameplay.Items
         public bool CanBePickedUp()
         {
             return !_pickedUp && !string.IsNullOrWhiteSpace(itemId);
+        }
+
+        public void ResetForSpawn(string newItemId, string newInstanceId)
+        {
+            _pickedUp = false;
+            _visualReleased = false;
+            runtimeInitialized = false;
+            itemId = newItemId ?? string.Empty;
+            instanceId = string.IsNullOrWhiteSpace(newInstanceId)
+                ? BuildDeterministicInstanceId()
+                : newInstanceId;
+            PickedUp = null;
+
+            var colliders = GetComponentsInChildren<Collider>(true);
+            for (var i = 0; i < colliders.Length; i++)
+            {
+                if (colliders[i] != null)
+                {
+                    colliders[i].enabled = true;
+                }
+            }
+
+            gameObject.SetActive(true);
+        }
+
+        public void ResetForDespawn()
+        {
+            _pickedUp = false;
+            runtimeInitialized = false;
+            PickedUp = null;
+            ReleaseVisualToPool();
         }
 
         internal void EnsureRuntimeSetup()
@@ -127,6 +169,39 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             gameObject.SetActive(false);
+        }
+
+        private void ReleaseVisualToPool()
+        {
+            if (_visualReleased)
+            {
+                return;
+            }
+
+            _visualReleased = true;
+            ItemFieldDropFactory.ReleaseFieldVisual(gameObject, itemId);
+        }
+
+        private bool ShouldReleaseVisualOnDestroy()
+        {
+            if (string.Equals(name, "Visual", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (transform.Find("Visual") != null)
+            {
+                return true;
+            }
+
+            if (transform.parent == null &&
+                (name.StartsWith("FieldItem_", StringComparison.Ordinal) ||
+                 name.StartsWith("NetworkedFieldItemDrop", StringComparison.Ordinal)))
+            {
+                return true;
+            }
+
+            return GetComponent<NetworkedItemFieldDrop>() != null;
         }
 
         private void EnsureInstanceId()

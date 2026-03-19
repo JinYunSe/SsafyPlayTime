@@ -319,13 +319,13 @@ namespace SSAFYPlayTime.Gameplay.Items
                     var fieldDrop = obj.GetComponent<ItemFieldDrop>();
                     if (fieldDrop != null)
                     {
-                        fieldDrop.SetItemId(definition.Master.ItemId);
-                        fieldDrop.SetInstanceId(requestedInstanceId);
+                        fieldDrop.ResetForSpawn(definition.Master.ItemId, requestedInstanceId);
                     }
 
                     var networkedDrop = obj.GetComponent<NetworkedItemFieldDrop>();
                     if (networkedDrop != null)
                     {
+                        networkedDrop.ResetForSpawn(definition.Master.ItemId, resolvedPosition, Quaternion.identity);
                         networkedDrop.InitializeMetadata(definition.Master.ItemId);
                     }
                 });
