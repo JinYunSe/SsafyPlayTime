@@ -1,7 +1,6 @@
-using System.Collections;
 using UnityEngine;
 using RootMotion.Dynamics;
-
+using System.Collections;
 /// <summary>
 /// PuppetMaster 상태 머신: Active↔Dead↔Frozen 전환을 관리한다.
 /// 보고서 권장 패턴: 상태 전환, 죽음 처리, 리스폰(Teleport)
@@ -12,10 +11,6 @@ public class PuppetLifecycleManager : MonoBehaviour
     [SerializeField] PuppetMaster puppetMaster;
     [SerializeField] BehaviourPuppet behaviourPuppet;
 
-    [Header("Respawn Settings")]
-    [SerializeField] float respawnDelay = 3f;
-    [SerializeField] Transform respawnPoint;
-
     [Header("Death Settings")]
     [SerializeField] float freezeAfterDeathTime = 5f;
 
@@ -23,7 +18,6 @@ public class PuppetLifecycleManager : MonoBehaviour
     public bool IsFrozen => puppetMaster != null && puppetMaster.state == PuppetMaster.State.Frozen;
 
     public event System.Action OnDeath;
-    public event System.Action OnRespawn;
 
     void Awake()
     {
@@ -45,6 +39,7 @@ public class PuppetLifecycleManager : MonoBehaviour
     {
         if (puppetMaster == null || IsDead) return;
 
+        StopAllCoroutines();
         puppetMaster.state = PuppetMaster.State.Dead;
         puppetMaster.mode = PuppetMaster.Mode.Active;
 
@@ -61,53 +56,5 @@ public class PuppetLifecycleManager : MonoBehaviour
         {
             puppetMaster.state = PuppetMaster.State.Frozen;
         }
-    }
-
-    public void Respawn()
-    {
-        if (puppetMaster == null) return;
-        StartCoroutine(RespawnCoroutine());
-    }
-
-    public void Respawn(Vector3 position, Quaternion rotation)
-    {
-        if (puppetMaster == null) return;
-        StartCoroutine(RespawnCoroutine(position, rotation));
-    }
-
-    IEnumerator RespawnCoroutine()
-    {
-        Vector3 pos = respawnPoint != null ? respawnPoint.position : Vector3.up * 2f;
-        Quaternion rot = respawnPoint != null ? respawnPoint.rotation : Quaternion.identity;
-        yield return RespawnCoroutine(pos, rot);
-    }
-
-    IEnumerator RespawnCoroutine(Vector3 pos, Quaternion rot)
-    {
-        puppetMaster.Resurrect();
-        if (behaviourPuppet != null)
-            behaviourPuppet.SetState(BehaviourPuppet.State.Puppet);
-
-        yield return null;
-        yield return new WaitForFixedUpdate();
-
-        puppetMaster.Teleport(pos, rot, true);
-
-        yield return null;
-        puppetMaster.mode = PuppetMaster.Mode.Active;
-
-        OnRespawn?.Invoke();
-    }
-
-    public void DieAndAutoRespawn()
-    {
-        Die();
-        StartCoroutine(AutoRespawnCoroutine());
-    }
-
-    IEnumerator AutoRespawnCoroutine()
-    {
-        yield return new WaitForSeconds(respawnDelay);
-        Respawn();
     }
 }

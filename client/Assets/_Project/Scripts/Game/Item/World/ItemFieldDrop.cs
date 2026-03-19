@@ -32,7 +32,10 @@ namespace SSAFYPlayTime.Gameplay.Items
         private void Awake()
         {
             EnsureInstanceId();
-            EnsureRuntimeSetup();
+            if (ShouldInitializeRuntimeOnAwake())
+            {
+                EnsureRuntimeSetup();
+            }
         }
 
         public void SetItemId(string value)
@@ -61,13 +64,29 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         internal void EnsureRuntimeSetup()
         {
-            if (runtimeInitialized)
+            if (runtimeInitialized || string.IsNullOrWhiteSpace(itemId))
             {
                 return;
             }
 
             ItemFieldDropFactory.ApplyFieldDropRuntimeSetup(gameObject, itemId);
             runtimeInitialized = true;
+        }
+
+        private bool ShouldInitializeRuntimeOnAwake()
+        {
+            if (transform.parent == null)
+            {
+                return true;
+            }
+
+            if (name.StartsWith("FieldItem_", StringComparison.Ordinal) ||
+                name.StartsWith("NetworkedFieldItemDrop", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            return GetComponent<NetworkedItemFieldDrop>() != null;
         }
 
         public void MarkPickedUp()

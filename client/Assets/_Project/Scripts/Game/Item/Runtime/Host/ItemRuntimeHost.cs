@@ -128,6 +128,16 @@ namespace SSAFYPlayTime.Gameplay.Items
             return _controller.TryUseHeldItem(ownerPos, ownerForward, targetPosition, out reason);
         }
 
+        public bool TrySetFlamethrowerActive(bool active, out string reason)
+        {
+            if (!EnsureReady(out reason))
+            {
+                return false;
+            }
+
+            return _controller.TrySetFlamethrowerActive(active, out reason);
+        }
+
         public bool TryDropHeldItem(out string reason)
         {
             if (!EnsureReady(out reason))

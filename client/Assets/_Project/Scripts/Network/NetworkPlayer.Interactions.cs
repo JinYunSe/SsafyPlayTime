@@ -9,18 +9,29 @@ public sealed partial class NetworkPlayer
         if (_handGrabHandlers == null || !_isActiveRagdoll)
             return;
 
-        // 회복 안정화 중에는 전투 행동 차단 (이동은 허용)
+        // Block combat actions while the recovery gate is active.
         if (_isRecovering)
             return;
 
         var dropRequested = input.Drop || _dropTriggered;
         var throwRequested = input.Throw || _throwTriggered;
         var anyHolding = IsAnyHandHoldingObject();
+        var isHoldingFlamethrower = IsHoldingRuntimeItem(ItemIds.Flamethrower);
 
-        if (input.Punch && (HasHeldRuntimeItem() || !_isGrabActive))
+        if (isHoldingFlamethrower)
+        {
+            ProcessFlamethrowerPrimaryHold(input.PrimaryUseHold);
+            if (input.PrimaryUseHold)
+            {
+                _isLeftGrabActive = false;
+                _isGrabActive = _isRightGrabActive;
+            }
+        }
+
+        if (!isHoldingFlamethrower && input.Punch && (HasHeldRuntimeItem() || !_isGrabActive))
             TryProcessPrimaryAction(anyHolding);
 
-        if (_isGrabActive)
+        if (!isHoldingFlamethrower && _isGrabActive)
             TryProcessGrab();
 
         if (dropRequested)
@@ -33,9 +44,17 @@ public sealed partial class NetworkPlayer
         UpdateGrabbingAnimatorFlag();
     }
 
+    private void ProcessFlamethrowerPrimaryHold(bool isHoldingPrimaryUse)
+    {
+        if (!TryPrepareItemInteractionService(out var runtimeHost) || runtimeHost == null)
+            return;
+
+        runtimeHost.TrySetFlamethrowerActive(isHoldingPrimaryUse, out _);
+    }
+
     /// <summary>
-    /// PartyMonsterAnimationDriver에서 그랩 애니메이션 동기화에 사용.
-    /// 원격 클라이언트에서는 Networked 속성을 참조한다.
+    /// Used by PartyMonsterAnimationDriver to branch grab animation state.
+    /// Remote peers read the replicated Networked state instead of local grab handlers.
     /// </summary>
     public bool IsAnyHandHolding
     {
@@ -62,7 +81,7 @@ public sealed partial class NetworkPlayer
     {
         if (!TryUseHeldItemByPrimaryClick() && !anyHolding)
         {
-            // 호스트가 좌/우 펀치를 결정하고 네트워크에 기록
+            // The host decides left/right punch order and records the replicated event.
             var isLeft = _hostNextPunchLeft;
             if (!TryBeginPunchHitDetection(isLeft))
                 return;
@@ -153,8 +172,8 @@ public sealed partial class NetworkPlayer
     }
 
     /// <summary>
-    /// 양손으로 같은 기절자를 잡고 있는지 판별.
-    /// Phase 2(overhead carry)와 Phase 4(양손 강화) 진입 조건으로 사용.
+    /// Returns true when both hands are holding the same stunned player.
+    /// Used as a gate for overhead carry / two-hand carry transitions.
     /// </summary>
     internal bool IsDualGrabbingStunnedPlayer
     {
@@ -194,18 +213,18 @@ public sealed partial class NetworkPlayer
         animator.SetBool("isCarrying", isCarrying);
     }
 
-    // ─── OwnerProxy grab 예측 타이머 ───
+    // Local grab prediction timer for OwnerProxy presentation.
     private float _grabPredictionStart = -1f;
     private const float GRAB_PREDICTION_TIMEOUT = 0.4f;
 
     /// <summary>
-    /// 비권한 클라이언트(OwnerProxy / RemoteProxy)에서
-    /// 호스트가 확정한 grab/carry 상태를 animator에 반영한다.
-    /// StateAuthority에서는 UpdateGrabbingAnimatorFlag()가 직접 처리하므로 호출 불필요.
+    /// Sync replicated grab / carry state into the animator on non-authority peers.
+    /// StateAuthority uses UpdateGrabbingAnimatorFlag() directly.
+    /// OwnerProxy predicts grab immediately and rolls back if host confirmation never arrives.
     ///
-    /// OwnerProxy는 로컬 grab 입력을 즉시 예측 반영하되,
-    /// 호스트가 LeftGrabConfirmed/RightGrabConfirmed를 확정하지 않으면
-    /// GRAB_PREDICTION_TIMEOUT 후 롤백한다.
+    /// LeftGrabConfirmed / RightGrabConfirmed are the authoritative checkpoints.
+    /// If they do not arrive in time, GRAB_PREDICTION_TIMEOUT rolls presentation back.
+    /// This keeps owner feel responsive without desyncing remote presentation.
     /// </summary>
     internal void SyncGrabbingAnimatorFromNetwork()
     {
@@ -214,14 +233,14 @@ public sealed partial class NetworkPlayer
         var phase = GetPhysicalPhase();
         bool confirmedHolding = phase == PhysicalPhase.Holding;
 
-        // OwnerProxy 예측: 로컬 입력 즉시 반영 → 호스트 미확정 시 타임아웃 롤백
+        // OwnerProxy prediction: reflect local grab instantly, then roll back if not confirmed.
         bool localPredicting = HasInputAuthority && !HasStateAuthority
             && ((_leftMouseDown && _leftMouseConsumedAsGrab) || (_rightMouseDown && _rightMouseConsumedAsGrab));
 
         bool showGrab;
         if (localPredicting && !confirmedHolding)
         {
-            // 로컬에서 잡으려 하는데 호스트가 아직 확정하지 않음
+            // Local player is trying to grab, but host has not confirmed it yet.
             if (_grabPredictionStart < 0f)
                 _grabPredictionStart = Time.time;
             showGrab = Time.time - _grabPredictionStart < GRAB_PREDICTION_TIMEOUT;
@@ -232,7 +251,7 @@ public sealed partial class NetworkPlayer
             showGrab = phase == PhysicalPhase.GrabIntent || confirmedHolding || localPredicting;
         }
 
-        // Carry 판별: 확정된 grab 대상이 기절 상태이면 carrying
+        // Carry if the confirmed grab target is stunned.
         bool isCarrying = confirmedHolding && IsConfirmedGrabTargetStunned();
         bool isGrabbing = showGrab && !isCarrying && !UsesPhysicsPosePresentation(phase);
 
@@ -310,6 +329,13 @@ public sealed partial class NetworkPlayer
     private bool HasHeldRuntimeItem()
     {
         return _itemRuntimeHost != null && !string.IsNullOrWhiteSpace(_itemRuntimeHost.HeldItemId);
+    }
+
+    private bool IsHoldingRuntimeItem(string itemId)
+    {
+        return _itemRuntimeHost != null &&
+               !string.IsNullOrWhiteSpace(itemId) &&
+               string.Equals(_itemRuntimeHost.HeldItemId, itemId, System.StringComparison.Ordinal);
     }
 
     private bool TryPickupNearestFieldItemByKey()
