@@ -6,6 +6,9 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
+// CarrySolveFrame: carry 중 손/victim root/proxy hips/presentation root가
+// 모두 같은 기준점을 보게 만드는 통합 구조.
+
 // Fusion NetworkBehaviour 기반의 캐릭터 컨트롤러.
 // StateAuthority(서버/호스트)에서만 물리 시뮬레이션을 실행한다.
 //
@@ -32,6 +35,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [Header("Grab")]
     [SerializeField] private Transform holdPoint;
 
+    [Header("Carry Solve Frame")]
+    [SerializeField] private CarryRig carryRig;
+    [SerializeField] private CarryPhysicsProfile carryPhysicsProfile;
+
     [Header("Camera Follow")]
     [SerializeField] private Vector3 cameraAnchorPresentationLocalOffset = new Vector3(0f, 1.35f, 0f);
     [SerializeField] private Vector3 cameraAnchorFallbackRootLocalOffset = new Vector3(0f, 1.25f, 0f);
@@ -57,6 +64,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [Networked] private int NetworkedMotorState { get; set; }
     [Networked] private int NetworkedAnimationEventSequence { get; set; }
     [Networked] private int NetworkedAnimationEventType { get; set; }
+    [Networked] private int NetworkedKnockoutConfirmSequence { get; set; }
 
     // 스폰 시 확정된 캐릭터 종류(0=Ssaty, 1=AlG, 2=Fit, 3=Wise).
     // 랜덤 선택도 스폰 전 onBeforeSpawned에서 실제 배정값으로 기록된다.
@@ -96,12 +104,26 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [Networked] public NetworkBool LeftGrabConfirmed { get; set; }
     [Networked] public NetworkBool RightGrabConfirmed { get; set; }
 
+    // ─── CarrySolveFrame 네트워크 동기화 ───
+    // victim anchor: BeingCarriedStunned인 플레이어가 자신의 hips-chest 가중 평균을 전송
+    [Networked] private Vector3 NetworkedVictimAnchorPosition { get; set; }
+    [Networked] private Vector3 NetworkedVictimAnchorForward { get; set; }
+    [Networked] private NetworkBool NetworkedVictimAnchorValid { get; set; }
+    [Networked] private Vector3 NetworkedVictimRootOffset { get; set; }
+    [Networked] private NetworkBool NetworkedVictimRootOffsetValid { get; set; }
+    // carrier anchor: CarryingStunned인 플레이어가 자신의 carry rig anchor를 전송
+    [Networked] private Vector3 NetworkedCarrierAnchorPosition { get; set; }
+    [Networked] private Vector3 NetworkedCarrierAnchorForward { get; set; }
+    [Networked] private NetworkBool NetworkedCarrierAnchorValid { get; set; }
+    [Networked] private byte NetworkedCarryMode { get; set; }
+
     // OwnerProxy에서 다른 플레이어에게 잡힌 상태
     [Networked] public NetworkBool NetworkedIsBeingGrabbed { get; set; }
     [Networked] private byte NetworkedPhysicalPhase { get; set; }
     [Networked] private float NetworkedInstability { get; set; }
     [Networked] public NetworkBool NetworkedIsDragged { get; set; }
     [Networked] private byte NetworkedPhysicsPresentationResetVersion { get; set; }
+    [Networked] private byte NetworkedRecoveryAnimationVariant { get; set; }
 
     // PuppetMaster 상태 동기화
     [Networked] private float NetworkedPuppetPinWeight { get; set; }
@@ -115,7 +137,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     // 현재 기절 남은 시간
     [Networked] private float StunTimeRemaining { get; set; }
 
-    // 로컬 변수
+    [Header("Grab Debug")]
+    [SerializeField] bool debugGrabLog = true;
+    [SerializeField] bool enableProxyAnimationDiagnostics = true;
+
+    // ─── 로컬 변수 ───
     private float _localMoveSpeed;
     private int _localMotorState;
     private float _localVisualYaw;
@@ -126,6 +152,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private byte _lastObservedPhysicsPresentationResetVersion;
     private int _remotePhysicsPresentationHoldUntilFrame = -1;
     private int _lastConsumedAnimationEventSequence = -1;
+    private int _lastConsumedKnockoutConfirmSequence = -1;
     private Vector2 _sandboxInput;
     private bool _sandboxJump;
 
@@ -151,6 +178,13 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private Transform _cameraAnchorSourceCache;
     private Transform _cameraAnchorSourceRootCache;
     private CameraAnchorSourceMode _cameraAnchorSourceMode;
+    private RecoveryAnimationVariant _localRecoveryAnimationVariant;
+    private Transform _recoveryPoseHips;
+    private Transform _recoveryPoseHead;
+    private Transform _recoveryPoseLeftArm;
+    private Transform _recoveryPoseRightArm;
+    private float _recoveryPoseForwardSign = 1f;
+    private bool _recoveryPoseForwardSignResolved;
     private static readonly string[] LegacyCameraAnchorTargetNames =
     {
         "FollowTarget",
@@ -158,6 +192,15 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         "ShoulderPivot",
         "HeadTarget"
     };
+
+    // ─── CarrySolveFrame 로컬 상태 ───
+    private CarryPhysicsProfile.CarryMode _localCarryMode = CarryPhysicsProfile.CarryMode.None;
+    private CarryPhysicsProfile.CarryMode _lastObservedCarryMode = CarryPhysicsProfile.CarryMode.None;
+    private float _carryReleaseSettleRemaining;
+    private Vector3 _lastCarryAnchorPosition;
+    private Vector3 _lastCarryAnchorForward;
+    private Vector3 _carriedVictimRootOffset;
+    private bool _hasCarriedVictimRootOffset;
 
     // PuppetMaster 통합
     private PuppetMaster _puppetMaster;
@@ -182,6 +225,22 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     /// <summary>카메라가 따라가야 할 타겟. Follow 앵커가 있으면 앵커, 없으면 transform.</summary>
     public Transform GetCameraFollowTarget() => _cameraFollowAnchor != null ? _cameraFollowAnchor : transform;
 
+    /// <summary>CarryRig 참조 (carrier/victim 양쪽에서 사용)</summary>
+    internal CarryRig GetCarryRig() => carryRig;
+    /// <summary>CarryPhysicsProfile 참조</summary>
+    internal CarryPhysicsProfile GetCarryPhysicsProfile() => carryPhysicsProfile;
+    /// <summary>
+    /// 현재 carry 모드. StateAuthority는 로컬 값, proxy는 네트워크 값을 반환.
+    /// </summary>
+    internal CarryPhysicsProfile.CarryMode GetLocalCarryMode()
+    {
+        if (IsNetworkReady && !HasStateAuthority)
+            return (CarryPhysicsProfile.CarryMode)NetworkedCarryMode;
+        return _localCarryMode;
+    }
+    /// <summary>carry release settle 중인지 여부</summary>
+    internal bool IsCarryReleaseSettling => _carryReleaseSettleRemaining > 0f;
+
     // OwnerProxy 잡힘 상태 레퍼런스 카운트
     private int _beingGrabbedRefCount;
 
@@ -189,6 +248,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private bool _isLeftGrabActive;
     private bool _isRightGrabActive;
     public bool IsGrabActive => _isGrabActive;
+
+    // 다른 플레이어에 의해 잡힌 횟수 (여러 손에 동시에 잡힐 수 있으므로 카운터)
+    private int _grabbedByCount;
+    public bool IsGrabbedByOther => _grabbedByCount > 0;
 
     public bool IsHandGrabActive(HandGrabHandler.HandSide side)
     {
@@ -220,7 +283,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     }
 
     /// <summary>Spawned 이후에만 Networked 속성 접근 가능 여부.</summary>
-    private bool IsNetworkReady => Runner != null && Object != null && Object.IsValid;
+    internal bool IsNetworkReady => Runner != null && Object != null && Object.IsValid;
 
     internal enum PresentationLocomotionState : byte
     {
@@ -236,6 +299,13 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         RecoverStabilizing = 2
     }
 
+    internal enum RecoveryAnimationVariant : byte
+    {
+        None = 0,
+        Supine = 1,
+        Prone = 2
+    }
+
     internal enum PhysicalPhase : byte
     {
         Stable = 0,
@@ -248,7 +318,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         Recovering = 7,
         CarryingStunned = 8,
         WeaponEquipped = 9,
-        BeingCarriedStunned = 10
+        BeingCarriedStunned = 10,
+        StunnedCollapse = 11
     }
 
     private enum CameraAnchorSourceMode : byte
@@ -302,10 +373,22 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     /// </summary>
     public void SetGrabbedByOther(bool grabbed)
     {
+        var previousRefCount = _beingGrabbedRefCount;
         _beingGrabbedRefCount += grabbed ? 1 : -1;
         _beingGrabbedRefCount = Mathf.Max(0, _beingGrabbedRefCount);
         if (IsNetworkReady && HasStateAuthority)
             NetworkedIsBeingGrabbed = _beingGrabbedRefCount > 0;
+
+        if (debugGrabLog && previousRefCount != _beingGrabbedRefCount)
+        {
+            Debug.Log($"[GrabState] {name} SetGrabbedByOther({grabbed}) ref={previousRefCount}->{_beingGrabbedRefCount} " +
+                $"netGrabbed={(IsNetworkReady ? NetworkedIsBeingGrabbed.ToString() : "N/A")}", this);
+        }
+
+        TraceCarryDebugSample(
+            "SetGrabbedByOther",
+            $"grabbed={grabbed} ref={previousRefCount}->{_beingGrabbedRefCount}",
+            true);
     }
 
     /// <summary>
@@ -326,6 +409,17 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             RightGrabAnchorLocal = anchorLocal;
             RightGrabConfirmed = true;
         }
+
+        if (debugGrabLog)
+        {
+            Debug.Log($"[GrabState] {name} ReportGrabAttached side={side} targetId={targetId} anchorLocal={anchorLocal} " +
+                $"L_confirmed={LeftGrabConfirmed} R_confirmed={RightGrabConfirmed}", this);
+        }
+
+        TraceCarryDebugSample(
+            "ReportGrabAttached",
+            $"side={side} targetId={targetId} anchorLocal={FormatStunForceDiagnosticsVector(anchorLocal)}",
+            true);
     }
 
     /// <summary>
@@ -346,6 +440,17 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             RightGrabAnchorLocal = Vector3.zero;
             RightGrabConfirmed = false;
         }
+
+        if (debugGrabLog)
+        {
+            Debug.Log($"[GrabState] {name} ReportGrabDetached side={side} " +
+                $"L_confirmed={LeftGrabConfirmed} R_confirmed={RightGrabConfirmed}", this);
+        }
+
+        TraceCarryDebugSample(
+            "ReportGrabDetached",
+            $"side={side} leftTarget={LeftGrabTargetId} rightTarget={RightGrabTargetId}",
+            true);
     }
 
     internal bool TryGetHeldAnchorWorldPosition(HandGrabHandler.HandSide side, out Vector3 anchorWorld)
@@ -501,6 +606,22 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             return ResolveLocalStunPresentationPhase();
 
         return (StunPresentationPhase)NetworkedStunPresentationPhase;
+    }
+
+    internal RecoveryAnimationVariant GetRecoveryAnimationVariant()
+    {
+        if (!IsNetworkReady || HasStateAuthority)
+            return _localRecoveryAnimationVariant;
+
+        return (RecoveryAnimationVariant)NetworkedRecoveryAnimationVariant;
+    }
+
+    private void SetRecoveryAnimationVariant(RecoveryAnimationVariant variant)
+    {
+        _localRecoveryAnimationVariant = variant;
+
+        if (IsNetworkReady && HasStateAuthority)
+            NetworkedRecoveryAnimationVariant = (byte)variant;
     }
 
     internal PresentationLocomotionState ResolveLocomotionState(float speed, bool sprinting)
@@ -723,6 +844,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         if (phase == PhysicalPhase.BeingGrabbed ||
             phase == PhysicalPhase.Dragged ||
+            phase == PhysicalPhase.StunnedCollapse ||
             phase == PhysicalPhase.Stunned ||
             phase == PhysicalPhase.BeingCarriedStunned)
         {
@@ -803,7 +925,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     internal bool ShouldUsePhysicalPhasePresentation()
     {
-        return UsesPhysicsPosePresentation(GetPhysicalPhase()) || IsRemotePhysicsPresentationResetLocked();
+        return GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing ||
+               UsesPhysicsPosePresentation(GetPhysicalPhase()) ||
+               IsRemotePhysicsPresentationResetLocked();
     }
 
     internal bool ShouldUseHardPhysicsPresentation()
@@ -814,11 +938,16 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (IsRemotePhysicsPresentationResetLocked())
             return true;
 
+        if (GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing)
+            return true;
+
         return GetPhysicalPhase() switch
         {
             PhysicalPhase.BeingGrabbed => true,
             PhysicalPhase.Dragged => true,
+            PhysicalPhase.StunnedCollapse => true,
             PhysicalPhase.Stunned => true,
+            PhysicalPhase.BeingCarriedStunned => true,
             _ => false
         };
     }
@@ -828,8 +957,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         return phase == PhysicalPhase.BeingGrabbed ||
                phase == PhysicalPhase.Dragged ||
                phase == PhysicalPhase.Unstable ||
+               phase == PhysicalPhase.StunnedCollapse ||
                phase == PhysicalPhase.Stunned ||
-               phase == PhysicalPhase.Recovering;
+               phase == PhysicalPhase.BeingCarriedStunned;
     }
 
     internal bool ShouldUsePhysicsPosePresentation()
@@ -913,6 +1043,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     private void Awake()
     {
+        debugGrabLog = true; // 디버그 진단용 강제 활성화
         InitializeInternal();
     }
 
@@ -945,15 +1076,22 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             NetworkedInstability = 0f;
             NetworkedIsDragged = false;
             NetworkedPhysicsPresentationResetVersion = 0;
+            NetworkedRecoveryAnimationVariant = (byte)RecoveryAnimationVariant.None;
             AccumulatedStunDamage = 0f;
             StunTimeRemaining = 0f;
             NetworkedAnimationEventSequence = 0;
             NetworkedAnimationEventType = (int)AnimationEventType.None;
+            NetworkedKnockoutConfirmSequence = 0;
             NetworkedVisualYaw = _localVisualYaw;
             NetworkedLocomotionState = (byte)_localPresentationLocomotionState;
+            NetworkedVictimAnchorValid = false;
+            NetworkedVictimRootOffsetValid = false;
+            NetworkedCarrierAnchorValid = false;
+            NetworkedCarryMode = (byte)CarryPhysicsProfile.CarryMode.None;
         }
 
         _lastObservedPhysicsPresentationResetVersion = NetworkedPhysicsPresentationResetVersion;
+        _lastConsumedKnockoutConfirmSequence = NetworkedKnockoutConfirmSequence;
 
         if (HasStateAuthority)
         {
@@ -976,7 +1114,6 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         ConfigureLocalOwnershipPresentation();
         InitializeAnimationEventState();
         InitializeAnimationDriverNetworkMode();
-        TraceProxyAnimationDiagnostics("Spawned");
 
         // 호스트 마이그레이션 이후 로컬 플레이어의 필드 아이템 위치를 다시 동기화한다.
         if (HasStateAuthority && HasInputAuthority && Runner != null && Runner.IsServer)
@@ -1014,6 +1151,20 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         _targetRoot = _puppetMaster != null ? _puppetMaster.targetRoot : null;
         MarkPhysicsPoseBindingsDirty();
         _bodyPartPhysicsManager = GetComponentInChildren<SSAFYPlayTime.Character.BodyPartPhysicsManager>(true);
+
+        // CarryRig 초기화 — 프리팹에 없으면 런타임 생성
+        if (carryRig == null)
+            carryRig = GetComponentInChildren<CarryRig>(true);
+        if (carryRig == null && _targetRoot != null)
+        {
+            var rigGo = new GameObject("CarryRig");
+            rigGo.transform.SetParent(_targetRoot);
+            rigGo.transform.localPosition = Vector3.zero;
+            rigGo.transform.localRotation = Quaternion.identity;
+            carryRig = rigGo.AddComponent<CarryRig>();
+            carryRig.EnsureAnchorsCreated();
+        }
+
         _grabAntiStretchController = GetComponent<SSAFYPlayTime.Character.GrabAntiStretchController>();
         if (_grabAntiStretchController == null)
             _grabAntiStretchController = gameObject.AddComponent<SSAFYPlayTime.Character.GrabAntiStretchController>();
@@ -1039,9 +1190,18 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         EnsureAnimatorBinding();
         SetPresentationVisualYaw(ResolvePresentationYawFromTransform());
         CacheOwnedPresentationComponents();
+        EnsureAntiStretchConstraint();
 
         if (GetComponent<PlayerStats>() == null)
             gameObject.AddComponent<PlayerStats>();
+    }
+
+    private void EnsureAntiStretchConstraint()
+    {
+        if (GetComponent<AntiStretchConstraint>() != null)
+            return;
+
+        gameObject.AddComponent<AntiStretchConstraint>();
     }
 
     private void EnsureItemRuntimeIntegration()
@@ -1154,6 +1314,106 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         // 호스트 로컬 플레이어는 입력을 즉시 반영하되, locomotion만 네트워크 기반으로 처리한다.
         var isLocalWithoutAuth = Runner != null && HasInputAuthority && !HasStateAuthority;
         driver.SetLocalWithoutAuthority(isLocalWithoutAuth);
+    }
+
+    /// <summary>
+    /// 다른 플레이어의 HandGrabHandler가 이 캐릭터를 잡았을 때 호출.
+    /// 코어 joint spring을 높여 형태를 유지하고, 팔다리 spring을 낮춰 느슨하게 만든다.
+    /// </summary>
+    public void OnGrabbed()
+    {
+        _grabbedByCount++;
+        // 기절 중(래그돌)이면 spring 조정 불필요 — 이미 느슨한 상태
+        if (_grabbedByCount == 1 && _isActiveRagdoll)
+            ApplyGrabbedJointState(true);
+
+        TraceCarryDebugSample("OnGrabbed", $"grabbedByCount={_grabbedByCount}", true);
+    }
+
+    /// <summary>
+    /// 다른 플레이어의 HandGrabHandler가 이 캐릭터를 놓았을 때 호출.
+    /// </summary>
+    public void OnReleased()
+    {
+        _grabbedByCount = Mathf.Max(0, _grabbedByCount - 1);
+        if (_grabbedByCount == 0)
+            ApplyGrabbedJointState(false);
+
+        TraceCarryDebugSample("OnReleased", $"grabbedByCount={_grabbedByCount}", true);
+    }
+
+    // 잡힌 상태에서 원래 spring 복원을 위해 캐싱
+    private (ConfigurableJoint joint, float originalSpring)[] _grabbedJointCache;
+
+    private void ApplyGrabbedJointState(bool grabbed)
+    {
+        // SyncPhysicsObject 경로 (비-Puppet 모드)
+        if (!ShouldDisablePhysicsAnimationSync && syncPhysicsObjects != null)
+        {
+            for (int i = 0; i < syncPhysicsObjects.Length; i++)
+            {
+                if (syncPhysicsObjects[i] == null) continue;
+
+                if (grabbed)
+                    syncPhysicsObjects[i].MakeGrabbed();
+                else
+                    syncPhysicsObjects[i].MakeUnGrabbed();
+            }
+            return;
+        }
+
+        // PuppetMaster 경로: PuppetMaster 하위 ConfigurableJoint를 직접 조정
+        if (grabbed)
+        {
+            var joints = GetComponentsInChildren<ConfigurableJoint>(true);
+            var cache = new System.Collections.Generic.List<(ConfigurableJoint, float)>();
+
+            foreach (var cj in joints)
+            {
+                // 루트의 mainJoint과 그랩용으로 동적 생성된 joint는 제외
+                if (cj == mainJoint) continue;
+                if (cj.gameObject == gameObject) continue;
+
+                float originalSpring = cj.slerpDrive.positionSpring;
+                float multiplier = ClassifyBodyPart(cj.gameObject.name);
+
+                var drive = cj.slerpDrive;
+                drive.positionSpring = originalSpring * multiplier;
+                cj.slerpDrive = drive;
+
+                cache.Add((cj, originalSpring));
+            }
+            _grabbedJointCache = cache.ToArray();
+        }
+        else if (_grabbedJointCache != null)
+        {
+            foreach (var (cj, originalSpring) in _grabbedJointCache)
+            {
+                if (cj == null) continue;
+                var drive = cj.slerpDrive;
+                drive.positionSpring = originalSpring;
+                cj.slerpDrive = drive;
+            }
+            _grabbedJointCache = null;
+        }
+    }
+
+    private static float ClassifyBodyPart(string name)
+    {
+        var cs = CombatSettings.Instance;
+        float coreM = cs != null ? cs.grabbedCoreSpringMultiplier : 2.5f;
+        float headM = cs != null ? cs.grabbedHeadSpringMultiplier : 1.5f;
+        float limbM = cs != null ? cs.grabbedLimbSpringMultiplier : 0.3f;
+
+        var lower = name.ToLowerInvariant();
+        // Core: 형태 유지
+        if (lower.Contains("hip") || lower.Contains("spine") || lower.Contains("waist") || lower.Contains("chest"))
+            return coreM;
+        // Head: 약간 강화
+        if (lower.Contains("head"))
+            return headM;
+        // Limb: 느슨
+        return limbM;
     }
 
     private void ConfigureLocalOwnershipPresentation()

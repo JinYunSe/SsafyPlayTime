@@ -10,6 +10,7 @@ public sealed partial class NetworkPlayer
         public Transform visual;
         public Quaternion physicsRestLocalRotation;
         public Quaternion visualRestLocalRotation;
+        public float carryBlendMultiplier;
     }
 
     private bool ShouldDisablePhysicsAnimationSync =>
@@ -20,6 +21,7 @@ public sealed partial class NetworkPlayer
     private bool _wasUsingPhysicsPresentation;
     private int _lastPhysicsPresentationSyncFrame = -1;
     private bool _pendingAnimatorDrivenPoseReset;
+    private bool _recoveryRestoreBlockedLogged;
     private const float HitReactionBoneCopyThreshold = 0.58f;
     private const float HitReactionBoneCopyFullThreshold = 0.88f;
 
@@ -30,6 +32,14 @@ public sealed partial class NetworkPlayer
     /// </summary>
     private bool _forceAnimatorVisualLatch;
     private float _savedMappingWeight = 1f;
+    private float _hardPhysicsVisualPoseCopyWeight;
+    private float _carryVisualPoseCopyWeight;
+    private const float HardPhysicsPoseBlendInSpeed = 22f;
+    private const float HardPhysicsPoseBlendOutSpeed = 12f;
+    private const float CarryVisualPoseBlendInSpeed = 14f;
+    private const float CarryVisualPoseBlendOutSpeed = 10f;
+    private const float CarryVisualPoseTargetWeight = 0.82f;
+    private const float AnimatorRestoreBlendThreshold = 0.06f;
 
     private void ConfigureAnimatedVisualMode()
     {
@@ -156,6 +166,50 @@ public sealed partial class NetworkPlayer
         }
     }
 
+    internal bool ShouldUseHardPhysicsVisualMode()
+    {
+        if (!ShouldUseHardPhysicsPresentation())
+            return false;
+
+        // Carry keeps the animated visual rig visible and blends only key bones toward physics.
+        return GetPhysicalPhase() != PhysicalPhase.BeingCarriedStunned;
+    }
+
+    private void TickVisualPoseBlendWeights()
+    {
+        var hardTarget = ShouldUseHardPhysicsVisualMode() ? 1f : 0f;
+        var hardBlendSpeed = hardTarget >= _hardPhysicsVisualPoseCopyWeight
+            ? HardPhysicsPoseBlendInSpeed
+            : HardPhysicsPoseBlendOutSpeed;
+        _hardPhysicsVisualPoseCopyWeight = DampVisualPoseWeight(
+            _hardPhysicsVisualPoseCopyWeight,
+            hardTarget,
+            hardBlendSpeed);
+
+        var carryTarget = GetPhysicalPhase() == PhysicalPhase.BeingCarriedStunned
+            ? CarryVisualPoseTargetWeight
+            : 0f;
+        var carryBlendSpeed = carryTarget >= _carryVisualPoseCopyWeight
+            ? CarryVisualPoseBlendInSpeed
+            : CarryVisualPoseBlendOutSpeed;
+        _carryVisualPoseCopyWeight = DampVisualPoseWeight(
+            _carryVisualPoseCopyWeight,
+            carryTarget,
+            carryBlendSpeed);
+    }
+
+    private static float DampVisualPoseWeight(float current, float target, float speed)
+    {
+        if (Mathf.Approximately(current, target))
+            return target;
+
+        if (speed <= 0f)
+            return target;
+
+        var alpha = 1f - Mathf.Exp(-speed * Time.deltaTime);
+        return Mathf.Lerp(current, target, alpha);
+    }
+
     // ─── 기절/회복 비주얼 모드 전환 ───
     private void MarkPhysicsPoseBindingsDirty()
     {
@@ -166,19 +220,18 @@ public sealed partial class NetworkPlayer
     {
         SynchronizePhysicsPresentationState();
         TickAuthorityAnimatorVisualLatch();
+        TickVisualPoseBlendWeights();
 
         if (_pendingAnimatorDrivenPoseReset)
             TryRestoreAnimatorDrivenPresentation();
 
-        var useHardPhysicsPresentation = ShouldUseHardPhysicsPresentation();
-        var hitReactionCopyWeight = useHardPhysicsPresentation ? 1f : ResolveHitReactionBoneCopyWeight();
-        if (!useHardPhysicsPresentation && hitReactionCopyWeight <= 0f)
+        var hardPhysicsCopyWeight = _hardPhysicsVisualPoseCopyWeight;
+        var hitReactionCopyWeight = ResolveHitReactionBoneCopyWeight();
+        var carryCopyWeight = _carryVisualPoseCopyWeight;
+        if (Mathf.Max(hardPhysicsCopyWeight, hitReactionCopyWeight, carryCopyWeight) <= 0.001f)
             return;
 
         // 호스트 래치 활성: 물리 뼈→비주얼 복사를 건너뛰어 animator pose를 유지
-        if (_forceAnimatorVisualLatch && hitReactionCopyWeight <= 0f)
-            return;
-
         var presentationRoot = GetPresentationRootTransform();
         if (presentationRoot == null || syncPhysicsObjects == null || syncPhysicsObjects.Length == 0)
             return;
@@ -191,9 +244,15 @@ public sealed partial class NetworkPlayer
                 continue;
 
             var physicsRotation = ResolveVisualLocalRotation(binding);
-            binding.visual.localRotation = hitReactionCopyWeight >= 0.999f
+            var bindingWeight = Mathf.Max(hardPhysicsCopyWeight, hitReactionCopyWeight);
+            if (carryCopyWeight > 0f && binding.carryBlendMultiplier > 0f)
+                bindingWeight = Mathf.Max(bindingWeight, carryCopyWeight * binding.carryBlendMultiplier);
+            if (bindingWeight <= 0.001f)
+                continue;
+
+            binding.visual.localRotation = bindingWeight >= 0.999f
                 ? physicsRotation
-                : Quaternion.Slerp(binding.visual.localRotation, physicsRotation, hitReactionCopyWeight);
+                : Quaternion.Slerp(binding.visual.localRotation, physicsRotation, bindingWeight);
         }
     }
 
@@ -269,7 +328,7 @@ public sealed partial class NetworkPlayer
 
         _lastPhysicsPresentationSyncFrame = Time.frameCount;
 
-        var usingPhysicsPresentation = ShouldUseHardPhysicsPresentation();
+        var usingPhysicsPresentation = ShouldUseHardPhysicsVisualMode();
         if (usingPhysicsPresentation == _wasUsingPhysicsPresentation)
             return;
 
@@ -282,7 +341,10 @@ public sealed partial class NetworkPlayer
         MarkPresentationEffectsDirty();
 
         if (!usingPhysicsPresentation)
+        {
             _pendingAnimatorDrivenPoseReset = true;
+            _recoveryRestoreBlockedLogged = false;
+        }
     }
 
     /// <summary>
@@ -326,10 +388,19 @@ public sealed partial class NetworkPlayer
 
     private void TryRestoreAnimatorDrivenPresentation()
     {
-        if (!_pendingAnimatorDrivenPoseReset || ShouldUseHardPhysicsPresentation())
+        if (!_pendingAnimatorDrivenPoseReset)
             return;
 
+        if (ShouldUseHardPhysicsVisualMode() ||
+            _hardPhysicsVisualPoseCopyWeight > AnimatorRestoreBlendThreshold)
+        {
+            if (!_recoveryRestoreBlockedLogged)
+                _recoveryRestoreBlockedLogged = true;
+            return;
+        }
+
         _pendingAnimatorDrivenPoseReset = false;
+        _recoveryRestoreBlockedLogged = false;
         MarkPhysicsPoseBindingsDirty();
         MarkPresentationEffectsDirty();
 
@@ -343,7 +414,8 @@ public sealed partial class NetworkPlayer
             return;
 
         animator.enabled = true;
-        animator.Rebind();
+        if (!animator.isInitialized)
+            animator.Rebind();
         animator.Update(0f);
     }
 
@@ -381,9 +453,45 @@ public sealed partial class NetworkPlayer
                 physics = physicsTransform,
                 visual = visualTransform,
                 physicsRestLocalRotation = physicsTransform.localRotation,
-                visualRestLocalRotation = visualTransform.localRotation
+                visualRestLocalRotation = visualTransform.localRotation,
+                carryBlendMultiplier = ResolveCarryPoseBindingMultiplier(visualTransform)
             });
         }
+    }
+
+    private static float ResolveCarryPoseBindingMultiplier(Transform visualTransform)
+    {
+        if (visualTransform == null)
+            return 0f;
+
+        var boneName = visualTransform.name;
+        if (boneName.IndexOf("Hips", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("Pelvis", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 1f;
+
+        if (boneName.IndexOf("Spine", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("Chest", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("Neck", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("Head", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 0.95f;
+
+        if (boneName.IndexOf("Shoulder", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("UpperArm", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("LowerArm", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 0.82f;
+
+        if (boneName.IndexOf("Hand", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 0.68f;
+
+        if (boneName.IndexOf("UpperLeg", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("LowerLeg", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 0.35f;
+
+        if (boneName.IndexOf("Foot", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("Toe", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 0.2f;
+
+        return 0.45f;
     }
 
     private static Quaternion ResolveVisualLocalRotation(in PhysicsPoseBinding binding)

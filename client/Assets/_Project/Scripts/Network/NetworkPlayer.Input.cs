@@ -135,6 +135,7 @@ public sealed partial class NetworkPlayer
             _throwTriggered = true;
 
         _rightMouseDown = false;
+        _rightMouseConsumedAsGrab = false;
     }
 
     private PlayerNetworkInput BuildSandboxInput()
@@ -200,6 +201,63 @@ public sealed partial class NetworkPlayer
         NetworkedPhysicalPhase = (byte)_localPhysicalPhase;
         NetworkedInstability = _localInstability;
         NetworkedIsDragged = _localIsDragged;
+
+        // ── CarrySolveFrame: carry anchor 네트워크 동기화 (carrier/victim 분리) ──
+        NetworkedCarryMode = (byte)_localCarryMode;
+        if (_localCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None && carryRig != null)
+        {
+            if (_localCarryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim)
+            {
+                // victim: 자신의 hips-chest 가중 평균 anchor 전송
+                carryRig.UpdateVictimAnchor();
+                if (carryRig.TryGetVictimAnchorWorld(out var vPos, out var vFwd))
+                {
+                    NetworkedVictimAnchorPosition = vPos;
+                    NetworkedVictimAnchorForward = vFwd;
+                    NetworkedVictimAnchorValid = true;
+                }
+                else
+                {
+                    NetworkedVictimAnchorValid = false;
+                }
+
+                if (_hasCarriedVictimRootOffset)
+                {
+                    NetworkedVictimRootOffset = _carriedVictimRootOffset;
+                    NetworkedVictimRootOffsetValid = true;
+                }
+                else
+                {
+                    NetworkedVictimRootOffsetValid = false;
+                }
+
+                NetworkedCarrierAnchorValid = false;
+            }
+            else
+            {
+                // carrier: 자신의 carry rig anchor 전송
+                if (carryRig.TryGetCarrierAnchorWorld(_localCarryMode, out var cPos, out var cFwd))
+                {
+                    NetworkedCarrierAnchorPosition = cPos;
+                    NetworkedCarrierAnchorForward = cFwd;
+                    NetworkedCarrierAnchorValid = true;
+                }
+                else
+                {
+                    NetworkedCarrierAnchorValid = false;
+                }
+
+                NetworkedVictimAnchorValid = false;
+                NetworkedVictimRootOffsetValid = false;
+            }
+        }
+        else
+        {
+            NetworkedVictimAnchorValid = false;
+            NetworkedVictimRootOffsetValid = false;
+            NetworkedCarrierAnchorValid = false;
+        }
+
         SynchronizeStunPresentationPhase();
     }
 
