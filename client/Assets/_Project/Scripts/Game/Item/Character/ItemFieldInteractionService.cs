@@ -425,6 +425,10 @@ namespace SSAFYPlayTime.Gameplay.Items
         private Vector3 ResolveDefaultDropSpawnPosition()
         {
             var owner = ResolveOwnerTransform();
+            var dropAnchor = ResolveDropAnchor(owner);
+            var anchorPosition = dropAnchor != null
+                ? dropAnchor.position
+                : (owner != null ? owner.position : transform.position);
             var forward = owner != null ? owner.forward : transform.forward;
             forward.y = 0f;
             if (forward.sqrMagnitude < 0.0001f)
@@ -433,7 +437,33 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             forward.Normalize();
-            return (owner != null ? owner.position : transform.position) + forward * 0.9f + Vector3.up * 0.4f;
+            return anchorPosition + forward * 0.18f + Vector3.up * 0.08f;
+        }
+
+        private static Transform ResolveDropAnchor(Transform owner)
+        {
+            if (owner == null)
+            {
+                return null;
+            }
+
+            var animator = owner.GetComponentInChildren<Animator>(true);
+            if (animator != null && animator.isHuman)
+            {
+                var rightHand = animator.GetBoneTransform(HumanBodyBones.RightHand);
+                if (rightHand != null)
+                {
+                    return rightHand;
+                }
+            }
+
+            var holdPoint = owner.Find("HoldPoint");
+            if (holdPoint != null)
+            {
+                return holdPoint;
+            }
+
+            return owner;
         }
 
         private bool HasSpawnAuthority()
