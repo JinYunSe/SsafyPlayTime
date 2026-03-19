@@ -33,6 +33,14 @@ namespace SSAFYPlayTime.Game.GhostThrow
         [Networked]
         public Vector3 NetworkedInitialVelocity { get; set; }
 
+        /// <summary>폭발 여부. Despawned() 콜백에서 모든 클라이언트가 읽어 이펙트를 생성한다.</summary>
+        [Networked]
+        private NetworkBool NetworkedHasExploded { get; set; }
+
+        /// <summary>폭발 위치. Despawn 시 최종 상태로 모든 클라이언트에 전달된다.</summary>
+        [Networked]
+        private Vector3 NetworkedExplosionPos { get; set; }
+
         // 이미 폭발했는지 여부 (중복 폭발 방지)
         private bool _hasExploded = false;
 
@@ -158,17 +166,24 @@ namespace SSAFYPlayTime.Game.GhostThrow
             if (_hasExploded) return;
             _hasExploded = true;
 
-            ApplyExplosionKnockback(transform.position);
-            // 모든 클라이언트에 폭발 이펙트 동기화 (Instantiate는 로컬 전용이므로 RPC 사용)
-            Rpc_SpawnExplosionEffect(transform.position);
+            // 폭발 위치·플래그를 네트워크 상태에 기록.
+            // Runner.Despawn() 시 Fusion이 최종 상태를 모든 클라이언트에 전달하며
+            // Despawned() 콜백에서 이펙트를 생성한다.
+            NetworkedExplosionPos = transform.position;
+            NetworkedHasExploded = true;
 
+            ApplyExplosionKnockback(transform.position);
             Runner.Despawn(Object);
         }
 
-        [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
-        private void Rpc_SpawnExplosionEffect(Vector3 pos)
+        /// <summary>
+        /// Despawn 시 Fusion이 최종 네트워크 상태와 함께 모든 클라이언트에서 호출.
+        /// NetworkedHasExploded가 true이면 파티클 이펙트를 로컬 생성한다.
+        /// </summary>
+        public override void Despawned(NetworkRunner runner, bool hasState)
         {
-            SpawnExplosionEffect(pos);
+            if (hasState && NetworkedHasExploded)
+                SpawnExplosionEffect(NetworkedExplosionPos);
         }
 
         /// <summary>오프라인/테스트 환경 폭발.</summary>
