@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemFieldPrefabResolver 스크립트가 들어 있는 파일이다.
  * - World 계층에서 필드 드랍, 획득, 스폰, 배치, 프리팹 해석처럼 월드 오브젝트와 연결되는 책임을 맡는다.
@@ -30,16 +30,6 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return null;
             }
 
-            var resourcePath = NormalizeToResourcesPath(prefabPath);
-            if (!string.IsNullOrWhiteSpace(resourcePath))
-            {
-                var runtimePrefab = Resources.Load<GameObject>(resourcePath);
-                if (runtimePrefab != null)
-                {
-                    return runtimePrefab;
-                }
-            }
-
 #if UNITY_EDITOR
             if (prefabPath.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
             {
@@ -50,6 +40,16 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
             }
 #endif
+            var resourcePath = NormalizeToResourcesPath(prefabPath);
+            if (!string.IsNullOrWhiteSpace(resourcePath))
+            {
+                var runtimePrefab = Resources.Load<GameObject>(resourcePath);
+                if (runtimePrefab != null)
+                {
+                    return runtimePrefab;
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(resourcePath))
             {
                 return null;

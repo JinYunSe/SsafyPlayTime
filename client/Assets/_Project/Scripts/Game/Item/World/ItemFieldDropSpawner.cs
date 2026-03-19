@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemFieldDropSpawner 스크립트가 들어 있는 파일이다.
  * - World 계층에서 필드 드랍, 획득, 스폰, 배치, 프리팹 해석처럼 월드 오브젝트와 연결되는 책임을 맡는다.
@@ -37,6 +37,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private bool enableDebugLog = true;
 
         private readonly ItemFieldCatalogProvider _catalogProvider = new();
+        private readonly DefaultItemFieldPrefabResolver _prefabResolver = new();
         private ItemFieldDropFactory _dropFactory;
         private NetworkRunner _runnerCache;
         private float _nextRunnerLookupTime;
@@ -73,10 +74,15 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         public bool TrySpawnItem(string itemId, Vector3 worldPosition, out ItemFieldDrop spawnedDrop)
         {
-            return TrySpawnItem(itemId, worldPosition, string.Empty, out spawnedDrop);
+            return TrySpawnItem(itemId, worldPosition, string.Empty, true, out spawnedDrop);
         }
 
         public bool TrySpawnItem(string itemId, Vector3 worldPosition, string instanceId, out ItemFieldDrop spawnedDrop)
+        {
+            return TrySpawnItem(itemId, worldPosition, instanceId, true, out spawnedDrop);
+        }
+
+        public bool TrySpawnItem(string itemId, Vector3 worldPosition, string instanceId, bool snapToGround, out ItemFieldDrop spawnedDrop)
         {
             spawnedDrop = null;
             if (string.IsNullOrWhiteSpace(itemId))
@@ -95,11 +101,26 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return false;
             }
 
-            var resolvedPosition = ItemFieldPositionUtility.ResolveGroundPosition(
-                worldPosition,
-                useGroundRaycast,
-                groundMask,
-                spawnHeightOffset);
+            var resolvedPosition = snapToGround
+                ? ItemFieldPositionUtility.ResolveGroundPosition(
+                    worldPosition,
+                    useGroundRaycast,
+                    groundMask,
+                    spawnHeightOffset)
+                : worldPosition;
+
+            if (TryGetRunner(out var runner) && runner != null && runner.IsRunning)
+            {
+                return TrySpawnNetworkedDefinition(
+                    runner,
+                    definition,
+                    resolvedPosition,
+                    instanceId,
+                    false,
+                    Vector3.zero,
+                    out spawnedDrop);
+            }
+
             spawnedDrop = SpawnDefinition(definition, resolvedPosition, false, Vector3.zero);
             if (spawnedDrop != null && !string.IsNullOrWhiteSpace(instanceId))
             {
@@ -215,6 +236,87 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             FieldDropSpawned?.Invoke(fieldDrop);
             return fieldDrop;
+        }
+
+        private bool TrySpawnNetworkedDefinition(
+            NetworkRunner runner,
+            ItemDefinition definition,
+            Vector3 position,
+            string instanceId,
+            bool useImpulse,
+            Vector3 impulseDirection,
+            out ItemFieldDrop fieldDrop)
+        {
+            fieldDrop = null;
+            if (runner == null || !runner.IsRunning)
+            {
+                return false;
+            }
+
+            if (!runner.IsServer)
+            {
+                DebugLog($"Network spawn denied without server authority: {definition.Master.ItemId}");
+                return false;
+            }
+
+            var prefab = ItemFieldDropFactory.TryLoadNetworkedDropPrefab(_prefabResolver);
+            if (prefab == null)
+            {
+                DebugLog($"Network spawn failed: missing networked wrapper prefab for {definition.Master.ItemId}");
+                return false;
+            }
+
+            if (prefab.GetComponent<NetworkObject>() == null)
+            {
+                DebugLog($"Network spawn failed: wrapper prefab missing NetworkObject for {definition.Master.ItemId}");
+                return false;
+            }
+
+            var requestedInstanceId = string.IsNullOrWhiteSpace(instanceId)
+                ? Guid.NewGuid().ToString("N")
+                : instanceId;
+
+            var spawnedObject = runner.Spawn(
+                prefab,
+                position,
+                Quaternion.identity,
+                onBeforeSpawned: (_, obj) =>
+                {
+                    var drop = obj.GetComponent<ItemFieldDrop>();
+                    if (drop != null)
+                    {
+                        drop.ResetForSpawn(definition.Master.ItemId, requestedInstanceId);
+                    }
+
+                    var networkedDrop = obj.GetComponent<NetworkedItemFieldDrop>();
+                    if (networkedDrop != null)
+                    {
+                        networkedDrop.ResetForSpawn(definition.Master.ItemId, position, Quaternion.identity);
+                        networkedDrop.InitializeMetadata(definition.Master.ItemId);
+                    }
+                });
+
+            if (spawnedObject == null)
+            {
+                DebugLog($"Network spawn failed: runner returned null for {definition.Master.ItemId}");
+                return false;
+            }
+
+            fieldDrop = spawnedObject.GetComponent<ItemFieldDrop>();
+            if (fieldDrop == null)
+            {
+                DebugLog($"Network spawn failed: spawned prefab missing ItemFieldDrop {definition.Master.ItemId}");
+                runner.Despawn(spawnedObject);
+                return false;
+            }
+
+            if (useImpulse)
+            {
+                ApplyDropImpulse(fieldDrop.gameObject, impulseDirection);
+            }
+
+            FieldDropSpawned?.Invoke(fieldDrop);
+            return true;
         }
 
         private void ApplyDropImpulse(GameObject target, Vector3 impulseDirection)

@@ -1,86 +1,112 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// 래그돌 신체 부위에 부착되어, 일정 이상의 충격(CauseDamage 태그)을 받으면
-/// NetworkPlayer.OnPlayerBodyPartHit()를 호출하여 기절 상태로 만드는 컴포넌트.
-///
-/// CSV(CombatTable)에서 knockoutThreshold / maxKnockbackForce를 자동으로 읽어온다.
-/// CombatSettings 싱글턴이 없으면 Inspector의 fallback 값 사용.
+/// Converts high-energy collisions from "CauseDamage" objects into stun damage.
+/// Extra launch impulse is disabled by default because the collision response has
+/// already been applied by Unity physics before this callback runs.
 /// </summary>
 public class DetectCollision : MonoBehaviour
 {
-    [Header("Fallback Settings (CombatSettings 없을 때)")]
-    [Tooltip("이 수치 이상의 충격을 받아야 기절 판정됨")]
-    [SerializeField] private float fallbackKnockoutThreshold = 15f;
-
-    [Tooltip("피격 시 추가 넉백 힘의 최대 크기")]
+    [Header("Fallback Settings")]
+    [SerializeField] private float fallbackKnockoutThreshold = 18f;
     [SerializeField] private float fallbackMaxKnockbackForce = 30f;
+    [SerializeField] private float fallbackStunEntryNudgeForce = 0f;
+    [SerializeField] private float fallbackMaxImpact = 55f;
+    [SerializeField] private float fallbackMinStunDamage = 3f;
+    [SerializeField] private float fallbackMaxStunDamage = 9f;
+    [SerializeField] private float fallbackMinHealthDamage = 0f;
+    [SerializeField] private float fallbackMaxHealthDamage = 14f;
 
-    NetworkPlayer networkPlayer;
-    Rigidbody hitRigidbody;
+    private NetworkPlayer networkPlayer;
+    private Rigidbody hitRigidbody;
 
-    // GC 줄이기 위해 미리 할당
-    ContactPoint[] contactPoints = new ContactPoint[5];
+    private readonly ContactPoint[] contactPoints = new ContactPoint[5];
 
     private float KnockoutThreshold =>
-        CombatSettings.Instance != null ? CombatSettings.Instance.knockoutThreshold : fallbackKnockoutThreshold;
+        CombatSettings.Instance != null ? CombatSettings.Instance.environmentCollisionMinImpact : fallbackKnockoutThreshold;
 
-    private float MaxKnockbackForce => fallbackMaxKnockbackForce;
+    private float MaxImpact =>
+        CombatSettings.Instance != null ? CombatSettings.Instance.environmentCollisionMaxImpact : fallbackMaxImpact;
 
-    void Awake()
+    private float MinStunDamage =>
+        CombatSettings.Instance != null ? CombatSettings.Instance.environmentCollisionMinStunDamage : fallbackMinStunDamage;
+
+    private float MaxStunDamage =>
+        CombatSettings.Instance != null ? CombatSettings.Instance.environmentCollisionMaxStunDamage : fallbackMaxStunDamage;
+
+    private float MinHealthDamage =>
+        CombatSettings.Instance != null ? CombatSettings.Instance.environmentCollisionMinHealthDamage : fallbackMinHealthDamage;
+
+    private float MaxHealthDamage =>
+        CombatSettings.Instance != null ? CombatSettings.Instance.environmentCollisionMaxHealthDamage : fallbackMaxHealthDamage;
+
+    private float StunEntryNudgeForce =>
+        Mathf.Max(0f, Mathf.Min(fallbackStunEntryNudgeForce, fallbackMaxKnockbackForce));
+
+    private void Awake()
     {
         networkPlayer = GetComponentInParent<NetworkPlayer>();
         hitRigidbody = GetComponent<Rigidbody>();
     }
 
-    void OnCollisionEnter(Collision collision)
+    private void OnCollisionEnter(Collision collision)
     {
-        if (networkPlayer == null) return;
-
-        // StateAuthority(호스트)에서만 판정
-        if (networkPlayer.Object != null && networkPlayer.Object.IsValid
-            && !networkPlayer.HasStateAuthority)
+        if (networkPlayer == null)
             return;
 
-        // 이미 기절 상태이면 무시
+        if (networkPlayer.Object != null && networkPlayer.Object.IsValid && !networkPlayer.HasStateAuthority)
+            return;
+
         if (!networkPlayer.IsActiveRagdoll)
             return;
 
-        // "CauseDamage" 태그가 붙은 물체만 판정
         if (!collision.collider.CompareTag("CauseDamage"))
             return;
 
-        // 자기 자신의 공격은 무시
         if (collision.collider.transform.root == networkPlayer.transform)
             return;
 
-        int numberOfContacts = collision.GetContacts(contactPoints);
-
-        for (int i = 0; i < numberOfContacts; i++)
+        var numberOfContacts = collision.GetContacts(contactPoints);
+        for (var i = 0; i < numberOfContacts; i++)
         {
-            ContactPoint contactPoint = contactPoints[i];
-
-            // 접촉 충격량 계산
-            Vector3 contactImpulse = contactPoint.impulse / Time.fixedDeltaTime;
-
-            // 임계값 미만이면 무시
-            if (contactImpulse.magnitude < KnockoutThreshold)
+            var contactPoint = contactPoints[i];
+            var impactMagnitude = contactPoint.impulse.magnitude;
+            if (impactMagnitude < KnockoutThreshold)
                 continue;
 
-            // 기절 처리
-            networkPlayer.OnPlayerBodyPartHit();
+            networkPlayer.ArmStunForceDiagnostics("DetectCollision", $"impact={impactMagnitude:F2}");
+            networkPlayer.TraceStunCollisionImpact(
+                "DetectCollision",
+                impactMagnitude,
+                contactPoint.impulse,
+                contactPoint.normal);
 
-            // 넉백 방향: 충격 방향 + 약간 위쪽
-            Vector3 forceDirection = (contactImpulse + Vector3.up) * 0.5f;
-            forceDirection = Vector3.ClampMagnitude(forceDirection, MaxKnockbackForce);
+            var maxImpact = Mathf.Max(KnockoutThreshold + 0.01f, MaxImpact);
+            var impactRatio = Mathf.InverseLerp(KnockoutThreshold, maxImpact, impactMagnitude);
+            var stunDamage = Mathf.Lerp(MinStunDamage, MaxStunDamage, impactRatio);
+            var healthDamage = Mathf.Lerp(MinHealthDamage, MaxHealthDamage, impactRatio);
+            networkPlayer.ApplyCombinedDamage(
+                healthDamage,
+                stunDamage,
+                "EnvironmentCollision",
+                0f,
+                impactMagnitude);
 
-            Debug.DrawRay(hitRigidbody.position, forceDirection * 40, Color.red, 4);
+            if (hitRigidbody != null && !hitRigidbody.isKinematic && StunEntryNudgeForce > 0f)
+            {
+                var forceDirection = Vector3.ProjectOnPlane(contactPoint.normal, Vector3.up);
+                if (forceDirection.sqrMagnitude <= 0.0001f)
+                    forceDirection = contactPoint.normal.sqrMagnitude > 0.0001f
+                        ? contactPoint.normal.normalized
+                        : transform.forward;
 
-            // 피격 부위에 추가 넉백 힘 적용
-            if (hitRigidbody != null)
-                hitRigidbody.AddForce(forceDirection, ForceMode.Impulse);
+                forceDirection = forceDirection.normalized;
+                Debug.DrawRay(hitRigidbody.position, forceDirection * 8f, Color.red, 2f);
+                hitRigidbody.AddForce(forceDirection * StunEntryNudgeForce, ForceMode.Impulse);
+            }
 
-            break; // 첫 번째 유효 충격만 처리
+            break;
         }
     }
 }

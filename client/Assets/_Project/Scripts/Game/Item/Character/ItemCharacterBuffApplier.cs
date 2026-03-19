@@ -21,8 +21,11 @@ namespace SSAFYPlayTime.Gameplay.Items
         private const string InvisibilityDustPrefabPath = "Assets/Polygon Arsenal/Prefabs/Environment/Dust/DustCalm.prefab";
         private const string ShieldObjectName = "ConsumableShieldEffect";
         private const string ShieldFlatRingObjectName = "FlatRing";
+        private const string ShieldStartObjectName = "ShieldStart";
+        private const string ShieldSparksObjectName = "Sparks";
         private const string DustObjectName = "ConsumableDustEffect";
         private const float MinimumShieldScaleAxis = 2f;
+        private const float ShieldDisableGraceSeconds = 0.15f;
 
         [Serializable]
         private struct ColliderSnapshot
@@ -44,7 +47,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         [Header("지속 이펙트")]
         [SerializeField] private Vector3 shieldLocalOffset = new(0f, 1.05f, 0f);
-        [SerializeField] private Vector3 shieldScale = Vector3.one * 2f;
+        [SerializeField] private Vector3 shieldScale = Vector3.one * 1.6f;
         [SerializeField] private Vector3 dustLocalOffset = new(0f, 0.05f, 0f);
         [SerializeField] private Vector3 dustScale = Vector3.one * 0.45f;
 
@@ -61,6 +64,9 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private GameObject _shieldEffectInstance;
         private GameObject _dustEffectInstance;
+        private bool _shieldVisualConfigured;
+        private bool _shieldBodyParticleFrozen;
+        private float _shieldVisibleUntil;
         private Transform _animatedVisualRoot;
         private Vector3 _baseVisualScale = Vector3.one;
         private float _baseDrag;
@@ -478,7 +484,12 @@ namespace SSAFYPlayTime.Gameplay.Items
         private void UpdateShieldEffect(ItemBuffSnapshot snapshot)
         {
             var shouldShowShield = snapshot.IsSuperArmorActive;
-            if (!shouldShowShield)
+            if (shouldShowShield)
+            {
+                _shieldVisibleUntil = Time.unscaledTime + ShieldDisableGraceSeconds;
+            }
+
+            if (!shouldShowShield && Time.unscaledTime > _shieldVisibleUntil)
             {
                 DestroyShieldEffect();
                 return;
@@ -487,7 +498,8 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (_shieldEffectInstance == null)
             {
                 _shieldEffectInstance = CreateEffectInstance(ShieldPrefabPath, ShieldObjectName);
-                DisableShieldFlatRing(_shieldEffectInstance);
+                _shieldVisualConfigured = false;
+                _shieldBodyParticleFrozen = false;
             }
 
             if (_shieldEffectInstance == null)
@@ -498,6 +510,8 @@ namespace SSAFYPlayTime.Gameplay.Items
             _shieldEffectInstance.transform.localPosition = shieldLocalOffset;
             _shieldEffectInstance.transform.localRotation = Quaternion.identity;
             _shieldEffectInstance.transform.localScale = Vector3.Scale(ResolveShieldScale(), Vector3.one * snapshot.ScaleMultiplier);
+            EnsureShieldEffectVisualState(configureMaterials: !_shieldVisualConfigured);
+            _shieldVisualConfigured = true;
         }
 
         private void UpdateDustEffect(ItemBuffSnapshot snapshot)
@@ -555,24 +569,177 @@ namespace SSAFYPlayTime.Gameplay.Items
                 Mathf.Max(MinimumShieldScaleAxis, shieldScale.z));
         }
 
-        private static void DisableShieldFlatRing(GameObject shieldRoot)
+        private void EnsureShieldEffectVisualState(bool configureMaterials = false)
         {
-            if (shieldRoot == null)
+            if (_shieldEffectInstance == null)
             {
                 return;
             }
 
-            var transforms = shieldRoot.GetComponentsInChildren<Transform>(true);
-            for (var i = 0; i < transforms.Length; i++)
+            var renderers = _shieldEffectInstance.GetComponentsInChildren<Renderer>(true);
+            for (var i = 0; i < renderers.Length; i++)
             {
-                var current = transforms[i];
-                if (current == null || !string.Equals(current.name, ShieldFlatRingObjectName, StringComparison.Ordinal))
+                var renderer = renderers[i];
+                if (renderer == null)
                 {
                     continue;
                 }
 
-                current.gameObject.SetActive(false);
+                var rendererName = renderer.gameObject.name ?? string.Empty;
+                var isShieldBody =
+                    string.Equals(rendererName, ShieldObjectName, StringComparison.Ordinal) ||
+                    string.Equals(rendererName, "ShieldYellow", StringComparison.Ordinal) ||
+                    renderer.transform == _shieldEffectInstance.transform;
+                renderer.enabled = isShieldBody;
+                if (isShieldBody || configureMaterials)
+                {
+                    ApplyShieldRendererColors(renderer);
+                }
             }
+
+            var particleSystems = _shieldEffectInstance.GetComponentsInChildren<ParticleSystem>(true);
+            for (var i = 0; i < particleSystems.Length; i++)
+            {
+                var particleSystem = particleSystems[i];
+                if (particleSystem == null)
+                {
+                    continue;
+                }
+
+                var particleObject = particleSystem.gameObject;
+                if (particleObject != null && !particleObject.activeSelf)
+                {
+                    particleObject.SetActive(true);
+                }
+
+                var particleName = particleObject != null ? particleObject.name ?? string.Empty : string.Empty;
+                var isShieldBodyParticle =
+                    string.Equals(particleName, ShieldObjectName, StringComparison.Ordinal) ||
+                    string.Equals(particleName, "ShieldYellow", StringComparison.Ordinal) ||
+                    particleSystem.transform == _shieldEffectInstance.transform;
+
+                if (!isShieldBodyParticle)
+                {
+                    if (particleObject != null && particleObject.activeSelf)
+                    {
+                        particleObject.SetActive(false);
+                    }
+
+                    if (particleSystem.isPlaying)
+                    {
+                        particleSystem.Stop(withChildren: true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                    }
+
+                    continue;
+                }
+
+                var main = particleSystem.main;
+                if (!_shieldBodyParticleFrozen)
+                {
+                    particleSystem.Simulate(0.12f, withChildren: true, restart: true, fixedTimeStep: true);
+                    particleSystem.Pause(withChildren: true);
+                    _shieldBodyParticleFrozen = true;
+                }
+            }
+        }
+
+        private static void ApplyShieldRendererColors(Renderer renderer)
+        {
+            if (renderer == null)
+            {
+                return;
+            }
+
+            var rendererName = renderer.gameObject.name ?? string.Empty;
+            var isShieldBody =
+                string.Equals(rendererName, ShieldObjectName, StringComparison.Ordinal) ||
+                string.Equals(rendererName, "ShieldYellow", StringComparison.Ordinal);
+            var baseColor = string.Equals(rendererName, ShieldSparksObjectName, StringComparison.Ordinal)
+                ? new Color(1f, 0.84f, 0.2f, 0.3f)
+                : isShieldBody
+                    ? new Color(1f, 0.82f, 0.18f, 0.3f)
+                    : new Color(1f, 0.78f, 0.14f, 0.3f);
+            var rimColor = isShieldBody
+                ? new Color(1f, 0.84f, 0.2f, 0.3f)
+                : new Color(1f, 0.84f, 0.2f, 0.3f);
+            var innerColor = isShieldBody
+                ? new Color(0.52f, 0.28f, 0.03f, 0.22f)
+                : new Color(0.42f, 0.22f, 0.02f, 0.22f);
+
+            var materials = renderer.materials;
+            for (var i = 0; i < materials.Length; i++)
+            {
+                var material = materials[i];
+                if (material == null)
+                {
+                    continue;
+                }
+
+                if (material.HasProperty("_BaseColor"))
+                {
+                    material.SetColor("_BaseColor", baseColor);
+                }
+                if (material.HasProperty("_Color"))
+                {
+                    material.SetColor("_Color", baseColor);
+                }
+                if (material.HasProperty("_TintColor"))
+                {
+                    material.SetColor("_TintColor", baseColor);
+                }
+                if (material.HasProperty("_RimColor"))
+                {
+                    material.SetColor("_RimColor", rimColor);
+                }
+                if (material.HasProperty("_InnerColor"))
+                {
+                    material.SetColor("_InnerColor", innerColor);
+                }
+                if (material.HasProperty("_EmissionColor"))
+                {
+                    material.SetColor("_EmissionColor", rimColor * 0.65f);
+                    material.EnableKeyword("_EMISSION");
+                }
+
+                EnsureTransparentShieldMaterial(material);
+            }
+
+            renderer.materials = materials;
+        }
+
+        private static void EnsureTransparentShieldMaterial(Material material)
+        {
+            if (material == null)
+            {
+                return;
+            }
+
+            if (material.HasProperty("_Surface"))
+            {
+                material.SetFloat("_Surface", 1f);
+            }
+            if (material.HasProperty("_Blend"))
+            {
+                material.SetFloat("_Blend", 0f);
+            }
+            if (material.HasProperty("_SrcBlend"))
+            {
+                material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            }
+            if (material.HasProperty("_DstBlend"))
+            {
+                material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            }
+            if (material.HasProperty("_ZWrite"))
+            {
+                material.SetFloat("_ZWrite", 0f);
+            }
+
+            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.EnableKeyword("_ALPHABLEND_ON");
+            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            material.SetOverrideTag("RenderType", "Transparent");
+            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
         }
 
         private static void DisableRuntimePhysics(GameObject root)
@@ -601,6 +768,8 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (_shieldEffectInstance != null)
             {
                 _shieldEffectInstance.transform.localPosition = shieldLocalOffset;
+                _shieldEffectInstance.transform.localRotation = Quaternion.identity;
+                EnsureShieldEffectVisualState();
             }
 
             if (_dustEffectInstance != null)
@@ -624,6 +793,8 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             Destroy(_shieldEffectInstance);
             _shieldEffectInstance = null;
+            _shieldVisualConfigured = false;
+            _shieldBodyParticleFrozen = false;
         }
 
         private void DestroyDustEffect()

@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1f1979ae21b8b29449a1a5190d45dd61, type: 3}
+  m_Name: IslandMapData
+  m_EditorClassIdentifier: 
+  mapId: 1
+  mapName: Island
+  damageAmount: 20
+  damageInterval: 1
+  initialDelay: 0.5
+  gimmicks:
+  - {fileID: 11400000, guid: 99655cd9bfcd06546b1b96255b342b10, type: 2}
