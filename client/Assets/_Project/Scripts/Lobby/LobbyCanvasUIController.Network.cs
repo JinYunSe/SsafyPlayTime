@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Fusion;
 using Fusion.Sockets;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace SSAFYPlayTime
 {
@@ -87,7 +88,7 @@ namespace SSAFYPlayTime
                 // LauncherScene·GameScene 공통으로 필요하다.
                 TryRemapMigrationEntryOnJoin(runner, player);
 
-                if (IsActiveGameplayScene())
+                if (IsActiveGameplayScene() && _gameplaySceneSpawnBootstrapComplete)
                 {
                     TrySpawnGameplayNetworkCharacter(player);
                 }
@@ -111,6 +112,7 @@ namespace SSAFYPlayTime
             {
                 try
                 {
+                    UntrackGameplayPlayer(player.PlayerId);
                     runner.Despawn(spawned);
                 }
                 catch (Exception e)
@@ -118,8 +120,10 @@ namespace SSAFYPlayTime
                     Debug.LogWarning($"[Lobby] Failed to despawn player character. player={player.PlayerId}, error={e.Message}");
                 }
             }
+            UntrackGameplayPlayer(player.PlayerId);
             _spawnedGameplayNetworkCharacters.Remove(player.PlayerId);
             _spawnedCharacterIndexByPlayerId.Remove(player.PlayerId);
+            _deadGameplayPlayerIds.Remove(player.PlayerId);
 
             if (player.IsRealPlayer)
             {
@@ -158,7 +162,8 @@ namespace SSAFYPlayTime
                 Debug.Log("[Lobby] Shutdown in progress, skip recovery.");
                 return;
             }
-
+            
+            CleanupRunnerAfterGameEndHostExit();
         }
 
         void INetworkRunnerCallbacks.OnConnectedToServer(NetworkRunner runner) { }
@@ -178,7 +183,8 @@ namespace SSAFYPlayTime
                 Debug.Log("[Lobby] Shutdown in progress, skip disconnect recovery.");
                 return;
             }
-
+            
+            CleanupRunnerAfterGameEndHostExit();
         }
 
         void INetworkRunnerCallbacks.OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token)
@@ -204,6 +210,21 @@ namespace SSAFYPlayTime
             if (runner != _runner)
             {
                 return;
+            }
+
+            if (_isShowingGameEndPanel && !_gameEndReturnTransitionStarted)
+            {
+                // 자동 방 입장이 완료된 새 방 세션에서 발생한 migration은 normal path로 처리한다.
+                // 아직 자동 입장 전(이전 게임 세션)이거나 입장 중인 경우에만 runner를 종료한다.
+                var autoJoinDone = _gameEndAutoRoomJoinTask?.IsCompletedSuccessfully == true;
+                if (!autoJoinDone)
+                {
+                    Debug.Log("[Lobby] 게임 종료 화면 대기 중 stale runner 감지 - 즉시 종료.");
+                    _ = ShutdownRunnerAsync();
+                    return;
+                }
+                // autoJoinDone: 새 방 세션의 host migration → normal path로 fall-through
+                Debug.Log("[Lobby] 게임 종료 화면의 새 방 세션에서 host migration 발생 - normal path 처리.");
             }
 
             if (_isProcessing)
@@ -405,6 +426,7 @@ namespace SSAFYPlayTime
                     {
                         RestoreEnvironmentStatesAfterMigration();
                         TrySpawnGameplayNetworkCharactersForAllPlayers();
+                        _gameplaySceneSpawnBootstrapComplete = true;
                     }
 
                     // 모든 플레이어(서버·클라이언트 공통)가 자신의 캐릭터 선택을 재전송한다.
@@ -433,8 +455,13 @@ namespace SSAFYPlayTime
                 {
                     // ── LauncherScene(로비) 방장 이전 처리 ───────────────────────────
                     // 기존 방 패널로 복귀해 대기 상태를 유지한다.
-                    ShowRoomPanel();
-                    UpdateRoomPanel();
+                    // 게임 종료 화면 표시 중(_isShowingGameEndPanel)이면 패널을 표시하지 않는다.
+                    // 유저가 방 버튼을 눌렀을 때 ReturnToRoomFromGameEnd 흐름에서 ShowRoomPanel이 호출된다.
+                    if (!_isShowingGameEndPanel)
+                    {
+                        ShowRoomPanel();
+                        UpdateRoomPanel();
+                    }
 
                     // 클라이언트는 새 방장에게 캐릭터 선택과 준비 상태를 재전송해야 roster 에 반영됨.
                     // 서버(새 방장)는 RegisterParticipant + BroadcastPlayerRoster 로 처리되며
@@ -518,18 +545,56 @@ namespace SSAFYPlayTime
             return oldToNewPlayerIds;
         }
 
+        // GameEndScene에서 순위 UI 표시를 위해 PlayerId로 닉네임을 조회한다.
+        public string GetParticipantNickname(int playerId)
+        {
+            if (_roomParticipantsByPlayerId.TryGetValue(playerId, out var p) && p != null && !string.IsNullOrEmpty(p.Nickname))
+                return p.Nickname;
+            return $"Player{playerId}";
+        }
+
         private bool _netLeftMouseDown;
         private float _netLeftMouseDownTime;
         private bool _netLeftMouseConsumedAsGrab;
+        private bool _netRightMouseDown;
+        private float _netRightMouseDownTime;
+        private bool _netRightMouseConsumedAsGrab;
+        private bool _netPunchQueued;
+        private bool _netThrowQueued;
+        private bool _netJumpQueued;
+        private bool _netDropQueued;
+        private bool _netHeadbuttQueued;
+        private Vector2 _netMoveInput;
+        private Vector2 _netMoveInputRaw;
+        private float _netCameraYaw;
+        private bool _netSprintHeld;
         private const float NET_GRAB_HOLD_THRESHOLD = 0.15f;
+        private float _lastMoveSyncInputLogAt = float.NegativeInfinity;
+        private float _lastMoveSyncCaptureLogAt = float.NegativeInfinity;
+        private const float MOVE_SYNC_INPUT_LOG_INTERVAL = 0.12f;
 
-        // 매 네트워크 틱마다 로컬 플레이어의 입력을 수집해 Fusion에 전달한다.
-        // 좌클릭 짧게 떼기 = 아이템 사용(Punch 비트 재사용), 좌클릭 꾹(0.15초 이상) = GrabHold
-        void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input)
+        private void CaptureNetworkInputState()
         {
-            bool isPunch = false;
+            if (_runner == null || !_runner.IsRunning || !GameStartCountdown.InputEnabled)
+            {
+                ResetLatchedNetworkInputState();
+                TraceMoveSyncCapture("Reset");
+                return;
+            }
 
-            // 좌클릭 상태 추적
+            if (IsGhostThrowInputModeActive())
+            {
+                ResetLatchedNetworkInputState();
+                return;
+            }
+
+            _netMoveInputRaw = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+            _netMoveInput = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
+            // Camera.main이 null이면 직전 유효 yaw를 그대로 유지 (0으로 리셋하면 이동 방향이 북쪽으로 고정됨)
+            if (Camera.main != null)
+                _netCameraYaw = Camera.main.transform.eulerAngles.y;
+            _netSprintHeld = Input.GetKey(KeyCode.LeftShift);
+
             if (Input.GetMouseButtonDown(0))
             {
                 _netLeftMouseDown = true;
@@ -537,36 +602,237 @@ namespace SSAFYPlayTime
                 _netLeftMouseConsumedAsGrab = false;
             }
 
-            if (Input.GetMouseButton(0) && _netLeftMouseDown)
+            if (_netLeftMouseDown && Input.GetMouseButton(0) &&
+                Time.time - _netLeftMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
+            {
+                _netLeftMouseConsumedAsGrab = true;
+            }
+
+            if (Input.GetMouseButtonUp(0))
+            {
+                if (_netLeftMouseDown &&
+                    !_netLeftMouseConsumedAsGrab &&
+                    Time.time - _netLeftMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
+                {
+                    _netPunchQueued = true;
+                }
+
+                _netLeftMouseDown = false;
+                _netLeftMouseConsumedAsGrab = false;
+            }
+
+            _netRightMouseDown = false;
+            _netRightMouseDownTime = 0f;
+            _netRightMouseConsumedAsGrab = false;
+
+            if (Input.GetKeyDown(KeyCode.Space))
+                _netJumpQueued = true;
+
+            if (Input.GetKeyDown(KeyCode.F))
+                _netDropQueued = true;
+
+            if (Input.GetMouseButtonDown(2))
+                _netHeadbuttQueued = true;
+
+            TraceMoveSyncCapture("Capture");
+        }
+
+        private void ResetLatchedNetworkInputState()
+        {
+            _netLeftMouseDown = false;
+            _netLeftMouseConsumedAsGrab = false;
+            _netRightMouseDown = false;
+            _netRightMouseConsumedAsGrab = false;
+            _netPunchQueued = false;
+            _netThrowQueued = false;
+            _netJumpQueued = false;
+            _netDropQueued = false;
+            _netHeadbuttQueued = false;
+            _netMoveInput = Vector2.zero;
+            _netMoveInputRaw = Vector2.zero;
+            _netCameraYaw = 0f;
+            _netSprintHeld = false;
+        }
+
+        private static bool ConsumeLatchedNetworkFlag(ref bool queued)
+        {
+            var value = queued;
+            queued = false;
+            return value;
+        }
+
+        private void TraceMoveSyncInput(NetworkRunner runner, in PlayerNetworkInput payload)
+        {
+            if (!Application.isPlaying || !MoveSyncDiagnostics.Enabled)
+                return;
+
+            var forceLog =
+                (bool)payload.Jump ||
+                (bool)payload.Punch ||
+                (bool)payload.Throw ||
+                (bool)payload.Drop ||
+                (bool)payload.Headbutt ||
+                (bool)payload.LeftGrabHold ||
+                (bool)payload.RightGrabHold ||
+                (bool)payload.Sprint;
+
+            var now = Time.unscaledTime;
+            if (!forceLog && now - _lastMoveSyncInputLogAt < MOVE_SYNC_INPUT_LOG_INTERVAL)
+                return;
+
+            _lastMoveSyncInputLogAt = now;
+
+            var tick = runner != null ? runner.Tick.Raw : -1;
+            var playerId = runner != null && runner.LocalPlayer.IsRealPlayer ? runner.LocalPlayer.PlayerId : -1;
+            MoveSyncDiagnostics.Emit(
+                $"[MoveDiag:OnInput] role=LocalInput playerId={playerId} tick={tick} source=LobbyCanvasUIController.OnInput " +
+                $"move={MoveSyncDiagnostics.FormatVector2(payload.Move)} camYaw={payload.CameraYaw:F1} " +
+                $"jump={((bool)payload.Jump ? 1 : 0)} sprint={((bool)payload.Sprint ? 1 : 0)} " +
+                $"punch={((bool)payload.Punch ? 1 : 0)} throw={((bool)payload.Throw ? 1 : 0)} " +
+                $"drop={((bool)payload.Drop ? 1 : 0)} headbutt={((bool)payload.Headbutt ? 1 : 0)} " +
+                $"leftGrab={((bool)payload.LeftGrabHold ? 1 : 0)} rightGrab={((bool)payload.RightGrabHold ? 1 : 0)}",
+                this);
+        }
+
+        private void TraceMoveSyncCapture(string source)
+        {
+            if (!Application.isPlaying || !MoveSyncDiagnostics.Enabled || _runner == null || !_runner.IsRunning || !_runner.IsServer)
+                return;
+
+            var forceLog =
+                _netMoveInputRaw.sqrMagnitude > 0.0001f ||
+                _netMoveInput.sqrMagnitude > 0.0001f ||
+                _netSprintHeld ||
+                _netLeftMouseDown ||
+                _netRightMouseDown ||
+                _netPunchQueued ||
+                _netThrowQueued ||
+                _netJumpQueued ||
+                _netDropQueued ||
+                _netHeadbuttQueued;
+
+            var now = Time.unscaledTime;
+            if (!forceLog && now - _lastMoveSyncCaptureLogAt < MOVE_SYNC_INPUT_LOG_INTERVAL)
+                return;
+
+            _lastMoveSyncCaptureLogAt = now;
+
+            var playerId = _runner.LocalPlayer.IsRealPlayer ? _runner.LocalPlayer.PlayerId : -1;
+            MoveSyncDiagnostics.Emit(
+                $"[MoveDiag:Capture] role=HostCapture playerId={playerId} tick={_runner.Tick.Raw} source={source} " +
+                $"inputEnabled={(GameStartCountdown.InputEnabled ? 1 : 0)} focused={(Application.isFocused ? 1 : 0)} " +
+                $"cursorLocked={(Cursor.lockState == CursorLockMode.Locked ? 1 : 0)} cameraMain={(Camera.main != null ? 1 : 0)} " +
+                $"moveRaw={MoveSyncDiagnostics.FormatVector2(_netMoveInputRaw)} move={MoveSyncDiagnostics.FormatVector2(_netMoveInput)} " +
+                $"camYaw={_netCameraYaw:F1} sprint={(_netSprintHeld ? 1 : 0)} " +
+                $"leftGrab={(_netLeftMouseDown ? 1 : 0)} rightGrab={(_netRightMouseDown ? 1 : 0)} " +
+                $"punchQ={(_netPunchQueued ? 1 : 0)} throwQ={(_netThrowQueued ? 1 : 0)} jumpQ={(_netJumpQueued ? 1 : 0)} " +
+                $"dropQ={(_netDropQueued ? 1 : 0)} headbuttQ={(_netHeadbuttQueued ? 1 : 0)}",
+                this);
+        }
+
+        private bool IsGhostThrowInputModeActive()
+        {
+            var ghostManagers = UnityEngine.Object.FindObjectsByType<SSAFYPlayTime.Game.GhostThrow.GhostThrowManager>(FindObjectsSortMode.None);
+            for (var i = 0; i < ghostManagers.Length; i++)
+            {
+                var manager = ghostManagers[i];
+                if (manager != null && manager.IsGhostThrowEnabled)
+                    return true;
+            }
+
+            return false;
+        }
+
+        // 매 네트워크 틱마다 로컬 플레이어의 입력을 수집해 Fusion에 전달한다.
+        // 좌클릭 짧게 = 아이템 사용(Punch), 좌클릭 꾹(0.15초+) = 왼손 그랩
+        // 우클릭 짧게 = 던지기, 우클릭 꾹(0.15초+) = 오른손 그랩
+        void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input)
+        {
+            if (!GameStartCountdown.InputEnabled) return;
+
+            var latchedLeftGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
+            var latchedRightGrabHold = _netRightMouseDown && _netRightMouseConsumedAsGrab;
+
+            var payload = new PlayerNetworkInput
+            {
+                Move = _netMoveInput,
+                CameraYaw = _netCameraYaw,
+                Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
+                Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
+                Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
+                Throw = false,
+                LeftGrabHold = latchedLeftGrabHold,
+                RightGrabHold = false,
+                Headbutt = ConsumeLatchedNetworkFlag(ref _netHeadbuttQueued),
+                Sprint = _netSprintHeld
+            };
+            input.Set(payload);
+            TraceMoveSyncInput(runner, payload);
+            return;
+
+            bool isPunch = false;
+            bool isThrow = false;
+
+
+            // 좌클릭 상태 추적 (왼손 그랩)
+            if (Input.GetMouseButtonDown(0))
+            {
+                _netLeftMouseDown = true;
+                _netLeftMouseDownTime = Time.time;
+                _netLeftMouseConsumedAsGrab = false;
+            }
+
+            if (runner == null && Input.GetMouseButton(0) && _netLeftMouseDown)
             {
                 if (Time.time - _netLeftMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
                     _netLeftMouseConsumedAsGrab = true;
             }
 
-            if (Input.GetMouseButtonUp(0))
+            if (runner == null && Input.GetMouseButtonUp(0))
             {
                 if (!_netLeftMouseConsumedAsGrab && Time.time - _netLeftMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
-                {
                     isPunch = true;
-                }
 
                 _netLeftMouseDown = false;
             }
 
-            bool isGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
-            var cameraYaw = Camera.main != null ? Camera.main.transform.eulerAngles.y : 0f;
+            // 우클릭 상태 추적 (오른손 그랩)
+            if (runner == null && Input.GetMouseButtonDown(1))
+            {
+                _netRightMouseDown = true;
+                _netRightMouseDownTime = Time.time;
+                _netRightMouseConsumedAsGrab = false;
+            }
+
+            if (runner == null && Input.GetMouseButton(1) && _netRightMouseDown)
+            {
+                if (Time.time - _netRightMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
+                    _netRightMouseConsumedAsGrab = true;
+            }
+
+            if (runner == null && Input.GetMouseButtonUp(1))
+            {
+                if (!_netRightMouseConsumedAsGrab && Time.time - _netRightMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
+                    isThrow = true;
+
+                _netRightMouseDown = false;
+            }
+
+            bool isLeftGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
+            bool isRightGrabHold = _netRightMouseDown && _netRightMouseConsumedAsGrab;
 
             input.Set(new PlayerNetworkInput
             {
-                Move = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical")),
-                CameraYaw = cameraYaw,
-                Jump = Input.GetKeyDown(KeyCode.Space),
-                Punch = isPunch,
-                Drop = Input.GetKeyDown(KeyCode.F),
-                Throw = Input.GetMouseButtonDown(1),
-                GrabHold = isGrabHold,
-                Headbutt = Input.GetMouseButtonDown(2),
-                Sprint = Input.GetKey(KeyCode.LeftShift)
+                Move = _netMoveInput,
+                CameraYaw = _netCameraYaw,
+                Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
+                Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
+                Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
+                Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
+                LeftGrabHold = isLeftGrabHold,
+                RightGrabHold = isRightGrabHold,
+                Headbutt = ConsumeLatchedNetworkFlag(ref _netHeadbuttQueued),
+                Sprint = _netSprintHeld
             });
         }
         void INetworkRunnerCallbacks.OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
@@ -665,7 +931,10 @@ namespace SSAFYPlayTime
                 {
                     UpdateRoomPanel();
                 }
+
+                return;
             }
+
         }
 
         void INetworkRunnerCallbacks.OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
@@ -680,7 +949,10 @@ namespace SSAFYPlayTime
 
             _spawnedGameplayNetworkCharacters.Clear();
             _spawnedCharacterIndexByPlayerId.Clear();
+            UntrackAllGameplayPlayers();
+            _deadGameplayPlayerIds.Clear();
             _cachedSpawnPointGroup = null;
+            _gameplaySceneSpawnBootstrapComplete = false;
 
             // 마이그레이션 중에는 캡처해둔 위치 테이블을 지우지 않는다.
             // StartGame(HostMigrationToken) 과정에서 OnSceneLoadStart 가 발동할 수 있으나
@@ -706,7 +978,9 @@ namespace SSAFYPlayTime
             }
         }
 
-        // 씬 전환이 완료됐을 때 호출. GameScene이면 로비 UI를 숨기고 서버에서 캐릭터를 스폰한다.
+        // 씬 전환이 완료됐을 때 호출.
+        // GameScene이면 로비 UI를 숨기고 서버에서 캐릭터를 스폰한다.
+        // LauncherScene으로 복귀(게임 종료 후)이면 게임 종료 패널을 표시하고 방 세션 자동 입장을 시작한다.
         void INetworkRunnerCallbacks.OnSceneLoadDone(NetworkRunner runner)
         {
             if (runner != _runner)
@@ -726,6 +1000,10 @@ namespace SSAFYPlayTime
                 // 게임씬 전환 시 로비 UI 캐릭터 미리보기 전부 숨김
                 HideAllCharacterSlots();
 
+                // GameHUD 인스턴스 생성 (모든 클라이언트에서 실행)
+                if (gameHUDPrefab != null && FindObjectOfType<GameHUD>() == null)
+                    Instantiate(gameHUDPrefab);
+
                 if (runner.IsServer)
                 {
                     // 씬 리로드 후 마이그레이션 환경 상태 복원.
@@ -734,6 +1012,25 @@ namespace SSAFYPlayTime
                     // 마이그레이션 데이터가 없으면 no-op.
                     RestoreEnvironmentStatesAfterMigration();
                     TrySpawnGameplayNetworkCharactersForAllPlayers();
+                    _gameplaySceneSpawnBootstrapComplete = true;
+                }
+            }
+            else
+            {
+                // LauncherScene 전환 완료.
+                // GameScene 전환 시 LobbyCharacterRuntimeRoot의 캐릭터 오브젝트들이 파괴됐으므로
+                // _characterSlotsInitialized를 리셋해 재초기화를 허용한다.
+                ResetCharacterSlotState();
+
+                // GameResultData에 결과가 있으면 게임 종료 후 복귀한 것 → 게임 종료 패널 표시.
+                // [흐름] 게임 종료 패널을 보는 동안 백그라운드에서 자동으로
+                // 이전 세션 종료 → 순위 기반 딜레이(0~450ms) → 새 방 세션 AutoHostOrClient 입장.
+                // 버튼 클릭 시점에는 이미 방에 입장한 상태이므로 버튼 처리가 즉시 이뤄진다.
+                if (_pendingGameEndPanel)
+                {
+                    _pendingGameEndPanel = false;
+                    Debug.Log("[Lobby] 게임 종료 후 LauncherScene 전환 완료 - 게임 종료 패널 표시.");
+                    ShowGameEndPanel();
                 }
             }
         }

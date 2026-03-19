@@ -1,62 +1,133 @@
 using System;
-
 using Fusion;
 using UnityEngine;
 
-// 플레이어의 체력을 관리하고, 시작 시 SpawnManager에서 스폰 위치를 받아 배치하는 컴포넌트.
-// (현재는 네트워크 동기화 없이 로컬에서만 동작하는 프로토타입 구현)
 public class PlayerStats : MonoBehaviour
 {
-    public int currentHealth = 100;
+    [Header("Offline Fallback")]
+    [SerializeField] private int offlineStartingHealth = 260;
 
-    // 죽었을 때 알림 이벤트
+    private NetworkPlayer _networkPlayer;
+    private int _standaloneCurrentHealth;
+    private int _lastObservedHealth = -1;
+    private int _lastObservedMaxHealth = -1;
+    private bool _lastObservedDead;
+
+    public int currentHealth => CurrentHealth;
+    public int maxHealth => MaxHealth;
+    public int CurrentHealth => ResolveCurrentHealth();
+    public int MaxHealth => ResolveMaxHealth();
+    public bool IsDead => ResolveIsDead();
+
     public event Action<PlayerStats> OnDied;
+    public event Action<PlayerStats, int, int> OnHealthChanged;
 
-    void Start()
+    private void Awake()
     {
-        var networkObject = GetComponent<NetworkObject>();
-        if (networkObject != null && networkObject.Runner != null && networkObject.IsValid)
-        {
-            // Fusion이 이미 스폰 위치를 결정한 네트워크 캐릭터는 로컬 SpawnManager로 다시 옮기지 않는다.
-            return;
-        }
-
-        SpawnManager spawnManager = GameObject.FindObjectOfType<SpawnManager>();
-
-        if (spawnManager != null)
-        {
-            Vector3 spawnPos = spawnManager.GetSpawnPosition();
-            transform.position = spawnPos;
-        }
-        else
-        {
-            Debug.LogError("SpawnManager를 찾을 수 없습니다! 씬에 배치했는지 확인하세요");
-        }
+        _networkPlayer = GetComponent<NetworkPlayer>();
+        _standaloneCurrentHealth = Mathf.Max(1, offlineStartingHealth);
     }
 
-    // 데미지를 받아 currentHealth를 감소시킨다. 0 이하가 되면 Die()를 호출한다.
+    private void Start()
+    {
+        TryPlaceStandaloneAtSpawn();
+        RefreshObservedState(forceNotify: true);
+    }
+
+    private void Update()
+    {
+        RefreshObservedState(forceNotify: false);
+    }
+
     public void TakeDamage(int damage)
     {
-        if (currentHealth <= 0)
+        if (damage <= 0)
             return;
 
-        currentHealth -= damage;
-        Debug.Log("현재 체력: " + currentHealth);
+        if (_networkPlayer != null)
+        {
+            _networkPlayer.ApplyHealthDamage(damage, "LegacyDamage");
+            return;
+        }
 
-        if (currentHealth <= 0)
-            Die();
+        ApplyStandaloneDamage(damage);
     }
 
-    // 체력이 0 이하가 됐을 때 호출. 현재는 오브젝트를 즉시 삭제한다.
-    void Die()
+    public void ApplyDamage(float damage, float stunDamage, string source)
     {
-        currentHealth = 0;
+        if (_networkPlayer != null)
+        {
+            _networkPlayer.ApplyCombinedDamage(damage, stunDamage, source);
+            return;
+        }
 
-        // 카메라/관전 전환 같은 외부 로직에게 먼저 알림
-        OnDied?.Invoke(this);
+        if (damage > 0f)
+            ApplyStandaloneDamage(Mathf.Max(1, Mathf.RoundToInt(damage)));
+    }
 
-        // 바로 Destroy하면 다른 스크립트가 참조 중일 때 꼬일 수 있어서
-        // 최소 1프레임 뒤에 삭제하는 게 안전
-        Destroy(gameObject, 0.05f);
+    private void ApplyStandaloneDamage(int damage)
+    {
+        if (_standaloneCurrentHealth <= 0)
+            return;
+
+        _standaloneCurrentHealth = Mathf.Max(0, _standaloneCurrentHealth - damage);
+        RefreshObservedState(forceNotify: true);
+    }
+
+    private int ResolveCurrentHealth()
+    {
+        if (_networkPlayer != null)
+            return _networkPlayer.CurrentHealth;
+
+        return Mathf.Clamp(_standaloneCurrentHealth, 0, MaxHealth);
+    }
+
+    private int ResolveMaxHealth()
+    {
+        if (_networkPlayer != null)
+            return Mathf.Max(1, _networkPlayer.MaxHealth);
+
+        return Mathf.Max(1, offlineStartingHealth);
+    }
+
+    private bool ResolveIsDead()
+    {
+        if (_networkPlayer != null)
+            return _networkPlayer.IsDeadState;
+
+        return _standaloneCurrentHealth <= 0;
+    }
+
+    private void RefreshObservedState(bool forceNotify)
+    {
+        var current = ResolveCurrentHealth();
+        var max = ResolveMaxHealth();
+        var dead = ResolveIsDead();
+
+        if (forceNotify || current != _lastObservedHealth || max != _lastObservedMaxHealth)
+        {
+            _lastObservedHealth = current;
+            _lastObservedMaxHealth = max;
+            OnHealthChanged?.Invoke(this, current, max);
+        }
+
+        if (!_lastObservedDead && dead)
+            OnDied?.Invoke(this);
+
+        _lastObservedDead = dead;
+    }
+
+    private void TryPlaceStandaloneAtSpawn()
+    {
+        // Fusion 네트워크 캐릭터: 스폰 위치는 서버가 결정하므로 로컬 이동 생략
+        var networkObject = GetComponent<NetworkObject>();
+        if (networkObject != null && networkObject.Runner != null && networkObject.IsValid)
+            return;
+
+        var spawnManager = FindObjectOfType<SpawnManager>();
+        if (spawnManager == null)
+            return;
+
+        transform.position = spawnManager.GetSpawnPosition();
     }
 }

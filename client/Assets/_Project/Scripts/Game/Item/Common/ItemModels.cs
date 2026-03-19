@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemModels 스크립트가 들어 있는 파일이다.
  * - Common 계층에서 아이템 시스템 전반이 공유하는 모델, 상수, 인터페이스를 정의한다.
@@ -61,9 +61,18 @@ namespace SSAFYPlayTime.Gameplay.Items
 
     public readonly struct BlackholeSkillRequest
     {
-        public BlackholeSkillRequest(Vector3 center, float delaySec, float durationSec, float radius, float force)
+        public BlackholeSkillRequest(
+            Vector3 center,
+            Vector3 origin,
+            Vector3 forward,
+            float delaySec,
+            float durationSec,
+            float radius,
+            float force)
         {
             Center = center;
+            Origin = origin;
+            Forward = forward;
             DelaySec = delaySec;
             DurationSec = durationSec;
             Radius = radius;
@@ -71,6 +80,8 @@ namespace SSAFYPlayTime.Gameplay.Items
         }
 
         public Vector3 Center { get; }
+        public Vector3 Origin { get; }
+        public Vector3 Forward { get; }
         public float DelaySec { get; }
         public float DurationSec { get; }
         public float Radius { get; }

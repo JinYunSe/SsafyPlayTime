@@ -1,65 +1,88 @@
+using System.Collections;
 using System.Collections.Generic;
-
 using UnityEngine;
+using Fusion;
 
-// 데드존에 플레이어가 머무르면 일정 간격마다 데미지를 입힘
+// 데스존 안에 들어온 플레이어를 처리한다.
 public class DeathZone : MonoBehaviour
 {
+    [Header("Kill Settings")]
+    [SerializeField] private bool killInstantly = true;
+
     [Header("Damage Settings")]
-    // 한 번에 입히는 데미지
-    public int damageAmount = 10;
+    [SerializeField] private int damageAmount = 10;
+    [SerializeField] private float damageInterval = 1.0f;
 
-    // 데미지를 입히는 간격 (초)
-    public float damageInterval = 1.0f;
-
-    // 플레이어별 다음 데미지 시간 저장
-    private readonly Dictionary<PlayerStats, float> nextDamageTimes = new Dictionary<PlayerStats, float>();
+    private readonly Dictionary<PlayerStats, Coroutine> damageCoroutines = new Dictionary<PlayerStats, Coroutine>();
 
     private void OnTriggerEnter(Collider other)
     {
-        PlayerStats player = other.GetComponentInParent<PlayerStats>();
+        var player = other.GetComponentInParent<PlayerStats>();
         if (player == null)
             return;
 
-        if (player.currentHealth <= 0)
-            return;
-
-        // 처음 들어왔을 때 즉시 데미지를 주지 않고,
-        // damageInterval 뒤에 첫 데미지가 들어가도록 예약
-        if (!nextDamageTimes.ContainsKey(player))
+        if (killInstantly)
         {
-            nextDamageTimes[player] = Time.time + damageInterval;
+            TryKillPlayer(player);
+            return;
+        }
+
+        if (!damageCoroutines.ContainsKey(player))
+        {
+            var newRoutine = StartCoroutine(DamageTickRoutine(player));
+            damageCoroutines.Add(player, newRoutine);
         }
     }
 
     private void OnTriggerStay(Collider other)
     {
-        PlayerStats player = other.GetComponentInParent<PlayerStats>();
-        if (player == null)
+        if (!killInstantly)
             return;
 
-        if (player.currentHealth <= 0)
-            return;
-
-        if (!nextDamageTimes.TryGetValue(player, out float nextTime))
-        {
-            nextDamageTimes[player] = Time.time + damageInterval;
-            return;
-        }
-
-        if (Time.time >= nextTime)
-        {
-            player.TakeDamage(damageAmount);
-            nextDamageTimes[player] = Time.time + damageInterval;
-        }
+        var player = other.GetComponentInParent<PlayerStats>();
+        if (player != null)
+            TryKillPlayer(player);
     }
 
     private void OnTriggerExit(Collider other)
     {
-        PlayerStats player = other.GetComponentInParent<PlayerStats>();
-        if (player == null)
+        if (killInstantly)
             return;
 
-        nextDamageTimes.Remove(player);
+        var player = other.GetComponentInParent<PlayerStats>();
+        if (player != null && damageCoroutines.TryGetValue(player, out var routine))
+        {
+            StopCoroutine(routine);
+            damageCoroutines.Remove(player);
+        }
+    }
+
+    private IEnumerator DamageTickRoutine(PlayerStats player)
+    {
+        yield return new WaitForSeconds(damageInterval);
+
+        while (player != null && player.currentHealth > 0)
+        {
+            player.TakeDamage(damageAmount);
+            yield return new WaitForSeconds(damageInterval);
+        }
+
+        if (damageCoroutines.ContainsKey(player))
+            damageCoroutines.Remove(player);
+    }
+
+    private static void TryKillPlayer(PlayerStats player)
+    {
+        if (player == null || player.IsDead)
+            return;
+
+        var networkPlayer = player.GetComponent<NetworkPlayer>();
+        if (networkPlayer != null)
+        {
+            networkPlayer.KillImmediately("DeathZone");
+            return;
+        }
+
+        player.TakeDamage(Mathf.Max(1, player.currentHealth));
     }
 }

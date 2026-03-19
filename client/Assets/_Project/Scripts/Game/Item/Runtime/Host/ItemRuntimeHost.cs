@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemRuntimeHost 스크립트가 들어 있는 파일이다.
  * - Runtime/Host 계층에서 MonoBehaviour 기반 진입점과 외부 시스템 이벤트 연결을 담당한다.
@@ -47,6 +47,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         public bool IsReady => _controller != null;
         public string HeldItemId => _controller?.HeldItemId ?? string.Empty;
         public bool IsFlamethrowerActive => _controller != null && _controller.IsFlamethrowerActive;
+        public bool IsHeldItemEquipment => _controller != null && _controller.IsHeldItemEquipment;
         public IReadOnlyList<string> LoadWarnings => _loadWarnings;
         public string LastError => _lastError;
         public Transform OwnerTransform => ownerTransform;
@@ -125,6 +126,16 @@ namespace SSAFYPlayTime.Gameplay.Items
             var ownerPos = ResolveOwnerPosition();
             var ownerForward = ResolveOwnerForward();
             return _controller.TryUseHeldItem(ownerPos, ownerForward, targetPosition, out reason);
+        }
+
+        public bool TrySetFlamethrowerActive(bool active, out string reason)
+        {
+            if (!EnsureReady(out reason))
+            {
+                return false;
+            }
+
+            return _controller.TrySetFlamethrowerActive(active, out reason);
         }
 
         public bool TryDropHeldItem(out string reason)

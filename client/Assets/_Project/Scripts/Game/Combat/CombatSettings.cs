@@ -32,6 +32,17 @@ public class CombatSettings : MonoBehaviour
     public float groggyToStunChance = 0.7f;
     public float headbuttSelfStunWall = 2.5f;
     public float headbuttSelfStunFloor = 1.5f;
+    public int hiddenHealthMax = 260;
+    public float hiddenHealthHitImmunity = 0.12f;
+    public float hiddenHealthRecentDamageWindow = 3.5f;
+    public float hiddenHealthRecentDamageCap = 85f;
+    public float hiddenHealthLowHpStunBonus = 0.35f;
+    public float environmentCollisionMinImpact = 18f;
+    public float environmentCollisionMaxImpact = 55f;
+    public float environmentCollisionMinStunDamage = 3f;
+    public float environmentCollisionMaxStunDamage = 9f;
+    public float environmentCollisionMinHealthDamage = 0f;
+    public float environmentCollisionMaxHealthDamage = 14f;
 
     [Header("Body Part Multipliers")]
     public float bodyPartHeadMultiplier = 1.5f;
@@ -44,6 +55,32 @@ public class CombatSettings : MonoBehaviour
     public float grabThrowForceStunned = 15f;
     public float thrownObjectStunDamage = 20f;
     public float thrownPlayerStunDamage = 25f;
+
+    [Header("HP System")]
+    [Tooltip("최대 HP (게임 내 숨겨짐, 디자이너 조정용)")]
+    public float maxHealth = 200f;
+    [Tooltip("펀치 1회 고정 HP 데미지")]
+    public float punchHpDamage = 4f;
+    [Tooltip("GhostCube 폭발 중심부 HP 데미지 (거리 감쇠 적용)")]
+    public float ghostBombHpDamage = 30f;
+    [Tooltip("바나나 밟혔을 때 HP 데미지")]
+    public float bananaHpDamage = 10f;
+    [Tooltip("맵 밖 추락 시 HP 데미지 (즉사)")]
+    public float outOfBoundsHpDamage = 9999f;
+
+    [Header("Grab Joint (ConfigurableJoint)")]
+    public float grabJointSpring = 5000f;
+    public float grabJointDamper = 200f;
+    public float grabJointMaxForce = 3000f;
+    public float grabJointLinearLimit = 0.15f;
+    public float grabJointLimitSpring = 5000f;
+    public float grabJointLimitDamper = 200f;
+    public float grabMaxStretchDistance = 1.5f;
+
+    [Header("Grabbed Body Part Spring Multipliers")]
+    public float grabbedCoreSpringMultiplier = 2.5f;
+    public float grabbedHeadSpringMultiplier = 1.5f;
+    public float grabbedLimbSpringMultiplier = 0.3f;
 
     private bool _loaded;
 
@@ -103,6 +140,17 @@ public class CombatSettings : MonoBehaviour
         if (p.TryGetValue("GROGGY_TO_STUN_CHANCE", out v)) groggyToStunChance = v;
         if (p.TryGetValue("HEADBUTT_SELF_STUN_WALL", out v)) headbuttSelfStunWall = v;
         if (p.TryGetValue("HEADBUTT_SELF_STUN_FLOOR", out v)) headbuttSelfStunFloor = v;
+        if (p.TryGetValue("HIDDEN_HEALTH_MAX", out v)) hiddenHealthMax = Mathf.Max(1, Mathf.RoundToInt(v));
+        if (p.TryGetValue("HIDDEN_HEALTH_HIT_IMMUNITY", out v)) hiddenHealthHitImmunity = Mathf.Max(0f, v);
+        if (p.TryGetValue("HIDDEN_HEALTH_RECENT_WINDOW", out v)) hiddenHealthRecentDamageWindow = Mathf.Max(0f, v);
+        if (p.TryGetValue("HIDDEN_HEALTH_RECENT_CAP", out v)) hiddenHealthRecentDamageCap = Mathf.Max(1f, v);
+        if (p.TryGetValue("HIDDEN_HEALTH_LOW_HP_STUN_BONUS", out v)) hiddenHealthLowHpStunBonus = Mathf.Max(0f, v);
+        if (p.TryGetValue("ENVIRONMENT_COLLISION_MIN_IMPACT", out v)) environmentCollisionMinImpact = Mathf.Max(0f, v);
+        if (p.TryGetValue("ENVIRONMENT_COLLISION_MAX_IMPACT", out v)) environmentCollisionMaxImpact = Mathf.Max(environmentCollisionMinImpact + 0.01f, v);
+        if (p.TryGetValue("ENVIRONMENT_COLLISION_MIN_STUN", out v)) environmentCollisionMinStunDamage = Mathf.Max(0f, v);
+        if (p.TryGetValue("ENVIRONMENT_COLLISION_MAX_STUN", out v)) environmentCollisionMaxStunDamage = Mathf.Max(environmentCollisionMinStunDamage, v);
+        if (p.TryGetValue("ENVIRONMENT_COLLISION_MIN_HEALTH", out v)) environmentCollisionMinHealthDamage = Mathf.Max(0f, v);
+        if (p.TryGetValue("ENVIRONMENT_COLLISION_MAX_HEALTH", out v)) environmentCollisionMaxHealthDamage = Mathf.Max(environmentCollisionMinHealthDamage, v);
         if (p.TryGetValue("BODY_PART_HEAD_MULTIPLIER", out v)) bodyPartHeadMultiplier = v;
         if (p.TryGetValue("BODY_PART_BODY_MULTIPLIER", out v)) bodyPartBodyMultiplier = v;
         if (p.TryGetValue("BODY_PART_LIMB_MULTIPLIER", out v)) bodyPartLimbMultiplier = v;
@@ -111,6 +159,20 @@ public class CombatSettings : MonoBehaviour
         if (p.TryGetValue("GRAB_THROW_FORCE_PLAYER_STUNNED", out v)) grabThrowForceStunned = v;
         if (p.TryGetValue("THROWN_OBJECT_STUN_DAMAGE", out v)) thrownObjectStunDamage = v;
         if (p.TryGetValue("THROWN_PLAYER_STUN_DAMAGE", out v)) thrownPlayerStunDamage = v;
+        if (p.TryGetValue("MAX_HEALTH", out v)) maxHealth = v;
+        if (p.TryGetValue("PUNCH_HP_DAMAGE", out v)) punchHpDamage = v;
+        if (p.TryGetValue("GHOST_BOMB_HP_DAMAGE", out v)) ghostBombHpDamage = v;
+        if (p.TryGetValue("BANANA_HP_DAMAGE", out v)) bananaHpDamage = v;
+        if (p.TryGetValue("GRAB_JOINT_SPRING", out v)) grabJointSpring = v;
+        if (p.TryGetValue("GRAB_JOINT_DAMPER", out v)) grabJointDamper = v;
+        if (p.TryGetValue("GRAB_JOINT_MAX_FORCE", out v)) grabJointMaxForce = v;
+        if (p.TryGetValue("GRAB_JOINT_LINEAR_LIMIT", out v)) grabJointLinearLimit = v;
+        if (p.TryGetValue("GRAB_JOINT_LIMIT_SPRING", out v)) grabJointLimitSpring = v;
+        if (p.TryGetValue("GRAB_JOINT_LIMIT_DAMPER", out v)) grabJointLimitDamper = v;
+        if (p.TryGetValue("GRAB_MAX_STRETCH_DISTANCE", out v)) grabMaxStretchDistance = v;
+        if (p.TryGetValue("GRABBED_CORE_SPRING_MULTIPLIER", out v)) grabbedCoreSpringMultiplier = v;
+        if (p.TryGetValue("GRABBED_HEAD_SPRING_MULTIPLIER", out v)) grabbedHeadSpringMultiplier = v;
+        if (p.TryGetValue("GRABBED_LIMB_SPRING_MULTIPLIER", out v)) grabbedLimbSpringMultiplier = v;
     }
 
     /// <summary>공격 ID로 수치 조회. 없으면 null.</summary>

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemCharacterMeleeSwingHandler 스크립트가 들어 있는 파일이다.
  * - Character 계층에서 캐릭터와 아이템 시스템의 결합 지점을 담당한다.
@@ -351,38 +351,35 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            var healthApplied = false;
-            var stunApplied = false;
-            var healthInt = Mathf.Max(0, Mathf.RoundToInt(_currentHealthDamage));
-            var stunValue = Mathf.Max(0f, _currentStunDamage);
             var attackerVelocity = ResolveOwnerVelocity();
+            var healthValue = Mathf.Max(0f, _currentHealthDamage);
+            var stunValue = Mathf.Max(0f, _currentStunDamage);
 
             var networkPlayer = targetRoot.GetComponentInParent<NetworkPlayer>();
-            if (networkPlayer != null && stunValue > 0f)
+            if (networkPlayer != null)
             {
-                // 부위 배율/충격량은 우선 기본값으로 적용한다.
-                networkPlayer.ApplyStunDamage(stunValue, 1f, attackerVelocity, 0f);
-                stunApplied = true;
+                networkPlayer.ApplyCombinedDamage(
+                    healthValue,
+                    stunValue,
+                    "WaterMelonSword",
+                    attackerVelocity,
+                    0f);
+                return;
             }
 
             var playerStats = targetRoot.GetComponentInParent<PlayerStats>();
+            var healthInt = Mathf.Max(0, Mathf.RoundToInt(healthValue));
             if (playerStats != null && healthInt > 0)
             {
                 playerStats.TakeDamage(healthInt);
-                healthApplied = true;
+                return;
             }
 
-            if (!healthApplied && healthInt > 0)
-            {
-                healthApplied = TryInvokeTakeDamage(targetRoot, healthInt);
-            }
+            if (healthInt > 0 && TryInvokeTakeDamage(targetRoot, healthInt))
+                return;
 
-            var pendingHealth = healthApplied ? 0f : Mathf.Max(0f, _currentHealthDamage);
-            var pendingStun = stunApplied ? 0f : stunValue;
-            if (pendingHealth > 0f || pendingStun > 0f)
-            {
-                TryInvokeApplyDamage(targetRoot, pendingHealth, pendingStun, "WaterMelonSword");
-            }
+            if (healthValue > 0f || stunValue > 0f)
+                TryInvokeApplyDamage(targetRoot, healthValue, stunValue, "WaterMelonSword");
         }
 
         private bool TryInvokeApplyDamage(Transform root, float damage, float stunDamage, string source)
