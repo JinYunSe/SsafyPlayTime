@@ -563,6 +563,37 @@ Transform:
   - {fileID: 1095147141903560883}
   m_Father: {fileID: 7201479421470915713}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &2013187929359467952
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 4914378989453673816}
+  m_Layer: 0
+  m_Name: CameraTarget
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &4914378989453673816
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2013187929359467952}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.12, z: 0.08}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1095147141903560883}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2036326815678479903
 GameObject:
   m_ObjectHideFlags: 0
@@ -627,6 +658,7 @@ Transform:
   - {fileID: 4504508126209565325}
   - {fileID: 9088548268556093928}
   - {fileID: 366734767021570402}
+  - {fileID: 4914378989453673816}
   m_Father: {fileID: 696812045042035185}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2407959369552087449
@@ -1306,6 +1338,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  fallbackStunEntryNudgeForce: 0
+  fallbackMaxImpact: 55
+  fallbackMinStunDamage: 3
+  fallbackMaxStunDamage: 9
+  fallbackMinHealthDamage: 0
+  fallbackMaxHealthDamage: 14
 --- !u!1 &4667754045461763541
 GameObject:
   m_ObjectHideFlags: 0
@@ -1353,6 +1391,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  fallbackStunEntryNudgeForce: 0
+  fallbackMaxImpact: 55
+  fallbackMinStunDamage: 3
+  fallbackMaxStunDamage: 9
+  fallbackMinHealthDamage: 0
+  fallbackMaxHealthDamage: 14
 --- !u!1 &4846320313338777243
 GameObject:
   m_ObjectHideFlags: 0
@@ -1447,7 +1491,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dc81d8401fd80724199a03ece649b9b0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  handSide: 0
   animator: {fileID: 0}
+  grabProfile: {fileID: 0}
+  breakForce: 2000
+  breakTorque: 2000
+  dualGrabBreakMultiplier: 3
+  maxGrabDistance: 2.5
+  palmAnchorOffset: {x: 0, y: -0.02, z: 0.06}
+  grabbedPinWeight: 0.3
+  grabbedMuscleWeight: 0.3
 --- !u!1 &4888672586632788184
 GameObject:
   m_ObjectHideFlags: 0
@@ -1656,6 +1709,7 @@ MonoBehaviour:
   colliderToIgnore:
   - {fileID: 1739335677015546356}
   - {fileID: 6032885320944524630}
+  ignoreAllChildColliders: 1
 --- !u!114 &270849239238027643
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1678,9 +1732,46 @@ MonoBehaviour:
   useAnimatedVisualOnly: 1
   disablePhysicsAnimationSync: 1
   holdPoint: {fileID: 0}
+  cameraAnchorPresentationLocalOffset: {x: 0, y: 1.35, z: 0}
+  cameraAnchorFallbackRootLocalOffset: {x: 0, y: 1.25, z: 0}
+  cameraAnchorStableFollowSpeed: 25
+  cameraAnchorStableAirborneFollowSpeed: 18
+  cameraAnchorHoldingFollowSpeed: 18
+  cameraAnchorRecoveringFollowSpeed: 12
+  cameraAnchorHardPhysicsFollowSpeed: 6
+  cameraAnchorVerticalFollowMultiplier: 0.75
+  cameraAnchorStableAirborneVerticalFollowMultiplier: 0.9
+  cameraAnchorHoldingVerticalFollowMultiplier: 0.82
+  cameraAnchorHardPhysicsVerticalFollowMultiplier: 0.58
+  cameraAnchorSnapDistance: 2
+  cameraAnchorStableAirborneSnapMultiplier: 0.9
+  cameraAnchorHoldingSnapMultiplier: 0.85
+  cameraAnchorRecoveringSnapMultiplier: 1.1
+  cameraAnchorOwnerProxyLeadDistance: 0.18
+  cameraAnchorOwnerProxyPresentationCorrectionScale: 0.35
+  cameraAnchorOwnerProxyMaxCorrectionDistance: 0.12
   _CharacterTypeIndex: -1
   _BoneRotations: []
+  _NetworkedHipsPosition: {x: 0, y: 0, z: 0}
   _NetworkedIsActiveRagdoll:
+    _value: 0
+  _NetworkedLeftGrabHolding:
+    _value: 0
+  _NetworkedRightGrabHolding:
+    _value: 0
+  _LeftGrabTargetId:
+    Raw: 0
+  _RightGrabTargetId:
+    Raw: 0
+  _LeftGrabAnchorLocal: {x: 0, y: 0, z: 0}
+  _RightGrabAnchorLocal: {x: 0, y: 0, z: 0}
+  _LeftGrabConfirmed:
+    _value: 0
+  _RightGrabConfirmed:
+    _value: 0
+  _NetworkedIsBeingGrabbed:
+    _value: 0
+  _NetworkedIsDragged:
     _value: 0
   itemWorldEffectMask:
     serializedVersion: 2
@@ -1710,6 +1801,11 @@ MonoBehaviour:
   flamethrowerMuzzleLocalOffset: {x: 0, y: 0, z: 0.5}
   flamethrowerMuzzleLocalEulerOffset: {x: 0, y: 0, z: 0}
   enableItemWorldEffectLog: 0
+  enableProxyAnimationDiagnostics: 1
+  enableStunForceDiagnostics: 0
+  stunForceDiagnosticsIncludeProxies: 1
+  stunForceDiagnosticsWindow: 1.5
+  stunForceDiagnosticsSampleInterval: 0.12
 --- !u!114 &387452055322444763
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1724,6 +1820,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  fallbackStunEntryNudgeForce: 0
+  fallbackMaxImpact: 55
+  fallbackMinStunDamage: 3
+  fallbackMaxStunDamage: 9
+  fallbackMinHealthDamage: 0
+  fallbackMaxHealthDamage: 14
 --- !u!114 &9102579800952245977
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1738,6 +1840,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  fallbackStunEntryNudgeForce: 0
+  fallbackMaxImpact: 55
+  fallbackMinStunDamage: 3
+  fallbackMaxStunDamage: 9
+  fallbackMinHealthDamage: 0
+  fallbackMaxHealthDamage: 14
 --- !u!114 &8505828117639570202
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2087,6 +2195,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  fallbackStunEntryNudgeForce: 0
+  fallbackMaxImpact: 55
+  fallbackMinStunDamage: 3
+  fallbackMaxStunDamage: 9
+  fallbackMinHealthDamage: 0
+  fallbackMaxHealthDamage: 14
 --- !u!1 &5588333632612372222
 GameObject:
   m_ObjectHideFlags: 0
@@ -2212,7 +2326,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dc81d8401fd80724199a03ece649b9b0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  handSide: 0
   animator: {fileID: 0}
+  grabProfile: {fileID: 0}
+  breakForce: 2000
+  breakTorque: 2000
+  dualGrabBreakMultiplier: 3
+  maxGrabDistance: 2.5
+  palmAnchorOffset: {x: 0, y: -0.02, z: 0.06}
+  grabbedPinWeight: 0.3
+  grabbedMuscleWeight: 0.3
 --- !u!1 &5837053090287064595
 GameObject:
   m_ObjectHideFlags: 0
@@ -2430,6 +2553,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  fallbackStunEntryNudgeForce: 0
+  fallbackMaxImpact: 55
+  fallbackMinStunDamage: 3
+  fallbackMaxStunDamage: 9
+  fallbackMinHealthDamage: 0
+  fallbackMaxHealthDamage: 14
 --- !u!1 &5916628239945864310
 GameObject:
   m_ObjectHideFlags: 0
@@ -2796,6 +2925,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  fallbackStunEntryNudgeForce: 0
+  fallbackMaxImpact: 55
+  fallbackMinStunDamage: 3
+  fallbackMaxStunDamage: 9
+  fallbackMinHealthDamage: 0
+  fallbackMaxHealthDamage: 14
 --- !u!1 &6699480033981266559
 GameObject:
   m_ObjectHideFlags: 0
@@ -3066,6 +3201,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   fallbackKnockoutThreshold: 15
   fallbackMaxKnockbackForce: 30
+  fallbackStunEntryNudgeForce: 0
+  fallbackMaxImpact: 55
+  fallbackMinStunDamage: 3
+  fallbackMaxStunDamage: 9
+  fallbackMinHealthDamage: 0
+  fallbackMaxHealthDamage: 14
 --- !u!1 &7522442882458616873
 GameObject:
   m_ObjectHideFlags: 0
@@ -3279,7 +3420,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   target: {fileID: 0}
   autoFindPlayerTag: Player
-  autoFindTargetName: Test
   autoFindTargetWhenNull: 1
   pivotOffset: {x: 0, y: 1.2, z: 0}
   distance: 8
@@ -3292,14 +3432,15 @@ MonoBehaviour:
   invertY: 0
   lockCursor: 1
   lookDeadZone: 0.01
-  followSmooth: 14
-  rotateSmooth: 18
   obstructionMask:
     serializedVersion: 2
     m_Bits: 119
   collisionRadius: 0.2
   collisionBuffer: 0.1
   minDistance: 1.25
+  impactPositionStrength: 0.22
+  impactRotationStrength: 2.8
+  impactDecay: 16
 --- !u!114 &9170000000000001002
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3310,8 +3451,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 225aa0b6136b5ef4cb50de0fe4fa2dbc, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   enableOnlyAfterDeath: 1
   localPlayerTag: Player
   manualLocalTarget: {fileID: 0}

@@ -50,39 +50,39 @@ MonoBehaviour:
       frictionCombine: 0
   grabbed:
     hand:
-      pinWeight: 0.25
-      muscleWeight: 0.18
-      mappingWeight: 0.76
-      staticFriction: 1.3
-      dynamicFriction: 1.05
-      frictionCombine: 3
+      pinWeight: 0.38
+      muscleWeight: 0.3
+      mappingWeight: 0.88
+      staticFriction: 0.95
+      dynamicFriction: 0.72
+      frictionCombine: 0
     arm:
-      pinWeight: 0.12
-      muscleWeight: 0.08
-      mappingWeight: 0.55
-      staticFriction: 0.18
-      dynamicFriction: 0.1
+      pinWeight: 0.34
+      muscleWeight: 0.26
+      mappingWeight: 0.84
+      staticFriction: 0.22
+      dynamicFriction: 0.12
       frictionCombine: 0
     head:
-      pinWeight: 0.32
-      muscleWeight: 0.22
-      mappingWeight: 0.85
-      staticFriction: 0.12
-      dynamicFriction: 0.06
-      frictionCombine: 2
+      pinWeight: 0.52
+      muscleWeight: 0.4
+      mappingWeight: 0.92
+      staticFriction: 0.16
+      dynamicFriction: 0.1
+      frictionCombine: 0
     torso:
-      pinWeight: 0.28
-      muscleWeight: 0.22
-      mappingWeight: 0.55
-      staticFriction: 0.12
-      dynamicFriction: 0.08
-      frictionCombine: 2
+      pinWeight: 0.74
+      muscleWeight: 0.66
+      mappingWeight: 0.94
+      staticFriction: 0.22
+      dynamicFriction: 0.16
+      frictionCombine: 0
     leg:
-      pinWeight: 0.4
-      muscleWeight: 0.34
-      mappingWeight: 0.68
-      staticFriction: 0.55
-      dynamicFriction: 0.35
+      pinWeight: 0.82
+      muscleWeight: 0.76
+      mappingWeight: 0.96
+      staticFriction: 0.85
+      dynamicFriction: 0.65
       frictionCombine: 0
   unstable:
     hand:
@@ -122,73 +122,109 @@ MonoBehaviour:
       frictionCombine: 0
   stunned:
     hand:
-      pinWeight: 0
-      muscleWeight: 0
-      mappingWeight: 1
-      staticFriction: 0.2
-      dynamicFriction: 0.1
-      frictionCombine: 2
+      pinWeight: 0.18
+      muscleWeight: 0.12
+      mappingWeight: 0.96
+      staticFriction: 0.55
+      dynamicFriction: 0.36
+      frictionCombine: 0
     arm:
-      pinWeight: 0
-      muscleWeight: 0
-      mappingWeight: 1
-      staticFriction: 0.2
-      dynamicFriction: 0.1
-      frictionCombine: 2
+      pinWeight: 0.24
+      muscleWeight: 0.18
+      mappingWeight: 0.95
+      staticFriction: 0.44
+      dynamicFriction: 0.28
+      frictionCombine: 0
     head:
-      pinWeight: 0
-      muscleWeight: 0
-      mappingWeight: 1
-      staticFriction: 0.15
-      dynamicFriction: 0.08
-      frictionCombine: 2
+      pinWeight: 0.44
+      muscleWeight: 0.34
+      mappingWeight: 0.98
+      staticFriction: 0.4
+      dynamicFriction: 0.26
+      frictionCombine: 0
     torso:
-      pinWeight: 0
-      muscleWeight: 0
+      pinWeight: 0.68
+      muscleWeight: 0.6
       mappingWeight: 1
-      staticFriction: 0.5
-      dynamicFriction: 0.3
+      staticFriction: 1.1
+      dynamicFriction: 0.88
+      frictionCombine: 3
+    leg:
+      pinWeight: 0.78
+      muscleWeight: 0.7
+      mappingWeight: 1
+      staticFriction: 1.25
+      dynamicFriction: 0.98
+      frictionCombine: 3
+  carriedStunned:
+    hand:
+      pinWeight: 0.2
+      muscleWeight: 0.14
+      mappingWeight: 0.96
+      staticFriction: 0.28
+      dynamicFriction: 0.16
+      frictionCombine: 0
+    arm:
+      pinWeight: 0.24
+      muscleWeight: 0.18
+      mappingWeight: 0.94
+      staticFriction: 0.24
+      dynamicFriction: 0.14
+      frictionCombine: 0
+    head:
+      pinWeight: 0.38
+      muscleWeight: 0.28
+      mappingWeight: 0.98
+      staticFriction: 0.2
+      dynamicFriction: 0.12
+      frictionCombine: 0
+    torso:
+      pinWeight: 0.58
+      muscleWeight: 0.5
+      mappingWeight: 1
+      staticFriction: 0.58
+      dynamicFriction: 0.38
       frictionCombine: 0
     leg:
-      pinWeight: 0
-      muscleWeight: 0
-      mappingWeight: 1
-      staticFriction: 0.3
-      dynamicFriction: 0.2
+      pinWeight: 0.52
+      muscleWeight: 0.46
+      mappingWeight: 0.98
+      staticFriction: 0.44
+      dynamicFriction: 0.3
       frictionCombine: 0
   recovering:
     hand:
-      pinWeight: 0.48
-      muscleWeight: 0.4
-      mappingWeight: 0.82
-      staticFriction: 0.9
-      dynamicFriction: 0.7
+      pinWeight: 0.56
+      muscleWeight: 0.46
+      mappingWeight: 0.9
+      staticFriction: 0.95
+      dynamicFriction: 0.76
       frictionCombine: 0
     arm:
-      pinWeight: 0.26
-      muscleWeight: 0.2
-      mappingWeight: 0.7
-      staticFriction: 0.2
-      dynamicFriction: 0.14
+      pinWeight: 0.42
+      muscleWeight: 0.34
+      mappingWeight: 0.82
+      staticFriction: 0.24
+      dynamicFriction: 0.16
       frictionCombine: 0
     head:
-      pinWeight: 0.42
-      muscleWeight: 0.3
-      mappingWeight: 0.88
-      staticFriction: 0.12
-      dynamicFriction: 0.08
-      frictionCombine: 2
+      pinWeight: 0.54
+      muscleWeight: 0.42
+      mappingWeight: 0.92
+      staticFriction: 0.16
+      dynamicFriction: 0.1
+      frictionCombine: 0
     torso:
-      pinWeight: 0.52
-      muscleWeight: 0.46
-      mappingWeight: 0.78
-      staticFriction: 0.2
-      dynamicFriction: 0.14
+      pinWeight: 0.76
+      muscleWeight: 0.7
+      mappingWeight: 0.94
+      staticFriction: 0.24
+      dynamicFriction: 0.16
       frictionCombine: 0
     leg:
-      pinWeight: 0.76
-      muscleWeight: 0.72
-      mappingWeight: 0.9
-      staticFriction: 0.75
-      dynamicFriction: 0.55
+      pinWeight: 0.88
+      muscleWeight: 0.84
+      mappingWeight: 0.98
+      staticFriction: 0.82
+      dynamicFriction: 0.62
       frictionCombine: 0

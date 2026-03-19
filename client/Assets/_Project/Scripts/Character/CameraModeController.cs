@@ -70,6 +70,22 @@ public class CameraModeController : MonoBehaviour
 
     private void HandleLocalPlayerDied(PlayerStats dead)
     {
+        var networkPlayer = dead != null ? dead.GetComponent<NetworkPlayer>() : null;
+        if (networkPlayer != null && networkPlayer.UsesLocalGhostDeathFlow)
+        {
+            if (cameraRig != null)
+            {
+                cameraRig.enabled = true;
+                cameraRig.SetTarget(networkPlayer.GetCameraFollowTarget());
+            }
+
+            if (spectatorCamera != null)
+                spectatorCamera.EnableSpectator(false);
+
+            Debug.Log($"CameraModeController: Local player died -> {dead.gameObject.name}, defer to NetworkPlayer ghost death flow");
+            return;
+        }
+
         Debug.Log($"CameraModeController: Local player died -> {dead.gameObject.name}, switch to spectator");
 
         // Spectator mode: 살아있는 플레이어들 전부 모아서 타겟으로
@@ -80,9 +96,13 @@ public class CameraModeController : MonoBehaviour
 
         Debug.Log($"CameraModeController: alive targets = {alivePlayers.Count}");
 
-        cameraRig.enabled = false;
+        if (cameraRig != null)
+            cameraRig.enabled = false;
 
-        spectatorCamera.SetTargets(alivePlayers);
-        spectatorCamera.EnableSpectator(true);
+        if (spectatorCamera != null)
+        {
+            spectatorCamera.SetTargets(alivePlayers);
+            spectatorCamera.EnableSpectator(true);
+        }
     }
 }
