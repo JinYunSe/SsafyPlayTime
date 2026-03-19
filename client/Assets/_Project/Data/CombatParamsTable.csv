@@ -1,24 +1,35 @@
 paramId,paramName,value,description
-KNOCKOUT_BASE_THRESHOLD,기절 기본 임계값,30,stunDamage 누적이 이 값 이상이면 기절 판정
-KNOCKOUT_ACCUMULATE_DECAY,기절 누적 감쇠 속도,5,초당 stunDamage 누적치가 이 만큼 감소 (안 맞으면 회복)
-KNOCKOUT_GROGGY_MULTIPLIER,그로기 상태 취약 배율,1.8,그로기 상태에서 받는 stunDamage에 곱해짐
-KNOCKOUT_AIRBORNE_MULTIPLIER,공중 상태 취약 배율,1.5,공중(두 발 안 닿은 상태)에서 받는 stunDamage에 곱해짐
-KNOCKOUT_RECOVERING_MULTIPLIER,회복 직전 취약 배율,2.0,기절에서 막 일어나는 중 피격 시 stunDamage에 곱해짐
-STUN_MIN_DURATION,기절 최소 시간,1.5,어떤 공격이든 기절 시 최소 이 시간(초)은 기절
-STUN_MAX_DURATION,기절 최대 시간,8.0,기절 최대 시간(초) 캡
-STUN_VELOCITY_BONUS,속도 기반 추가 기절 시간 계수,0.15,공격자 속도 * 이 계수 만큼 기절 시간 추가
-STUN_WEIGHT_BONUS,무게 기반 추가 기절 시간 계수,0.02,충격 impulse magnitude * 이 계수 만큼 기절 시간 추가
-STUN_AUTO_RECOVER,자동 회복 여부,1,1=자동 회복 (R키 불필요)
-GROGGY_DURATION,그로기 기본 시간,2.0,제트킥 착지 등 그로기 상태 기본 지속 시간(초)
-GROGGY_TO_STUN_CHANCE,그로기 중 기절 전환 확률,0.7,그로기 상태에서 피격 시 기절 전환 확률 (0~1)
-HEADBUTT_SELF_STUN_WALL,벽 박치기 자해 기절 시간,2.5,벽에 박치기 시 본인 기절 시간(초)
-HEADBUTT_SELF_STUN_FLOOR,바닥 박치기 자해 기절 시간,1.5,바닥에 박치기 시 본인 기절 시간(초)
-BODY_PART_HEAD_MULTIPLIER,머리 부위 배율,1.5,머리를 맞으면 stunDamage에 곱해짐
-BODY_PART_BODY_MULTIPLIER,몸통 부위 배율,1.0,몸통을 맞으면 기본 배율
-BODY_PART_LIMB_MULTIPLIER,팔다리 부위 배율,0.7,팔다리를 맞으면 stunDamage 감소
-GRAB_THROW_FORCE_OBJECT,오브젝트 던지기 힘,12,일반 물체를 던질 때의 impulse force
-GRAB_THROW_FORCE_PLAYER_NORMAL,정상 플레이어 던지기 힘,10,active ragdoll 플레이어 던짐
-GRAB_THROW_FORCE_PLAYER_STUNNED,기절 플레이어 던지기 힘,15,기절 플레이어를 아이템처럼 던짐
-THROWN_OBJECT_STUN_DAMAGE,던진 물체 기절 데미지,20,던진 물체에 맞았을 때의 stunDamage
-THROWN_PLAYER_STUN_DAMAGE,던진 플레이어 기절 데미지,25,던진 기절 플레이어에 맞았을 때의 stunDamage
-DROP_WEAPON_KEY,무기 떨구기 키,F,무기를 들고 있을 때 F키로 떨구기
+KNOCKOUT_BASE_THRESHOLD,Stun threshold,45,Base accumulated stun needed to enter stun.
+KNOCKOUT_ACCUMULATE_DECAY,Stun decay per second,3.2,How quickly accumulated stun drains over time.
+KNOCKOUT_GROGGY_MULTIPLIER,Groggy multiplier,1.8,Extra stun taken while groggy.
+KNOCKOUT_AIRBORNE_MULTIPLIER,Airborne multiplier,1.3,Extra stun taken while airborne.
+KNOCKOUT_RECOVERING_MULTIPLIER,Recovering multiplier,1.6,Extra stun taken while in recovery.
+STUN_MIN_DURATION,Min stun duration,1.2,Minimum stun duration in seconds.
+STUN_MAX_DURATION,Max stun duration,4.8,Maximum stun duration in seconds.
+STUN_VELOCITY_BONUS,Velocity bonus,0.08,Extra stun duration from attacker speed.
+STUN_WEIGHT_BONUS,Impulse bonus,0.015,Extra stun duration from impact impulse.
+STUN_AUTO_RECOVER,Auto recover,1,1 keeps automatic recovery enabled.
+GROGGY_DURATION,Groggy duration,2.0,Base groggy duration in seconds.
+GROGGY_TO_STUN_CHANCE,Groggy to stun chance,0.7,Chance to transition from groggy to stun.
+HEADBUTT_SELF_STUN_WALL,Headbutt wall self stun,2.5,Self stun duration when headbutting a wall.
+HEADBUTT_SELF_STUN_FLOOR,Headbutt floor self stun,1.5,Self stun duration when headbutting the floor.
+HIDDEN_HEALTH_MAX,Hidden max health,260,Hidden health pool used for death.
+HIDDEN_HEALTH_HIT_IMMUNITY,Health hit immunity,0.12,Short immunity window between health hits.
+HIDDEN_HEALTH_RECENT_WINDOW,Recent health window,3.5,Window used for recent health damage cap.
+HIDDEN_HEALTH_RECENT_CAP,Recent health cap,85,Maximum health damage allowed inside the recent window.
+HIDDEN_HEALTH_LOW_HP_STUN_BONUS,Low health stun bonus,0.35,Extra stun vulnerability when health is low.
+ENVIRONMENT_COLLISION_MIN_IMPACT,Collision min impact,18,Minimum impact that starts collision damage.
+ENVIRONMENT_COLLISION_MAX_IMPACT,Collision max impact,55,Impact level treated as max collision damage.
+ENVIRONMENT_COLLISION_MIN_STUN,Collision min stun,3,Minimum stun from environment collision.
+ENVIRONMENT_COLLISION_MAX_STUN,Collision max stun,9,Maximum stun from environment collision.
+ENVIRONMENT_COLLISION_MIN_HEALTH,Collision min health,0,Minimum health damage from environment collision.
+ENVIRONMENT_COLLISION_MAX_HEALTH,Collision max health,14,Maximum health damage from environment collision.
+BODY_PART_HEAD_MULTIPLIER,Head multiplier,1.5,Head hits amplify stun.
+BODY_PART_BODY_MULTIPLIER,Body multiplier,1.0,Torso hits use the default stun multiplier.
+BODY_PART_LIMB_MULTIPLIER,Limb multiplier,0.7,Limb hits reduce stun.
+GRAB_THROW_FORCE_OBJECT,Object throw force,12,Impulse applied when throwing an object.
+GRAB_THROW_FORCE_PLAYER_NORMAL,Normal player throw force,10,Throw force for an active ragdoll player.
+GRAB_THROW_FORCE_PLAYER_STUNNED,Stunned player throw force,15,Throw force for a stunned player.
+THROWN_OBJECT_STUN_DAMAGE,Thrown object stun damage,20,Stun damage dealt by a thrown object.
+THROWN_PLAYER_STUN_DAMAGE,Thrown player stun damage,25,Stun damage dealt by a thrown player.
+DROP_WEAPON_KEY,Drop key,70,Keyboard key code used for drop in docs only.
