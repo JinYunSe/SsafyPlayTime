@@ -57,6 +57,14 @@ namespace SSAFYPlayTime.Character
         private float[] _currentMuscleWeights;
         private bool _initialized;
 
+        // ─── Anchor Grab Overlay ───
+        // 특정 앵커 부위가 잡혔을 때 해당 근육의 pin/muscle weight를 낮추는 오버레이.
+        // GrabAnchorPoint.AnchorId별로 적용, 해제 시 복원.
+        private float[] _anchorGrabMultipliers;
+        private readonly List<GrabAnchorPoint.AnchorId> _activeAnchorGrabs = new();
+        private const float AnchorGrabDirectMuscleMultiplier = 0.55f;  // 잡힌 본 직접
+        private const float AnchorGrabAdjacentMuscleMultiplier = 0.75f;  // 인접 본
+
         // ─── Combat Flinch Overlay ───
         // 피격 시 방향성 per-muscle pin drop을 적용하는 임시 오버레이.
         // 상태 enum 추가 없이 multiplier 채널로 동작.
@@ -123,6 +131,7 @@ namespace SSAFYPlayTime.Character
 
             ApplyDynamicWobble(Time.deltaTime);
             TickCombatFlinch(Time.deltaTime);
+            ApplyAnchorGrabOverlay();
         }
 
         public void SetState(BodyPartPhysicsProfile.CharacterPhysicsState newState)
@@ -642,6 +651,119 @@ namespace SSAFYPlayTime.Character
                 var targetMultiplier = Mathf.Lerp(_combatFlinchMultipliers[i], 1f, easedRecovery);
                 var muscle = puppetMaster.muscles[i];
                 muscle.props.pinWeight = Mathf.Clamp01(muscle.props.pinWeight * targetMultiplier);
+            }
+        }
+
+        // =========================================================
+        // Anchor Grab Overlay — 특정 앵커 부위가 잡혔을 때 해당 근육 약화
+        // =========================================================
+
+        /// <summary>
+        /// 특정 앵커 부위가 잡혔을 때 해당 근육의 pin/muscle weight를 낮추는 오버레이 적용.
+        /// HandGrabHandler가 AttachGrab 시 타겟 BodyPartPhysicsManager에 호출.
+        /// </summary>
+        public void NotifyAnchorGrabbed(GrabAnchorPoint.AnchorId anchorId)
+        {
+            if (!_initialized || puppetMaster == null || anchorId == GrabAnchorPoint.AnchorId.None)
+                return;
+
+            if (_activeAnchorGrabs.Contains(anchorId))
+                return;
+
+            _activeAnchorGrabs.Add(anchorId);
+            RebuildAnchorGrabMultipliers();
+        }
+
+        /// <summary>
+        /// 앵커 그랩 해제 시 오버레이 제거.
+        /// HandGrabHandler가 Release 시 타겟 BodyPartPhysicsManager에 호출.
+        /// </summary>
+        public void NotifyAnchorReleased(GrabAnchorPoint.AnchorId anchorId)
+        {
+            if (!_initialized || anchorId == GrabAnchorPoint.AnchorId.None)
+                return;
+
+            _activeAnchorGrabs.Remove(anchorId);
+            RebuildAnchorGrabMultipliers();
+        }
+
+        private void RebuildAnchorGrabMultipliers()
+        {
+            var count = puppetMaster.muscles.Length;
+            if (_anchorGrabMultipliers == null || _anchorGrabMultipliers.Length != count)
+                _anchorGrabMultipliers = new float[count];
+
+            // 초기화: 전부 1 (영향 없음)
+            for (int i = 0; i < count; i++)
+                _anchorGrabMultipliers[i] = 1f;
+
+            if (_activeAnchorGrabs.Count == 0)
+                return;
+
+            // 각 활성 앵커에 대해 관련 근육 멀티플라이어 적용
+            foreach (var anchorId in _activeAnchorGrabs)
+            {
+                MapAnchorToMuscleCategories(anchorId,
+                    out var directCategory, out var adjacentCategory);
+
+                for (int i = 0; i < count; i++)
+                {
+                    var cat = _muscleCategories[i];
+                    if (cat == directCategory)
+                        _anchorGrabMultipliers[i] = Mathf.Min(_anchorGrabMultipliers[i],
+                            AnchorGrabDirectMuscleMultiplier);
+                    else if (adjacentCategory.HasValue && cat == adjacentCategory.Value)
+                        _anchorGrabMultipliers[i] = Mathf.Min(_anchorGrabMultipliers[i],
+                            AnchorGrabAdjacentMuscleMultiplier);
+                }
+            }
+        }
+
+        /// <summary>현재 프레임에 앵커 그랩 오버레이 적용 (LateUpdate에서 호출)</summary>
+        private void ApplyAnchorGrabOverlay()
+        {
+            if (_anchorGrabMultipliers == null || _activeAnchorGrabs.Count == 0)
+                return;
+
+            var count = puppetMaster.muscles.Length;
+            for (int i = 0; i < count; i++)
+            {
+                if (_anchorGrabMultipliers[i] >= 1f) continue;
+                var muscle = puppetMaster.muscles[i];
+                muscle.props.pinWeight *= _anchorGrabMultipliers[i];
+                muscle.props.muscleWeight *= _anchorGrabMultipliers[i];
+            }
+        }
+
+        private static void MapAnchorToMuscleCategories(GrabAnchorPoint.AnchorId anchorId,
+            out BodyPartPhysicsProfile.BodyPartCategory direct,
+            out BodyPartPhysicsProfile.BodyPartCategory? adjacent)
+        {
+            switch (anchorId)
+            {
+                case GrabAnchorPoint.AnchorId.Chest:
+                case GrabAnchorPoint.AnchorId.Hips:
+                    direct = BodyPartPhysicsProfile.BodyPartCategory.Torso;
+                    adjacent = null;
+                    break;
+                case GrabAnchorPoint.AnchorId.LeftUpperArm:
+                case GrabAnchorPoint.AnchorId.RightUpperArm:
+                    direct = BodyPartPhysicsProfile.BodyPartCategory.Arm;
+                    adjacent = BodyPartPhysicsProfile.BodyPartCategory.Torso;
+                    break;
+                case GrabAnchorPoint.AnchorId.LeftForearm:
+                case GrabAnchorPoint.AnchorId.RightForearm:
+                    direct = BodyPartPhysicsProfile.BodyPartCategory.Hand;
+                    adjacent = BodyPartPhysicsProfile.BodyPartCategory.Arm;
+                    break;
+                case GrabAnchorPoint.AnchorId.Head:
+                    direct = BodyPartPhysicsProfile.BodyPartCategory.Head;
+                    adjacent = BodyPartPhysicsProfile.BodyPartCategory.Torso;
+                    break;
+                default:
+                    direct = BodyPartPhysicsProfile.BodyPartCategory.Torso;
+                    adjacent = null;
+                    break;
             }
         }
 
