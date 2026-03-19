@@ -78,9 +78,9 @@ public sealed partial class NetworkPlayer
         if (Input.GetKeyDown(KeyCode.F))
             _dropTriggered = true;
 
-        // OwnerProxy: DoPhysicsStep은 호스트에서만 실행되므로
-        // 로컬 입력 기반 grab 상태를 여기서 갱신해야
-        // PartyMonsterAnimationDriver.SyncGrabAnimation()이 올바르게 동작한다.
+        // OwnerProxy does not run DoPhysicsStep locally.
+        // Mirror the local grab intent here so animation sync stays correct.
+        // This keeps PartyMonsterAnimationDriver.SyncGrabAnimation() in sync.
         if (Runner != null && HasInputAuthority && !HasStateAuthority)
         {
             _isLeftGrabActive = _leftMouseDown && _leftMouseConsumedAsGrab;
@@ -145,6 +145,7 @@ public sealed partial class NetworkPlayer
             CameraYaw = ResolveCameraYaw(),
             Jump = _sandboxJump,
             Punch = _leftClickUseTriggered,
+            PrimaryUseHold = _leftMouseDown,
             Drop = _dropTriggered,
             Throw = _throwTriggered,
             LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab,
@@ -165,7 +166,7 @@ public sealed partial class NetworkPlayer
         _sandboxInput = Vector2.zero;
         _sandboxJump = false;
         _dropTriggered = false;
-        _throwTriggered = false;
+        // Sync absolute hips position for remote grab / drag presentation.
         _leftClickUseTriggered = false;
         _leftMouseDown = false;
         _leftMouseConsumedAsGrab = false;
