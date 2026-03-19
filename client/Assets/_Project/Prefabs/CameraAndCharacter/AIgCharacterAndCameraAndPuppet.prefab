@@ -492,6 +492,7 @@ MonoBehaviour:
   breakTorque: 2000
   dualGrabBreakMultiplier: 3
   maxGrabDistance: 2.5
+  palmAnchorOffset: {x: 0, y: -0.02, z: 0.06}
   grabbedPinWeight: 0.3
   grabbedMuscleWeight: 0.3
 --- !u!1 &1079263157093569050
@@ -3499,6 +3500,7 @@ MonoBehaviour:
   breakTorque: 2000
   dualGrabBreakMultiplier: 3
   maxGrabDistance: 2.5
+  palmAnchorOffset: {x: 0, y: -0.02, z: 0.06}
   grabbedPinWeight: 0.3
   grabbedMuscleWeight: 0.3
 --- !u!1 &6540608904053397971
@@ -4289,6 +4291,7 @@ GameObject:
   - component: {fileID: 964483268536491044}
   - component: {fileID: 871762644500709784}
   - component: {fileID: 394049066348431589}
+  - component: {fileID: 8709236335086931300}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -4398,6 +4401,8 @@ MonoBehaviour:
   invertY: 0
   lockCursor: 1
   lookDeadZone: 0.01
+  yawClampBlendInSpeed: 18
+  yawClampBlendOutSpeed: 8
   followSmooth: 14
   rotateSmooth: 18
   obstructionMask:
@@ -4406,6 +4411,9 @@ MonoBehaviour:
   collisionRadius: 0.2
   collisionBuffer: 0.1
   minDistance: 1.25
+  impactPositionStrength: 0.22
+  impactRotationStrength: 2.8
+  impactDecay: 16
 --- !u!114 &964483268536491044
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4503,6 +4511,19 @@ MonoBehaviour:
   bananaPrefabOnline:
     RawGuidValue: 3ce32ffa6ccf60e4ab65d9e396f43433
   bananaPrefabOnlineObject: {fileID: 0}
+--- !u!114 &8709236335086931300
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7761395685847284647}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fcd2e1ec062a7a84dbab757e2700ea43, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  mapLayerName: Map
 --- !u!1 &7818269253471217244
 GameObject:
   m_ObjectHideFlags: 0
@@ -4811,6 +4832,8 @@ MonoBehaviour:
   weightBlendSpeed: 2.2
   lookAtHeightOffset: 0.8
   scanInterval: 0.2
+  movingWeightScale: 0.3
+  movingSpeedThreshold: 1.5
 --- !u!114 &5030105105898311857
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5443,6 +5466,24 @@ MonoBehaviour:
   useAnimatedVisualOnly: 1
   disablePhysicsAnimationSync: 1
   holdPoint: {fileID: 0}
+  cameraAnchorPresentationLocalOffset: {x: 0, y: 1.35, z: 0}
+  cameraAnchorFallbackRootLocalOffset: {x: 0, y: 1.25, z: 0}
+  cameraAnchorStableFollowSpeed: 25
+  cameraAnchorStableAirborneFollowSpeed: 18
+  cameraAnchorHoldingFollowSpeed: 18
+  cameraAnchorRecoveringFollowSpeed: 12
+  cameraAnchorHardPhysicsFollowSpeed: 6
+  cameraAnchorVerticalFollowMultiplier: 0.75
+  cameraAnchorStableAirborneVerticalFollowMultiplier: 0.9
+  cameraAnchorHoldingVerticalFollowMultiplier: 0.82
+  cameraAnchorHardPhysicsVerticalFollowMultiplier: 0.58
+  cameraAnchorSnapDistance: 2
+  cameraAnchorStableAirborneSnapMultiplier: 0.9
+  cameraAnchorHoldingSnapMultiplier: 0.85
+  cameraAnchorRecoveringSnapMultiplier: 1.1
+  cameraAnchorOwnerProxyLeadDistance: 0.18
+  cameraAnchorOwnerProxyPresentationCorrectionScale: 0.35
+  cameraAnchorOwnerProxyMaxCorrectionDistance: 0.12
   _CharacterTypeIndex: -1
   _BoneRotations: []
   _NetworkedHipsPosition: {x: 0, y: 0, z: 0}
@@ -5465,9 +5506,6 @@ MonoBehaviour:
   _NetworkedIsBeingGrabbed:
     _value: 0
   _NetworkedIsDragged:
-    _value: 0
-  _NetworkedHp: 0
-  _IsDeadNetworked:
     _value: 0
   itemWorldEffectMask:
     serializedVersion: 2
@@ -5498,6 +5536,10 @@ MonoBehaviour:
   flamethrowerMuzzleLocalEulerOffset: {x: 0, y: 0, z: 0}
   enableItemWorldEffectLog: 0
   enableProxyAnimationDiagnostics: 1
+  enableStunForceDiagnostics: 0
+  stunForceDiagnosticsIncludeProxies: 1
+  stunForceDiagnosticsWindow: 1.5
+  stunForceDiagnosticsSampleInterval: 0.12
 --- !u!114 &8050714215843509432
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5515,6 +5557,7 @@ MonoBehaviour:
   locomotionThreshold: 0.1
   grabHoldThreshold: 0.2
   attackLockDuration: 0.08
+  attackVisualDuration: 0.3
   throwLockDuration: 0.85
   enableAnimationDriverDiagnostics: 1
 --- !u!114 &1826213868747077357
@@ -5537,6 +5580,7 @@ MonoBehaviour:
   reachDistance: 0.6
   handReachForce: 115
   handDamping: 8
+  holdIKRotationWeight: 0.5
   anchorBlend: 0.6
   holdForwardOffset: 0.45
   holdSideOffset: 0.24
@@ -5548,6 +5592,12 @@ MonoBehaviour:
   behindBackThreshold: -0.08
   behindBackForce: 90
   behindBackTurnTorque: 20
+  chestReactionShare: 0.4
+  carryingTorsoReactionMultiplier: 1.15
+  dualCarryTorsoReactionMultiplier: 1.35
+  carryingTurnAssistMultiplier: 1.1
+  dualCarryTurnAssistMultiplier: 1.25
+  carryPoseProfile: {fileID: 0}
 --- !u!114 &2457155399830757086
 MonoBehaviour:
   m_ObjectHideFlags: 0
