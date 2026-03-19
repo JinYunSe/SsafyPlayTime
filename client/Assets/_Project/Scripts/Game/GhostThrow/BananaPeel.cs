@@ -128,9 +128,28 @@ namespace SSAFYPlayTime.Game.GhostThrow
             // 온라인: StateAuthority(서버/호스트)만 처리
             if (Runner != null && !HasStateAuthority) return;
 
+            var networkPlayer = playerObj.GetComponentInParent<NetworkPlayer>();
+            if (networkPlayer != null && (networkPlayer.IsStunned || networkPlayer.IsRecovering))
+            {
+                var skippedRb = networkPlayer.transform.root.GetComponent<Rigidbody>();
+                var velocity = skippedRb != null ? skippedRb.velocity : Vector3.zero;
+                networkPlayer.TraceStunForceEvent(
+                    "BananaPeel",
+                    skippedRb,
+                    Vector3.zero,
+                    ForceMode.VelocityChange,
+                    velocity,
+                    velocity,
+                    false,
+                    "skipped=stunned_or_recovering");
+                return;
+            }
+
             _isConsumed = true;
 
-            Rigidbody playerRb = playerObj.GetComponentInParent<Rigidbody>();
+            Rigidbody playerRb = networkPlayer != null
+                ? networkPlayer.transform.root.GetComponent<Rigidbody>()
+                : playerObj.GetComponentInParent<Rigidbody>();
             if (playerRb != null && !playerRb.isKinematic)
             {
                 Vector3 randomHorizontal = new Vector3(
@@ -140,7 +159,17 @@ namespace SSAFYPlayTime.Game.GhostThrow
                 ).normalized;
 
                 Vector3 slipVelocity = randomHorizontal * slipForce + Vector3.up * slipUpForce;
+                var velocityBefore = playerRb.velocity;
                 playerRb.AddForce(slipVelocity, ForceMode.VelocityChange);
+                networkPlayer?.TraceStunForceEvent(
+                    "BananaPeel",
+                    playerRb,
+                    slipVelocity,
+                    ForceMode.VelocityChange,
+                    velocityBefore,
+                    playerRb.velocity,
+                    true,
+                    "applied");
 
                 Debug.Log($"[BananaPeel] {playerRb.gameObject.name} 이(가) 바나나를 밟아 미끄러졌습니다!");
             }

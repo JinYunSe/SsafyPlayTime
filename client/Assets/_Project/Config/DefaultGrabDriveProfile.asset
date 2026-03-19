@@ -22,6 +22,24 @@ MonoBehaviour:
   limitSpring: 500
   limitDamper: 30
   dualGrabMultiplier: 2.5
+  usePlayerGrabOverride: 1
+  playerGrabSpring: 900
+  playerGrabDamper: 70
+  playerGrabBreakForce: 1800
+  playerGrabLinearLimit: 0.16
+  playerWeakeningEnabled: 0
+  useObjectGrabOverride: 1
+  objectGrabSpring: 1200
+  objectGrabBreakForce: 3000
+  objectGrabLinearLimit: 0.15
+  useStunnedPlayerGrabOverride: 1
+  stunnedPlayerGrabSpring: 950
+  stunnedPlayerGrabBreakForce: 2200
+  stunnedPlayerGrabLinearLimit: 0.12
+  stunnedPlayerGrabDamper: 95
+  stunnedPlayerWeakeningEnabled: 0
   grabbedPinWeight: 0.3
   grabbedMuscleWeight: 0.3
   throwUpComponent: 0.4
+  consciousPushForceScale: 0.4
+  consciousPushUpComponent: 0.1

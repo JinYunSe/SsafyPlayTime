@@ -2,64 +2,132 @@ using System;
 using Fusion;
 using UnityEngine;
 
-/// <summary>
-/// 플레이어 HP 이벤트 어댑터.
-/// 실제 HP 로직은 NetworkPlayer.Health.cs가 담당하며,
-/// 이 클래스는 OnDied 이벤트를 EndGameManager에 중계하는 역할만 한다.
-/// HP 바는 게임 내에서 노출하지 않음 (숨김 처리).
-/// </summary>
 public class PlayerStats : MonoBehaviour
 {
-    // EndGameManager가 구독하는 사망 이벤트 (인터페이스 유지)
+    [Header("Offline Fallback")]
+    [SerializeField] private int offlineStartingHealth = 260;
+
+    private NetworkPlayer _networkPlayer;
+    private int _standaloneCurrentHealth;
+    private int _lastObservedHealth = -1;
+    private int _lastObservedMaxHealth = -1;
+    private bool _lastObservedDead;
+
+    public int currentHealth => CurrentHealth;
+    public int maxHealth => MaxHealth;
+    public int CurrentHealth => ResolveCurrentHealth();
+    public int MaxHealth => ResolveMaxHealth();
+    public bool IsDead => ResolveIsDead();
+
     public event Action<PlayerStats> OnDied;
+    public event Action<PlayerStats, int, int> OnHealthChanged;
 
-    // 현재 생존 여부 (EndGameManager용)
-    public bool IsDead { get; private set; } = false;
-
-    // 하위 호환: 외부에서 currentHealth를 읽는 코드를 위한 프로퍼티
-    public int currentHealth => IsDead ? 0 : 1;
+    private void Awake()
+    {
+        _networkPlayer = GetComponent<NetworkPlayer>();
+        _standaloneCurrentHealth = Mathf.Max(1, offlineStartingHealth);
+    }
 
     private void Start()
+    {
+        TryPlaceStandaloneAtSpawn();
+        RefreshObservedState(forceNotify: true);
+    }
+
+    private void Update()
+    {
+        RefreshObservedState(forceNotify: false);
+    }
+
+    public void TakeDamage(int damage)
+    {
+        if (damage <= 0)
+            return;
+
+        if (_networkPlayer != null)
+        {
+            _networkPlayer.ApplyHealthDamage(damage, "LegacyDamage");
+            return;
+        }
+
+        ApplyStandaloneDamage(damage);
+    }
+
+    public void ApplyDamage(float damage, float stunDamage, string source)
+    {
+        if (_networkPlayer != null)
+        {
+            _networkPlayer.ApplyCombinedDamage(damage, stunDamage, source);
+            return;
+        }
+
+        if (damage > 0f)
+            ApplyStandaloneDamage(Mathf.Max(1, Mathf.RoundToInt(damage)));
+    }
+
+    private void ApplyStandaloneDamage(int damage)
+    {
+        if (_standaloneCurrentHealth <= 0)
+            return;
+
+        _standaloneCurrentHealth = Mathf.Max(0, _standaloneCurrentHealth - damage);
+        RefreshObservedState(forceNotify: true);
+    }
+
+    private int ResolveCurrentHealth()
+    {
+        if (_networkPlayer != null)
+            return _networkPlayer.CurrentHealth;
+
+        return Mathf.Clamp(_standaloneCurrentHealth, 0, MaxHealth);
+    }
+
+    private int ResolveMaxHealth()
+    {
+        if (_networkPlayer != null)
+            return Mathf.Max(1, _networkPlayer.MaxHealth);
+
+        return Mathf.Max(1, offlineStartingHealth);
+    }
+
+    private bool ResolveIsDead()
+    {
+        if (_networkPlayer != null)
+            return _networkPlayer.IsDeadState;
+
+        return _standaloneCurrentHealth <= 0;
+    }
+
+    private void RefreshObservedState(bool forceNotify)
+    {
+        var current = ResolveCurrentHealth();
+        var max = ResolveMaxHealth();
+        var dead = ResolveIsDead();
+
+        if (forceNotify || current != _lastObservedHealth || max != _lastObservedMaxHealth)
+        {
+            _lastObservedHealth = current;
+            _lastObservedMaxHealth = max;
+            OnHealthChanged?.Invoke(this, current, max);
+        }
+
+        if (!_lastObservedDead && dead)
+            OnDied?.Invoke(this);
+
+        _lastObservedDead = dead;
+    }
+
+    private void TryPlaceStandaloneAtSpawn()
     {
         // Fusion 네트워크 캐릭터: 스폰 위치는 서버가 결정하므로 로컬 이동 생략
         var networkObject = GetComponent<NetworkObject>();
         if (networkObject != null && networkObject.Runner != null && networkObject.IsValid)
             return;
 
-        // 오프라인/로컬 테스트: SpawnManager로 위치 결정
         var spawnManager = FindObjectOfType<SpawnManager>();
-        if (spawnManager != null)
-            transform.position = spawnManager.GetSpawnPosition();
-    }
-
-    /// <summary>
-    /// NetworkPlayer.Health.cs의 RPC_OnPlayerDied에서 호출.
-    /// EndGameManager에 사망 이벤트를 중계한다.
-    /// </summary>
-    public void NotifyDeathFromNetwork()
-    {
-        if (IsDead) return;
-        IsDead = true;
-        OnDied?.Invoke(this);
-        Debug.Log($"[PlayerStats] {gameObject.name} 사망 이벤트 중계 완료");
-    }
-
-    /// <summary>
-    /// 오프라인/레거시 코드 호환용. 네트워크 캐릭터에서는 NetworkPlayer.ApplyHpDamage()를 사용한다.
-    /// </summary>
-    public void TakeDamage(int damage)
-    {
-        var np = GetComponent<NetworkPlayer>();
-        if (np != null)
-        {
-            np.ApplyHpDamage(damage);
+        if (spawnManager == null)
             return;
-        }
 
-        // 순수 오프라인 폴백
-        if (IsDead) return;
-        IsDead = true;
-        OnDied?.Invoke(this);
-        Destroy(gameObject, 0.05f);
+        transform.position = spawnManager.GetSpawnPosition();
     }
 }

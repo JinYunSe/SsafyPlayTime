@@ -44,6 +44,8 @@ namespace SSAFYPlayTime.Game.GhostThrow
         private NetworkPlayer _localNetworkPlayer;
         private bool _isGhostThrowEnabled;
         private bool _hasLoggedMissingLocalPlayer;
+        private bool controlEnabled = true;
+        private bool enableOutOfBoundsKillCheck;
 
         public bool IsGhostThrowEnabled => _isGhostThrowEnabled;
 
@@ -57,6 +59,16 @@ namespace SSAFYPlayTime.Game.GhostThrow
         {
             if (_localPlayerStats != null)
                 _localPlayerStats.OnDied -= HandleLocalPlayerDied;
+        }
+
+        public void SetGhostControlEnabled(bool enabled)
+        {
+            controlEnabled = enabled;
+        }
+
+        public void SetEnableOutOfBoundsKillCheck(bool enabled)
+        {
+            enableOutOfBoundsKillCheck = enabled;
         }
 
         private void Update()
@@ -251,12 +263,11 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
             if (runner != null && runner.IsRunning && runner.IsServer)
             {
-                SpawnOnline(runner, isBanana, spawnPos, initialVelocity);
+                if (SpawnOnline(runner, isBanana, spawnPos, initialVelocity))
+                    return;
             }
-            else
-            {
-                SpawnOffline(isBanana, spawnPos, initialVelocity);
-            }
+
+            SpawnOffline(isBanana, spawnPos, initialVelocity);
         }
 
         private Vector3 CalculateParabolicVelocity(Vector3 from, Vector3 to)
