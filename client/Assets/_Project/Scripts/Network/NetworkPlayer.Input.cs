@@ -49,11 +49,16 @@ public sealed partial class NetworkPlayer
             return;
 
         if (GetInput(out PlayerNetworkInput input))
+        {
+            TraceMoveAuthorityInput("FixedUpdateNetwork.Input", input);
             DoPhysicsStep(input, Runner.DeltaTime);
+        }
 
         UpdateGrabHandlers();
         UpdatePhysicalPhaseState(Runner.DeltaTime);
         SynchronizeNetworkSimulationState();
+        TraceMoveAuthorityState("FixedUpdateNetwork.AfterPhase");
+        TraceMovePublish("FixedUpdateNetwork.Publish");
         ClampOutOfBoundsCharacter();
     }
 
@@ -83,9 +88,10 @@ public sealed partial class NetworkPlayer
         // This keeps PartyMonsterAnimationDriver.SyncGrabAnimation() in sync.
         if (Runner != null && HasInputAuthority && !HasStateAuthority)
         {
-            _isLeftGrabActive = _leftMouseDown && _leftMouseConsumedAsGrab;
-            _isRightGrabActive = _rightMouseDown && _rightMouseConsumedAsGrab;
-            _isGrabActive = _isLeftGrabActive || _isRightGrabActive;
+            var unifiedGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab;
+            _isLeftGrabActive = unifiedGrabHold;
+            _isRightGrabActive = unifiedGrabHold;
+            _isGrabActive = unifiedGrabHold;
         }
     }
 
@@ -115,26 +121,8 @@ public sealed partial class NetworkPlayer
 
     private void UpdateSecondaryClickState()
     {
-        if (Input.GetMouseButtonDown(1))
-        {
-            _rightMouseDown = true;
-            _rightMouseDownTime = Time.time;
-            _rightMouseConsumedAsGrab = false;
-        }
-
-        if (Input.GetMouseButton(1) && _rightMouseDown)
-        {
-            if (Time.time - _rightMouseDownTime >= GRAB_HOLD_THRESHOLD && !_rightMouseConsumedAsGrab)
-                _rightMouseConsumedAsGrab = true;
-        }
-
-        if (!Input.GetMouseButtonUp(1))
-            return;
-
-        if (!_rightMouseConsumedAsGrab && Time.time - _rightMouseDownTime < GRAB_HOLD_THRESHOLD)
-            _throwTriggered = true;
-
         _rightMouseDown = false;
+        _rightMouseDownTime = 0f;
         _rightMouseConsumedAsGrab = false;
     }
 
@@ -148,9 +136,9 @@ public sealed partial class NetworkPlayer
             Punch = _leftClickUseTriggered,
             PrimaryUseHold = _leftMouseDown,
             Drop = _dropTriggered,
-            Throw = _throwTriggered,
+            Throw = false,
             LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab,
-            RightGrabHold = _rightMouseDown && _rightMouseConsumedAsGrab,
+            RightGrabHold = false,
             Headbutt = Input.GetMouseButtonDown(2),
             Sprint = Input.GetKey(KeyCode.LeftShift)
         };
