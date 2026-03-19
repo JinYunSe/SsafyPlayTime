@@ -878,26 +878,13 @@ public class HandGrabHandler : MonoBehaviour
         cj.anchor = palmAnchorOffset;
         cj.connectedAnchor = localAnchor;
 
-        // 기절자 운반: 선형 Locked + 각도 Limited로 더 단단하게 고정
-        // 일반 잡기: 선형 Limited + 각도 Free (기존 동작)
-        if (targetType == GrabDriveProfile.GrabTargetType.StunnedPlayer)
-        {
-            cj.xMotion = ConfigurableJointMotion.Locked;
-            cj.yMotion = ConfigurableJointMotion.Locked;
-            cj.zMotion = ConfigurableJointMotion.Locked;
-            cj.angularXMotion = ConfigurableJointMotion.Limited;
-            cj.angularYMotion = ConfigurableJointMotion.Limited;
-            cj.angularZMotion = ConfigurableJointMotion.Limited;
-        }
-        else
-        {
-            cj.xMotion = ConfigurableJointMotion.Limited;
-            cj.yMotion = ConfigurableJointMotion.Limited;
-            cj.zMotion = ConfigurableJointMotion.Limited;
-            cj.angularXMotion = ConfigurableJointMotion.Free;
-            cj.angularYMotion = ConfigurableJointMotion.Free;
-            cj.angularZMotion = ConfigurableJointMotion.Free;
-        }
+        // 모든 타겟: 선형 Limited + 각도 Free (기절자도 Limited로 약간의 여유를 줌)
+        cj.xMotion = ConfigurableJointMotion.Limited;
+        cj.yMotion = ConfigurableJointMotion.Limited;
+        cj.zMotion = ConfigurableJointMotion.Limited;
+        cj.angularXMotion = ConfigurableJointMotion.Free;
+        cj.angularYMotion = ConfigurableJointMotion.Free;
+        cj.angularZMotion = ConfigurableJointMotion.Free;
 
         // 타겟 유형별 스프링 드라이브
         var drive = grabProfile.CreateGrabDrive(false, targetType);
@@ -924,15 +911,6 @@ public class HandGrabHandler : MonoBehaviour
         }
 
         cj.linearLimit = linearLimit;
-
-        // 기절자 운반: 각도 리미트 설정 (Locked 선형 + 제한된 회전으로 안정적 운반)
-        if (targetType == GrabDriveProfile.GrabTargetType.StunnedPlayer)
-        {
-            cj.lowAngularXLimit = new SoftJointLimit { limit = -45f };
-            cj.highAngularXLimit = new SoftJointLimit { limit = 45f };
-            cj.angularYLimit = new SoftJointLimit { limit = 45f };
-            cj.angularZLimit = new SoftJointLimit { limit = 45f };
-        }
 
         // 타겟 유형별 breakForce
         var bf = grabProfile.EvaluateWeakenedBreakForce(targetType, 0f);
