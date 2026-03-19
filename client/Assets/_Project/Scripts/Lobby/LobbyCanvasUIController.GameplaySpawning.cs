@@ -27,6 +27,8 @@ namespace SSAFYPlayTime
         // 스폰된 캐릭터 NetworkObject를 PlayerId 키로 관리 (퇴장 시 Despawn에 사용)
         private readonly Dictionary<int, NetworkObject> _spawnedGameplayNetworkCharacters = new();
         private readonly Dictionary<int, int> _spawnedCharacterIndexByPlayerId = new();
+        private readonly HashSet<int> _deadGameplayPlayerIds = new();
+        private readonly Dictionary<int, NetworkPlayer> _trackedGameplayPlayersByPlayerId = new();
 
         // 씬에서 찾아둔 SpawnPointGroup 캐시 (OnSceneLoadStart 시 null 초기화)
         private SpawnPointGroup _cachedSpawnPointGroup;
@@ -464,6 +466,12 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            if (_deadGameplayPlayerIds.Contains(player.PlayerId))
+            {
+                Debug.Log($"[Lobby] Skip gameplay spawn for dead player={player.PlayerId}.");
+                return;
+            }
+
             var selectedCharacter = _selectedCharacterIndexByPlayerId.TryGetValue(player.PlayerId, out var selected)
                 ? SanitizeCharacterIndexOrNone(selected)
                 : -1;
@@ -498,6 +506,7 @@ namespace SSAFYPlayTime
 
                 if (existingSpawned != null)
                 {
+                    UntrackGameplayPlayer(player.PlayerId);
                     // 캐릭터 종류 변경으로 재스폰하는 경우, 현재 위치를 보존한다.
                     // 마이그레이션 위치가 이미 소비된 경우에도 재스폰 위치가 유지된다.
                     if (!_migratedPositionsByOldPlayerId.ContainsKey(player.PlayerId))
@@ -631,6 +640,8 @@ namespace SSAFYPlayTime
                     return;
                 }
 
+                TrackGameplayPlayer(player.PlayerId, spawned);
+
                 if (hasCapturedMigrationState &&
                     !string.IsNullOrWhiteSpace(capturedMigrationClientId) &&
                     _migratedPositionsByClientId.TryGetValue(capturedMigrationClientId, out var pendingCapturedByClientId) &&
@@ -687,6 +698,57 @@ namespace SSAFYPlayTime
                 TrySpawnGameplayNetworkCharacter(player);
             }
             _pendingCharacterSelectionsWhileMigrating.Clear();
+        }
+
+        private void TrackGameplayPlayer(int playerId, NetworkObject spawnedObject)
+        {
+            if (spawnedObject == null)
+                return;
+
+            UntrackGameplayPlayer(playerId);
+
+            var networkPlayer = spawnedObject.GetComponent<NetworkPlayer>();
+            if (networkPlayer == null)
+                return;
+
+            networkPlayer.OnNetworkPlayerDied -= HandleTrackedGameplayPlayerDied;
+            networkPlayer.OnNetworkPlayerDied += HandleTrackedGameplayPlayerDied;
+            _trackedGameplayPlayersByPlayerId[playerId] = networkPlayer;
+
+            if (networkPlayer.IsDeadState)
+                _deadGameplayPlayerIds.Add(playerId);
+        }
+
+        private void UntrackGameplayPlayer(int playerId)
+        {
+            if (!_trackedGameplayPlayersByPlayerId.TryGetValue(playerId, out var trackedPlayer) || trackedPlayer == null)
+            {
+                _trackedGameplayPlayersByPlayerId.Remove(playerId);
+                return;
+            }
+
+            trackedPlayer.OnNetworkPlayerDied -= HandleTrackedGameplayPlayerDied;
+            _trackedGameplayPlayersByPlayerId.Remove(playerId);
+        }
+
+        private void UntrackAllGameplayPlayers()
+        {
+            foreach (var playerId in _trackedGameplayPlayersByPlayerId.Keys.ToArray())
+                UntrackGameplayPlayer(playerId);
+        }
+
+        private void HandleTrackedGameplayPlayerDied(NetworkPlayer deadPlayer)
+        {
+            if (deadPlayer == null)
+                return;
+
+            var networkObject = deadPlayer.GetComponent<NetworkObject>();
+            if (networkObject == null || !networkObject.InputAuthority.IsRealPlayer)
+                return;
+
+            var playerId = networkObject.InputAuthority.PlayerId;
+            _deadGameplayPlayerIds.Add(playerId);
+            Debug.Log($"[Lobby] Marked gameplay player as dead. player={playerId}, object={deadPlayer.name}");
         }
 
         // 현재 접속된 모든 플레이어에 대해 캐릭터 스폰을 순차 호출한다.

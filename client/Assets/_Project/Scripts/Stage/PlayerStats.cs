@@ -119,6 +119,7 @@ public class PlayerStats : MonoBehaviour
 
     private void TryPlaceStandaloneAtSpawn()
     {
+        // Fusion 네트워크 캐릭터: 스폰 위치는 서버가 결정하므로 로컬 이동 생략
         var networkObject = GetComponent<NetworkObject>();
         if (networkObject != null && networkObject.Runner != null && networkObject.IsValid)
             return;

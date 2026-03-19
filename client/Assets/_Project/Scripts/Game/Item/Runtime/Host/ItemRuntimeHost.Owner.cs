@@ -36,7 +36,20 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private Vector3 ResolveOwnerForward()
         {
-            var forward = ownerTransform != null ? ownerTransform.forward : transform.forward;
+            var owner = ownerTransform != null ? ownerTransform : transform;
+            var networkPlayer = owner != null ? owner.GetComponentInParent<global::NetworkPlayer>() : null;
+            if (networkPlayer != null)
+            {
+                var visualYaw = networkPlayer.GetNetworkedVisualYaw();
+                var visualForward = Quaternion.Euler(0f, visualYaw, 0f) * Vector3.forward;
+                visualForward.y = 0f;
+                if (visualForward.sqrMagnitude >= 0.0001f)
+                {
+                    return visualForward.normalized;
+                }
+            }
+
+            var forward = owner.forward;
             forward.y = 0f;
             if (forward.sqrMagnitude < 0.0001f)
             {

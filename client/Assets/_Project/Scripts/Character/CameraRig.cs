@@ -1,13 +1,13 @@
 using SSAFYPlayTime.Character;
 using UnityEngine;
+using Fusion;
 
-// NetworkPlayer LateUpdate(카메라 앵커 갱신) 이후 실행을 보장하기 위해 실행 순서를 뒤로 설정
-[DefaultExecutionOrder(100)]
 public class CameraRig : MonoBehaviour
 {
     [Header("Follow")]
     [SerializeField] private Transform target;
     [SerializeField] private string autoFindPlayerTag = "Player";
+    [SerializeField] private string autoFindTargetName = "Test";
     [SerializeField] private bool autoFindTargetWhenNull = true;
 
     [Header("Orbit")]
@@ -25,6 +25,10 @@ public class CameraRig : MonoBehaviour
     [SerializeField] private float yawClampBlendInSpeed = 18f;
     [SerializeField] private float yawClampBlendOutSpeed = 8f;
 
+    [Header("Smoothing")]
+    [SerializeField] private float followSmooth = 14f;
+    [SerializeField] private float rotateSmooth = 18f;
+
     [Header("Collision")]
     [SerializeField] private LayerMask obstructionMask = ~0;
     [SerializeField] private float collisionRadius = 0.2f;
@@ -38,6 +42,12 @@ public class CameraRig : MonoBehaviour
 
     private float _targetYaw;
     private float _targetPitch;
+    private float _currentYaw;
+    private float _currentPitch;
+    private float _yawVelocity;
+    private float _pitchVelocity;
+    private Vector3 _currentPivot;
+    private Vector3 _pivotVelocity;
     private bool _initializedAngles;
     private Vector3 _impactPositionOffset;
     private Vector2 _impactRotationOffset;
@@ -124,11 +134,50 @@ public class CameraRig : MonoBehaviour
         if (!autoFindTargetWhenNull || target != null)
             return;
 
-        // 태그 탐색만 사용 — FindObjectOfType<NetworkPlayer> 제거
-        // (멀티플레이어에서 원격 플레이어를 잘못 잡는 문제 방지)
+        var localNetworkPlayer = ResolveLocalNetworkPlayer();
+        if (localNetworkPlayer != null)
+        {
+            SetTarget(localNetworkPlayer.GetCameraFollowTarget());
+            return;
+        }
+
         var tagged = GameObject.FindGameObjectWithTag(autoFindPlayerTag);
         if (tagged != null)
+        {
             SetTarget(tagged.transform);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(autoFindTargetName))
+        {
+            var namedTarget = GameObject.Find(autoFindTargetName);
+            if (namedTarget != null)
+            {
+                SetTarget(namedTarget.transform);
+                return;
+            }
+        }
+
+        var networkPlayer = FindObjectOfType<NetworkPlayer>();
+        if (networkPlayer != null)
+            SetTarget(networkPlayer.GetCameraFollowTarget());
+    }
+
+    private static NetworkPlayer ResolveLocalNetworkPlayer()
+    {
+        var allPlayers = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None);
+        for (var i = 0; i < allPlayers.Length; i++)
+        {
+            var player = allPlayers[i];
+            if (player == null)
+                continue;
+
+            var networkObject = player.GetComponent<NetworkObject>();
+            if (networkObject != null && networkObject.HasInputAuthority)
+                return player;
+        }
+
+        return null;
     }
 
     private void InitializeAngles(bool force)
