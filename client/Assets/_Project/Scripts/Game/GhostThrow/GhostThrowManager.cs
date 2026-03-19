@@ -71,6 +71,12 @@ namespace SSAFYPlayTime.Game.GhostThrow
             enableOutOfBoundsKillCheck = enabled;
         }
 
+        /// <summary>
+        /// 고스트 모드 진입 시 spawnPoint를 null로 설정해 카메라 기반 발사 위치를 사용하게 한다.
+        /// (캐릭터가 0,0,0에 고정된 후에도 카메라 시점에서 발사됨)
+        /// </summary>
+        public void SetGhostThrowSpawnPoint(Transform point) => ghostThrowSpawnPoint = point;
+
         private void Update()
         {
             if (_localPlayerStats == null && _localNetworkPlayer == null)
@@ -153,7 +159,7 @@ namespace SSAFYPlayTime.Game.GhostThrow
             }
 
             if ((_localPlayerStats != null && _localPlayerStats.IsDead) ||
-                (_localNetworkPlayer != null && _localNetworkPlayer.IsDeadNetworked))
+                (_localNetworkPlayer != null && _localNetworkPlayer.IsDeadState))
                 _isGhostThrowEnabled = true;
         }
 
@@ -179,7 +185,7 @@ namespace SSAFYPlayTime.Game.GhostThrow
                 return;
             }
 
-            if (_localNetworkPlayer != null && _localNetworkPlayer.IsDeadNetworked)
+            if (_localNetworkPlayer != null && _localNetworkPlayer.IsDeadState)
             {
                 ForceEnableGhostThrow($"NetworkPlayer death state on {_localNetworkPlayer.name}");
                 return;
@@ -196,7 +202,7 @@ namespace SSAFYPlayTime.Game.GhostThrow
                 if (networkObject == null || !networkObject.HasInputAuthority)
                     continue;
 
-                if (!player.IsDeadNetworked)
+                if (!player.IsDeadState)
                     continue;
 
                 ForceEnableGhostThrow($"NetworkPlayer death state on {player.name}");
@@ -252,21 +258,35 @@ namespace SSAFYPlayTime.Game.GhostThrow
             var runner = FindAnyObjectByType<NetworkRunner>();
             if (runner != null && runner.IsRunning)
             {
+                // ── 온라인 경로 ──────────────────────────────────────────────
+                // InputAuthority(클라이언트 포함)는 RPC로 호스트에 위임.
+                // StateAuthority(호스트)는 직접 스폰.
+                // 어느 쪽이든 SpawnOffline으로 폴백하지 않는다:
+                //   SpawnOffline은 로컬 오브젝트이므로 호스트에만 보이는 버그를 유발한다.
                 var localNetworkPlayer = ResolveLocalNetworkPlayer();
                 if (localNetworkPlayer != null && localNetworkPlayer.TryRequestGhostThrow(isBanana, spawnPos, initialVelocity))
                 {
-                    var label = isBanana ? "banana" : "bomb";
-                    Debug.Log($"GhostThrow [Request]: requested {label} at {spawnPos}");
+                    Debug.Log($"GhostThrow [Request]: requested {(isBanana ? "banana" : "bomb")} at {spawnPos}");
                     return;
                 }
+
+                // RPC 실패(localNetworkPlayer가 없거나 InputAuthority 아님)인 경우
+                // 호스트라면 직접 스폰 시도
+                if (runner.IsServer)
+                {
+                    SpawnOnline(runner, isBanana, spawnPos, initialVelocity);
+                }
+                else
+                {
+                    Debug.LogError("GhostThrow: 온라인 환경이지만 localNetworkPlayer를 찾을 수 없어 투척 실패. " +
+                                   "NetworkPlayer가 올바르게 연결됐는지 확인하세요.");
+                }
+
+                // 온라인 환경에서는 반드시 여기서 종료 (SpawnOffline 폴백 없음)
+                return;
             }
 
-            if (runner != null && runner.IsRunning && runner.IsServer)
-            {
-                if (SpawnOnline(runner, isBanana, spawnPos, initialVelocity))
-                    return;
-            }
-
+            // ── 오프라인(로컬 테스트) 환경 전용 ─────────────────────────────
             SpawnOffline(isBanana, spawnPos, initialVelocity);
         }
 
@@ -357,32 +377,65 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
             var spawnRot = velocity.sqrMagnitude > 0.001f ? Quaternion.LookRotation(velocity) : Quaternion.identity;
 
-            if (prefabObject != null)
+            // onBeforeSpawned: [Networked] 초기 속도를 저장 → 모든 클라이언트의 Spawned()에서 읽어 Rigidbody에 적용.
+            // 이 콜백이 없으면 클라이언트는 속도 0으로 시작해 폭탄이 수직 낙하하며 보이지 않는다.
+            var capturedVelocity = velocity;
+            void OnBeforeSpawned(NetworkRunner r, NetworkObject no)
             {
-                var spawnedByObject = runner.Spawn(prefabObject, spawnPos, spawnRot);
-                if (spawnedByObject == null)
+                if (isBanana)
                 {
-                    Debug.LogError($"GhostThrowManager [Online]: failed to spawn {label} prefab object.");
+                    var bp = no.GetComponent<BananaPeel>();
+                    if (bp != null) bp.NetworkedInitialVelocity = capturedVelocity;
+                }
+                else
+                {
+                    var gc = no.GetComponent<GhostCube>();
+                    if (gc != null) gc.NetworkedInitialVelocity = capturedVelocity;
+                }
+            }
+
+            // ── NetworkPrefabRef 우선 사용 ──────────────────────────────────
+            // Fusion이 prefab GUID로 클라이언트에게 스폰 메시지를 전달하므로
+            // 모든 클라이언트에서 동일한 오브젝트가 생성된다 (진정한 네트워크 복제).
+            // prefabObject(GameObject) 경로는 Fusion 테이블 미등록 시 로컬 생성만 되므로 폴백으로만 사용.
+            if (prefabRef.IsValid)
+            {
+                var spawnedObj = runner.Spawn(prefabRef, spawnPos, spawnRot,
+                    onBeforeSpawned: OnBeforeSpawned);
+                if (spawnedObj == null)
+                {
+                    Debug.LogError($"GhostThrowManager [Online/prefabRef]: {label} 스폰 실패. " +
+                                   $"Fusion > Network Project Config > Rebuild Object Table 을 실행했는지 확인하세요.");
                     return false;
                 }
 
-                ApplyThrowVelocity(spawnedByObject.gameObject, velocity);
-                NotifySpectatorCameraToTrack(spawnedByObject.transform);
-                Debug.Log($"GhostThrow [Online]: threw {label} at {spawnPos}");
+                NotifySpectatorCameraToTrack(spawnedObj.transform);
+                Debug.Log($"GhostThrow [Online/prefabRef]: threw {label} at {spawnPos}");
                 return true;
             }
 
-            if (!prefabRef.IsValid)
+            // ── 폴백: GameObject 경로 ────────────────────────────────────────
+            // NetworkPrefabRef가 없을 때만 사용. Fusion NetworkPrefabTable에 등록돼 있어야 복제된다.
+            if (prefabObject != null)
             {
-                Debug.LogError($"GhostThrowManager [Online]: {label} prefab is not assigned.");
-                return false;
+                var spawnedByObject = runner.Spawn(prefabObject, spawnPos, spawnRot,
+                    onBeforeSpawned: OnBeforeSpawned);
+                if (spawnedByObject == null)
+                {
+                    Debug.LogError($"GhostThrowManager [Online/prefabObject]: {label} 스폰 실패. " +
+                                   $"Inspector의 cubePrefabOnline(NetworkPrefabRef) 필드를 설정하고 " +
+                                   $"Fusion > Network Project Config > Rebuild Object Table 을 실행하세요.");
+                    return false;
+                }
+
+                NotifySpectatorCameraToTrack(spawnedByObject.transform);
+                Debug.Log($"GhostThrow [Online/prefabObject]: threw {label} at {spawnPos}");
+                return true;
             }
 
-            var spawnedObj = runner.Spawn(prefabRef, spawnPos, spawnRot);
-            ApplyThrowVelocity(spawnedObj.gameObject, velocity);
-            NotifySpectatorCameraToTrack(spawnedObj.transform);
-            Debug.Log($"GhostThrow [Online]: threw {label} at {spawnPos}");
-            return true;
+            Debug.LogError($"GhostThrowManager [Online]: {label} 프리팹이 지정되지 않았습니다. " +
+                           $"Inspector에서 cubePrefabOnline(NetworkPrefabRef) 또는 cubePrefabOnlineObject(GameObject)를 설정하세요.");
+            return false;
         }
 
         private void SpawnOffline(bool isBanana, Vector3 spawnPos, Vector3 velocity)

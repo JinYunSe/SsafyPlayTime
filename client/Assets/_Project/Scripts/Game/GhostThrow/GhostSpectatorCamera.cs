@@ -22,6 +22,9 @@ namespace SSAFYPlayTime.Game.GhostThrow
         private float _orbitAngle;
         private Transform _trackedProjectile;
 
+        // 비용 절감: 일정 주기(0.5s)마다만 씬 전체를 스캔한다
+        private float _autoTrackScanTimer;
+
         private void Start()
         {
             _cam = GetComponent<Camera>();
@@ -47,8 +50,10 @@ namespace SSAFYPlayTime.Game.GhostThrow
             if (_cam == null) return;
 
             // A: 왼쪽 공전, D: 오른쪽 공전
+            // 부호 반전: Sin/Cos 기반 공전에서 angle 증가는 카메라가 +X로 이동하지만
+            // 카메라가 항상 중앙을 바라보므로 화면상 장면은 반대 방향으로 흐른다.
             var horizontal = Input.GetAxis("Horizontal");
-            _orbitAngle += horizontal * orbitSpeed * Time.deltaTime;
+            _orbitAngle -= horizontal * orbitSpeed * Time.deltaTime;
 
             var rad = _orbitAngle * Mathf.Deg2Rad;
             var targetPos = mapCenter
@@ -56,12 +61,56 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
             transform.position = Vector3.Lerp(transform.position, targetPos, Time.deltaTime * moveSpeed);
 
+            // 추적 중인 투사체가 없으면 씬에서 자동 탐색 (비호스트 클라이언트 지원)
+            if (_trackedProjectile == null)
+            {
+                _autoTrackScanTimer -= Time.deltaTime;
+                if (_autoTrackScanTimer <= 0f)
+                {
+                    _autoTrackScanTimer = 0.5f;
+                    AutoTrackNearest();
+                }
+            }
+
             // 투사체 추적 중이면 투사체 방향으로, 파괴됐으면 맵 중앙으로 복귀
             var lookPoint = (_trackedProjectile != null) ? _trackedProjectile.position : mapCenter;
             var lookDir = lookPoint - transform.position;
             if (lookDir != Vector3.zero)
                 transform.rotation = Quaternion.Slerp(transform.rotation,
                     Quaternion.LookRotation(lookDir, Vector3.up), Time.deltaTime * moveSpeed);
+        }
+
+        /// <summary>
+        /// 씬에 활성화된 GhostCube / BananaPeel 중 카메라 전방에 가장 가까운 것을 자동으로 추적한다.
+        /// NotifySpectatorCameraToTrack()이 호출되지 않는 비호스트 클라이언트에서도
+        /// 네트워크 복제된 투사체를 자동으로 카메라에 잡아준다.
+        /// </summary>
+        private void AutoTrackNearest()
+        {
+            Transform best = null;
+            float bestDot = -1f;
+            var forward = transform.forward;
+
+            var cubes = FindObjectsByType<GhostCube>(FindObjectsSortMode.None);
+            for (var i = 0; i < cubes.Length; i++)
+            {
+                if (cubes[i] == null) continue;
+                var dir = (cubes[i].transform.position - transform.position).normalized;
+                var dot = Vector3.Dot(forward, dir);
+                if (dot > bestDot) { bestDot = dot; best = cubes[i].transform; }
+            }
+
+            var peels = FindObjectsByType<BananaPeel>(FindObjectsSortMode.None);
+            for (var i = 0; i < peels.Length; i++)
+            {
+                if (peels[i] == null) continue;
+                var dir = (peels[i].transform.position - transform.position).normalized;
+                var dot = Vector3.Dot(forward, dir);
+                if (dot > bestDot) { bestDot = dot; best = peels[i].transform; }
+            }
+
+            if (best != null)
+                _trackedProjectile = best;
         }
     }
 }
