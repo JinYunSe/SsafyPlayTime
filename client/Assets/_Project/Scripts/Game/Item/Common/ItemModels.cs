@@ -61,9 +61,18 @@ namespace SSAFYPlayTime.Gameplay.Items
 
     public readonly struct BlackholeSkillRequest
     {
-        public BlackholeSkillRequest(Vector3 center, float delaySec, float durationSec, float radius, float force)
+        public BlackholeSkillRequest(
+            Vector3 center,
+            Vector3 origin,
+            Vector3 forward,
+            float delaySec,
+            float durationSec,
+            float radius,
+            float force)
         {
             Center = center;
+            Origin = origin;
+            Forward = forward;
             DelaySec = delaySec;
             DurationSec = durationSec;
             Radius = radius;
@@ -71,6 +80,8 @@ namespace SSAFYPlayTime.Gameplay.Items
         }
 
         public Vector3 Center { get; }
+        public Vector3 Origin { get; }
+        public Vector3 Forward { get; }
         public float DelaySec { get; }
         public float DurationSec { get; }
         public float Radius { get; }
