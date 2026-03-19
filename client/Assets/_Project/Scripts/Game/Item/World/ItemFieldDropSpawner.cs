@@ -74,10 +74,15 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         public bool TrySpawnItem(string itemId, Vector3 worldPosition, out ItemFieldDrop spawnedDrop)
         {
-            return TrySpawnItem(itemId, worldPosition, string.Empty, out spawnedDrop);
+            return TrySpawnItem(itemId, worldPosition, string.Empty, true, out spawnedDrop);
         }
 
         public bool TrySpawnItem(string itemId, Vector3 worldPosition, string instanceId, out ItemFieldDrop spawnedDrop)
+        {
+            return TrySpawnItem(itemId, worldPosition, instanceId, true, out spawnedDrop);
+        }
+
+        public bool TrySpawnItem(string itemId, Vector3 worldPosition, string instanceId, bool snapToGround, out ItemFieldDrop spawnedDrop)
         {
             spawnedDrop = null;
             if (string.IsNullOrWhiteSpace(itemId))
@@ -96,11 +101,13 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return false;
             }
 
-            var resolvedPosition = ItemFieldPositionUtility.ResolveGroundPosition(
-                worldPosition,
-                useGroundRaycast,
-                groundMask,
-                spawnHeightOffset);
+            var resolvedPosition = snapToGround
+                ? ItemFieldPositionUtility.ResolveGroundPosition(
+                    worldPosition,
+                    useGroundRaycast,
+                    groundMask,
+                    spawnHeightOffset)
+                : worldPosition;
 
             if (TryGetRunner(out var runner) && runner != null && runner.IsRunning)
             {

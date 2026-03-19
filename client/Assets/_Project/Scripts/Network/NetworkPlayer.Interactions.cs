@@ -357,7 +357,7 @@ public sealed partial class NetworkPlayer
         if (!_itemFieldInteractionService.TryDropHeldItem(out var droppedItemId, out var dropSpawnPosition, out _))
             return false;
 
-        return TrySpawnNetworkedFieldDrop(droppedItemId, dropSpawnPosition, runtimeHost, out _);
+        return TrySpawnNetworkedFieldDrop(droppedItemId, dropSpawnPosition, runtimeHost, false, out _);
     }
 
     /// <summary>

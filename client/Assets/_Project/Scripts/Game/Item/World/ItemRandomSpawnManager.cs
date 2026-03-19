@@ -11,12 +11,14 @@ namespace SSAFYPlayTime.Gameplay.Items
     {
         private const string DefaultSpawnZoneRootName = "ItemSpawnZone";
         private const string DefaultSpawnZonePrefix = "ItemSpawnZone_";
+        private const int DefaultMaxActiveFieldDropCount = 20;
 
         [Header("Test")]
         [SerializeField] private bool enableTestSpawnLoop = true;
         [SerializeField] private float spawnIntervalSec = 3f;
         [SerializeField] private bool keepSpawnedItemStatic;
         [SerializeField] private bool enableDebugLog = true;
+        [SerializeField] private int maxActiveFieldDropCount = DefaultMaxActiveFieldDropCount;
 
         [Header("Spawn Zones")]
         [SerializeField] private Transform spawnZoneRoot;
@@ -114,6 +116,16 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         public void HandleManagedFieldDropEnteredDeathZone(ItemFieldDrop drop)
         {
+            HandleManagedFieldDropRemoval(drop, "ImmediateDeath");
+        }
+
+        public void HandleManagedFieldDropEnteredWater(ItemFieldDrop drop)
+        {
+            HandleManagedFieldDropRemoval(drop, "Water");
+        }
+
+        private void HandleManagedFieldDropRemoval(ItemFieldDrop drop, string reason)
+        {
             if (drop == null)
             {
                 return;
@@ -129,7 +141,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
                 UnregisterManagedDrop(drop);
                 networkObject.Runner.Despawn(networkObject);
-                DebugLog($"ImmediateDeath removed networked drop: itemId={drop.ItemId}, id={drop.InstanceId}");
+                DebugLog($"{reason} removed networked drop: itemId={drop.ItemId}, id={drop.InstanceId}");
                 return;
             }
 
@@ -279,6 +291,13 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (Runner == null || _spawnPoints.Count == 0 || _spawnableDefinitions.Count == 0)
             {
                 DebugLog("Spawn skipped because zones, definitions, or runner are missing.");
+                return;
+            }
+
+            var activeFieldDropCount = CountActiveFieldDrops();
+            if (activeFieldDropCount >= Mathf.Max(1, maxActiveFieldDropCount))
+            {
+                DebugLog($"Spawn skipped because active field drop count reached limit: count={activeFieldDropCount}, limit={maxActiveFieldDropCount}");
                 return;
             }
 
@@ -494,6 +513,24 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 ListPool<string>.Release(deadIds);
             }
+        }
+
+        private static int CountActiveFieldDrops()
+        {
+            var drops = FindObjectsOfType<ItemFieldDrop>(true);
+            var count = 0;
+            for (var i = 0; i < drops.Length; i++)
+            {
+                var drop = drops[i];
+                if (drop == null || !drop.gameObject.activeInHierarchy || drop.IsPickedUp)
+                {
+                    continue;
+                }
+
+                count++;
+            }
+
+            return count;
         }
 
         private static string GetManagedKey(ItemFieldDrop drop)
