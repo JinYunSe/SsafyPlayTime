@@ -417,6 +417,12 @@ public sealed partial class NetworkPlayer
             yield break;
         }
 
+        if (bombBody != null)
+        {
+            bombBody.isKinematic = true;
+            bombBody.useGravity = false;
+        }
+
         var delaySec = Mathf.Max(0f, request.DelaySec);
         if (delaySec > 0f)
         {
