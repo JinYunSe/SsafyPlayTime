@@ -103,6 +103,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [Networked] public Vector3 RightGrabAnchorLocal { get; set; }
     [Networked] public NetworkBool LeftGrabConfirmed { get; set; }
     [Networked] public NetworkBool RightGrabConfirmed { get; set; }
+    // 잡힌 앵커 부위 동기화 (GrabAnchorPoint.AnchorId byte)
+    [Networked] public byte LeftGrabAnchorId { get; set; }
+    [Networked] public byte RightGrabAnchorId { get; set; }
 
     // ─── CarrySolveFrame 네트워크 동기화 ───
     // victim anchor: BeingCarriedStunned인 플레이어가 자신의 hips-chest 가중 평균을 전송
@@ -394,7 +397,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     /// <summary>
     /// HandGrabHandler에서 조인트 생성 후 호출해 grab 관계를 네트워크에 기록한다.
     /// </summary>
-    public void ReportGrabAttached(HandGrabHandler.HandSide side, NetworkId targetId, Vector3 anchorLocal)
+    public void ReportGrabAttached(HandGrabHandler.HandSide side, NetworkId targetId, Vector3 anchorLocal,
+        byte anchorId = 0)
     {
         if (!HasStateAuthority) return;
         if (side == HandGrabHandler.HandSide.Left)
@@ -402,23 +406,25 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             LeftGrabTargetId = targetId;
             LeftGrabAnchorLocal = anchorLocal;
             LeftGrabConfirmed = true;
+            LeftGrabAnchorId = anchorId;
         }
         else
         {
             RightGrabTargetId = targetId;
             RightGrabAnchorLocal = anchorLocal;
             RightGrabConfirmed = true;
+            RightGrabAnchorId = anchorId;
         }
 
         if (debugGrabLog)
         {
             Debug.Log($"[GrabState] {name} ReportGrabAttached side={side} targetId={targetId} anchorLocal={anchorLocal} " +
-                $"L_confirmed={LeftGrabConfirmed} R_confirmed={RightGrabConfirmed}", this);
+                $"anchorId={anchorId} L_confirmed={LeftGrabConfirmed} R_confirmed={RightGrabConfirmed}", this);
         }
 
         TraceCarryDebugSample(
             "ReportGrabAttached",
-            $"side={side} targetId={targetId} anchorLocal={FormatStunForceDiagnosticsVector(anchorLocal)}",
+            $"side={side} targetId={targetId} anchorLocal={FormatStunForceDiagnosticsVector(anchorLocal)} anchorId={anchorId}",
             true);
     }
 
@@ -433,12 +439,14 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             LeftGrabTargetId = default;
             LeftGrabAnchorLocal = Vector3.zero;
             LeftGrabConfirmed = false;
+            LeftGrabAnchorId = 0;
         }
         else
         {
             RightGrabTargetId = default;
             RightGrabAnchorLocal = Vector3.zero;
             RightGrabConfirmed = false;
+            RightGrabAnchorId = 0;
         }
 
         if (debugGrabLog)

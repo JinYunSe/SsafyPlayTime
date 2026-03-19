@@ -3,6 +3,7 @@ using UnityEngine;
 using RootMotion.Dynamics;
 using SSAFYPlayTime.Character;
 using SSAFYPlayTime.Gameplay.Items;
+using GrabAnchorId = SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId;
 
 /// <summary>
 /// 멀티플레이 손 그랩 핸들러.
@@ -55,6 +56,23 @@ public class HandGrabHandler : MonoBehaviour
     ItemRuntimeHost itemRuntimeHost;
     Transform _holdPoint;
     NetworkPlayer _grabbedPlayer;
+
+    // GrabAnchor 시스템
+    GrabSensor _grabSensor;
+    GrabAnchorPoint _attachedAnchorPoint;
+    GrabAnchorPoint _pendingReachAnchor;
+    private readonly System.Collections.Generic.List<(Collider hand, Collider target)> _ignoredCollisionPairs
+        = new System.Collections.Generic.List<(Collider, Collider)>();
+
+    /// <summary>현재 붙어있는 GrabAnchorPoint (null이면 레거시 모드로 붙음)</summary>
+    public GrabAnchorPoint AttachedAnchorPoint => _attachedAnchorPoint;
+    /// <summary>현재 붙어있는 앵커의 Id (네트워크 동기화용)</summary>
+    public GrabAnchorId AttachedAnchorId => _attachedAnchorPoint != null ? _attachedAnchorPoint.Id : GrabAnchorId.None;
+    /// <summary>이 손의 GrabSensor</summary>
+    public GrabSensor Sensor => _grabSensor;
+
+    // GrabHurtbox 레이어 마스크 (런타임 캐시)
+    private int _grabHurtboxLayerMask;
 
     // Reach intent — TryGrab에서 타겟을 찾으면 저장, 근접/접촉 시 실제 attach
     Rigidbody _pendingReachTarget;
@@ -162,6 +180,13 @@ public class HandGrabHandler : MonoBehaviour
         if (animator == null)
             animator = GetComponentInParent<Animator>();
 
+        // GrabSensor 캐시 (자식에 붙어있는 센서)
+        _grabSensor = GetComponentInChildren<GrabSensor>(true);
+
+        // GrabHurtbox 레이어 마스크 캐시
+        var hurtboxLayer = LayerMask.NameToLayer("GrabHurtbox");
+        _grabHurtboxLayerMask = hurtboxLayer >= 0 ? (1 << hurtboxLayer) : 0;
+
         // Inspector에서 미설정 시 트랜스폼 이름으로 자동 감지
         AutoDetectHandSide();
     }
@@ -183,6 +208,7 @@ public class HandGrabHandler : MonoBehaviour
 
         RestoreGrabbedPuppet();
         NotifyGrabReleased();
+        ClearAnchorState();
         _fixedJoint = null;
         _configurableJoint = null;
         _grabbedPlayer = null;
@@ -248,6 +274,7 @@ public class HandGrabHandler : MonoBehaviour
 
                 RestoreGrabbedPuppet();
                 NotifyGrabReleased();
+                ClearAnchorState();
                 DestroyActiveJoint();
                 _grabbedPlayer = null;
                 _grabbedPuppet = null;
@@ -272,17 +299,40 @@ public class HandGrabHandler : MonoBehaviour
             }
             else
             {
-                var closestPoint = _pendingReachTarget.ClosestPointOnBounds(transform.position);
-                var dist = Vector3.Distance(transform.position, closestPoint);
-
-                if (debugLog && Time.frameCount % 15 == 0)
-                    Debug.Log($"[Grab] {handSide} reaching → dist={dist:F3}, attachR={attachRadius:F2}, stunned={isReachStunned}, " +
-                        $"target={_pendingReachTarget.name}", this);
-
-                if (dist <= attachRadius)
+                // 앵커 기반 접근 판정 (GrabSensor 오버랩 또는 앵커 거리)
+                if (_pendingReachAnchor != null)
                 {
-                    AttachGrab(_pendingReachTarget, closestPoint);
-                    _pendingReachTarget = null;
+                    bool sensorOverlap = _grabSensor != null
+                        && _grabSensor.OverlappingAnchors.Contains(_pendingReachAnchor);
+                    var gripPos = _pendingReachAnchor.GetGripWorldPosition();
+                    var dist = Vector3.Distance(transform.position, gripPos);
+
+                    if (debugLog && Time.frameCount % 15 == 0)
+                        Debug.Log($"[Grab] {handSide} reaching(anchor) → dist={dist:F3}, attachR={attachRadius:F2}, " +
+                            $"sensorOverlap={sensorOverlap}, anchor={_pendingReachAnchor.Id}, " +
+                            $"target={_pendingReachTarget.name}", this);
+
+                    if (sensorOverlap || dist <= attachRadius)
+                    {
+                        AttachGrab(_pendingReachTarget, gripPos);
+                        _pendingReachTarget = null;
+                    }
+                }
+                else
+                {
+                    // 레거시 폴백: ClosestPointOnBounds 기반 접근
+                    var closestPoint = _pendingReachTarget.ClosestPointOnBounds(transform.position);
+                    var dist = Vector3.Distance(transform.position, closestPoint);
+
+                    if (debugLog && Time.frameCount % 15 == 0)
+                        Debug.Log($"[Grab] {handSide} reaching → dist={dist:F3}, attachR={attachRadius:F2}, stunned={isReachStunned}, " +
+                            $"target={_pendingReachTarget.name}", this);
+
+                    if (dist <= attachRadius)
+                    {
+                        AttachGrab(_pendingReachTarget, closestPoint);
+                        _pendingReachTarget = null;
+                    }
                 }
             }
         }
@@ -298,6 +348,7 @@ public class HandGrabHandler : MonoBehaviour
             EmitGrabDiagnostics("InputRelease", true);
             RestoreGrabbedPuppet();
             NotifyGrabReleased();
+            ClearAnchorState();
             DestroyActiveJoint();
             _grabbedPlayer = null;
             _grabbedPuppet = null;
@@ -318,6 +369,7 @@ public class HandGrabHandler : MonoBehaviour
         Collider[] hits = Physics.OverlapSphere(transform.position, grabRadius);
         Rigidbody bestTarget = null;
         float bestScore = float.MinValue;
+        GrabAnchorPoint bestAnchor = null;
 
         // 손 방향과 캐릭터 시야를 기반으로 가중 점수 계산
         var handForward = transform.forward;
@@ -327,55 +379,98 @@ public class HandGrabHandler : MonoBehaviour
         // 반대 손이 기절자를 잡고 있으면 같은 캐릭터의 다른 부위에 보너스 부여
         Transform otherHandStunnedRoot = GetOtherHandStunnedTargetRoot();
 
-        // 캐릭터 중심에서도 스캔 (바닥에 쓰러진 기절자는 손 위치 기준 0.8m 밖일 수 있음)
-        Vector3 charCenter = networkPlayer != null ? networkPlayer.transform.position : transform.position;
-        Collider[] bodyHits = Physics.OverlapSphere(charCenter, stunnedGrabRadius);
-
-        // 두 스캔 결과를 합쳐서 평가
-        var allHits = new System.Collections.Generic.HashSet<Collider>();
-        foreach (var h in hits) allHits.Add(h);
-        foreach (var h in bodyHits) allHits.Add(h);
-
-        foreach (var hit in allHits)
+        // --- GrabHurtbox 레이어 우선 스캔 (앵커 기반 정밀 잡기) ---
+        if (_grabHurtboxLayerMask != 0)
         {
-            Rigidbody rb = hit.attachedRigidbody;
-            if (rb == null) continue;
-            if (ShouldIgnoreGrabTarget(rb))
-                continue;
+            Collider[] anchorHits = Physics.OverlapSphere(handPos, grabRadius, _grabHurtboxLayerMask);
+            Vector3 charCenter = networkPlayer != null ? networkPlayer.transform.position : handPos;
+            Collider[] anchorBodyHits = Physics.OverlapSphere(charCenter, stunnedGrabRadius, _grabHurtboxLayerMask);
 
-            var toTarget = rb.position - handPos;
-            float dist = toTarget.magnitude;
-            if (dist < 0.001f) dist = 0.001f;
+            var anchorAllHits = new System.Collections.Generic.HashSet<Collider>();
+            foreach (var h in anchorHits) anchorAllHits.Add(h);
+            foreach (var h in anchorBodyHits) anchorAllHits.Add(h);
 
-            // 기절 플레이어인지 확인
-            var targetNp = rb.transform.root.GetComponent<NetworkPlayer>();
-            bool isStunnedTarget = targetNp != null && !targetNp.IsActiveRagdoll;
-
-            // 비기절 대상은 원래 grabRadius 밖이면 스킵
-            if (!isStunnedTarget && dist > grabRadius) continue;
-
-            float effectiveRadius = isStunnedTarget ? stunnedGrabRadius : grabRadius;
-
-            // 거리 점수 (가까울수록 높음, 0~1)
-            float distScore = 1f - Mathf.Clamp01(dist / effectiveRadius);
-            // 손 방향 내적 (손이 향하는 쪽일수록 높음, -1~1 → 0~1)
-            float handDot = (Vector3.Dot(handForward, toTarget / dist) + 1f) * 0.5f;
-            // 캐릭터 시야 내적 (캐릭터가 바라보는 쪽일수록 높음)
-            float viewDot = (Vector3.Dot(charForward, toTarget / dist) + 1f) * 0.5f;
-
-            float score = distScore * 0.4f + handDot * 0.3f + viewDot * 0.3f;
-
-            // 기절자 보너스 — 근처에 있으면 우선 잡기
-            if (isStunnedTarget) score += 0.3f;
-
-            // 반대 손이 같은 기절자를 잡고 있으면 양손 잡기 유도 보너스
-            if (otherHandStunnedRoot != null && rb.transform.root == otherHandStunnedRoot)
-                score += 0.5f;
-
-            if (score > bestScore)
+            foreach (var hit in anchorAllHits)
             {
-                bestScore = score;
-                bestTarget = rb;
+                var anchor = hit.GetComponent<GrabAnchorPoint>();
+                if (anchor == null) continue;
+
+                var ownerNp = anchor.OwnerPlayer;
+                if (ownerNp == null || ownerNp == networkPlayer) continue; // 자기 자신 무시
+
+                var rb = anchor.ParentBoneRigidbody;
+                if (rb == null) continue;
+
+                var toTarget = anchor.GetGripWorldPosition() - handPos;
+                float dist = toTarget.magnitude;
+                if (dist < 0.001f) dist = 0.001f;
+
+                bool isStunnedTarget = !ownerNp.IsActiveRagdoll;
+                if (!isStunnedTarget && dist > grabRadius) continue;
+                float effectiveRadius = isStunnedTarget ? stunnedGrabRadius : grabRadius;
+
+                float distScore = 1f - Mathf.Clamp01(dist / effectiveRadius);
+                float handDot = (Vector3.Dot(handForward, toTarget / dist) + 1f) * 0.5f;
+                float viewDot = (Vector3.Dot(charForward, toTarget / dist) + 1f) * 0.5f;
+                float score = distScore * 0.4f + handDot * 0.3f + viewDot * 0.3f;
+
+                // 앵커 우선순위 가중치
+                score += anchor.GrabPriority * 0.15f;
+                if (isStunnedTarget) score += 0.3f;
+                if (otherHandStunnedRoot != null && rb.transform.root == otherHandStunnedRoot) score += 0.5f;
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestTarget = rb;
+                    bestAnchor = anchor;
+                }
+            }
+        }
+
+        // --- 레거시 폴백: GrabHurtbox가 없는 대상 (오브젝트 등) ---
+        if (bestTarget == null)
+        {
+            Vector3 charCenter = networkPlayer != null ? networkPlayer.transform.position : handPos;
+            Collider[] bodyHits = Physics.OverlapSphere(charCenter, stunnedGrabRadius);
+
+            var allHits = new System.Collections.Generic.HashSet<Collider>();
+            foreach (var h in hits) allHits.Add(h);
+            foreach (var h in bodyHits) allHits.Add(h);
+
+            foreach (var hit in allHits)
+            {
+                Rigidbody rb = hit.attachedRigidbody;
+                if (rb == null) continue;
+                if (ShouldIgnoreGrabTarget(rb))
+                    continue;
+                // GrabHurtbox 레이어는 이미 위에서 처리
+                if (_grabHurtboxLayerMask != 0 && hit.gameObject.layer == LayerMask.NameToLayer("GrabHurtbox"))
+                    continue;
+
+                var toTarget = rb.position - handPos;
+                float dist = toTarget.magnitude;
+                if (dist < 0.001f) dist = 0.001f;
+
+                var targetNp = rb.transform.root.GetComponent<NetworkPlayer>();
+                bool isStunnedTarget = targetNp != null && !targetNp.IsActiveRagdoll;
+                if (!isStunnedTarget && dist > grabRadius) continue;
+                float effectiveRadius = isStunnedTarget ? stunnedGrabRadius : grabRadius;
+
+                float distScore = 1f - Mathf.Clamp01(dist / effectiveRadius);
+                float handDot = (Vector3.Dot(handForward, toTarget / dist) + 1f) * 0.5f;
+                float viewDot = (Vector3.Dot(charForward, toTarget / dist) + 1f) * 0.5f;
+                float score = distScore * 0.4f + handDot * 0.3f + viewDot * 0.3f;
+
+                if (isStunnedTarget) score += 0.3f;
+                if (otherHandStunnedRoot != null && rb.transform.root == otherHandStunnedRoot) score += 0.5f;
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestTarget = rb;
+                    bestAnchor = null; // 레거시 모드
+                }
             }
         }
 
@@ -393,11 +488,13 @@ public class HandGrabHandler : MonoBehaviour
             if (debugLog)
                 Debug.Log($"[Grab] {handSide} TryGrab → found target={bestTarget.name}, root={bestTarget.transform.root.name}, " +
                     $"stunned={foundStunned}, score={bestScore:F3}, " +
+                    $"anchor={(bestAnchor != null ? bestAnchor.Id.ToString() : "LEGACY")}, " +
                     $"handPos={transform.position}, targetPos={bestTarget.position}, " +
                     $"dist={Vector3.Distance(transform.position, bestTarget.position):F3}", this);
 
             // 즉시 attach하지 않고 reach intent만 설정 — 근접/접촉 시 실제 attach
             _pendingReachTarget = bestTarget;
+            _pendingReachAnchor = bestAnchor;
             _reachIntentTime = Time.time;
         }
         else if (debugLog && Time.frameCount % 30 == 0)
@@ -421,6 +518,7 @@ public class HandGrabHandler : MonoBehaviour
 
         RestoreGrabbedPuppet();
         NotifyGrabReleased();
+        ClearAnchorState();
         DestroyActiveJoint();
         _grabbedPlayer = null;
         _grabbedPuppet = null;
@@ -459,6 +557,7 @@ public class HandGrabHandler : MonoBehaviour
 
         RestoreGrabbedPuppet();
         NotifyGrabReleased();
+        ClearAnchorState();
         DestroyActiveJoint();
         _grabbedPlayer = null;
         _grabbedPuppet = null;
@@ -629,6 +728,13 @@ public class HandGrabHandler : MonoBehaviour
 
         Vector3 localAnchor = targetRb.transform.InverseTransformPoint(worldAnchorPoint);
 
+        // GrabAnchorPoint 기반 정밀 부착
+        if (_pendingReachAnchor != null)
+        {
+            _attachedAnchorPoint = _pendingReachAnchor;
+        }
+        _pendingReachAnchor = null;
+
         // 타겟 유형 판별: 기절자 / 정상 캐릭터 / 오브젝트
         var targetPlayer = targetRb.transform.root.GetComponent<NetworkPlayer>();
         if (targetPlayer != null && !targetPlayer.IsActiveRagdoll)
@@ -646,6 +752,16 @@ public class HandGrabHandler : MonoBehaviour
 
         var jointTargetRb = targetRb;
         var jointAnchorWorld = worldAnchorPoint;
+
+        // 앵커 기반: 비기절 타겟은 앵커의 부모 본 Rigidbody를 조인트 타겟으로 사용
+        if (_attachedAnchorPoint != null
+            && _currentGrabTargetType != SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.StunnedPlayer
+            && _attachedAnchorPoint.ParentBoneRigidbody != null)
+        {
+            jointTargetRb = _attachedAnchorPoint.ParentBoneRigidbody;
+            jointAnchorWorld = _attachedAnchorPoint.GetGripWorldPosition();
+        }
+
         if (_currentGrabTargetType == SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.StunnedPlayer)
             ResolveStunnedCarryJointTarget(targetPlayer, targetRb, ref jointTargetRb, ref jointAnchorWorld);
         localAnchor = jointTargetRb.transform.InverseTransformPoint(jointAnchorWorld);
@@ -667,7 +783,8 @@ public class HandGrabHandler : MonoBehaviour
         {
             var targetNetObj = targetRb.transform.root.GetComponent<Fusion.NetworkObject>();
             var netId = targetNetObj != null ? targetNetObj.Id : default;
-            networkPlayer.ReportGrabAttached(handSide, netId, localAnchor);
+            byte anchorIdByte = _attachedAnchorPoint != null ? (byte)_attachedAnchorPoint.Id : (byte)0;
+            networkPlayer.ReportGrabAttached(handSide, netId, localAnchor, anchorIdByte);
         }
 
         // 잡힌 상대에게 알림 (OwnerProxy 뼈 보간 전환용)
@@ -675,6 +792,28 @@ public class HandGrabHandler : MonoBehaviour
         {
             _grabbedPlayer.SetGrabbedByOther(true);
             _grabbedPlayer.OnGrabbed();
+        }
+
+        // 앵커 기반 잡기: 손 콜라이더 ↔ 잡힌 본 콜라이더 충돌 무시
+        if (_attachedAnchorPoint != null)
+        {
+            ApplySelectiveCollisionIgnore(_attachedAnchorPoint);
+
+            // 타겟의 AntiStretchController에 동적 링크 추가 (사지 스트레칭 방지)
+            // 타겟의 BodyPartPhysicsManager에 앵커 그랩 오버레이 적용
+            if (_grabbedPlayer != null)
+            {
+                var targetAntiStretch = _grabbedPlayer.GetComponentInChildren<SSAFYPlayTime.Character.GrabAntiStretchController>(true);
+                if (targetAntiStretch != null)
+                    targetAntiStretch.AddDynamicGrabLink(_attachedAnchorPoint);
+
+                var targetBodyPart = _grabbedPlayer.GetComponentInChildren<SSAFYPlayTime.Character.BodyPartPhysicsManager>(true);
+                if (targetBodyPart != null)
+                    targetBodyPart.NotifyAnchorGrabbed(_attachedAnchorPoint.Id);
+
+                // 잡힌 본의 비주얼 물리 복사 가중치 설정
+                _grabbedPlayer.SetAnchorGrabBoneBlend(_attachedAnchorPoint.Id);
+            }
         }
     }
 
@@ -1028,6 +1167,76 @@ public class HandGrabHandler : MonoBehaviour
                 return h.GrabTargetRoot;
         }
         return null;
+    }
+
+    // =========================================================
+    // GrabAnchorPoint 충돌 무시 관리
+    // =========================================================
+
+    /// <summary>
+    /// 앵커 상태 및 선택적 충돌 무시 쌍을 전부 정리.
+    /// 모든 grab 해제 경로에서 호출.
+    /// </summary>
+    private void ClearAnchorState()
+    {
+        RestoreIgnoredCollisions();
+
+        // 타겟의 동적 안티스트레치 링크 제거 + 앵커 그랩 오버레이 해제
+        if (_attachedAnchorPoint != null && _grabbedPlayer != null)
+        {
+            var targetAntiStretch = _grabbedPlayer.GetComponentInChildren<SSAFYPlayTime.Character.GrabAntiStretchController>(true);
+            if (targetAntiStretch != null)
+                targetAntiStretch.RemoveDynamicGrabLink(_attachedAnchorPoint.Id);
+
+            var targetBodyPart = _grabbedPlayer.GetComponentInChildren<SSAFYPlayTime.Character.BodyPartPhysicsManager>(true);
+            if (targetBodyPart != null)
+                targetBodyPart.NotifyAnchorReleased(_attachedAnchorPoint.Id);
+
+            // 비주얼 물리 복사 가중치 해제
+            _grabbedPlayer.ClearAnchorGrabBoneBlend(_attachedAnchorPoint.Id);
+        }
+
+        _attachedAnchorPoint = null;
+        _pendingReachAnchor = null;
+    }
+
+    /// <summary>
+    /// 손 콜라이더 ↔ 잡힌 본의 물리 콜라이더 간 충돌을 무시.
+    /// 잡기 해제 시 RestoreIgnoredCollisions()로 복원.
+    /// </summary>
+    private void ApplySelectiveCollisionIgnore(GrabAnchorPoint anchor)
+    {
+        if (anchor == null) return;
+
+        var boneCollider = anchor.ParentBoneCollider;
+        if (boneCollider == null) return;
+
+        var handCollider = GetComponent<Collider>();
+        if (handCollider == null) return;
+
+        Physics.IgnoreCollision(handCollider, boneCollider, true);
+        _ignoredCollisionPairs.Add((handCollider, boneCollider));
+
+        if (debugLog)
+            Debug.Log($"[Grab] {handSide} IgnoreCollision ON: hand={handCollider.name} ↔ bone={boneCollider.name}", this);
+    }
+
+    /// <summary>
+    /// 선택적 충돌 무시를 복원 (모든 쌍의 Physics.IgnoreCollision을 false로).
+    /// </summary>
+    private void RestoreIgnoredCollisions()
+    {
+        for (int i = 0; i < _ignoredCollisionPairs.Count; i++)
+        {
+            var pair = _ignoredCollisionPairs[i];
+            if (pair.hand != null && pair.target != null)
+            {
+                Physics.IgnoreCollision(pair.hand, pair.target, false);
+                if (debugLog)
+                    Debug.Log($"[Grab] {handSide} IgnoreCollision OFF: hand={pair.hand.name} ↔ bone={pair.target.name}", this);
+            }
+        }
+        _ignoredCollisionPairs.Clear();
     }
 
     private bool ShouldIgnoreGrabTarget(Rigidbody targetRb)

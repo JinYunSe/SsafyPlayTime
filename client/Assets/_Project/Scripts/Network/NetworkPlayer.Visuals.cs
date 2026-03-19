@@ -11,6 +11,8 @@ public sealed partial class NetworkPlayer
         public Quaternion physicsRestLocalRotation;
         public Quaternion visualRestLocalRotation;
         public float carryBlendMultiplier;
+        /// <summary>앵커 그랩에 의한 per-bone 물리 복사 가중치 (0=영향없음, 1=완전 물리)</summary>
+        public float anchorGrabBlendWeight;
     }
 
     private bool ShouldDisablePhysicsAnimationSync =>
@@ -247,6 +249,9 @@ public sealed partial class NetworkPlayer
             var bindingWeight = Mathf.Max(hardPhysicsCopyWeight, hitReactionCopyWeight);
             if (carryCopyWeight > 0f && binding.carryBlendMultiplier > 0f)
                 bindingWeight = Mathf.Max(bindingWeight, carryCopyWeight * binding.carryBlendMultiplier);
+            // 앵커 그랩: 잡힌 본은 물리 복사 가중치 적용
+            if (binding.anchorGrabBlendWeight > 0f)
+                bindingWeight = Mathf.Max(bindingWeight, binding.anchorGrabBlendWeight);
             if (bindingWeight <= 0.001f)
                 continue;
 
@@ -492,6 +497,101 @@ public sealed partial class NetworkPlayer
             return 0.2f;
 
         return 0.45f;
+    }
+
+    // =========================================================
+    // 앵커 그랩 per-bone 물리 블렌드
+    // =========================================================
+
+    /// <summary>
+    /// 특정 앵커 부위가 잡혔을 때, 해당 본과 인접 본의 물리 복사 가중치를 설정.
+    /// 잡힌 본은 물리 포즈를 더 강하게 따라가 시각적으로 정확한 잡기를 표현.
+    /// </summary>
+    public void SetAnchorGrabBoneBlend(SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId anchorId, float weight = 0.75f)
+    {
+        if (_physicsPoseBindings.Count == 0) return;
+
+        var boneNames = ResolveAnchorBoneNames(anchorId);
+        if (boneNames == null) return;
+
+        for (int i = 0; i < _physicsPoseBindings.Count; i++)
+        {
+            var binding = _physicsPoseBindings[i];
+            if (binding.visual == null) continue;
+
+            var name = binding.visual.name;
+            bool isMatch = false;
+            foreach (var boneName in boneNames)
+            {
+                if (name.IndexOf(boneName, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    isMatch = true;
+                    break;
+                }
+            }
+
+            if (isMatch)
+            {
+                binding.anchorGrabBlendWeight = weight;
+                _physicsPoseBindings[i] = binding;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 앵커 그랩 해제 시 per-bone 블렌드 가중치 초기화.
+    /// </summary>
+    public void ClearAnchorGrabBoneBlend(SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId anchorId)
+    {
+        if (_physicsPoseBindings.Count == 0) return;
+
+        var boneNames = ResolveAnchorBoneNames(anchorId);
+        if (boneNames == null) return;
+
+        for (int i = 0; i < _physicsPoseBindings.Count; i++)
+        {
+            var binding = _physicsPoseBindings[i];
+            if (binding.visual == null) continue;
+
+            var name = binding.visual.name;
+            bool isMatch = false;
+            foreach (var boneName in boneNames)
+            {
+                if (name.IndexOf(boneName, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    isMatch = true;
+                    break;
+                }
+            }
+
+            if (isMatch)
+            {
+                binding.anchorGrabBlendWeight = 0f;
+                _physicsPoseBindings[i] = binding;
+            }
+        }
+    }
+
+    private static string[] ResolveAnchorBoneNames(SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId anchorId)
+    {
+        return anchorId switch
+        {
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.Chest =>
+                new[] { "Spine", "Chest", "Spine1", "Spine2" },
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.Hips =>
+                new[] { "Hips", "Pelvis" },
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.LeftUpperArm =>
+                new[] { "LeftUpperArm", "LeftArm", "LeftShoulder" },
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.RightUpperArm =>
+                new[] { "RightUpperArm", "RightArm", "RightShoulder" },
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.LeftForearm =>
+                new[] { "LeftForeArm", "LeftLowerArm", "LeftHand" },
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.RightForearm =>
+                new[] { "RightForeArm", "RightLowerArm", "RightHand" },
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.Head =>
+                new[] { "Head", "Neck" },
+            _ => null
+        };
     }
 
     private static Quaternion ResolveVisualLocalRotation(in PhysicsPoseBinding binding)

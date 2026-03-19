@@ -325,11 +325,29 @@ public class ProceduralGrabArm : MonoBehaviour
             }
             else
             {
-                _leftReachDir = GetReachDirection(_leftPhysicsHand, true);
-                Vector3 charPos = puppetMaster.targetRoot.position;
-                // reach 방향의 Y가 크게 음수면 IK 높이도 낮춤 (바닥 기절자 대응)
-                float ikHeight = Mathf.Lerp(0.8f, 0.15f, Mathf.Clamp01(-_leftReachDir.y * 1.5f));
-                _leftIKTarget.position = charPos + Vector3.up * ikHeight + _leftReachDir * reachDistance;
+                // 앵커 기반 reach: 펜딩 앵커가 있으면 그립 포인트를 직접 타겟팅
+                var leftPendingAnchor = _leftHandler != null ? _leftHandler.AttachedAnchorPoint : null;
+                if (leftPendingAnchor == null && _leftHandler != null && _leftHandler.IsReaching)
+                {
+                    var sensor = _leftHandler.Sensor;
+                    if (sensor != null && sensor.HasOverlappingAnchor)
+                        leftPendingAnchor = sensor.GetBestOverlappingAnchor();
+                }
+
+                if (leftPendingAnchor != null)
+                {
+                    var gripPos = leftPendingAnchor.GetGripWorldPosition();
+                    _leftReachDir = (gripPos - puppetMaster.targetRoot.position).normalized;
+                    _leftIKTarget.position = gripPos;
+                }
+                else
+                {
+                    _leftReachDir = GetReachDirection(_leftPhysicsHand, true);
+                    Vector3 charPos = puppetMaster.targetRoot.position;
+                    // reach 방향의 Y가 크게 음수면 IK 높이도 낮춤 (바닥 기절자 대응)
+                    float ikHeight = Mathf.Lerp(0.8f, 0.15f, Mathf.Clamp01(-_leftReachDir.y * 1.5f));
+                    _leftIKTarget.position = charPos + Vector3.up * ikHeight + _leftReachDir * reachDistance;
+                }
             }
 
             if (rightHolding)
@@ -341,10 +359,28 @@ public class ProceduralGrabArm : MonoBehaviour
             }
             else
             {
-                _rightReachDir = GetReachDirection(_rightPhysicsHand, false);
-                Vector3 charPos = puppetMaster.targetRoot.position;
-                float ikHeight = Mathf.Lerp(0.8f, 0.15f, Mathf.Clamp01(-_rightReachDir.y * 1.5f));
-                _rightIKTarget.position = charPos + Vector3.up * ikHeight + _rightReachDir * reachDistance;
+                // 앵커 기반 reach: 펜딩 앵커가 있으면 그립 포인트를 직접 타겟팅
+                var rightPendingAnchor = _rightHandler != null ? _rightHandler.AttachedAnchorPoint : null;
+                if (rightPendingAnchor == null && _rightHandler != null && _rightHandler.IsReaching)
+                {
+                    var sensor = _rightHandler.Sensor;
+                    if (sensor != null && sensor.HasOverlappingAnchor)
+                        rightPendingAnchor = sensor.GetBestOverlappingAnchor();
+                }
+
+                if (rightPendingAnchor != null)
+                {
+                    var gripPos = rightPendingAnchor.GetGripWorldPosition();
+                    _rightReachDir = (gripPos - puppetMaster.targetRoot.position).normalized;
+                    _rightIKTarget.position = gripPos;
+                }
+                else
+                {
+                    _rightReachDir = GetReachDirection(_rightPhysicsHand, false);
+                    Vector3 charPos = puppetMaster.targetRoot.position;
+                    float ikHeight = Mathf.Lerp(0.8f, 0.15f, Mathf.Clamp01(-_rightReachDir.y * 1.5f));
+                    _rightIKTarget.position = charPos + Vector3.up * ikHeight + _rightReachDir * reachDistance;
+                }
             }
         }
     }

@@ -45,6 +45,9 @@ namespace SSAFYPlayTime.Character
         private bool _warnedMissingCoreJoints;
         private CoreDriveMode _currentCoreDriveMode;
 
+        // 동적 그랩 링크: 잡힌 앵커 부위 → 코어 본 체인 보강
+        private readonly List<RuntimeLink> _dynamicGrabLinks = new();
+
         private enum CoreDriveMode : byte
         {
             Off = 0,
@@ -528,6 +531,10 @@ namespace SSAFYPlayTime.Character
             for (var i = 0; i < _links.Length; i++)
                 EnsureJoint(_links[i]);
 
+            // 동적 그랩 링크도 활성화
+            for (var i = 0; i < _dynamicGrabLinks.Count; i++)
+                EnsureJoint(_dynamicGrabLinks[i]);
+
             _active = true;
         }
 
@@ -547,6 +554,15 @@ namespace SSAFYPlayTime.Character
 
                 Destroy(joint);
                 _links[i].joint = null;
+            }
+
+            // 동적 그랩 링크도 비활성화 (링크 정의는 유지, 조인트만 제거)
+            for (var i = 0; i < _dynamicGrabLinks.Count; i++)
+            {
+                var dynJoint = _dynamicGrabLinks[i]?.joint;
+                if (dynJoint == null) continue;
+                Destroy(dynJoint);
+                _dynamicGrabLinks[i].joint = null;
             }
 
             _active = false;
@@ -696,6 +712,110 @@ namespace SSAFYPlayTime.Character
                 source.positionDamper *= damperMultiplier;
 
             return source;
+        }
+
+        // =========================================================
+        // 동적 그랩 링크 — 잡힌 앵커 부위의 스트레칭 방지
+        // =========================================================
+
+        /// <summary>
+        /// 잡힌 앵커에 대응하는 동적 안티스트레치 링크 추가.
+        /// HandGrabHandler가 AttachGrab 시 타겟의 AntiStretchController에 호출.
+        /// </summary>
+        public void AddDynamicGrabLink(GrabAnchorPoint anchor)
+        {
+            if (anchor == null) return;
+
+            // 앵커 부위에 따라 코어 본으로의 링크 결정
+            ResolveDynamicLinkTargets(anchor.Id, out var limbNames, out var anchorNames);
+            if (limbNames == null || anchorNames == null) return;
+
+            var link = CreateLink($"DynGrab_{anchor.Id}", limbNames, anchorNames, handSlack * 0.5f);
+            link.limbTransform = FindBestNamedTransform(link.limbNames);
+            link.limbBody = FindNearestRigidbody(link.limbTransform, MaxParentSearchDepth);
+            link.anchorTransform = FindBestAnchorTransform(link.anchorNames);
+            link.anchorBody = FindNearestRigidbody(link.anchorTransform, MaxParentSearchDepth);
+            if (link.anchorBody == null && IsHipsAnchor(link.anchorNames))
+                link.anchorBody = fallbackRootBody;
+
+            if (link.limbBody == null || link.anchorBody == null || link.limbBody == link.anchorBody)
+                return;
+
+            _dynamicGrabLinks.Add(link);
+
+            if (_active)
+                EnsureJoint(link);
+
+            if (debugLog)
+                Debug.Log($"[AntiStretch] {name}: Added dynamic link {link.label}, " +
+                    $"limb={link.limbBody?.name}, anchor={link.anchorBody?.name}", this);
+        }
+
+        /// <summary>
+        /// 특정 앵커에 대응하는 동적 링크 제거.
+        /// HandGrabHandler가 Release 시 타겟의 AntiStretchController에 호출.
+        /// </summary>
+        public void RemoveDynamicGrabLink(GrabAnchorPoint.AnchorId anchorId)
+        {
+            for (int i = _dynamicGrabLinks.Count - 1; i >= 0; i--)
+            {
+                var link = _dynamicGrabLinks[i];
+                if (link == null || !link.label.EndsWith(anchorId.ToString()))
+                    continue;
+
+                if (link.joint != null)
+                    Destroy(link.joint);
+                _dynamicGrabLinks.RemoveAt(i);
+
+                if (debugLog)
+                    Debug.Log($"[AntiStretch] {name}: Removed dynamic link {link.label}", this);
+            }
+        }
+
+        /// <summary>모든 동적 그랩 링크 제거</summary>
+        public void ClearAllDynamicGrabLinks()
+        {
+            for (int i = _dynamicGrabLinks.Count - 1; i >= 0; i--)
+            {
+                var link = _dynamicGrabLinks[i];
+                if (link?.joint != null)
+                    Destroy(link.joint);
+            }
+            _dynamicGrabLinks.Clear();
+        }
+
+        /// <summary>앵커 부위별 동적 링크 매핑 (사지 → 코어 본)</summary>
+        private static void ResolveDynamicLinkTargets(GrabAnchorPoint.AnchorId anchorId,
+            out string[] limbNames, out string[] anchorNames)
+        {
+            switch (anchorId)
+            {
+                case GrabAnchorPoint.AnchorId.LeftUpperArm:
+                    limbNames = new[] { "LeftUpperArm", "LeftArm" };
+                    anchorNames = new[] { "Chest", "Spine2", "Spine1" };
+                    break;
+                case GrabAnchorPoint.AnchorId.RightUpperArm:
+                    limbNames = new[] { "RightUpperArm", "RightArm" };
+                    anchorNames = new[] { "Chest", "Spine2", "Spine1" };
+                    break;
+                case GrabAnchorPoint.AnchorId.LeftForearm:
+                    limbNames = new[] { "LeftForeArm", "LeftLowerArm" };
+                    anchorNames = new[] { "LeftUpperArm", "LeftArm" };
+                    break;
+                case GrabAnchorPoint.AnchorId.RightForearm:
+                    limbNames = new[] { "RightForeArm", "RightLowerArm" };
+                    anchorNames = new[] { "RightUpperArm", "RightArm" };
+                    break;
+                case GrabAnchorPoint.AnchorId.Head:
+                    limbNames = new[] { "Head" };
+                    anchorNames = new[] { "Neck", "Chest", "Spine2" };
+                    break;
+                default:
+                    // Chest/Hips는 이미 코어 본 — 추가 링크 불필요
+                    limbNames = null;
+                    anchorNames = null;
+                    break;
+            }
         }
     }
 }
