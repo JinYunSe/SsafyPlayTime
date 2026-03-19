@@ -44,6 +44,10 @@ public sealed partial class NetworkPlayer
         if (!HasStateAuthority)
             return;
 
+        // 사망 후에는 물리/동기화 연산 전부 스킵 → 네트워크 부하 최소화
+        if (GetIsDeadState())
+            return;
+
         if (GetInput(out PlayerNetworkInput input))
             DoPhysicsStep(input, Runner.DeltaTime);
 
