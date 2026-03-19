@@ -1050,19 +1050,12 @@ public sealed partial class NetworkPlayer
             var targetPlayer = hitCollider.GetComponentInParent<NetworkPlayer>();
             if (targetPlayer != null && targetPlayer != this)
             {
-                if (damagePerTick > 0f)
-                {
-                    var playerStats = targetPlayer.GetComponentInParent<PlayerStats>();
-                    if (playerStats != null)
-                    {
-                        playerStats.TakeDamage(Mathf.Max(0, Mathf.RoundToInt(damagePerTick)));
-                    }
-                }
-
-                if (stunPerTick > 0f)
-                {
-                    targetPlayer.ApplyStunDamage(stunPerTick, 1f, 0f, explosionForce);
-                }
+                targetPlayer.ApplyCombinedDamage(
+                    damagePerTick,
+                    stunPerTick,
+                    "SatelliteStrike",
+                    0f,
+                    explosionForce);
             }
 
             var body = hitCollider.attachedRigidbody;

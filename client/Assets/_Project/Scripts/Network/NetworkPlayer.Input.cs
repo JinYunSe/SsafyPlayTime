@@ -3,6 +3,8 @@ using UnityEngine;
 
 public sealed partial class NetworkPlayer
 {
+    private static readonly Collider[] s_deathZoneProbeBuffer = new Collider[16];
+
     private Vector3 _lastSafePosition;
     private Quaternion _lastSafeRotation = Quaternion.identity;
     private bool _hasLastSafeTransform;
@@ -18,6 +20,7 @@ public sealed partial class NetworkPlayer
         ApplyReplicatedHeldItemPresentation();
         ApplyReplicatedWorldItemEffects();
         UpdateReplicatedFlamethrowerVisualFollow();
+        UpdateLocalDeathPresentation();
 
         if (Object != null && Object.IsValid && !HasInputAuthority)
             return;
@@ -52,6 +55,12 @@ public sealed partial class NetworkPlayer
 
     private void PollLocalInputState()
     {
+        if (GetIsDeadState())
+        {
+            ResetAllLocalInputState();
+            return;
+        }
+
         if (Runner == null)
         {
             _sandboxInput = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
@@ -147,6 +156,22 @@ public sealed partial class NetworkPlayer
         _leftClickUseTriggered = false;
     }
 
+    private void ResetAllLocalInputState()
+    {
+        _sandboxInput = Vector2.zero;
+        _sandboxJump = false;
+        _dropTriggered = false;
+        _throwTriggered = false;
+        _leftClickUseTriggered = false;
+        _leftMouseDown = false;
+        _leftMouseConsumedAsGrab = false;
+        _rightMouseDown = false;
+        _rightMouseConsumedAsGrab = false;
+        _isLeftGrabActive = false;
+        _isRightGrabActive = false;
+        _isGrabActive = false;
+    }
+
     private void SynchronizeNetworkSimulationState()
     {
         if (syncPhysicsObjects != null)
@@ -239,8 +264,36 @@ public sealed partial class NetworkPlayer
         return false;
     }
 
+    private bool IsInsideDeathZone()
+    {
+        var hitCount = Physics.OverlapSphereNonAlloc(
+            transform.position,
+            0.2f,
+            s_deathZoneProbeBuffer,
+            ~0,
+            QueryTriggerInteraction.Collide);
+
+        for (var i = 0; i < hitCount; i++)
+        {
+            var hit = s_deathZoneProbeBuffer[i];
+            if (hit == null)
+                continue;
+
+            if (hit.transform.IsChildOf(transform))
+                continue;
+
+            if (hit.GetComponentInParent<DeathZone>() != null)
+                return true;
+        }
+
+        return false;
+    }
+
     private void ClampOutOfBoundsCharacter()
     {
+        if (GetIsDeadState())
+            return;
+
         if (transform.position.y >= -10)
             return;
 
@@ -249,6 +302,12 @@ public sealed partial class NetworkPlayer
             return;
 
         _nextOutOfBoundsRecoverAt = now + 0.5f;
+
+        if (IsInsideDeathZone())
+        {
+            KillImmediately("DeathZoneOutOfBounds");
+            return;
+        }
 
         if (!TryResolveRecoveryTransform(out var recoveryPosition, out var recoveryRotation))
             recoveryRotation = transform.rotation;
