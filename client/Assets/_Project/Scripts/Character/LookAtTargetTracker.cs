@@ -29,10 +29,15 @@ public class LookAtTargetTracker : MonoBehaviour
     [SerializeField] private float lookAtHeightOffset = 0.8f;
     [SerializeField] private float scanInterval = 0.2f;
 
+    [Header("Movement Damping")]
+    [SerializeField, Range(0f, 1f)] private float movingWeightScale = 0.3f;
+    [SerializeField] private float movingSpeedThreshold = 1.5f;
+
     private Transform _currentTarget;
     private float _targetWeight;
     private Transform _ikTarget;
     private float _nextScanTime;
+    private Rigidbody _rootRigidbody;
 
     private void Start()
     {
@@ -53,6 +58,7 @@ public class LookAtTargetTracker : MonoBehaviour
         }
 
         Register(puppetMaster);
+        _rootRigidbody = transform.root.GetComponentInChildren<Rigidbody>();
 
         var targetGO = new GameObject("LookAtTarget");
         targetGO.transform.SetParent(transform);
@@ -74,6 +80,17 @@ public class LookAtTargetTracker : MonoBehaviour
         }
 
         var desired = _currentTarget != null ? 1f : 0f;
+
+        if (_rootRigidbody != null)
+        {
+            var planarSpeed = new Vector3(_rootRigidbody.velocity.x, 0f, _rootRigidbody.velocity.z).magnitude;
+            if (planarSpeed > movingSpeedThreshold)
+            {
+                var moveFactor = Mathf.Clamp01(planarSpeed / (movingSpeedThreshold * 3f));
+                desired *= Mathf.Lerp(1f, movingWeightScale, moveFactor);
+            }
+        }
+
         _targetWeight = Mathf.MoveTowards(_targetWeight, desired, weightBlendSpeed * Time.deltaTime);
     }
 

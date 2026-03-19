@@ -32,6 +32,17 @@ public class CombatSettings : MonoBehaviour
     public float groggyToStunChance = 0.7f;
     public float headbuttSelfStunWall = 2.5f;
     public float headbuttSelfStunFloor = 1.5f;
+    public int hiddenHealthMax = 260;
+    public float hiddenHealthHitImmunity = 0.12f;
+    public float hiddenHealthRecentDamageWindow = 3.5f;
+    public float hiddenHealthRecentDamageCap = 85f;
+    public float hiddenHealthLowHpStunBonus = 0.35f;
+    public float environmentCollisionMinImpact = 18f;
+    public float environmentCollisionMaxImpact = 55f;
+    public float environmentCollisionMinStunDamage = 3f;
+    public float environmentCollisionMaxStunDamage = 9f;
+    public float environmentCollisionMinHealthDamage = 0f;
+    public float environmentCollisionMaxHealthDamage = 14f;
 
     [Header("Body Part Multipliers")]
     public float bodyPartHeadMultiplier = 1.5f;
@@ -103,6 +114,17 @@ public class CombatSettings : MonoBehaviour
         if (p.TryGetValue("GROGGY_TO_STUN_CHANCE", out v)) groggyToStunChance = v;
         if (p.TryGetValue("HEADBUTT_SELF_STUN_WALL", out v)) headbuttSelfStunWall = v;
         if (p.TryGetValue("HEADBUTT_SELF_STUN_FLOOR", out v)) headbuttSelfStunFloor = v;
+        if (p.TryGetValue("HIDDEN_HEALTH_MAX", out v)) hiddenHealthMax = Mathf.Max(1, Mathf.RoundToInt(v));
+        if (p.TryGetValue("HIDDEN_HEALTH_HIT_IMMUNITY", out v)) hiddenHealthHitImmunity = Mathf.Max(0f, v);
+        if (p.TryGetValue("HIDDEN_HEALTH_RECENT_WINDOW", out v)) hiddenHealthRecentDamageWindow = Mathf.Max(0f, v);
+        if (p.TryGetValue("HIDDEN_HEALTH_RECENT_CAP", out v)) hiddenHealthRecentDamageCap = Mathf.Max(1f, v);
+        if (p.TryGetValue("HIDDEN_HEALTH_LOW_HP_STUN_BONUS", out v)) hiddenHealthLowHpStunBonus = Mathf.Max(0f, v);
+        if (p.TryGetValue("ENVIRONMENT_COLLISION_MIN_IMPACT", out v)) environmentCollisionMinImpact = Mathf.Max(0f, v);
+        if (p.TryGetValue("ENVIRONMENT_COLLISION_MAX_IMPACT", out v)) environmentCollisionMaxImpact = Mathf.Max(environmentCollisionMinImpact + 0.01f, v);
+        if (p.TryGetValue("ENVIRONMENT_COLLISION_MIN_STUN", out v)) environmentCollisionMinStunDamage = Mathf.Max(0f, v);
+        if (p.TryGetValue("ENVIRONMENT_COLLISION_MAX_STUN", out v)) environmentCollisionMaxStunDamage = Mathf.Max(environmentCollisionMinStunDamage, v);
+        if (p.TryGetValue("ENVIRONMENT_COLLISION_MIN_HEALTH", out v)) environmentCollisionMinHealthDamage = Mathf.Max(0f, v);
+        if (p.TryGetValue("ENVIRONMENT_COLLISION_MAX_HEALTH", out v)) environmentCollisionMaxHealthDamage = Mathf.Max(environmentCollisionMinHealthDamage, v);
         if (p.TryGetValue("BODY_PART_HEAD_MULTIPLIER", out v)) bodyPartHeadMultiplier = v;
         if (p.TryGetValue("BODY_PART_BODY_MULTIPLIER", out v)) bodyPartBodyMultiplier = v;
         if (p.TryGetValue("BODY_PART_LIMB_MULTIPLIER", out v)) bodyPartLimbMultiplier = v;

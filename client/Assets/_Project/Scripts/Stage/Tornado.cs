@@ -80,33 +80,62 @@ public class Tornado : MonoBehaviour
 
     private void OnTriggerStay(Collider other)
     {
-        Rigidbody rb = other.GetComponent<Rigidbody>();
+        var networkPlayer = other.GetComponentInParent<NetworkPlayer>();
+        Rigidbody rb = networkPlayer != null
+            ? networkPlayer.transform.root.GetComponent<Rigidbody>()
+            : other.GetComponent<Rigidbody>();
         if (rb == null)
             return;
 
+        if (networkPlayer != null && (networkPlayer.IsStunned || networkPlayer.IsRecovering))
+        {
+            rb.drag = 0.05f;
+            networkPlayer.TraceStunForceEvent(
+                "Tornado",
+                rb,
+                Vector3.zero,
+                ForceMode.VelocityChange,
+                rb.velocity,
+                rb.velocity,
+                false,
+                "skipped=stunned_or_recovering");
+            return;
+        }
+
         float topY = tornadoCollider.bounds.max.y;
+        var targetTransform = networkPlayer != null ? networkPlayer.transform : other.transform;
 
         // 1. 사출 판정 (꼭대기 근처)
-        if (other.transform.position.y >= topY - 0.8f)
+        if (targetTransform.position.y >= topY - 0.8f)
         {
-            DoArcadeLaunch(rb);
+            DoArcadeLaunch(rb, networkPlayer);
         }
         else
         {
             // 2. 상승 및 회전 (물리 힘보다는 직접 위치 조작 느낌으로)
             // 중심 방향 벡터
-            Vector3 centerDir = (transform.position - other.transform.position);
+            Vector3 centerDir = (transform.position - targetTransform.position);
             centerDir.y = 0;
 
             // 중심으로 당기면서 위로 올림
+            var velocityBefore = rb.velocity;
             rb.velocity = new Vector3(centerDir.x * 2f, liftSpeed, centerDir.z * 2f);
+            networkPlayer?.TraceStunForceEvent(
+                "TornadoVelocityAssign",
+                rb,
+                rb.velocity - velocityBefore,
+                ForceMode.VelocityChange,
+                velocityBefore,
+                rb.velocity,
+                true,
+                "assigned_velocity");
 
             // 비주얼 회전
-            other.transform.Rotate(0, spinSpeed * Time.deltaTime, 0);
+            targetTransform.Rotate(0, spinSpeed * Time.deltaTime, 0);
         }
     }
 
-    private void DoArcadeLaunch(Rigidbody rb)
+    private void DoArcadeLaunch(Rigidbody rb, NetworkPlayer networkPlayer)
     {
         // [핵심] 기존의 모든 관성과 회전속도를 0으로 초기화!
         // 이게 없으면 이전의 회전 관성 때문에 조종이 안 됩니다.
@@ -119,7 +148,17 @@ public class Tornado : MonoBehaviour
 
         // 새로운 깔끔한 힘 부여
         Vector3 finalForce = (Vector3.up * launchUpForce) + (exitDir * launchOutForce);
+        var velocityBefore = rb.velocity;
         rb.AddForce(finalForce, ForceMode.Impulse);
+        networkPlayer?.TraceStunForceEvent(
+            "TornadoLaunch",
+            rb,
+            finalForce,
+            ForceMode.Impulse,
+            velocityBefore,
+            rb.velocity,
+            true,
+            "arcade_launch");
 
         // [플레이어 제어권 강화]
         // 여기서 플레이어의 이동 스크립트에 "나 지금 날아가는 중이야!"라고 신호를 보냅니다.
