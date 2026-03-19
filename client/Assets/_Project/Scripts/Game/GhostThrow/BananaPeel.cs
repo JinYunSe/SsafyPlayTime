@@ -34,6 +34,13 @@ namespace SSAFYPlayTime.Game.GhostThrow
         // ─── 온라인 수명 타이머 ──────────────────────────────
         [Networked] private TickTimer LifeTimer { get; set; }
 
+        /// <summary>
+        /// 호스트가 onBeforeSpawned에서 설정 → 클라이언트 Spawned()에서 읽어 Rigidbody에 적용.
+        /// NetworkRigidbody 없이도 초기 탄도를 모든 클라이언트에 동기화한다.
+        /// </summary>
+        [Networked]
+        public Vector3 NetworkedInitialVelocity { get; set; }
+
         private void Awake()
         {
             _rb  = GetComponent<Rigidbody>();
@@ -47,6 +54,16 @@ namespace SSAFYPlayTime.Game.GhostThrow
             // 충분히 긴 최대 수명 (착지 후 LifeTimer 재설정)
             if (HasStateAuthority)
                 LifeTimer = TickTimer.CreateFromSeconds(Runner, lifeAfterLanding + 30f);
+
+            // 모든 클라이언트: 호스트가 onBeforeSpawned에서 저장한 초기 속도를 적용.
+            // NetworkRigidbody 없이 탄도를 동기화하는 핵심 처리.
+            if (NetworkedInitialVelocity.sqrMagnitude > 0.001f && _rb != null)
+            {
+                _rb.drag = 0f;
+                _rb.angularDrag = 0.05f;
+                _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                _rb.velocity = NetworkedInitialVelocity;
+            }
         }
 
         // ─── 오프라인 수명 체크 ──────────────────────────────
@@ -181,7 +198,7 @@ namespace SSAFYPlayTime.Game.GhostThrow
                 float dmg = CombatSettings.Instance != null
                     ? CombatSettings.Instance.bananaHpDamage
                     : 10f;
-                np.ApplyHpDamage(dmg);
+                np.ApplyHealthDamage(dmg);
                 Debug.Log($"[BananaPeel] HP 데미지: {np.name} -{dmg}");
             }
 
