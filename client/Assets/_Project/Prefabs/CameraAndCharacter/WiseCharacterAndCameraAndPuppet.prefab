@@ -2649,9 +2649,6 @@ MonoBehaviour:
     _value: 0
   _NetworkedIsDragged:
     _value: 0
-  _NetworkedHp: 0
-  _IsDeadNetworked:
-    _value: 0
   itemWorldEffectMask:
     serializedVersion: 2
     m_Bits: 119
@@ -2737,6 +2734,11 @@ MonoBehaviour:
   behindBackThreshold: -0.08
   behindBackForce: 90
   behindBackTurnTorque: 20
+  chestReactionShare: 0.4
+  carryingTorsoReactionMultiplier: 1.15
+  dualCarryTorsoReactionMultiplier: 1.35
+  carryingTurnAssistMultiplier: 1.1
+  dualCarryTurnAssistMultiplier: 1.25
   carryPoseProfile: {fileID: 0}
 --- !u!114 &3948311823849651178
 MonoBehaviour:
@@ -5223,6 +5225,7 @@ GameObject:
   - component: {fileID: 4024543050421231655}
   - component: {fileID: 490638968547530424}
   - component: {fileID: 688667343818133564}
+  - component: {fileID: 6543885247841284269}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -5319,6 +5322,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   target: {fileID: 0}
   autoFindPlayerTag: Player
+  autoFindTargetName: Test
   autoFindTargetWhenNull: 1
   pivotOffset: {x: 0, y: 1.2, z: 0}
   distance: 8
@@ -5331,6 +5335,10 @@ MonoBehaviour:
   invertY: 0
   lockCursor: 1
   lookDeadZone: 0.01
+  yawClampBlendInSpeed: 18
+  yawClampBlendOutSpeed: 8
+  followSmooth: 14
+  rotateSmooth: 18
   obstructionMask:
     serializedVersion: 2
     m_Bits: 119
@@ -5437,6 +5445,19 @@ MonoBehaviour:
   bananaPrefabOnline:
     RawGuidValue: 3ce32ffa6ccf60e4ab65d9e396f43433
   bananaPrefabOnlineObject: {fileID: 0}
+--- !u!114 &6543885247841284269
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8473949689365063382}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fcd2e1ec062a7a84dbab757e2700ea43, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  mapLayerName: Map
 --- !u!1 &8692385659494124323
 GameObject:
   m_ObjectHideFlags: 0
