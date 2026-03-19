@@ -62,11 +62,13 @@ namespace SSAFYPlayTime.Gameplay.Items
         {
             var request = new BlackholeSkillRequest(
                 ownerPosition + ownerForward * 6f,
+                ownerPosition,
+                ownerForward,
                 Mathf.Max(0f, def.Master.UseDelaySec),
                 Mathf.Max(0f, def.Master.DurationSec),
                 Mathf.Max(0f, def.Master.Range),
                 Mathf.Max(0f, def.Master.Force));
-            ItemRuntimeLog.Info(def.Master.ItemId, $"블랙홀 요청: center={request.Center}, delay={request.DelaySec:0.00}, duration={request.DurationSec:0.00}, radius={request.Radius:0.00}");
+            ItemRuntimeLog.Info(def.Master.ItemId, $"블랙홀 요청: origin={request.Origin}, forward={request.Forward}, center={request.Center}, delay={request.DelaySec:0.00}, duration={request.DurationSec:0.00}, radius={request.Radius:0.00}");
             _bridge.OnBlackholeRequested(request);
         }
 
@@ -95,6 +97,43 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 ItemRuntimeLog.Info(def.Master.ItemId, "화염방사기 종료 요청");
                 StopFlamethrowerIfNeeded();
+                return;
+            }
+
+            StartFlamethrower(def);
+        }
+
+        internal bool TrySetFlamethrowerActive(bool active, out string reason)
+        {
+            reason = string.Empty;
+            if (!_catalog.TryGetDefinition(ItemIds.Flamethrower, out var def))
+            {
+                reason = "Flamethrower definition missing.";
+                return false;
+            }
+
+            if (!string.Equals(_heldItemId, ItemIds.Flamethrower, System.StringComparison.Ordinal))
+            {
+                reason = "Flamethrower is not currently held.";
+                return false;
+            }
+
+            if (active)
+            {
+                StartFlamethrower(def);
+            }
+            else
+            {
+                StopFlamethrowerIfNeeded();
+            }
+
+            return true;
+        }
+
+        private void StartFlamethrower(ItemDefinition def)
+        {
+            if (_isFlamethrowerActive)
+            {
                 return;
             }
 

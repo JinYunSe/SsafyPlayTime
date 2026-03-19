@@ -56,6 +56,18 @@ public class CombatSettings : MonoBehaviour
     public float thrownObjectStunDamage = 20f;
     public float thrownPlayerStunDamage = 25f;
 
+    [Header("HP System")]
+    [Tooltip("최대 HP (게임 내 숨겨짐, 디자이너 조정용)")]
+    public float maxHealth = 200f;
+    [Tooltip("펀치 1회 고정 HP 데미지")]
+    public float punchHpDamage = 4f;
+    [Tooltip("GhostCube 폭발 중심부 HP 데미지 (거리 감쇠 적용)")]
+    public float ghostBombHpDamage = 30f;
+    [Tooltip("바나나 밟혔을 때 HP 데미지")]
+    public float bananaHpDamage = 10f;
+    [Tooltip("맵 밖 추락 시 HP 데미지 (즉사)")]
+    public float outOfBoundsHpDamage = 9999f;
+
     private bool _loaded;
 
     private void Awake()
@@ -133,6 +145,10 @@ public class CombatSettings : MonoBehaviour
         if (p.TryGetValue("GRAB_THROW_FORCE_PLAYER_STUNNED", out v)) grabThrowForceStunned = v;
         if (p.TryGetValue("THROWN_OBJECT_STUN_DAMAGE", out v)) thrownObjectStunDamage = v;
         if (p.TryGetValue("THROWN_PLAYER_STUN_DAMAGE", out v)) thrownPlayerStunDamage = v;
+        if (p.TryGetValue("MAX_HEALTH", out v)) maxHealth = v;
+        if (p.TryGetValue("PUNCH_HP_DAMAGE", out v)) punchHpDamage = v;
+        if (p.TryGetValue("GHOST_BOMB_HP_DAMAGE", out v)) ghostBombHpDamage = v;
+        if (p.TryGetValue("BANANA_HP_DAMAGE", out v)) bananaHpDamage = v;
     }
 
     /// <summary>공격 ID로 수치 조회. 없으면 null.</summary>
