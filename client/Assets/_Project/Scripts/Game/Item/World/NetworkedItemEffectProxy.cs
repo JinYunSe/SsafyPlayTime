@@ -56,6 +56,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private Collider _collider;
         private NetworkTransform _networkTransform;
         private bool _visualInitialized;
+        private bool _lastActivatedState;
 
         public override void Spawned()
         {
@@ -115,9 +116,21 @@ namespace SSAFYPlayTime.Gameplay.Items
         public void SetActivated(bool activated)
         {
             Activated = activated;
+            if (_lastActivatedState != activated)
+            {
+                _lastActivatedState = activated;
+                if (activated && _visualRoot != null)
+                {
+                    PlayAllParticles(_visualRoot);
+                }
+            }
         }
 
-        public void SyncNetworkPose(Vector3 position, Quaternion rotation, bool zeroVelocity = false)
+        public void SyncNetworkPose(
+            Vector3 position,
+            Quaternion rotation,
+            bool zeroVelocity = false,
+            bool teleportNetwork = true)
         {
             CachePhysics();
 
@@ -128,14 +141,14 @@ namespace SSAFYPlayTime.Gameplay.Items
                 _rigidbody.position = position;
                 _rigidbody.rotation = rotation;
 
-                if (zeroVelocity || _rigidbody.isKinematic)
+                if (zeroVelocity && !_rigidbody.isKinematic)
                 {
                     _rigidbody.velocity = Vector3.zero;
                     _rigidbody.angularVelocity = Vector3.zero;
                 }
             }
 
-            if (HasStateAuthority && _networkTransform != null)
+            if (HasStateAuthority && _networkTransform != null && teleportNetwork)
             {
                 _networkTransform.Teleport(position, rotation);
             }
@@ -179,14 +192,33 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private void ApplyAuthorityPhysicsState()
         {
-            if (_collider != null && _collider.enabled)
-            {
-                _collider.enabled = false;
-            }
-
             if (_rigidbody == null)
             {
                 return;
+            }
+
+            var isAuthorityBlackholeProjectile =
+                EffectKind == NetworkedItemEffectKind.Blackhole &&
+                !Activated &&
+                HasStateAuthority;
+
+            if (isAuthorityBlackholeProjectile)
+            {
+                if (_collider != null && !_collider.enabled)
+                {
+                    _collider.enabled = true;
+                }
+
+                _rigidbody.isKinematic = false;
+                _rigidbody.useGravity = true;
+                _rigidbody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                _rigidbody.interpolation = RigidbodyInterpolation.Interpolate;
+                return;
+            }
+
+            if (_collider != null && _collider.enabled)
+            {
+                _collider.enabled = false;
             }
 
             _rigidbody.velocity = Vector3.zero;
@@ -241,6 +273,15 @@ namespace SSAFYPlayTime.Gameplay.Items
                 ? Mathf.Clamp(Radius * 0.3f, 0.9f, 6f)
                 : 0.08f;
             _visualRoot.transform.localScale = Vector3.one * targetScale;
+
+            if (_lastActivatedState != Activated)
+            {
+                _lastActivatedState = Activated;
+                if (Activated)
+                {
+                    PlayAllParticles(_visualRoot);
+                }
+            }
 
             var renderer = _visualRoot.GetComponent<Renderer>();
             if (renderer != null)
@@ -343,18 +384,6 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            var networkObject = instance.GetComponent<NetworkObject>();
-            if (networkObject != null)
-            {
-                Destroy(networkObject);
-            }
-
-            var networkTransform = instance.GetComponent<NetworkTransform>();
-            if (networkTransform != null)
-            {
-                Destroy(networkTransform);
-            }
-
             var networkedDrop = instance.GetComponent<NetworkedItemFieldDrop>();
             if (networkedDrop != null)
             {
@@ -365,6 +394,18 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (itemDrop != null)
             {
                 Destroy(itemDrop);
+            }
+
+            var networkTransform = instance.GetComponent<NetworkTransform>();
+            if (networkTransform != null)
+            {
+                Destroy(networkTransform);
+            }
+
+            var networkObject = instance.GetComponent<NetworkObject>();
+            if (networkObject != null)
+            {
+                Destroy(networkObject);
             }
 
             var behaviours = instance.GetComponents<MonoBehaviour>();
@@ -390,7 +431,10 @@ namespace SSAFYPlayTime.Gameplay.Items
                 rigidbodies[i].useGravity = false;
             }
 
-            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
+            if (EffectKind != NetworkedItemEffectKind.Blackhole)
+            {
+                ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
+            }
             PlayAllParticles(instance);
         }
 

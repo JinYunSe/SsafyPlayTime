@@ -69,6 +69,7 @@ public sealed partial class NetworkPlayer
     private readonly Collider[] _replicatedBlackholeOverlapBuffer = new Collider[256];
     private readonly Collider[] _replicatedSatelliteOverlapBuffer = new Collider[256];
     private readonly DefaultItemFieldPrefabResolver _replicatedEffectPrefabResolver = new();
+    private static PhysicMaterial s_blackholeProjectileLowFrictionMaterial;
 
     private bool _itemWorldEffectNetworkReady;
     private bool _itemWorldEffectEventsBound;
@@ -102,12 +103,16 @@ public sealed partial class NetworkPlayer
 
     [Networked] private int NetworkedBlackholeSeq { get; set; }
     [Networked] private Vector3 NetworkedBlackholeCenter { get; set; }
+    [Networked] private Vector3 NetworkedBlackholeOrigin { get; set; }
+    [Networked] private Vector3 NetworkedBlackholeForward { get; set; }
     [Networked] private float NetworkedBlackholeDelaySec { get; set; }
     [Networked] private float NetworkedBlackholeDurationSec { get; set; }
     [Networked] private float NetworkedBlackholeRadius { get; set; }
     [Networked] private float NetworkedBlackholeForce { get; set; }
     [Networked] private int NetworkedSatelliteStrikeSeq { get; set; }
     [Networked] private Vector3 NetworkedSatelliteStrikeCenter { get; set; }
+    [Networked] private Vector3 NetworkedSatelliteStrikeOrigin { get; set; }
+    [Networked] private Vector3 NetworkedSatelliteStrikeForward { get; set; }
     [Networked] private float NetworkedSatelliteStrikeWarningSec { get; set; }
     [Networked] private float NetworkedSatelliteStrikeDurationSec { get; set; }
     [Networked] private float NetworkedSatelliteStrikeRadius { get; set; }
@@ -207,6 +212,8 @@ public sealed partial class NetworkPlayer
         }
 
         NetworkedBlackholeCenter = request.Center;
+        NetworkedBlackholeOrigin = request.Origin;
+        NetworkedBlackholeForward = request.Forward;
         NetworkedBlackholeDelaySec = request.DelaySec;
         NetworkedBlackholeDurationSec = request.DurationSec;
         NetworkedBlackholeRadius = request.Radius;
@@ -226,6 +233,8 @@ public sealed partial class NetworkPlayer
         }
 
         NetworkedSatelliteStrikeCenter = request.Center;
+        NetworkedSatelliteStrikeOrigin = request.Origin;
+        NetworkedSatelliteStrikeForward = request.Forward;
         NetworkedSatelliteStrikeWarningSec = request.WarningSec;
         NetworkedSatelliteStrikeDurationSec = request.DurationSec;
         NetworkedSatelliteStrikeRadius = request.Radius;
@@ -248,7 +257,12 @@ public sealed partial class NetworkPlayer
 
         NetworkedFlamethrowerActive = true;
         ItemRuntimeLog.Info(itemId, $"Flamethrower start replicated: endAt={endAtSec:0.00}", this);
-        var forward = transform.forward.sqrMagnitude > 0.0001f ? transform.forward.normalized : Vector3.forward;
+        var forward = Quaternion.Euler(0f, GetNetworkedVisualYaw(), 0f) * Vector3.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude <= 0.0001f)
+        {
+            forward = transform.forward.sqrMagnitude > 0.0001f ? transform.forward.normalized : Vector3.forward;
+        }
         var origin = ResolveFlamethrowerEffectOrigin(forward);
         EnsureOrUpdateFlamethrowerEffectProxy(
             origin,
@@ -393,9 +407,9 @@ public sealed partial class NetworkPlayer
             yield break;
         }
 
-        var startPosition = transform.position + Vector3.up * blackholeLaunchHeightOffset + transform.forward * blackholeLaunchForwardOffset;
+        var throwForward = ResolveReplicatedThrowForward(request.Forward, request.Center);
+        var startPosition = request.Origin + Vector3.up * blackholeLaunchHeightOffset + throwForward * blackholeLaunchForwardOffset;
         var center = ResolveSatelliteGroundCenter(request.Center);
-        var throwForward = ResolveReplicatedThrowForward(center);
         var startRotation = throwForward.sqrMagnitude > 0.0001f
             ? Quaternion.LookRotation(throwForward, Vector3.up)
             : Quaternion.identity;
@@ -411,52 +425,61 @@ public sealed partial class NetworkPlayer
         var visualRoot = _activeBlackholeEffectProxy != null ? _activeBlackholeEffectProxy.gameObject : null;
         var bombBody = visualRoot != null ? visualRoot.GetComponent<Rigidbody>() : null;
         var bombProxy = visualRoot != null ? visualRoot.GetComponent<NetworkedItemEffectProxy>() : null;
+        var bombCollider = visualRoot != null ? visualRoot.GetComponent<SphereCollider>() : null;
         if (visualRoot == null || bombBody == null || bombProxy == null)
         {
             _activeReplicatedBlackholeRoutine = null;
             yield break;
         }
 
+        if (bombCollider != null)
+        {
+            bombCollider.radius = 0.225f;
+            bombCollider.center = Vector3.zero;
+            bombCollider.sharedMaterial = GetOrCreateBlackholeProjectileContactMaterial();
+            IgnoreOwnerCollisions(bombCollider);
+        }
+
         if (bombBody != null)
         {
-            bombBody.isKinematic = true;
-            bombBody.useGravity = false;
+            bombBody.mass = 4f;
+            bombBody.drag = 0.3f;
+            bombBody.angularDrag = 0.1f;
+            bombBody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            bombBody.interpolation = RigidbodyInterpolation.Interpolate;
+            bombBody.constraints = RigidbodyConstraints.None;
+            bombBody.velocity = Vector3.zero;
+            bombBody.angularVelocity = Vector3.zero;
+            bombBody.isKinematic = false;
+            bombBody.useGravity = true;
         }
 
         var delaySec = Mathf.Max(0f, request.DelaySec);
+        var projectileCenter = startPosition;
         if (delaySec > 0f)
         {
-            var travelElapsed = 0f;
-            var previousPosition = startPosition;
-            var arcHeight = Mathf.Max(0.75f, Vector3.Distance(startPosition, center) * Mathf.Max(0.1f, blackholeThrowArc));
+            var launchVelocity =
+                (throwForward + Vector3.up * blackholeThrowArc).normalized *
+                Mathf.Max(0.1f, blackholeThrowSpeed);
+            bombBody.AddForce(launchVelocity, ForceMode.VelocityChange);
 
-            while (travelElapsed < delaySec)
+            var flightStartTime = Time.time;
+            while (Time.time - flightStartTime < delaySec)
             {
-                var step = Mathf.Max(0.001f, Time.deltaTime);
-                travelElapsed = Mathf.Min(delaySec, travelElapsed + step);
-                var t = Mathf.Clamp01(travelElapsed / delaySec);
-                var linear = Vector3.Lerp(startPosition, center, t);
-                var arcOffset = 4f * arcHeight * t * (1f - t);
-                var nextPosition = linear + Vector3.up * arcOffset;
-                var lookDirection = nextPosition - previousPosition;
-                var rotation = lookDirection.sqrMagnitude > 0.0001f
-                    ? Quaternion.LookRotation(lookDirection.normalized, Vector3.up)
-                    : visualRoot.transform.rotation;
-
-                bombProxy.SyncNetworkPose(nextPosition, rotation);
-                previousPosition = nextPosition;
+                projectileCenter = bombBody != null ? bombBody.position : visualRoot.transform.position;
                 yield return null;
             }
         }
 
-        center = ResolveSatelliteGroundCenter(request.Center);
+        center = bombBody != null ? bombBody.position : projectileCenter;
         bombBody.velocity = Vector3.zero;
         bombBody.angularVelocity = Vector3.zero;
         bombBody.isKinematic = true;
         bombBody.useGravity = false;
+        bombBody.constraints = RigidbodyConstraints.None;
         bombProxy.Radius = request.Radius;
         bombProxy.SetActivated(true);
-        bombProxy.SyncNetworkPose(center, Quaternion.identity, zeroVelocity: true);
+        bombProxy.SyncNetworkPose(center, Quaternion.identity, zeroVelocity: true, teleportNetwork: true);
 
         var duration = Mathf.Max(0.1f, request.DurationSec);
         var radius = Mathf.Max(0.1f, request.Radius);
@@ -470,7 +493,7 @@ public sealed partial class NetworkPlayer
             var ramp = Mathf.Clamp01(activeElapsed / expandDuration);
             visualRoot.transform.position = center;
             visualRoot.transform.rotation = Quaternion.identity;
-            bombProxy.SyncNetworkPose(center, Quaternion.identity);
+            bombProxy.SyncNetworkPose(center, Quaternion.identity, teleportNetwork: false);
 
             if (applyGameplay)
             {
@@ -519,8 +542,8 @@ public sealed partial class NetworkPlayer
         }
 
         var center = ResolveSatelliteGroundCenter(request.Center);
-        var launchOrigin = transform.position + Vector3.up * blackholeLaunchHeightOffset + transform.forward * blackholeLaunchForwardOffset;
-        var throwForward = ResolveReplicatedThrowForward(request.Center);
+        var throwForward = ResolveReplicatedThrowForward(request.Forward, request.Center);
+        var launchOrigin = request.Origin + Vector3.up * blackholeLaunchHeightOffset + throwForward * blackholeLaunchForwardOffset;
         var throwDirection = (throwForward + Vector3.up * blackholeThrowArc).normalized;
         var velocity = throwDirection * Mathf.Max(0.1f, blackholeThrowSpeed);
         var gravity = Physics.gravity;
@@ -670,14 +693,16 @@ public sealed partial class NetworkPlayer
                 continue;
             }
 
-            var body = hitCollider.attachedRigidbody;
+            var targetPlayer = hitCollider.GetComponentInParent<NetworkPlayer>();
+            var body = targetPlayer != null ? targetPlayer.rigidbody3D : hitCollider.attachedRigidbody;
             if (body == null || body.isKinematic)
             {
                 continue;
             }
 
-            var root = body.transform.root;
-            var toCenter = center - body.worldCenterOfMass;
+            var root = targetPlayer != null ? targetPlayer.transform : body.transform.root;
+            var centerOfMass = targetPlayer != null ? body.worldCenterOfMass : body.worldCenterOfMass;
+            var toCenter = center - centerOfMass;
             if (toCenter.sqrMagnitude <= 0.0001f)
             {
                 continue;
@@ -693,17 +718,18 @@ public sealed partial class NetworkPlayer
             }
 
             var distance = Mathf.Max(toCenter.magnitude, 0.35f);
-            var pullMultiplier = root != null && root.CompareTag("Player")
+            var isPlayerTarget = targetPlayer != null || (root != null && root.CompareTag("Player"));
+            var pullMultiplier = isPlayerTarget
                 ? Mathf.Max(0.05f, blackholePlayerPullMultiplier)
                 : Mathf.Max(0.05f, blackholeItemPullMultiplier);
             var pullStrength = (force * blackholePullStrengthMultiplier * (0.4f + ramp * 1.6f)) /
                                Mathf.Sqrt(distance) * pullMultiplier;
 
-            if (root != null && root.CompareTag("Player"))
+            if (isPlayerTarget)
             {
                 ApplyBlackholeEscapeDamping(body, toCenter.normalized);
                 var inwardVelocityBoost = toCenter.normalized *
-                                          ((force * 0.06f) + (ramp * 0.45f)) /
+                                          ((force * 0.12f) + (ramp * 0.9f)) /
                                           Mathf.Max(0.75f, Mathf.Sqrt(distance));
                 body.AddForce(inwardVelocityBoost, ForceMode.VelocityChange);
             }
@@ -1102,10 +1128,23 @@ public sealed partial class NetworkPlayer
         return requestedCenter + Vector3.up * 0.02f;
     }
 
-    private Vector3 ResolveReplicatedThrowForward(Vector3 targetPosition)
+    private Vector3 ResolveReplicatedThrowForward(Vector3 requestedForward, Vector3 targetPosition)
     {
-        var forward = targetPosition - transform.position;
+        var forward = requestedForward;
         forward.y = 0f;
+        if (forward.sqrMagnitude > 0.0001f)
+        {
+            return forward.normalized;
+        }
+
+        forward = targetPosition - transform.position;
+        forward.y = 0f;
+        if (forward.sqrMagnitude <= 0.0001f)
+        {
+            var yawForward = Quaternion.Euler(0f, GetNetworkedVisualYaw(), 0f) * Vector3.forward;
+            yawForward.y = 0f;
+            forward = yawForward;
+        }
         if (forward.sqrMagnitude <= 0.0001f)
         {
             forward = transform.forward;
@@ -1270,7 +1309,10 @@ public sealed partial class NetworkPlayer
 
         DisableColliders(instance);
         DisableBehaviours(instance);
-        ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
+        if (instance.GetComponent<ItemBlackholeVisualAuthoring>() == null)
+        {
+            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
+        }
         if (attachBlackholeFx)
         {
             TryAttachReplicatedBlackholeFx(instance.transform);
@@ -1843,7 +1885,6 @@ public sealed partial class NetworkPlayer
         instance.transform.localPosition = Vector3.zero;
         instance.transform.localRotation = Quaternion.identity;
         instance.transform.localScale = Vector3.one * Mathf.Max(0.001f, blackholeVisualScale);
-        ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(instance);
         PlayAllParticles(instance);
         ItemRuntimeLog.InfoOnce("BlackholeFxLoaded", ItemIds.BlackholeBomb, $"Blackhole FX resource loaded: {instance.name}", this);
 
@@ -1866,6 +1907,43 @@ public sealed partial class NetworkPlayer
         {
             colliders[i].enabled = false;
         }
+    }
+
+    private void IgnoreOwnerCollisions(Collider projectileCollider)
+    {
+        if (projectileCollider == null)
+        {
+            return;
+        }
+
+        var ownerColliders = GetComponentsInChildren<Collider>(true);
+        for (var i = 0; i < ownerColliders.Length; i++)
+        {
+            var ownerCollider = ownerColliders[i];
+            if (ownerCollider != null && ownerCollider != projectileCollider)
+            {
+                Physics.IgnoreCollision(projectileCollider, ownerCollider, true);
+            }
+        }
+    }
+
+    private static PhysicMaterial GetOrCreateBlackholeProjectileContactMaterial()
+    {
+        if (s_blackholeProjectileLowFrictionMaterial != null)
+        {
+            return s_blackholeProjectileLowFrictionMaterial;
+        }
+
+        s_blackholeProjectileLowFrictionMaterial = new PhysicMaterial("BlackholeProjectile_Contact")
+        {
+            dynamicFriction = 0.45f,
+            staticFriction = 0.45f,
+            frictionCombine = PhysicMaterialCombine.Average,
+            bounciness = 0f,
+            bounceCombine = PhysicMaterialCombine.Minimum
+        };
+
+        return s_blackholeProjectileLowFrictionMaterial;
     }
 
     private static void PlayAllParticles(GameObject root)
