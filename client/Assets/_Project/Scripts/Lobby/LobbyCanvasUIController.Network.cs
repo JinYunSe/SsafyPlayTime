@@ -112,6 +112,7 @@ namespace SSAFYPlayTime
             {
                 try
                 {
+                    UntrackGameplayPlayer(player.PlayerId);
                     runner.Despawn(spawned);
                 }
                 catch (Exception e)
@@ -119,8 +120,10 @@ namespace SSAFYPlayTime
                     Debug.LogWarning($"[Lobby] Failed to despawn player character. player={player.PlayerId}, error={e.Message}");
                 }
             }
+            UntrackGameplayPlayer(player.PlayerId);
             _spawnedGameplayNetworkCharacters.Remove(player.PlayerId);
             _spawnedCharacterIndexByPlayerId.Remove(player.PlayerId);
+            _deadGameplayPlayerIds.Remove(player.PlayerId);
 
             if (player.IsRealPlayer)
             {
@@ -574,6 +577,12 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            if (IsGhostThrowInputModeActive())
+            {
+                ResetLatchedNetworkInputState();
+                return;
+            }
+
             _netMoveInput = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
             // Camera.main이 null이면 직전 유효 yaw를 그대로 유지 (0으로 리셋하면 이동 방향이 북쪽으로 고정됨)
             if (Camera.main != null)
@@ -665,9 +674,22 @@ namespace SSAFYPlayTime
             return value;
         }
 
-        // Collect local host-player input and forward it to Fusion.
-        // Short left click = use item / punch, hold left click >= 0.15s = left grab.
-        // Short right click = throw, hold right click >= 0.15s = right grab.
+        private bool IsGhostThrowInputModeActive()
+        {
+            var ghostManagers = UnityEngine.Object.FindObjectsByType<SSAFYPlayTime.Game.GhostThrow.GhostThrowManager>(FindObjectsSortMode.None);
+            for (var i = 0; i < ghostManagers.Length; i++)
+            {
+                var manager = ghostManagers[i];
+                if (manager != null && manager.IsGhostThrowEnabled)
+                    return true;
+            }
+
+            return false;
+        }
+
+        // 매 네트워크 틱마다 로컬 플레이어의 입력을 수집해 Fusion에 전달한다.
+        // 좌클릭 짧게 = 아이템 사용(Punch), 좌클릭 꾹(0.15초+) = 왼손 그랩
+        // 우클릭 짧게 = 던지기, 우클릭 꾹(0.15초+) = 오른손 그랩
         void INetworkRunnerCallbacks.OnInput(NetworkRunner runner, NetworkInput input)
         {
             if (!GameStartCountdown.InputEnabled) return;
@@ -681,7 +703,6 @@ namespace SSAFYPlayTime
                 CameraYaw = _netCameraYaw,
                 Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
                 Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
-                PrimaryUseHold = _netLeftMouseDown,
                 Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
                 Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
                 LeftGrabHold = latchedLeftGrabHold,
@@ -693,7 +714,7 @@ namespace SSAFYPlayTime
 
             bool isPunch = false;
             bool isThrow = false;
-            // Track left mouse button state for left-hand grab.
+
 
             // 좌클릭 상태 추적 (왼손 그랩)
             if (Input.GetMouseButtonDown(0))
@@ -712,7 +733,7 @@ namespace SSAFYPlayTime
             if (runner == null && Input.GetMouseButtonUp(0))
             {
                 if (!_netLeftMouseConsumedAsGrab && Time.time - _netLeftMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
-            // Track right mouse button state for right-hand grab.
+                    isPunch = true;
 
                 _netLeftMouseDown = false;
             }
@@ -748,7 +769,6 @@ namespace SSAFYPlayTime
                 CameraYaw = _netCameraYaw,
                 Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
                 Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
-                PrimaryUseHold = _netLeftMouseDown,
                 Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
                 Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
                 LeftGrabHold = isLeftGrabHold,
@@ -871,6 +891,8 @@ namespace SSAFYPlayTime
 
             _spawnedGameplayNetworkCharacters.Clear();
             _spawnedCharacterIndexByPlayerId.Clear();
+            UntrackAllGameplayPlayers();
+            _deadGameplayPlayerIds.Clear();
             _cachedSpawnPointGroup = null;
             _gameplaySceneSpawnBootstrapComplete = false;
 

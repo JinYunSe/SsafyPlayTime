@@ -26,6 +26,13 @@ namespace SSAFYPlayTime.Game.GhostThrow
         [Networked]
         private TickTimer LifeTimer { get; set; }
 
+        /// <summary>
+        /// 호스트가 onBeforeSpawned에서 설정 → 클라이언트 Spawned()에서 읽어 Rigidbody에 적용.
+        /// NetworkRigidbody 없이도 초기 탄도를 모든 클라이언트에 동기화한다.
+        /// </summary>
+        [Networked]
+        public Vector3 NetworkedInitialVelocity { get; set; }
+
         // 이미 폭발했는지 여부 (중복 폭발 방지)
         private bool _hasExploded = false;
 
@@ -38,6 +45,20 @@ namespace SSAFYPlayTime.Game.GhostThrow
         {
             if (HasStateAuthority)
                 LifeTimer = TickTimer.CreateFromSeconds(Runner, lifeTime);
+
+            // 모든 클라이언트: 호스트가 onBeforeSpawned에서 저장한 초기 속도를 적용.
+            // NetworkRigidbody 없이 탄도를 동기화하는 핵심 처리.
+            if (NetworkedInitialVelocity.sqrMagnitude > 0.001f)
+            {
+                var rb = GetComponent<Rigidbody>();
+                if (rb != null)
+                {
+                    rb.drag = 0f;
+                    rb.angularDrag = 0.05f;
+                    rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                    rb.velocity = NetworkedInitialVelocity;
+                }
+            }
         }
 
         public override void FixedUpdateNetwork()
@@ -147,7 +168,7 @@ namespace SSAFYPlayTime.Game.GhostThrow
         }
 
         // ─── 폭발 로직 ────────────────────────────────────────
-        /// <summary>범위 내 모든 Rigidbody에 폭발력 적용.</summary>
+        /// <summary>범위 내 모든 Rigidbody에 폭발력 + NetworkPlayer HP 데미지 적용.</summary>
         private void ApplyExplosionKnockback(Vector3 explosionPos)
         {
             Collider[] cols = Physics.OverlapSphere(explosionPos, explosionRadius);
@@ -171,6 +192,23 @@ namespace SSAFYPlayTime.Game.GhostThrow
                 );
 
                 Debug.Log($"[GhostCube] 넉백: {rb.gameObject.name} (거리: {Vector3.Distance(explosionPos, rb.position):F1}m)");
+
+                // ─── HP 데미지: 거리 감쇠 적용 ───────────────────────
+                var np = col.GetComponentInParent<NetworkPlayer>();
+                if (np != null)
+                {
+                    float dist = Vector3.Distance(explosionPos, col.transform.position);
+                    float ratio = Mathf.Clamp01(1f - dist / explosionRadius); // 중심=1, 가장자리=0
+                    float baseDmg = CombatSettings.Instance != null
+                        ? CombatSettings.Instance.ghostBombHpDamage
+                        : 30f;
+                    float hpDmg = baseDmg * ratio;
+                    if (hpDmg > 0.5f)
+                    {
+                        np.ApplyHealthDamage(hpDmg);
+                        Debug.Log($"[GhostCube] HP 데미지: {np.name} -{hpDmg:F1} (거리비율={ratio:F2})");
+                    }
+                }
             }
         }
 
