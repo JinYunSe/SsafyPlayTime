@@ -45,7 +45,7 @@ public sealed partial class NetworkPlayer
             return;
 
         // 사망 후에는 물리/동기화 연산 전부 스킵 → 네트워크 부하 최소화
-        if (IsDeadNetworked)
+        if (GetIsDeadState())
             return;
 
         if (GetInput(out PlayerNetworkInput input))
@@ -306,9 +306,6 @@ public sealed partial class NetworkPlayer
             return;
 
         _nextOutOfBoundsRecoverAt = now + 0.5f;
-        var lethalDamage = CombatSettings.Instance != null
-            ? Mathf.Max(MaxHp, CombatSettings.Instance.outOfBoundsHpDamage)
-            : MaxHp;
 
         if (IsInsideDeathZone())
         {

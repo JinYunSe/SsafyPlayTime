@@ -57,8 +57,8 @@ public class ImmediateDeath : MonoBehaviour
 
         if (networkPlayer != null)
         {
-            networkPlayer.ApplyHpDamage(damage);
-            DebugLog($"Player entered death zone: name={playerStats.name}, damage={damage:F0}");
+            networkPlayer.KillImmediately("ImmediateDeath");
+            DebugLog($"Player entered death zone: name={playerStats.name}");
             return true;
         }
 
