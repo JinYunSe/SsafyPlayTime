@@ -69,6 +69,14 @@ public class Tornado : NetworkBehaviour
         }
     }*/
 
+    [Header("Tornado Settings")]
+    public float liftSpeed = 5f;
+    public float spinSpeed = 300f;
+
+    [Header("Launch Settings")]
+    public float launchUpForce = 10f;
+    public float launchOutForce = 10f;
+
     [Header("Data Asset")]
     public TornadoData data;
 
