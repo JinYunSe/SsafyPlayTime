@@ -24,6 +24,8 @@ public class ProceduralGrabArm : MonoBehaviour
     [Header("Hand Physics Force")]
     [SerializeField] float handReachForce = 115f;
     [SerializeField] float handDamping = 8f;
+    [Tooltip("조인트가 활성인 hold 상태에서 손 힘 스케일 (0=조인트만, 1=기존과 동일)")]
+    [SerializeField, Range(0f, 1f)] float holdForceScale = 0.15f;
 
     [Header("IK Rotation")]
     [SerializeField, Range(0f, 1f)] float holdIKRotationWeight = 0.5f;
@@ -48,6 +50,12 @@ public class ProceduralGrabArm : MonoBehaviour
 
     [Header("Carry Pose Profile")]
     [SerializeField] CarryPoseProfile carryPoseProfile;
+
+    [Header("Debug")]
+    [SerializeField] bool debugLog = true;
+    float _debugLogTimer;
+    float _debugPhysicsLogTimer;
+    float _debugCarryLogTimer;
 
     float _leftBlend;
     float _rightBlend;
@@ -74,15 +82,29 @@ public class ProceduralGrabArm : MonoBehaviour
     Transform _rightPhysicsHand;
     Transform _torsoReference;
 
+    // CarrySolveFrame: carrier anchor 참조
+    CarryRig _carryRig;
+    CarryPhysicsProfile _carryPhysicsProfile;
+
     Vector3 _leftReachDir;
     Vector3 _rightReachDir;
 
     void Awake()
     {
+        debugLog = true; // 디버그 진단용 강제 활성화
         _networkPlayer = GetComponent<NetworkPlayer>();
 
         if (puppetMaster == null)
             puppetMaster = GetComponentInChildren<PuppetMaster>(true);
+
+        // CarrySolveFrame: CarryRig/Profile 참조 캐시
+        _carryRig = GetComponentInChildren<SSAFYPlayTime.Character.CarryRig>(true);
+        if (_networkPlayer != null)
+        {
+            _carryPhysicsProfile = _networkPlayer.GetCarryPhysicsProfile();
+            if (_carryRig == null)
+                _carryRig = _networkPlayer.GetCarryRig();
+        }
 
         FindPhysicsHands();
     }
@@ -106,6 +128,7 @@ public class ProceduralGrabArm : MonoBehaviour
             leftArmIK.solver.target = _leftIKTarget;
             leftArmIK.solver.SetIKPositionWeight(0f);
             leftArmIK.solver.SetIKRotationWeight(0f);
+            EnsureSolverReady(leftArmIK);
             leftArmIK.enabled = false;
         }
 
@@ -114,6 +137,7 @@ public class ProceduralGrabArm : MonoBehaviour
             rightArmIK.solver.target = _rightIKTarget;
             rightArmIK.solver.SetIKPositionWeight(0f);
             rightArmIK.solver.SetIKRotationWeight(0f);
+            EnsureSolverReady(rightArmIK);
             rightArmIK.enabled = false;
         }
 
@@ -130,6 +154,15 @@ public class ProceduralGrabArm : MonoBehaviour
         go.transform.SetParent(transform);
         go.transform.localPosition = Vector3.forward;
         return go.transform;
+    }
+
+    static void EnsureSolverReady(LimbIK limbIK)
+    {
+        if (limbIK == null)
+            return;
+
+        if (!limbIK.solver.initiated)
+            limbIK.solver.Initiate(limbIK.transform);
     }
 
     void FindPhysicsHands()
@@ -221,10 +254,54 @@ public class ProceduralGrabArm : MonoBehaviour
         _leftBlend = Mathf.MoveTowards(_leftBlend, leftShouldReach ? 1f : 0f, dt);
         _rightBlend = Mathf.MoveTowards(_rightBlend, rightShouldReach ? 1f : 0f, dt);
 
-        // 오버헤드 캐리 포즈 전환 부드러운 블렌드
-        float overheadTarget = (phase == NetworkPlayer.PhysicalPhase.CarryingStunned) ? 1f : 0f;
+        // 오버헤드 캐리 포즈 전환: 한 손이든 양 손이든 기절자 잡으면 오버헤드
+        float overheadTarget = (phase == NetworkPlayer.PhysicalPhase.CarryingStunned && _networkPlayer != null && _networkPlayer.IsAnyHandHoldingStunnedPlayer) ? 1f : 0f;
         float overheadSpeed = carryPoseProfile != null ? carryPoseProfile.overheadBlendSpeed : 4f;
         _overheadBlend = Mathf.MoveTowards(_overheadBlend, overheadTarget, Time.deltaTime * overheadSpeed);
+
+        // B2: 1초 간격 상태 로그
+        if (debugLog && (leftHolding || rightHolding || grabActive))
+        {
+            _debugLogTimer -= Time.deltaTime;
+            if (_debugLogTimer <= 0f)
+            {
+                _debugLogTimer = 1f;
+                Debug.Log($"[Arm] phase={phase}, grabActive={grabActive}, " +
+                    $"L_hold={leftHolding}, R_hold={rightHolding}, " +
+                    $"L_blend={_leftBlend:F2}, R_blend={_rightBlend:F2}, " +
+                    $"overheadBlend={_overheadBlend:F2}, carryProfile={(carryPoseProfile != null ? "OK" : "NULL")}, " +
+                    $"isDual={(_networkPlayer != null ? _networkPlayer.IsDualGrabbingStunnedPlayer.ToString() : "N/A")}, " +
+                    $"isAnyStunned={(_networkPlayer != null ? _networkPlayer.IsAnyHandHoldingStunnedPlayer.ToString() : "N/A")}", this);
+            }
+        }
+
+        if (_networkPlayer != null)
+        {
+            bool carryTrackingActive = phase == NetworkPlayer.PhysicalPhase.CarryingStunned ||
+                                      _overheadBlend > 0.01f ||
+                                      _networkPlayer.IsAnyHandHoldingStunnedPlayer;
+            bool carryStateMismatch = phase == NetworkPlayer.PhysicalPhase.CarryingStunned &&
+                                      !_networkPlayer.IsAnyHandHoldingStunnedPlayer &&
+                                      !leftHolding &&
+                                      !rightHolding;
+
+            if (carryTrackingActive)
+            {
+                _debugCarryLogTimer -= Time.deltaTime;
+                if (carryStateMismatch || _debugCarryLogTimer <= 0f)
+                {
+                    _debugCarryLogTimer = carryStateMismatch ? 0.15f : 0.5f;
+                    EmitCarryArmDiagnostics(
+                        phase,
+                        grabActive,
+                        suppressReach,
+                        leftHolding,
+                        rightHolding,
+                        overheadTarget,
+                        carryStateMismatch);
+                }
+            }
+        }
 
         if (weaponEquipped && !leftHolding && !rightHolding)
         {
@@ -250,7 +327,9 @@ public class ProceduralGrabArm : MonoBehaviour
             {
                 _leftReachDir = GetReachDirection(_leftPhysicsHand, true);
                 Vector3 charPos = puppetMaster.targetRoot.position;
-                _leftIKTarget.position = charPos + Vector3.up * 0.8f + _leftReachDir * reachDistance;
+                // reach 방향의 Y가 크게 음수면 IK 높이도 낮춤 (바닥 기절자 대응)
+                float ikHeight = Mathf.Lerp(0.8f, 0.15f, Mathf.Clamp01(-_leftReachDir.y * 1.5f));
+                _leftIKTarget.position = charPos + Vector3.up * ikHeight + _leftReachDir * reachDistance;
             }
 
             if (rightHolding)
@@ -264,7 +343,8 @@ public class ProceduralGrabArm : MonoBehaviour
             {
                 _rightReachDir = GetReachDirection(_rightPhysicsHand, false);
                 Vector3 charPos = puppetMaster.targetRoot.position;
-                _rightIKTarget.position = charPos + Vector3.up * 0.8f + _rightReachDir * reachDistance;
+                float ikHeight = Mathf.Lerp(0.8f, 0.15f, Mathf.Clamp01(-_rightReachDir.y * 1.5f));
+                _rightIKTarget.position = charPos + Vector3.up * ikHeight + _rightReachDir * reachDistance;
             }
         }
     }
@@ -272,6 +352,10 @@ public class ProceduralGrabArm : MonoBehaviour
     void FixedUpdate()
     {
         if (puppetMaster == null) return;
+
+        // OwnerProxy에서는 물리 힘 적용 불필요 (호스트가 처리)
+        if (_networkPlayer != null && _networkPlayer.IsNetworkReady && !_networkPlayer.HasStateAuthority)
+            return;
 
         var phase = _networkPlayer != null ? _networkPlayer.GetPhysicalPhase() : NetworkPlayer.PhysicalPhase.Stable;
         bool grabActive = phase == NetworkPlayer.PhysicalPhase.GrabIntent || phase == NetworkPlayer.PhysicalPhase.Holding || phase == NetworkPlayer.PhysicalPhase.CarryingStunned;
@@ -302,6 +386,7 @@ public class ProceduralGrabArm : MonoBehaviour
 
         if (leftArmIK != null)
         {
+            EnsureSolverReady(leftArmIK);
             leftArmIK.solver.SetIKPositionWeight(_leftBlend);
             leftArmIK.solver.SetIKRotationWeight(leftHolding ? _leftBlend * holdIKRotationWeight : 0f);
             leftArmIK.solver.Update();
@@ -309,6 +394,7 @@ public class ProceduralGrabArm : MonoBehaviour
 
         if (rightArmIK != null)
         {
+            EnsureSolverReady(rightArmIK);
             rightArmIK.solver.SetIKPositionWeight(_rightBlend);
             rightArmIK.solver.SetIKRotationWeight(rightHolding ? _rightBlend * holdIKRotationWeight : 0f);
             rightArmIK.solver.Update();
@@ -330,18 +416,46 @@ public class ProceduralGrabArm : MonoBehaviour
 
         if (isHolding)
         {
+            // 기절자 운반 중인지 판별
+            var handler = isLeft ? _leftHandler : _rightHandler;
+            bool isCarryingStunned = handler != null &&
+                handler.GrabbedTargetKind == GrabDriveProfile.GrabTargetType.StunnedPlayer;
+
+            // 조인트가 주도: 손 힘은 holdForceScale로 축소하여 보조 역할만
+            var scale = holdForceScale;
+
             var toTarget = targetWorld - handRb.position;
             var targetDistance = toTarget.magnitude;
+            float appliedForceMag = 0f;
             if (targetDistance > 0.01f)
             {
-                var targetForce = toTarget / targetDistance * handReachForce * Mathf.Clamp(targetDistance * 2f, 0.4f, 2.5f);
+                var targetForce = toTarget / targetDistance * handReachForce * scale * Mathf.Clamp(targetDistance * 2f, 0.4f, 2.5f);
+                appliedForceMag = targetForce.magnitude;
                 handRb.AddForce(targetForce, ForceMode.Acceleration);
                 ApplyTorsoReaction(targetForce * torsoReactionScale);
             }
 
+            // 기절자 운반: carry pose(targetWorld)가 주도하므로 anchorAssist를 약화
+            // 일반 잡기: anchor에도 동시에 끌어 안정화
+            float anchorScale = isCarryingStunned ? 0.15f : 1f;
             var toAnchor = anchorWorld - handRb.position;
             if (toAnchor.sqrMagnitude > 0.0001f)
-                handRb.AddForce(toAnchor.normalized * handReachForce * anchorAssistScale, ForceMode.Acceleration);
+                handRb.AddForce(toAnchor.normalized * handReachForce * anchorAssistScale * scale * anchorScale, ForceMode.Acceleration);
+
+            // B1: 0.5초 간격 hold 힘 로그
+            if (debugLog)
+            {
+                _debugPhysicsLogTimer -= Time.fixedDeltaTime;
+                if (_debugPhysicsLogTimer <= 0f)
+                {
+                    _debugPhysicsLogTimer = 0.5f;
+                    Debug.Log($"[Arm] {(isLeft ? "L" : "R")} hold force: scale={scale:F2}, " +
+                        $"targetDist={targetDistance:F3}, appliedForce={appliedForceMag:F1}, " +
+                        $"anchorDist={toAnchor.magnitude:F3}, vel={handRb.velocity.magnitude:F2}, " +
+                        $"handPos={handRb.position}, targetPos={targetWorld}" +
+                        $"{(isCarryingStunned ? " [stun-carry]" : "")}", this);
+                }
+            }
 
             // 오버헤드 캐리 시 추가 수직 리프트 보조 (블렌드로 부드럽게 적용)
             if (carryPoseProfile != null && _overheadBlend > 0.01f)
@@ -349,7 +463,11 @@ public class ProceduralGrabArm : MonoBehaviour
                 handRb.AddForce(Vector3.up * carryPoseProfile.overheadLiftForce * _overheadBlend, ForceMode.Acceleration);
             }
 
-            ApplyBehindBackCorrection(handRb, isLeft);
+            // 기절자 운반 중에는 뒤로 말림 보정 끔 (carry pose 방향과 충돌)
+            if (!isCarryingStunned)
+                ApplyBehindBackCorrection(handRb, isLeft, scale);
+
+            // 댐핑은 유지 — 조인트 진동 억제에 필요
             handRb.AddForce(-handRb.velocity * handDamping * 1.5f, ForceMode.Acceleration);
         }
         else
@@ -366,6 +484,18 @@ public class ProceduralGrabArm : MonoBehaviour
             return default;
 
         var kind = handler != null ? handler.GrabbedTargetKind : GrabDriveProfile.GrabTargetType.Default;
+
+        /*
+
+        // OwnerProxy 폴백: 로컬 핸들러에 타겟 타입이 없지만 페이즈가 CarryingStunned이면 기절자
+        if (kind == GrabDriveProfile.GrabTargetType.Default && _networkPlayer != null &&
+        */
+        if (kind == GrabDriveProfile.GrabTargetType.Default &&
+            _networkPlayer != null &&
+            _networkPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.CarryingStunned)
+        {
+            kind = GrabDriveProfile.GrabTargetType.StunnedPlayer;
+        }
 
         switch (kind)
         {
@@ -393,6 +523,45 @@ public class ProceduralGrabArm : MonoBehaviour
     }
 
     /// <summary>무기 장착 시 양손 IK 타겟 위치 계산 (CarryPoseProfile.twoHandWeapon 사용)</summary>
+    // Carry diagnostics: correlate arm pose state with live hold/joint state.
+    void EmitCarryArmDiagnostics(
+        NetworkPlayer.PhysicalPhase phase,
+        bool grabActive,
+        bool suppressReach,
+        bool leftHolding,
+        bool rightHolding,
+        float overheadTarget,
+        bool forceSample)
+    {
+        if (_networkPlayer == null)
+            return;
+
+        var details =
+            $"grabActive={grabActive} suppressReach={suppressReach} overheadTarget={overheadTarget:F2} overheadBlend={_overheadBlend:F2} " +
+            $"leftLocal={leftHolding} rightLocal={rightHolding} " +
+            $"leftNet={_networkPlayer.IsHandHoldingNetworked(HandGrabHandler.HandSide.Left)} " +
+            $"rightNet={_networkPlayer.IsHandHoldingNetworked(HandGrabHandler.HandSide.Right)} " +
+            $"anyStunned={_networkPlayer.IsAnyHandHoldingStunnedPlayer} dual={_networkPlayer.IsDualGrabbingStunnedPlayer} " +
+            $"left={DescribeHandState(_leftHandler)} right={DescribeHandState(_rightHandler)}";
+
+        if (debugLog)
+            Debug.Log($"[ArmDiag] phase={phase} {details}", this);
+
+        _networkPlayer.TraceCarryDebugSample("ProceduralGrabArm", $"phase={phase} {details}", forceSample);
+    }
+
+    string DescribeHandState(HandGrabHandler handler)
+    {
+        if (handler == null)
+            return "null";
+
+        if (handler.IsHolding)
+            return handler.BuildGrabDiagnosticsSummary();
+
+        return $"hand={handler.Side} holding=false reaching={handler.IsReaching} pending={(handler.PendingReachTarget != null ? handler.PendingReachTarget.name : "null")}";
+    }
+
+    /// <summary>무기 장착 시 양손 IK 목표 위치 계산 (CarryPoseProfile.twoHandWeapon 사용)</summary>
     Vector3 ResolveWeaponPoseTarget(bool isLeft)
     {
         Transform bodyRoot = ResolveBodyReference();
@@ -423,11 +592,35 @@ public class ProceduralGrabArm : MonoBehaviour
 
     Vector3 ResolveHoldTargetForHandler(bool isLeft, Vector3 anchorWorld, HandGrabHandler handler)
     {
+        // CarrySolveFrame: 기절자 운반 중이면 carrier anchor 기준으로 target 계산
+        if (_carryRig != null && _networkPlayer != null && handler != null &&
+            handler.GrabbedTargetKind == GrabDriveProfile.GrabTargetType.StunnedPlayer)
+        {
+            var carryMode = _networkPlayer.GetLocalCarryMode();
+            if (carryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry ||
+                carryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry)
+            {
+                if (_carryRig.TryGetCarrierAnchorWorld(carryMode, out var carrierPos, out var carrierFwd))
+                {
+                    // carrier anchor 기준으로 pose offset 적용
+                    var carrierPose = ResolvePoseAnchor(handler);
+                    var carrySide = isLeft ? -1f : 1f;
+                    var carrierRot = Quaternion.LookRotation(carrierFwd, Vector3.up);
+                    var poseOffset = new Vector3(carrySide * carrierPose.sideOffset, carrierPose.heightOffset, carrierPose.forwardOffset);
+                    var carrierTarget = carrierPos + carrierRot * poseOffset;
+
+                    // anchor blend: carry 중에는 anchor(실제 잡힌 위치)보다 carrier target 중심
+                    var carryBlend = Mathf.Lerp(0f, carrierPose.anchorBlend, 0.3f);
+                    return Vector3.Lerp(carrierTarget, anchorWorld, carryBlend);
+                }
+            }
+        }
+
         Transform bodyRoot = ResolveBodyReference();
 
         // CarryPoseProfile이 있으면 프로파일에서 오프셋을 가져옴
         float useSide, useForward, useHeight, useVClamp, useLClamp, useBlend;
-        if (carryPoseProfile != null && handler != null && handler.IsHolding)
+        if (carryPoseProfile != null && handler != null && IsHandHolding(handler))
         {
             var pose = ResolvePoseAnchor(handler);
             useSide = pose.sideOffset;
@@ -468,7 +661,7 @@ public class ProceduralGrabArm : MonoBehaviour
         return Vector3.Lerp(poseTarget, constrainedAnchor, effectiveBlend);
     }
 
-    void ApplyBehindBackCorrection(Rigidbody handRb, bool isLeft)
+    void ApplyBehindBackCorrection(Rigidbody handRb, bool isLeft, float forceScale = 1f)
     {
         Transform bodyRoot = ResolveBodyReference();
 
@@ -478,8 +671,8 @@ public class ProceduralGrabArm : MonoBehaviour
 
         float side = isLeft ? -1f : 1f;
         float depth = behindBackThreshold - localHand.z;
-        var correctiveForce = bodyRoot.forward * depth * behindBackForce;
-        correctiveForce += bodyRoot.right * side * behindBackForce * 0.15f;
+        var correctiveForce = bodyRoot.forward * depth * behindBackForce * forceScale;
+        correctiveForce += bodyRoot.right * side * behindBackForce * 0.15f * forceScale;
 
         handRb.AddForce(correctiveForce, ForceMode.Acceleration);
         ApplyTorsoReaction(correctiveForce * torsoReactionScale);
@@ -492,7 +685,19 @@ public class ProceduralGrabArm : MonoBehaviour
             return;
 
         var scaledForce = reactionForce * ResolveTorsoReactionMultiplier();
-        var chestShare = _chestBodyRb != null && !_chestBodyRb.isKinematic ? chestReactionShare : 0f;
+
+        // CarrySolveFrame: carry 중 chest/hips 반작용 share를 키워 "몸이 따라옴" 효과 강화
+        float effectiveChestShare = chestReactionShare;
+        if (_networkPlayer != null)
+        {
+            var mode = _networkPlayer.GetLocalCarryMode();
+            if (mode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry)
+                effectiveChestShare = Mathf.Min(chestReactionShare * 1.5f, 0.65f);
+            else if (mode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry)
+                effectiveChestShare = Mathf.Min(chestReactionShare * 1.25f, 0.55f);
+        }
+
+        var chestShare = _chestBodyRb != null && !_chestBodyRb.isKinematic ? effectiveChestShare : 0f;
         var hipsShare = 1f - chestShare;
 
         if (_hipsBodyRb != null && !_hipsBodyRb.isKinematic && hipsShare > 0.0001f)
@@ -549,6 +754,15 @@ public class ProceduralGrabArm : MonoBehaviour
         if (_networkPlayer == null)
             return 1f;
 
+        // CarrySolveFrame: CarryPhysicsProfile 기반 배율 우선
+        if (_carryPhysicsProfile != null)
+        {
+            var mode = _networkPlayer.GetLocalCarryMode();
+            if (mode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None)
+                return _carryPhysicsProfile.GetSettings(mode).carrierTorsoReactionMultiplier;
+        }
+
+        // 폴백: 기존 Inspector 값
         if (_networkPlayer.IsDualGrabbingStunnedPlayer)
             return dualCarryTorsoReactionMultiplier;
 
@@ -562,6 +776,15 @@ public class ProceduralGrabArm : MonoBehaviour
         if (_networkPlayer == null)
             return 1f;
 
+        // CarrySolveFrame: CarryPhysicsProfile 기반 배율 우선
+        if (_carryPhysicsProfile != null)
+        {
+            var mode = _networkPlayer.GetLocalCarryMode();
+            if (mode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None)
+                return _carryPhysicsProfile.GetSettings(mode).carrierTurnAssistMultiplier;
+        }
+
+        // 폴백: 기존 Inspector 값
         if (_networkPlayer.IsDualGrabbingStunnedPlayer)
             return dualCarryTurnAssistMultiplier;
 
@@ -577,28 +800,48 @@ public class ProceduralGrabArm : MonoBehaviour
 
         if (physicsHand != null)
         {
+            // 손 중심 + 캐릭터 중심 두 군데서 스캔 (바닥 기절자 감지용)
             Collider[] hits = Physics.OverlapSphere(physicsHand.position, targetScanRadius);
             float bestDist = float.MaxValue;
             Rigidbody bestTarget = null;
+            bool bestIsStunned = false;
 
-            foreach (var hit in hits)
+            System.Action<Collider[]> scanHits = (Collider[] scanResult) =>
             {
-                Rigidbody rb = hit.attachedRigidbody;
-                if (rb == null || rb.isKinematic) continue;
-                if (rb.transform.root == transform) continue;
-
-                float dist = Vector3.Distance(physicsHand.position, rb.position);
-                if (dist < bestDist)
+                foreach (var hit in scanResult)
                 {
-                    bestDist = dist;
-                    bestTarget = rb;
+                    Rigidbody rb = hit.attachedRigidbody;
+                    if (rb == null || rb.isKinematic) continue;
+                    if (rb.transform.root == transform) continue;
+
+                    float dist = Vector3.Distance(charRoot.position, rb.position);
+                    // 기절 플레이어 부위는 우선순위 보너스
+                    var targetNp = rb.transform.root.GetComponent<NetworkPlayer>();
+                    bool isStunned = targetNp != null && !targetNp.IsActiveRagdoll;
+                    if (isStunned) dist *= 0.5f; // 기절자 거리 가중치 절반 (우선 탐지)
+
+                    if (dist < bestDist)
+                    {
+                        bestDist = dist;
+                        bestTarget = rb;
+                        bestIsStunned = isStunned;
+                    }
                 }
-            }
+            };
+
+            scanHits(hits);
+
+            // 캐릭터 발 아래쪽도 스캔 (바닥에 누운 기절자 감지)
+            Vector3 groundCenter = charRoot.position + Vector3.down * 0.3f;
+            Collider[] groundHits = Physics.OverlapSphere(groundCenter, targetScanRadius * 1.2f);
+            scanHits(groundHits);
 
             if (bestTarget != null)
             {
                 Vector3 toTarget = (bestTarget.position - charRoot.position).normalized;
-                toTarget.y = Mathf.Clamp(toTarget.y, -0.3f, 0.3f);
+                // 기절자(바닥)는 Y 클램프 완화 — 아래로 더 뻗을 수 있도록
+                float yClampMin = bestIsStunned ? -0.8f : -0.3f;
+                toTarget.y = Mathf.Clamp(toTarget.y, yClampMin, 0.3f);
                 toTarget.Normalize();
 
                 float spread = isLeft ? -0.15f : 0.15f;
@@ -626,9 +869,18 @@ public class ProceduralGrabArm : MonoBehaviour
         ikTarget.rotation = Quaternion.LookRotation(toAnchor.normalized, charUp);
     }
 
-    static bool IsHandHolding(HandGrabHandler handler)
+    bool IsHandHolding(HandGrabHandler handler)
     {
-        return handler != null && handler.IsHolding;
+        if (handler == null) return false;
+
+        // 로컬 조인트가 있으면 확정
+        if (handler.IsHolding) return true;
+
+        // OwnerProxy 폴백: 네트워크 동기화된 GrabConfirmed 사용
+        if (_networkPlayer != null)
+            return _networkPlayer.IsHandHoldingNetworked(handler.Side);
+
+        return false;
     }
 
     void OnDestroy()

@@ -1091,7 +1091,8 @@ public sealed partial class NetworkPlayer
                     stunPerTick,
                     "SatelliteStrike",
                     0f,
-                    explosionForce);
+                    explosionForce,
+                    instigator: this);
             }
 
             var body = hitCollider.attachedRigidbody;
