@@ -344,7 +344,9 @@ namespace SSAFYPlayTime
             EnsurePersistentAcrossScenes();
             EnsureLocalClientId();
             RuntimeLogOverlay.EnsureInstance();
+            GameAudioSettingsService.EnsureInstance();
             EnsureCharacterSelectionUi();
+            EnsureGameSettingModal();
             NormalizeCanvasRoot();
             NormalizeRoomListBindings();
             BindEvents();
@@ -362,6 +364,22 @@ namespace SSAFYPlayTime
             playerTwoReadyBadge ??= FindReadyBadge(playerTwoText);
             playerThreeReadyBadge ??= FindReadyBadge(playerThreeText);
             playerFourReadyBadge ??= FindReadyBadge(playerFourText);
+        }
+
+        private void EnsureGameSettingModal()
+        {
+            if (gameSettingModal == null)
+            {
+                return;
+            }
+
+            var modalController = gameSettingModal.GetComponent<LobbyAudioSettingsModal>();
+            if (modalController == null)
+            {
+                modalController = gameSettingModal.AddComponent<LobbyAudioSettingsModal>();
+            }
+
+            modalController.InitializeIfNeeded();
         }
 
         private static GameObject FindReadyBadge(TMP_Text slotText)

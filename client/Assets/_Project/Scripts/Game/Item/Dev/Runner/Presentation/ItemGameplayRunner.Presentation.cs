@@ -136,6 +136,9 @@ namespace SSAFYPlayTime.Gameplay.Items
             source.playOnAwake = false;
             source.volume = Mathf.Clamp01(volume);
             source.spatialBlend = spatial ? 1f : 0f;
+            var categorizedSource = go.AddComponent<global::SSAFYPlayTime.GameAudioSource>();
+            categorizedSource.SetCategory(global::SSAFYPlayTime.GameAudioCategory.EffectSound);
+            categorizedSource.RefreshBaseVolumeFromCurrentSource();
             source.Play();
             _loopingSfxSources[sfxId] = source;
         }
@@ -155,6 +158,9 @@ namespace SSAFYPlayTime.Gameplay.Items
             source.playOnAwake = false;
             source.volume = Mathf.Clamp01(volume);
             source.spatialBlend = spatial ? 1f : 0f;
+            var categorizedSource = go.AddComponent<global::SSAFYPlayTime.GameAudioSource>();
+            categorizedSource.SetCategory(global::SSAFYPlayTime.GameAudioCategory.EffectSound);
+            categorizedSource.RefreshBaseVolumeFromCurrentSource();
             source.Play();
             Destroy(go, clip.length + 0.1f);
         }
