@@ -172,6 +172,54 @@ public sealed partial class NetworkPlayer
     }
 
     /// <summary>
+    /// Returns true when either hand is holding a stunned player.
+    /// Also supports proxy-side checks from replicated grab/carry state.
+    /// </summary>
+    internal bool IsAnyHandHoldingStunnedPlayer
+    {
+        get
+        {
+            if (_handGrabHandlers != null)
+            {
+                foreach (var h in _handGrabHandlers)
+                {
+                    if (h != null && h.IsHoldingStunnedPlayer)
+                        return true;
+                }
+            }
+
+            if (IsNetworkReady && !HasStateAuthority &&
+                GetPhysicalPhase() == PhysicalPhase.CarryingStunned)
+                return true;
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Returns whether the requested hand is holding something.
+    /// StateAuthority uses local hand state and proxies use replicated confirmation flags.
+    /// </summary>
+    internal bool IsHandHoldingNetworked(HandGrabHandler.HandSide side)
+    {
+        if (HasStateAuthority)
+        {
+            if (_handGrabHandlers == null) return false;
+            foreach (var h in _handGrabHandlers)
+            {
+                if (h != null && h.Side == side && h.IsHolding)
+                    return true;
+            }
+
+            return false;
+        }
+
+        return side == HandGrabHandler.HandSide.Left
+            ? (bool)LeftGrabConfirmed
+            : (bool)RightGrabConfirmed;
+    }
+
+    /// <summary>
     /// Returns true when both hands are holding the same stunned player.
     /// Used as a gate for overhead carry / two-hand carry transitions.
     /// </summary>
@@ -179,22 +227,30 @@ public sealed partial class NetworkPlayer
     {
         get
         {
-            if (_handGrabHandlers == null || _handGrabHandlers.Length < 2)
-                return false;
-
-            HandGrabHandler left = null, right = null;
-            foreach (var h in _handGrabHandlers)
+            if (HasStateAuthority)
             {
-                if (h == null) continue;
-                if (h.Side == HandGrabHandler.HandSide.Left) left = h;
-                else right = h;
+                if (_handGrabHandlers == null || _handGrabHandlers.Length < 2)
+                    return false;
+
+                HandGrabHandler left = null, right = null;
+                foreach (var h in _handGrabHandlers)
+                {
+                    if (h == null) continue;
+                    if (h.Side == HandGrabHandler.HandSide.Left) left = h;
+                    else right = h;
+                }
+
+                if (left == null || right == null)
+                    return false;
+
+                return left.IsHoldingStunnedPlayer && right.IsHoldingStunnedPlayer
+                    && left.GrabTargetRoot != null && left.GrabTargetRoot == right.GrabTargetRoot;
             }
 
-            if (left == null || right == null)
-                return false;
+            if (IsNetworkReady && LeftGrabConfirmed && RightGrabConfirmed)
+                return LeftGrabTargetId.IsValid && LeftGrabTargetId == RightGrabTargetId;
 
-            return left.IsHoldingStunnedPlayer && right.IsHoldingStunnedPlayer
-                && left.GrabTargetRoot != null && left.GrabTargetRoot == right.GrabTargetRoot;
+            return false;
         }
     }
 

@@ -43,3 +43,4 @@ nginx/ssl/*.crt
 # ─── CLI ───
 .claude/
 .claude-code/
+unity-batch-compile.log
