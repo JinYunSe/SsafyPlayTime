@@ -151,7 +151,36 @@ public sealed partial class NetworkPlayer
             return;
         }
 
-        TryPickupNearestFieldItemByKey();
+        if (TryProcessAerialKick())
+            return;
+
+        if (TryPickupNearestFieldItemByKey())
+            return;
+
+        TryProcessKick();
+    }
+
+    private void TryProcessKick()
+    {
+        var isLeft = _hostNextKickLeft;
+        if (!TryBeginKickHitDetection(isLeft))
+            return;
+
+        _hostNextKickLeft = !_hostNextKickLeft;
+        var kickEvent = isLeft ? AnimationEventType.KickLeft : AnimationEventType.KickRight;
+        RaiseAnimationEvent(kickEvent, H_Punch);
+    }
+
+    private bool TryProcessAerialKick()
+    {
+        if (_isGrounded)
+            return false;
+
+        if (!TryBeginAerialKickHitDetection())
+            return false;
+
+        RaiseAnimationEvent(AnimationEventType.AerialKick, H_Punch);
+        return true;
     }
 
     private void ResetInteractionTriggers()

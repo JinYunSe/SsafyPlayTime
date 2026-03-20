@@ -4782,11 +4782,11 @@ MonoBehaviour:
       axis: {x: -1, y: -0, z: -0}
       baseForwardOffsetEuler: {x: 0, y: 0, z: 0}
     eyes: []
-    bodyWeight: 0.3
-    headWeight: 0.8
+    bodyWeight: 0.2
+    headWeight: 0.6
     eyesWeight: 0
     clampWeight: 0.5
-    clampWeightHead: 0.5
+    clampWeightHead: 0.32
     clampWeightEyes: 0
     clampSmoothing: 2
     spineWeightCurve:
@@ -4832,8 +4832,8 @@ MonoBehaviour:
   weightBlendSpeed: 2.2
   lookAtHeightOffset: 0.8
   scanInterval: 0.2
-  movingWeightScale: 0.3
-  movingSpeedThreshold: 1.5
+  movingWeightScale: 0.12
+  movingSpeedThreshold: 1
 --- !u!114 &5030105105898311857
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5557,8 +5557,10 @@ MonoBehaviour:
   locomotionThreshold: 0.1
   grabHoldThreshold: 0.2
   attackLockDuration: 0.08
-  attackVisualDuration: 0.3
+  attackVisualDuration: 0.34
   throwLockDuration: 0.85
+  aerialKickClip: {fileID: 7400000, guid: 2479957246e64435bcc1196b8b2e585b, type: 3}
+  aerialKickLockDuration: 0.72
   enableAnimationDriverDiagnostics: 1
 --- !u!114 &1826213868747077357
 MonoBehaviour:
@@ -5722,8 +5724,8 @@ MonoBehaviour:
   speedForMaxWobble: 4
   turnRateForMaxWobble: 220
   airborneWobbleBonus: 0.08
-  headPinMultiplier: 0.72
-  headMuscleMultiplier: 0.58
+  headPinMultiplier: 0.4
+  headMuscleMultiplier: 0.3
   armPinMultiplier: 0.64
   armMuscleMultiplier: 0.52
   handPinMultiplier: 0.82
