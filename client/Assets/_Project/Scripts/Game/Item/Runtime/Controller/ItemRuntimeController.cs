@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemRuntimeController 스크립트가 들어 있는 파일이다.
  * - Runtime/Controller 계층에서 아이템 상태 전이, 사용 요청 처리, 공용 브리지 호출을 조합한다.

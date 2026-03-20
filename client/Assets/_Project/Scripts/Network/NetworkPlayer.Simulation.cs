@@ -5,6 +5,7 @@ public sealed partial class NetworkPlayer
 {
     private float _localAccumulatedStun;
     private float _localStunTimeRemaining;
+    private float _stunCollapseTimer;
 
     // Coyote time + Jump buffer
     private float _coyoteTimeRemaining;
@@ -24,28 +25,55 @@ public sealed partial class NetworkPlayer
     private const float StunEntryMusclePlanarVelocityScale = 0.35f;
     private const float StunEntryMusclePlanarSpeedCap = 1.6f;
     private const float StunEntryMuscleAngularVelocityScale = 0.25f;
+    private const float StunCollapseDuration = 0.25f;
+    private const float StunCollapseEarlyDuration = 0.12f;
+    private const float StunCollapseEntryMainSpringScale = 0.08f;
+    private const float StunCollapseEntryBoneSpringLerp = 0.06f;
     private const float StunnedRootPlanarSpeedCap = 1.10f;
     private const float StunnedMusclePlanarSpeedCap = 0.90f;
     private const float StunnedRootAngularSpeedCap = 2.9f;
     private const float StunnedMuscleAngularSpeedCap = 3.2f;
+    private const float CollapseRootPlanarSpeedCap = 1.60f;
+    private const float CollapseMusclePlanarSpeedCap = 1.25f;
+    private const float CollapseRootAngularSpeedCap = 3.4f;
+    private const float CollapseMuscleAngularSpeedCap = 3.8f;
+    private const float CollapseEarlyRootPlanarSpeedCap = 0.95f;
+    private const float CollapseEarlyMusclePlanarSpeedCap = 0.70f;
+    private const float CollapseEarlyRootAngularSpeedCap = 1.45f;
+    private const float CollapseEarlyMuscleAngularSpeedCap = 1.75f;
+    // BeingCarriedStunned: 운반 중 피해자는 위로 끌려야 하므로 클램프 완화
+    private const float CarriedStunnedRootPlanarSpeedCap = 2.50f;
+    private const float CarriedStunnedMusclePlanarSpeedCap = 2.00f;
+    private const float CarriedStunnedRootAngularSpeedCap = 3.8f;
+    private const float CarriedStunnedMuscleAngularSpeedCap = 4.0f;
+    private const float CarriedStunnedMaxUpwardSpeed = 3.0f;
     private const float StunRootUpwardSyncStep = 0.08f;
+    private const float CarriedRootPlanarSyncSpeed = 7.5f;
+    private const float CarriedRootVerticalSyncSpeed = 14f;
+    private const float CarriedRootSnapDistance = 1.15f;
+    private const float CarriedRootSnapVerticalGap = 0.65f;
+    private const float CarriedRootTraceGapThreshold = 0.3f;
     private const float HitInstabilityBoostMin = 0.08f;
     private const float HitInstabilityBoostMax = 0.22f;
     private const float HitInstabilityBoostDecay = 1.5f;
     private const float HitReactionMoveSpeedScale = 0.70f;
     private const float HitReactionBrakeScale = 0.60f;
     private const float HitReactionGroundStickScale = 0.60f;
+    private const float HostRemoteClientMoveSpeedCompensation = 1.12f;
 
     private void DoPhysicsStep(PlayerNetworkInput input, float dt)
     {
         if (config == null || rigidbody3D == null || mainJoint == null)
             return;
 
-        _isLeftGrabActive = input.LeftGrabHold;
-        _isRightGrabActive = input.RightGrabHold;
-        _isGrabActive = _isLeftGrabActive || _isRightGrabActive;
+        // Single-button grab: left-hold enables grab attempts on both hands.
+        // Each hand still decides attachment independently from its own reach/target distance.
+        var unifiedGrabHold = input.LeftGrabHold || input.RightGrabHold;
+        _isLeftGrabActive = unifiedGrabHold;
+        _isRightGrabActive = unifiedGrabHold;
+        _isGrabActive = unifiedGrabHold;
 
-        TickHitStopRecovery();
+        // TickHitStopRecovery(); // 히트스탑 제거
         TickHitRecoil(dt);
         TickHitFlinch(dt);
         TickHitInstabilityBoost(dt);
@@ -66,6 +94,7 @@ public sealed partial class NetworkPlayer
         UpdatePhysicalPhaseState(dt);
         TickPunchHitDetectionWindow();
         SyncHeldItemNetworkState();
+        TraceStartupLaunchDiagnostics("DoPhysicsStep");
     }
 
     public void ApplyStunDamage(
@@ -73,7 +102,8 @@ public sealed partial class NetworkPlayer
         float bodyPartMultiplier,
         float attackerVelocity,
         float impulseMagnitude,
-        bool deferStunEntryDamping = false)
+        bool deferStunEntryDamping = false,
+        NetworkPlayer instigator = null)
     {
         if (!_isActiveRagdoll || GetIsDeadState())
             return;
@@ -98,6 +128,9 @@ public sealed partial class NetworkPlayer
             TriggerStun(
                 CalculateStunDuration(attackerVelocity, impulseMagnitude, overflow, threshold),
                 applyEntryDamping: !deferStunEntryDamping);
+
+            if (instigator != null && instigator != this)
+                instigator.TriggerKnockoutConfirm();
         }
         else
             _hitRecoilTimer = HIT_RECOIL_DURATION;
@@ -128,6 +161,9 @@ public sealed partial class NetworkPlayer
     private bool _hasRecoverAnchorPose;
     private Vector3 _recoverAnchorPosition;
     private Quaternion _recoverAnchorRotation = Quaternion.identity;
+    private bool _hasPendingRecoveryStandUpHandoff;
+    private Vector3 _pendingRecoveryStandUpPosition;
+    private Quaternion _pendingRecoveryStandUpRotation = Quaternion.identity;
 
     private bool ShouldUseCollapseAnchor()
     {
@@ -349,11 +385,14 @@ public sealed partial class NetworkPlayer
             _activePunchAttackerSpeed,
             _activePunchKnockbackForce,
             1.0f,
-            deferStunEntryDamping: true);
+            deferStunEntryDamping: true,
+            instigator: this);
         var isStunnedByHit = !victimPlayer._isActiveRagdoll;
+        var collapseVictim = isStunnedByHit && victimPlayer.GetPhysicalPhase() == PhysicalPhase.StunnedCollapse;
         var appliedKnockback = isStunnedByHit ? finalKnockback * StunLaunchKnockbackScale : finalKnockback;
         victimPlayer.ArmHitInstabilityBoost(appliedKnockback);
         victimPlayer.ArmHitFlinch(appliedKnockback);
+        victimPlayer.ArmDirectionalCombatFlinch(hitPoint, appliedKnockback);
 
         var victimRb = victimPlayer.rigidbody3D;
         var victimVelocityBeforeForce = victimRb != null && !victimRb.isKinematic
@@ -362,8 +401,10 @@ public sealed partial class NetworkPlayer
         if (victimRb != null && !victimRb.isKinematic)
         {
             victimRb.AddForce(knockbackDir * appliedKnockback, ForceMode.Impulse);
-            var rotationScale = isStunnedByHit
-                ? Mathf.Lerp(0.09f, 0.12f, heightRatio)
+            var rotationScale = collapseVictim
+                ? Mathf.Lerp(0.035f, 0.06f, heightRatio)
+                : isStunnedByHit
+                    ? Mathf.Lerp(0.09f, 0.12f, heightRatio)
                 : Mathf.Lerp(0.24f, 0.32f, heightRatio);
             victimRb.AddForceAtPosition(
                 knockbackDir * appliedKnockback * rotationScale,
@@ -374,7 +415,10 @@ public sealed partial class NetworkPlayer
             if (lateralRatio > 0.25f)
             {
                 var yawSign = Mathf.Sign(Vector3.Cross(victimPlayer.transform.forward, knockbackDir).y);
-                var yawTorque = Vector3.up * yawSign * appliedKnockback * Mathf.Lerp(0.08f, 0.16f, lateralRatio);
+                var yawTorqueScale = collapseVictim
+                    ? Mathf.Lerp(0.015f, 0.035f, lateralRatio)
+                    : Mathf.Lerp(0.08f, 0.16f, lateralRatio);
+                var yawTorque = Vector3.up * yawSign * appliedKnockback * yawTorqueScale;
                 victimRb.AddTorque(yawTorque, ForceMode.Impulse);
             }
         }
@@ -386,7 +430,7 @@ public sealed partial class NetworkPlayer
             victimVelocityBeforeForce,
             victimRb != null && !victimRb.isKinematic ? victimRb.velocity : victimVelocityBeforeForce,
             appliedKnockback > 0.0001f,
-            $"isStunnedByHit={isStunnedByHit}");
+            $"isStunnedByHit={isStunnedByHit} collapseVictim={collapseVictim}");
 
         ApplyPunchFollowThrough(knockbackDir, finalKnockback);
         ApplyMuscleImpulseOnHit(victimPlayer, hitPoint, knockbackDir, appliedKnockback);
@@ -395,7 +439,9 @@ public sealed partial class NetworkPlayer
 
         TriggerAttackCameraKick(forward, finalKnockback);
         victimPlayer.TriggerVictimCameraKick(knockbackDir, appliedKnockback);
-        ApplyLocalHitStop(victimPlayer);
+        // 히트스탑 제거 — 파티애니멀즈 스타일은 래그돌 과장 반응이 타격감 핵심, 속도 동결은 물리 흐름을 끊음
+        // ApplyLocalHitStop(victimPlayer);
+        SpawnHitImpactVFX(hitPoint, knockbackDir, appliedKnockback);
     }
 
     private Vector3 BuildPunchKnockbackDirection(NetworkPlayer victimPlayer, Vector3 forward)
@@ -541,7 +587,6 @@ public sealed partial class NetworkPlayer
 
         if (_recoverStabilizeTimer <= 0f)
         {
-            _isRecoverStabilizing = false;
 
             // 최종 스프링 값 확정 — mainJoint + 모든 관절
             if (!ShouldDisablePhysicsAnimationSync && mainJoint != null)
@@ -560,6 +605,8 @@ public sealed partial class NetworkPlayer
                 }
             }
 
+            CompleteRecoveryStandUpHandoff();
+            _isRecoverStabilizing = false;
             SynchronizeStunPresentationPhase();
         }
     }
@@ -576,32 +623,96 @@ public sealed partial class NetworkPlayer
             return true;
         }
 
-        var stunnedPhase = _beingGrabbedRefCount > 0
-            ? PhysicalPhase.BeingCarriedStunned
-            : PhysicalPhase.Stunned;
+        var collapsePhase = TickStunCollapseTimer(dt);
+        var stunnedPhase = ResolveCurrentStunnedPhase(collapsePhase);
         SetLocalPhysicalPhase(stunnedPhase, 1f, false);
+        ApplyStunCollapseSpringState(collapsePhase);
 
-        var remaining = GetStunTimeRemaining() - dt;
+        // 잡혀서 운반 중이면 기절 타이머 정지 (운반 중 자동 회복 방지)
+        bool pauseStunTimer = _beingGrabbedRefCount > 0;
+        var remaining = GetStunTimeRemaining() - (pauseStunTimer ? 0f : dt);
         SetStunTimeRemaining(remaining);
 
-        if (remaining <= 0f)
+        if (remaining <= 0f && !pauseStunTimer)
         {
             ForceRecover();
             if (_isActiveRagdoll)
                 return true;
         }
 
-        ClampStunnedMotion();
-        MaintainRecoveringHorizontalAnchor();
-        MaintainRecoveringUprightRotation();
-        TraceStunnedMotionSample("TryTickStunnedState");
+        bool beingCarried = _beingGrabbedRefCount > 0;
+        ClampStunnedMotion(collapsePhase, beingCarried);
+        if (collapsePhase)
+            TraceStunCollapsePose("TryTickStunnedState");
+        else
+            TraceStunnedMotionSample("TryTickStunnedState");
 
         // 기절 중 물리 뼈(메인 리지드바디)가 잡기 조인트 등에 의해 끌려갈 수 있으므로
         // 루트 트랜스폼을 메인 리지드바디 위치에 맞춘다.
         // 이렇게 해야 NetworkTransform이 원격 클라이언트에 올바른 위치를 전달한다.
-        SyncRootToPhysicsBody();
+        if (beingCarried)
+            SyncCarriedRootToPhysicsBody();
+        else
+            SyncRootToPhysicsBody();
 
         return true;
+    }
+
+    private bool TickStunCollapseTimer(float dt)
+    {
+        if (_beingGrabbedRefCount > 0)
+        {
+            _stunCollapseTimer = 0f;
+            return false;
+        }
+
+        var collapsePhase = _stunCollapseTimer > 0f;
+        if (collapsePhase)
+            _stunCollapseTimer = Mathf.Max(0f, _stunCollapseTimer - dt);
+
+        return collapsePhase;
+    }
+
+    private PhysicalPhase ResolveCurrentStunnedPhase(bool collapsePhase)
+    {
+        if (_beingGrabbedRefCount > 0)
+            return PhysicalPhase.BeingCarriedStunned;
+
+        return collapsePhase
+            ? PhysicalPhase.StunnedCollapse
+            : PhysicalPhase.Stunned;
+    }
+
+    private bool IsEarlyCollapsePhaseActive()
+    {
+        return GetPhysicalPhase() == PhysicalPhase.StunnedCollapse &&
+               _stunCollapseTimer > Mathf.Max(0f, StunCollapseDuration - StunCollapseEarlyDuration);
+    }
+
+    private void ApplyStunCollapseSpringState(bool collapsePhase)
+    {
+        if (ShouldDisablePhysicsAnimationSync)
+            return;
+
+        if (mainJoint != null)
+        {
+            var jd = mainJoint.slerpDrive;
+            jd.positionSpring = collapsePhase
+                ? Mathf.Max(1f, _startSlerpPositionSpring * StunCollapseEntryMainSpringScale)
+                : 0f;
+            mainJoint.slerpDrive = jd;
+        }
+
+        for (var i = 0; i < syncPhysicsObjects.Length; i++)
+        {
+            if (syncPhysicsObjects[i] == null)
+                continue;
+
+            if (collapsePhase)
+                syncPhysicsObjects[i].SetSpringLerp(StunCollapseEntryBoneSpringLerp);
+            else
+                syncPhysicsObjects[i].MakeRagdoll();
+        }
     }
 
     /// <summary>
@@ -612,27 +723,289 @@ public sealed partial class NetworkPlayer
     /// 즉시 스냅 대신 Lerp를 사용하여 카메라 앵커에 급격한 점프가 전달되지 않도록 한다.
     /// 텔레포트 수준(5m+)이면 즉시 스냅.
     /// </summary>
-    private void SyncRootToPhysicsBody()
+    private bool TryResolveRootSyncTargetPosition(out Vector3 targetPos)
     {
-        Vector3 targetPos;
-
         if (_puppetMaster != null && _puppetMaster.muscles != null && _puppetMaster.muscles.Length > 0)
         {
             var pelvisMuscle = _puppetMaster.muscles[0];
             if (pelvisMuscle.joint != null)
+            {
                 targetPos = pelvisMuscle.joint.transform.position;
-            else
-                return;
+                return true;
+            }
         }
-        else if (rigidbody3D != null && !rigidbody3D.isKinematic)
+
+        if (rigidbody3D != null && !rigidbody3D.isKinematic)
         {
             targetPos = rigidbody3D.position;
+            return true;
+        }
+
+        targetPos = default;
+        return false;
+    }
+
+    private static string FormatCarryDebugVector(Vector3 value)
+    {
+        return $"({value.x:F2},{value.y:F2},{value.z:F2})";
+    }
+
+    private void SyncCarriedRootToPhysicsBody()
+    {
+        // CarrySolveFrame: carry anchor 기준으로 root follow
+        if (!TryResolveCarryAnchorTargetPosition(out var targetPos))
+        {
+            // 폴백: 기존 pelvis 기반
+            if (!TryResolveRootSyncTargetPosition(out targetPos))
+                return;
+        }
+
+        var previousRootPos = transform.position;
+        var delta = targetPos - previousRootPos;
+        if (delta.sqrMagnitude > 0.25f || targetPos.y - previousRootPos.y > 0.08f)
+        {
+            TraceStartupLaunchDiagnostics(
+                "SyncCarriedRootToPhysicsBody",
+                targetPos,
+                force: true,
+                note: $"mode={_localCarryMode} deltaY={targetPos.y - previousRootPos.y:F2}");
+        }
+
+        if (delta.sqrMagnitude < 0.0004f)
+            return;
+
+        var dt = Runner != null ? Runner.DeltaTime : Time.fixedDeltaTime;
+        var settings = ResolveCarryModeSettings();
+        var verticalGap = targetPos.y - previousRootPos.y;
+        var shouldSnap = delta.sqrMagnitude > settings.rootSnapDistance * settings.rootSnapDistance ||
+                         verticalGap > settings.rootSnapVerticalGap;
+
+        Vector3 newRootPos;
+        if (shouldSnap)
+        {
+            newRootPos = targetPos;
         }
         else
         {
+            var planarCurrent = new Vector3(previousRootPos.x, 0f, previousRootPos.z);
+            var planarTarget = new Vector3(targetPos.x, 0f, targetPos.z);
+            var planarNext = Vector3.MoveTowards(planarCurrent, planarTarget, settings.rootPlanarFollowSpeed * dt);
+            var yNext = Mathf.MoveTowards(previousRootPos.y, targetPos.y, settings.rootVerticalFollowSpeed * dt);
+            newRootPos = new Vector3(planarNext.x, yNext, planarNext.z);
+        }
+
+        ApplyCarryRootPosition(newRootPos, shouldSnap);
+
+        // carry anchor 캐시 갱신 (네트워크 동기화 + settle 용)
+        _lastCarryAnchorPosition = targetPos;
+
+        var remainingGap = Vector3.Distance(newRootPos, targetPos);
+        if (remainingGap > CarriedRootTraceGapThreshold)
+        {
+            TraceCarryDebugSample(
+                "CarryAnchorSolve",
+                $"mode={_localCarryMode} prevRoot={FormatCarryDebugVector(previousRootPos)} target={FormatCarryDebugVector(targetPos)} " +
+                $"newRoot={FormatCarryDebugVector(newRootPos)} delta={FormatCarryDebugVector(delta)} " +
+                $"verticalGap={verticalGap:F2} remainingGap={remainingGap:F2} snap={shouldSnap}",
+                remainingGap > CarryRootDebugGapThreshold);
+        }
+    }
+
+    /// <summary>
+    /// CarryRig의 victim anchor를 기준으로 carry target 위치를 해석.
+    /// victim 쪽: hips-chest 가중 평균 anchor
+    /// </summary>
+    private bool TryResolveCarryAnchorTargetPosition(out Vector3 targetPos)
+    {
+        if (TryResolveCarryAnchorBasePosition(out var anchorPos, out var anchorFwd))
+        {
+            _lastCarryAnchorForward = anchorFwd;
+            targetPos = anchorPos;
+
+            if (_localCarryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim &&
+                _hasCarriedVictimRootOffset)
+            {
+                targetPos += _carriedVictimRootOffset;
+            }
+
+            return true;
+        }
+
+        targetPos = default;
+        return false;
+    }
+
+    private bool TryResolveCarryAnchorBasePosition(out Vector3 anchorPos, out Vector3 anchorFwd)
+    {
+        if (carryRig != null)
+        {
+            carryRig.UpdateVictimAnchor();
+            if (carryRig.TryGetVictimAnchorWorld(out anchorPos, out anchorFwd))
+                return true;
+        }
+
+        if (TryResolveRootSyncTargetPosition(out anchorPos))
+        {
+            anchorFwd = transform.forward;
+            return true;
+        }
+
+        anchorPos = default;
+        anchorFwd = transform.forward;
+        return false;
+    }
+
+    private void CaptureCarriedVictimRootOffset()
+    {
+        if (!TryResolveCarryAnchorBasePosition(out var anchorPos, out _))
+        {
+            _hasCarriedVictimRootOffset = false;
+            _carriedVictimRootOffset = Vector3.zero;
             return;
         }
 
+        _carriedVictimRootOffset = Vector3.ClampMagnitude(transform.position - anchorPos, 1.0f);
+        _hasCarriedVictimRootOffset = true;
+    }
+
+    /// <summary>
+    /// 현재 carry mode에 맞는 물리 설정을 반환.
+    /// CarryPhysicsProfile이 없으면 하드코드 폴백.
+    /// </summary>
+    private SSAFYPlayTime.Character.CarryPhysicsProfile.CarryModeSettings ResolveCarryModeSettings()
+    {
+        if (carryPhysicsProfile != null)
+            return carryPhysicsProfile.GetSettings(_localCarryMode);
+
+        // 폴백: 기존 하드코드 값
+        return new SSAFYPlayTime.Character.CarryPhysicsProfile.CarryModeSettings
+        {
+            rootPlanarFollowSpeed = CarriedRootPlanarSyncSpeed,
+            rootVerticalFollowSpeed = CarriedRootVerticalSyncSpeed,
+            rootSnapDistance = CarriedRootSnapDistance,
+            rootSnapVerticalGap = CarriedRootSnapVerticalGap,
+            proxyRootFollowSpeed = CarryProxyRootFollowSpeed,
+            proxyRootSnapDistance = CarryProxyRootSnapDistance,
+            carryReleaseSettleDuration = 0.15f,
+            carrierTorsoReactionMultiplier = 1.15f,
+            carrierTurnAssistMultiplier = 1.1f,
+            victimCoreDriveSpringMultiplier = 0.9f,
+            victimCoreDriveDamperMultiplier = 0.95f
+        };
+    }
+
+    /// <summary>
+    /// carry 모드를 phase 기반으로 갱신.
+    /// phase 전환 시 settle 타이머도 관리.
+    /// </summary>
+    private void UpdateLocalCarryMode()
+    {
+        var phase = _localPhysicalPhase;
+        var previousMode = _localCarryMode;
+
+        SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode newMode;
+        if (phase == PhysicalPhase.BeingCarriedStunned)
+        {
+            newMode = SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim;
+        }
+        else if (phase == PhysicalPhase.CarryingStunned)
+        {
+            newMode = IsDualGrabbingStunnedPlayer
+                ? SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry
+                : SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry;
+        }
+        else if (phase == PhysicalPhase.Holding)
+        {
+            newMode = SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.NormalGrab;
+        }
+        else
+        {
+            newMode = SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None;
+        }
+
+        // carry → non-carry 전환 시 settle 시작
+        if (previousMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None &&
+            newMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None)
+        {
+            var settings = carryPhysicsProfile != null
+                ? carryPhysicsProfile.GetSettings(previousMode)
+                : ResolveCarryModeSettings();
+            _carryReleaseSettleRemaining = settings.carryReleaseSettleDuration;
+        }
+
+        if (previousMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim &&
+            newMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim)
+        {
+            CaptureCarriedVictimRootOffset();
+        }
+        else if (previousMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim &&
+                 newMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim)
+        {
+            _hasCarriedVictimRootOffset = false;
+            _carriedVictimRootOffset = Vector3.zero;
+        }
+
+        _localCarryMode = newMode;
+
+        if (previousMode != newMode)
+        {
+            TraceStartupLaunchDiagnostics(
+                "UpdateLocalCarryMode",
+                force: true,
+                note: $"carry={previousMode}->{newMode}");
+        }
+    }
+
+    /// <summary>
+    /// carry 종료 직후 settle 기간 중 root를 마지막 carry anchor 기준으로 유지.
+    /// </summary>
+    private void TickCarryReleaseSettle(float dt)
+    {
+        if (_carryReleaseSettleRemaining <= 0f)
+            return;
+
+        _carryReleaseSettleRemaining = Mathf.Max(0f, _carryReleaseSettleRemaining - dt);
+
+        // settle 중에는 마지막 carry anchor를 기준으로 root를 유지
+        if (_lastCarryAnchorPosition != Vector3.zero)
+        {
+            var currentRoot = transform.position;
+            var toAnchor = _lastCarryAnchorPosition - currentRoot;
+            if (toAnchor.sqrMagnitude > 0.01f)
+            {
+                var settleSpeed = 8f * dt;
+                var settledRoot = Vector3.MoveTowards(currentRoot, _lastCarryAnchorPosition, settleSpeed);
+                ApplyCarryRootPosition(settledRoot, true);
+
+                TraceCarryDebugSample(
+                    "CarryReleaseSettle",
+                    $"remaining={_carryReleaseSettleRemaining:F2} root={FormatCarryDebugVector(currentRoot)} " +
+                    $"anchor={FormatCarryDebugVector(_lastCarryAnchorPosition)} gap={toAnchor.magnitude:F2}");
+            }
+        }
+    }
+
+    private void ApplyCarryRootPosition(Vector3 nextRootPosition, bool resetVelocity)
+    {
+        if (rigidbody3D != null && !rigidbody3D.isKinematic)
+        {
+            rigidbody3D.position = nextRootPosition;
+            if (resetVelocity)
+            {
+                rigidbody3D.velocity = Vector3.zero;
+                rigidbody3D.angularVelocity = Vector3.zero;
+            }
+        }
+
+        transform.position = nextRootPosition;
+    }
+
+    private void SyncRootToPhysicsBody()
+    {
+        if (!TryResolveRootSyncTargetPosition(out var targetPos))
+            return;
+
+        var originalTargetPos = targetPos;
         if (ShouldUseCollapseAnchor())
         {
             targetPos.x = _recoverAnchorPosition.x;
@@ -646,6 +1019,16 @@ public sealed partial class NetworkPlayer
         }
 
         var delta = targetPos - transform.position;
+        var upwardTarget = targetPos.y - transform.position.y;
+        if (upwardTarget > 0.08f || delta.sqrMagnitude > 0.25f)
+        {
+            TraceStartupLaunchDiagnostics(
+                "SyncRootToPhysicsBody",
+                targetPos,
+                force: true,
+                note: $"originalTargetY={originalTargetPos.y:F2} upwardTarget={upwardTarget:F2} collapseAnchor={ShouldUseCollapseAnchor()}");
+        }
+
         if (delta.sqrMagnitude < 0.001f)
             return;
 
@@ -682,6 +1065,8 @@ public sealed partial class NetworkPlayer
             var sprintMultiplier = config != null ? config.sprintSpeedMultiplier : 1.8f;
             moveSpeedMultiplier *= sprintMultiplier;
         }
+
+        moveSpeedMultiplier *= ResolveHostRemoteClientMoveSpeedCompensation();
 
         var wasGrounded = _isGrounded;
         _isGrounded = _groundProbe.IsGrounded(
@@ -730,6 +1115,20 @@ public sealed partial class NetworkPlayer
         // 원격 클라이언트 애니메이션용 스프린트 상태 동기화
         if (Runner != null && Object != null && Object.IsValid)
             NetworkedIsSprinting = input.Sprint;
+    }
+
+    private float ResolveHostRemoteClientMoveSpeedCompensation()
+    {
+        if (Runner == null || !Runner.IsServer || Object == null || !Object.IsValid)
+            return 1f;
+
+        if (!Object.InputAuthority.IsRealPlayer)
+            return 1f;
+
+        if (Runner.LocalPlayer.IsRealPlayer && Object.InputAuthority == Runner.LocalPlayer)
+            return 1f;
+
+        return HostRemoteClientMoveSpeedCompensation;
     }
 
     private void RotateTowardInput(Vector3 moveDirection, float inputMagnitude, float dt)
@@ -984,7 +1383,12 @@ public sealed partial class NetworkPlayer
     {
         if (!_isActiveRagdoll)
         {
-            SetLocalPhysicalPhase(PhysicalPhase.Stunned, 1f, false);
+            SetLocalPhysicalPhase(
+                ResolveCurrentStunnedPhase(_stunCollapseTimer > 0f),
+                1f,
+                false);
+            UpdateLocalCarryMode();
+            TickCarryReleaseSettle(dt);
             return;
         }
 
@@ -996,6 +1400,8 @@ public sealed partial class NetworkPlayer
         var dragged = ResolveDraggedState(beingGrabbed);
         var phase = ResolveAuthorityPhysicalPhase(anyHolding, beingGrabbed, dragged);
         SetLocalPhysicalPhase(phase, _localInstability, dragged);
+        UpdateLocalCarryMode();
+        TickCarryReleaseSettle(dt);
     }
 
     private void UpdateInstabilityScore(float dt, bool anyHolding, bool beingGrabbed)
@@ -1068,7 +1474,8 @@ public sealed partial class NetworkPlayer
 
         if (anyHolding)
         {
-            if (IsDualGrabbingStunnedPlayer)
+            // 기절자 잡기(한손/양손 모두) → CarryingStunned (코어 안정화 + 캐리 포즈)
+            if (IsAnyHandHoldingStunnedPlayer)
                 return PhysicalPhase.CarryingStunned;
             return PhysicalPhase.Holding;
         }
@@ -1085,9 +1492,26 @@ public sealed partial class NetworkPlayer
 
     private void SetLocalPhysicalPhase(PhysicalPhase phase, float instability, bool dragged)
     {
+        var previousPhase = _localPhysicalPhase;
+        if (debugGrabLog && phase != _localPhysicalPhase)
+        {
+            Debug.Log($"[Phase] {name}: {_localPhysicalPhase} → {phase} " +
+                $"(anyHolding={IsAnyHandHoldingObject()}, beingGrabbed={_beingGrabbedRefCount > 0}, " +
+                $"isAnyStunned={IsAnyHandHoldingStunnedPlayer}, isDual={IsDualGrabbingStunnedPlayer}, " +
+                $"instability={instability:F2})", this);
+        }
+
         _localPhysicalPhase = phase;
         _localInstability = Mathf.Clamp01(instability);
         _localIsDragged = dragged;
+
+        if (previousPhase != phase)
+        {
+            TraceStartupLaunchDiagnostics(
+                "SetLocalPhysicalPhase",
+                force: true,
+                note: $"phase={previousPhase}->{phase} instability={instability:F2} dragged={dragged}");
+        }
     }
 
     private float ResolveStunStateMultiplier()
@@ -1194,15 +1618,21 @@ public sealed partial class NetworkPlayer
         _itemRuntimeHost?.NotifyStunned();
         SetStunTimeRemaining(duration);
         SetAccumulatedStun(0f);
+        _stunCollapseTimer = _beingGrabbedRefCount > 0
+            ? 0f
+            : Mathf.Min(duration, StunCollapseDuration);
+        ApplyStunCollapseSpringState(_stunCollapseTimer > 0f);
         CaptureCollapseAnchorPose(transform.position, transform.rotation);
         ArmStunForceDiagnostics("TriggerStun", $"duration={duration:F2}");
+        TraceStunCollapsePose("TriggerStun-Entry", true);
         if (applyEntryDamping)
             DampenStunEntryVelocities();
-        SetLocalPhysicalPhase(PhysicalPhase.Stunned, 1f, false);
+        TraceStunCollapsePose("TriggerStun-Damped", true);
+        SetLocalPhysicalPhase(ResolveCurrentStunnedPhase(_stunCollapseTimer > 0f), 1f, false);
         _bodyPartPhysicsManager?.SetStateImmediate(
             _beingGrabbedRefCount > 0
                 ? SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned
-                : SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState.Stunned);
+                : SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse);
         FlagPhysicsPresentationReset();
         RaiseAnimationEvent(AnimationEventType.StunFall, H_StunFall);
         SynchronizeStunPresentationPhase();
@@ -1292,18 +1722,82 @@ public sealed partial class NetworkPlayer
         return velocity;
     }
 
-    private void ClampStunnedMotion()
+    private void ClampStunnedMotion(bool collapsePhase = false, bool beingCarried = false)
     {
+        var earlyCollapsePhase = collapsePhase && IsEarlyCollapsePhaseActive();
+
+        float rootPlanarSpeedCap, musclePlanarSpeedCap, rootAngularSpeedCap, muscleAngularSpeedCap;
+        if (beingCarried)
+        {
+            // 운반 중인 기절 피해자: 손을 따라 끌려가야 하므로 캡을 크게 완화
+            rootPlanarSpeedCap = CarriedStunnedRootPlanarSpeedCap;
+            musclePlanarSpeedCap = CarriedStunnedMusclePlanarSpeedCap;
+            rootAngularSpeedCap = CarriedStunnedRootAngularSpeedCap;
+            muscleAngularSpeedCap = CarriedStunnedMuscleAngularSpeedCap;
+        }
+        else if (earlyCollapsePhase)
+        {
+            rootPlanarSpeedCap = CollapseEarlyRootPlanarSpeedCap;
+            musclePlanarSpeedCap = CollapseEarlyMusclePlanarSpeedCap;
+            rootAngularSpeedCap = CollapseEarlyRootAngularSpeedCap;
+            muscleAngularSpeedCap = CollapseEarlyMuscleAngularSpeedCap;
+        }
+        else if (collapsePhase)
+        {
+            rootPlanarSpeedCap = CollapseRootPlanarSpeedCap;
+            musclePlanarSpeedCap = CollapseMusclePlanarSpeedCap;
+            rootAngularSpeedCap = CollapseRootAngularSpeedCap;
+            muscleAngularSpeedCap = CollapseMuscleAngularSpeedCap;
+        }
+        else
+        {
+            rootPlanarSpeedCap = StunnedRootPlanarSpeedCap;
+            musclePlanarSpeedCap = StunnedMusclePlanarSpeedCap;
+            rootAngularSpeedCap = StunnedRootAngularSpeedCap;
+            muscleAngularSpeedCap = StunnedMuscleAngularSpeedCap;
+        }
+        var rootVelocityBefore = rigidbody3D != null && !rigidbody3D.isKinematic
+            ? rigidbody3D.velocity
+            : Vector3.zero;
+        var rootAngularBefore = rigidbody3D != null && !rigidbody3D.isKinematic
+            ? rigidbody3D.angularVelocity
+            : Vector3.zero;
+        var maxMusclePlanarBefore = 0f;
+        var maxMusclePlanarAfter = 0f;
+
         if (rigidbody3D != null && !rigidbody3D.isKinematic)
         {
-            rigidbody3D.velocity = ClampStunnedVelocity(rigidbody3D.velocity, StunnedRootPlanarSpeedCap);
+            rigidbody3D.velocity = ClampStunnedVelocity(rigidbody3D.velocity, rootPlanarSpeedCap, beingCarried);
             rigidbody3D.angularVelocity = Vector3.ClampMagnitude(
                 rigidbody3D.angularVelocity,
-                StunnedRootAngularSpeedCap);
+                rootAngularSpeedCap);
         }
 
+        var traceLabel = beingCarried ? "ClampStunnedMotion-BeingCarried"
+            : collapsePhase ? "ClampStunnedMotion-Collapse"
+            : "ClampStunnedMotion-Stunned";
+
         if (_puppetMaster == null || _puppetMaster.muscles == null)
+        {
+            TraceStunVelocityClamp(
+                traceLabel,
+                rootVelocityBefore,
+                rigidbody3D != null && !rigidbody3D.isKinematic ? rigidbody3D.velocity : Vector3.zero,
+                rootAngularBefore,
+                rigidbody3D != null && !rigidbody3D.isKinematic ? rigidbody3D.angularVelocity : Vector3.zero,
+                maxMusclePlanarBefore,
+                maxMusclePlanarAfter);
+
+            if (beingCarried)
+            {
+                TraceBeingCarriedClampSample(
+                    rootVelocityBefore,
+                    rigidbody3D != null && !rigidbody3D.isKinematic ? rigidbody3D.velocity : Vector3.zero,
+                    rootPlanarSpeedCap,
+                    musclePlanarSpeedCap);
+            }
             return;
+        }
 
         foreach (var muscle in _puppetMaster.muscles)
         {
@@ -1314,22 +1808,170 @@ public sealed partial class NetworkPlayer
             if (rb == null || rb.isKinematic)
                 continue;
 
-            rb.velocity = ClampStunnedVelocity(rb.velocity, StunnedMusclePlanarSpeedCap);
+            var planarBefore = new Vector3(rb.velocity.x, 0f, rb.velocity.z).magnitude;
+            if (planarBefore > maxMusclePlanarBefore)
+                maxMusclePlanarBefore = planarBefore;
+
+            rb.velocity = ClampStunnedVelocity(rb.velocity, musclePlanarSpeedCap, beingCarried);
             rb.angularVelocity = Vector3.ClampMagnitude(
                 rb.angularVelocity,
-                StunnedMuscleAngularSpeedCap);
+                muscleAngularSpeedCap);
+
+            var planarAfter = new Vector3(rb.velocity.x, 0f, rb.velocity.z).magnitude;
+            if (planarAfter > maxMusclePlanarAfter)
+                maxMusclePlanarAfter = planarAfter;
+        }
+
+        TraceStunVelocityClamp(
+            traceLabel,
+            rootVelocityBefore,
+            rigidbody3D != null && !rigidbody3D.isKinematic ? rigidbody3D.velocity : Vector3.zero,
+            rootAngularBefore,
+            rigidbody3D != null && !rigidbody3D.isKinematic ? rigidbody3D.angularVelocity : Vector3.zero,
+            maxMusclePlanarBefore,
+            maxMusclePlanarAfter);
+
+        if (beingCarried)
+        {
+            TraceBeingCarriedClampSample(
+                rootVelocityBefore,
+                rigidbody3D != null && !rigidbody3D.isKinematic ? rigidbody3D.velocity : Vector3.zero,
+                rootPlanarSpeedCap,
+                musclePlanarSpeedCap);
         }
     }
 
-    private static Vector3 ClampStunnedVelocity(Vector3 velocity, float planarSpeedCap)
+    private void TraceBeingCarriedClampSample(
+        Vector3 rootVelocityBefore,
+        Vector3 rootVelocityAfter,
+        float rootPlanarSpeedCap,
+        float musclePlanarSpeedCap)
+    {
+        var pelvisY = transform.position.y;
+        if (_puppetMaster != null &&
+            _puppetMaster.muscles != null &&
+            _puppetMaster.muscles.Length > 0 &&
+            _puppetMaster.muscles[0].joint != null)
+        {
+            pelvisY = _puppetMaster.muscles[0].joint.transform.position.y;
+        }
+
+        var rootPlanarBefore = new Vector2(rootVelocityBefore.x, rootVelocityBefore.z).magnitude;
+        var rootPlanarAfter = new Vector2(rootVelocityAfter.x, rootVelocityAfter.z).magnitude;
+        var rootToPelvisGap = Mathf.Abs(transform.position.y - pelvisY);
+        if (rootToPelvisGap <= CarriedRootSnapVerticalGap)
+            return;
+
+        TraceCarryDebugSample(
+            "CarryAuthorityClampGap",
+            $"rootY={rootVelocityBefore.y:F2}->{rootVelocityAfter.y:F2} rootPlanar={rootPlanarBefore:F2}->{rootPlanarAfter:F2} " +
+            $"caps=root:{rootPlanarSpeedCap:F2}/muscle:{musclePlanarSpeedCap:F2}/up:{CarriedStunnedMaxUpwardSpeed:F2} " +
+            $"rootPosY={transform.position.y:F2} pelvisY={pelvisY:F2} rootPelvisGap={rootToPelvisGap:F2}",
+            rootToPelvisGap > CarryRootDebugGapThreshold);
+    }
+
+    private static Vector3 ClampStunnedVelocity(Vector3 velocity, float planarSpeedCap, bool beingCarried = false)
     {
         var planarVelocity = new Vector3(velocity.x, 0f, velocity.z);
         planarVelocity = Vector3.ClampMagnitude(planarVelocity, planarSpeedCap);
 
         velocity.x = planarVelocity.x;
         velocity.z = planarVelocity.z;
-        velocity.y = Mathf.Min(velocity.y, 0f);
+
+        if (beingCarried)
+        {
+            // 운반 중: 위로 끌려가야 하므로 양의 Y를 허용하되 상한만 설정
+            velocity.y = Mathf.Clamp(velocity.y, -2f, CarriedStunnedMaxUpwardSpeed);
+        }
+        else
+        {
+            velocity.y = Mathf.Min(velocity.y, 0f);
+        }
+
         return velocity;
+    }
+
+    private void EnsureRecoveryPoseReferences()
+    {
+        if (_recoveryPoseHips != null &&
+            _recoveryPoseHead != null &&
+            _recoveryPoseLeftArm != null &&
+            _recoveryPoseRightArm != null)
+        {
+            return;
+        }
+
+        if (animator == null || !animator.isHuman)
+            return;
+
+        _recoveryPoseHips ??= animator.GetBoneTransform(HumanBodyBones.Hips);
+        _recoveryPoseHead ??=
+            animator.GetBoneTransform(HumanBodyBones.Head) ??
+            animator.GetBoneTransform(HumanBodyBones.UpperChest) ??
+            animator.GetBoneTransform(HumanBodyBones.Chest);
+        _recoveryPoseLeftArm ??=
+            animator.GetBoneTransform(HumanBodyBones.LeftUpperArm) ??
+            animator.GetBoneTransform(HumanBodyBones.LeftShoulder);
+        _recoveryPoseRightArm ??=
+            animator.GetBoneTransform(HumanBodyBones.RightUpperArm) ??
+            animator.GetBoneTransform(HumanBodyBones.RightShoulder);
+    }
+
+    private bool TryResolveRecoveryFacingVector(out Vector3 facing)
+    {
+        facing = transform.forward;
+        EnsureRecoveryPoseReferences();
+
+        if (_recoveryPoseHips == null ||
+            _recoveryPoseHead == null ||
+            _recoveryPoseLeftArm == null ||
+            _recoveryPoseRightArm == null)
+        {
+            return false;
+        }
+
+        var bodyUp = _recoveryPoseHead.position - _recoveryPoseHips.position;
+        var shoulderRight = _recoveryPoseRightArm.position - _recoveryPoseLeftArm.position;
+        if (bodyUp.sqrMagnitude <= 0.0001f || shoulderRight.sqrMagnitude <= 0.0001f)
+            return false;
+
+        bodyUp.Normalize();
+        shoulderRight.Normalize();
+
+        var derivedForward = Vector3.Cross(shoulderRight, bodyUp);
+        if (derivedForward.sqrMagnitude <= 0.0001f)
+            return false;
+
+        derivedForward.Normalize();
+        if (!_recoveryPoseForwardSignResolved)
+        {
+            var referenceForward = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+            if (referenceForward.sqrMagnitude <= 0.0001f && _targetRoot != null)
+                referenceForward = Vector3.ProjectOnPlane(_targetRoot.forward, Vector3.up);
+
+            if (referenceForward.sqrMagnitude > 0.0001f)
+                _recoveryPoseForwardSign = Vector3.Dot(derivedForward, referenceForward.normalized) < 0f ? -1f : 1f;
+
+            _recoveryPoseForwardSignResolved = true;
+        }
+
+        facing = derivedForward * _recoveryPoseForwardSign;
+        return true;
+    }
+
+    private RecoveryAnimationVariant ResolveRecoveryAnimationVariant()
+    {
+        if (TryResolveRecoveryFacingVector(out var facing))
+        {
+            var facingUpDot = Vector3.Dot(facing.normalized, Vector3.up);
+            if (facingUpDot >= 0.18f)
+                return RecoveryAnimationVariant.Supine;
+
+            if (facingUpDot <= -0.18f)
+                return RecoveryAnimationVariant.Prone;
+        }
+
+        return RecoveryAnimationVariant.Supine;
     }
 
     private void ForceRecover()
@@ -1350,6 +1992,12 @@ public sealed partial class NetworkPlayer
             recoveryRotation = transform.rotation;
         }
 
+        var recoveryAnimationVariant = ResolveRecoveryAnimationVariant();
+        SetRecoveryAnimationVariant(recoveryAnimationVariant);
+        _pendingRecoveryStandUpPosition = recoveryPosition;
+        _pendingRecoveryStandUpRotation = recoveryRotation;
+        _hasPendingRecoveryStandUpHandoff = true;
+
         _localMoveSpeed = 0f;
         _localPresentationLocomotionState = PresentationLocomotionState.Idle;
         if (Runner != null && Object != null && Object.IsValid)
@@ -1363,10 +2011,8 @@ public sealed partial class NetworkPlayer
         DampenAllPhysicsBoneVelocities();
 
         // ── 2) 기립 정렬: 캐릭터를 월드 업 방향으로 세움 ──
-        AlignCharacterUpright(recoveryRotation);
 
         // ── 2.5) 안전 위치 텔레포트: 바닥 침투 방지 ──
-        TeleportToSafeStandUpPosition(recoveryPosition, recoveryRotation);
 
         // ── 3) 스프링을 0으로 시작 → stabilization 단계에서 점진적으로 복원 ──
         if (!ShouldDisablePhysicsAnimationSync && mainJoint != null)
@@ -1394,23 +2040,25 @@ public sealed partial class NetworkPlayer
         _recoverStabilizeTimer = RECOVER_STABILIZE_DURATION;
         _isRecovering = true;
         _recoveringTimer = RECOVERING_DURATION;
+        _stunCollapseTimer = 0f;
 
         SetStunTimeRemaining(0f);
         SetAccumulatedStun(0f);
+
+        // 회복 시 잡힌 상태가 유지 중이면 grab spring 적용
+        if (IsGrabbedByOther)
+            ApplyGrabbedJointState(true);
+
         SetLocalPhysicalPhase(PhysicalPhase.Recovering, Mathf.Max(_localInstability, 0.45f), false);
         ArmStunForceDiagnostics("ForceRecover");
-        FlagPhysicsPresentationReset();
-        RaiseAnimationEvent(AnimationEventType.StunRecover, H_StunRecover);
         SynchronizeStunPresentationPhase();
 
         // ── 4) 기립 보조: 약한 위쪽 충격량으로 일어나는 느낌 ──
         // 회복 비주얼: 물리 타겟 스켈레톤 숨기고 애니메이션 비주얼 복원
-        SetStunVisualMode(false);
 
         // 호스트: PuppetMaster.Map()이 target skeleton을 덮어쓰지 않도록 즉시 래치 활성화.
         // LateUpdate의 SynchronizePhysicsPresentationState() 전환 감지를 기다리지 않고
         // ForceRecover 시점에 바로 mappingWeight=0을 적용한다.
-        ActivateAuthorityAnimatorVisualLatch();
 
     }
 
@@ -1420,6 +2068,23 @@ public sealed partial class NetworkPlayer
     /// 모든 물리 뼈의 잔여 속도/각속도를 대폭 감쇠.
     /// 기절 중 축적된 충돌/관성을 제거해서 spring 복원 시 떨림을 방지.
     /// </summary>
+    private void CompleteRecoveryStandUpHandoff()
+    {
+        if (!_hasPendingRecoveryStandUpHandoff)
+            return;
+
+        _hasPendingRecoveryStandUpHandoff = false;
+
+        AlignCharacterUpright(_pendingRecoveryStandUpRotation);
+        TeleportToSafeStandUpPosition(_pendingRecoveryStandUpPosition, _pendingRecoveryStandUpRotation);
+        DampenAllPhysicsBoneVelocities();
+        SyncRootToPhysicsBody();
+        QueueRecoveryAnimationForVisuals();
+        RaiseAnimationEvent(AnimationEventType.StunRecover, H_StunRecover);
+        SetStunVisualMode(false);
+        ActivateAuthorityAnimatorVisualLatch();
+    }
+
     private void DampenAllPhysicsBoneVelocities()
     {
         // 메인 rigidbody
@@ -1868,6 +2533,16 @@ public sealed partial class NetworkPlayer
         _puppetMaster.pinWeight = _hitFlinchDroppedPinWeight;
     }
 
+    internal void ArmDirectionalCombatFlinch(Vector3 hitPoint, float impactMagnitude)
+    {
+        if (_bodyPartPhysicsManager == null || !_isActiveRagdoll)
+            return;
+
+        var localOffset = ResolveImpactLocalOffset(hitPoint);
+        var duration = Mathf.Lerp(0.08f, 0.15f, NormalizePunchImpact(impactMagnitude));
+        _bodyPartPhysicsManager.ArmCombatFlinch(localOffset, impactMagnitude, duration);
+    }
+
     private void EndHitFlinch()
     {
         if (!_hitFlinchActive)
@@ -1891,11 +2566,20 @@ public sealed partial class NetworkPlayer
 
     // ─── 기절 슬로우모션 (로컬 전용) ───
     private bool _stunSlowMotionActive;
-    private float _stunSlowMotionHoldEnd;    // unscaledTime 기준
-    private float _stunSlowMotionRampEnd;    // unscaledTime 기준
+    private float _stunSlowMotionHoldEnd;
+    private float _stunSlowMotionRampEnd;
+    private float _localSlowMotionHoldEnd;   // unscaledTime 기준
+    private float _localSlowMotionRampEnd;   // unscaledTime 기준
+    private bool _knockoutConfirmSlowMotionActive;
+    private float _knockoutConfirmSlowMotionHoldEnd;
+    private float _knockoutConfirmSlowMotionRampEnd;
+    private const float SLOWMO_BASE_FIXED_DELTA_TIME = 0.02f;
     private const float STUN_SLOWMO_SCALE = 0.15f;        // 85% 감속
     private const float STUN_SLOWMO_HOLD_DURATION = 0.25f; // 최저 유지 시간 (realtime)
     private const float STUN_SLOWMO_RAMP_DURATION = 0.35f; // 복원 램프 시간 (realtime)
+    private const float KNOCKOUT_CONFIRM_SLOWMO_SCALE = 0.58f;
+    private const float KNOCKOUT_CONFIRM_SLOWMO_HOLD_DURATION = 0.06f;
+    private const float KNOCKOUT_CONFIRM_SLOWMO_RAMP_DURATION = 0.12f;
 
     internal float GetConfiguredPunchCooldown()
     {
@@ -1978,22 +2662,32 @@ public sealed partial class NetworkPlayer
 
         var muscles = victim._puppetMaster.muscles;
         var stunnedVictim = !victim._isActiveRagdoll;
+        var collapseVictim = victim.GetPhysicalPhase() == PhysicalPhase.StunnedCollapse;
+        var mitigateCollapseImpulse = stunnedVictim && collapseVictim;
         var impactBlend = NormalizePunchImpact(force);
         var localHitOffset = victim.ResolveImpactLocalOffset(hitPoint);
         var lateralRatio = Mathf.Clamp01(Mathf.Abs(localHitOffset.x) / 0.32f);
         var heightRatio = Mathf.Clamp01((localHitOffset.y + 0.05f) / 0.70f);
         var torqueBlend = Mathf.Clamp01(Mathf.Max(lateralRatio, heightRatio * 0.85f));
-        var focusedImpulseScale = stunnedVictim
-            ? Mathf.Lerp(0.18f, 0.28f, impactBlend)
+        var focusedImpulseScale = mitigateCollapseImpulse
+            ? Mathf.Lerp(0.035f, 0.075f, impactBlend)
+            : stunnedVictim
+            ? Mathf.Lerp(collapseVictim ? 0.12f : 0.18f, collapseVictim ? 0.22f : 0.28f, impactBlend)
             : Mathf.Lerp(0.42f, 0.62f, impactBlend);
-        var spreadImpulseScale = stunnedVictim
-            ? Mathf.Lerp(0.04f, 0.08f, impactBlend)
+        var spreadImpulseScale = mitigateCollapseImpulse
+            ? 0f
+            : stunnedVictim
+            ? Mathf.Lerp(collapseVictim ? 0.02f : 0.04f, collapseVictim ? 0.05f : 0.08f, impactBlend)
             : Mathf.Lerp(0.10f, 0.18f, impactBlend);
-        var twistTorqueScale = stunnedVictim
-            ? Mathf.Lerp(0.03f, 0.10f, torqueBlend)
+        var twistTorqueScale = mitigateCollapseImpulse
+            ? 0f
+            : stunnedVictim
+            ? Mathf.Lerp(collapseVictim ? 0f : 0.03f, collapseVictim ? 0.03f : 0.10f, torqueBlend)
             : Mathf.Lerp(0.06f, 0.14f, torqueBlend);
         float closestDist = float.MaxValue;
         int closestIdx = -1;
+        float closestCoreDist = float.MaxValue;
+        int closestCoreIdx = -1;
 
         // 히트 포인트에서 가장 가까운 muscle 찾기
         for (int i = 0; i < muscles.Length; i++)
@@ -2008,18 +2702,32 @@ public sealed partial class NetworkPlayer
                 closestDist = dist;
                 closestIdx = i;
             }
+
+            if (IsStunImpulseCoreMuscle(muscles[i].joint.name) && dist < closestCoreDist)
+            {
+                closestCoreDist = dist;
+                closestCoreIdx = i;
+            }
         }
 
         if (closestIdx < 0) return;
 
+        var originalClosestIdx = closestIdx;
+        if (mitigateCollapseImpulse && closestCoreIdx >= 0)
+            closestIdx = closestCoreIdx;
+
         var targetMuscleName = muscles[closestIdx].joint != null ? muscles[closestIdx].joint.name : "unknown";
+        var originalTargetMuscleName = muscles[originalClosestIdx].joint != null ? muscles[originalClosestIdx].joint.name : "unknown";
         victim.TraceStunImpulseSummary(
             "ApplyMuscleImpulseOnHit",
             force,
             focusedImpulseScale,
             spreadImpulseScale,
             twistTorqueScale,
-            targetMuscleName);
+            targetMuscleName,
+            mitigateCollapseImpulse
+                ? $"mitigated=stun-entry-collapse redirected={(closestIdx != originalClosestIdx)} original={originalTargetMuscleName}"
+                : null);
 
         var closestRb = muscles[closestIdx].joint.GetComponent<Rigidbody>();
         if (closestRb != null && !closestRb.isKinematic)
@@ -2037,8 +2745,12 @@ public sealed partial class NetworkPlayer
             var yawSign = Mathf.Abs(localHitOffset.x) > 0.02f
                 ? Mathf.Sign(localHitOffset.x)
                 : Mathf.Sign(Vector3.Cross(victimForward, knockbackDir).y);
-            var yawTorque = Vector3.up * yawSign * force * Mathf.Lerp(0.015f, 0.075f, lateralRatio);
-            var backwardLeanTorque = -victimRight * force * Mathf.Lerp(0f, stunnedVictim ? 0.06f : 0.09f, heightRatio);
+            var yawTorque = mitigateCollapseImpulse || collapseVictim
+                ? Vector3.zero
+                : Vector3.up * yawSign * force * Mathf.Lerp(0.015f, 0.075f, lateralRatio);
+            var backwardLeanTorque = mitigateCollapseImpulse
+                ? Vector3.zero
+                : -victimRight * force * Mathf.Lerp(0f, stunnedVictim ? 0.06f : 0.09f, heightRatio);
 
             closestRb.AddForceAtPosition(
                 knockbackDir * force * focusedImpulseScale,
@@ -2058,6 +2770,19 @@ public sealed partial class NetworkPlayer
             if (rb != null && !rb.isKinematic)
                 rb.AddForce(knockbackDir * force * spreadImpulseScale, ForceMode.Impulse);
         }
+    }
+
+    private static bool IsStunImpulseCoreMuscle(string muscleName)
+    {
+        if (string.IsNullOrWhiteSpace(muscleName))
+            return false;
+
+        return muscleName.Contains("Hips") ||
+               muscleName.Contains("Pelvis") ||
+               muscleName.Contains("Waist") ||
+               muscleName.Contains("Spine") ||
+               muscleName.Contains("Chest") ||
+               muscleName.Contains("Torso");
     }
 
     /// <summary>
@@ -2157,6 +2882,47 @@ public sealed partial class NetworkPlayer
     /// Update (또는 LateUpdate)에서 매 프레임 호출.
     /// hold 구간 후 timeScale을 1.0까지 부드럽게 복원.
     /// </summary>
+    private void TriggerKnockoutConfirmSlowMotion()
+    {
+        if (Runner != null && Object != null && Object.IsValid && !HasInputAuthority)
+            return;
+
+        if (_stunSlowMotionActive)
+            return;
+
+        _knockoutConfirmSlowMotionActive = true;
+        Time.timeScale = KNOCKOUT_CONFIRM_SLOWMO_SCALE;
+        Time.fixedDeltaTime = SLOWMO_BASE_FIXED_DELTA_TIME * KNOCKOUT_CONFIRM_SLOWMO_SCALE;
+
+        float now = Time.unscaledTime;
+        _knockoutConfirmSlowMotionHoldEnd = now + KNOCKOUT_CONFIRM_SLOWMO_HOLD_DURATION;
+        _knockoutConfirmSlowMotionRampEnd = now + KNOCKOUT_CONFIRM_SLOWMO_HOLD_DURATION + KNOCKOUT_CONFIRM_SLOWMO_RAMP_DURATION;
+    }
+
+    private void TickKnockoutConfirmSlowMotion()
+    {
+        if (!_knockoutConfirmSlowMotionActive)
+            return;
+
+        float now = Time.unscaledTime;
+
+        if (now < _knockoutConfirmSlowMotionHoldEnd)
+            return;
+
+        if (now >= _knockoutConfirmSlowMotionRampEnd)
+        {
+            Time.timeScale = 1f;
+            Time.fixedDeltaTime = SLOWMO_BASE_FIXED_DELTA_TIME;
+            _knockoutConfirmSlowMotionActive = false;
+            return;
+        }
+
+        float t = (now - _knockoutConfirmSlowMotionHoldEnd) / KNOCKOUT_CONFIRM_SLOWMO_RAMP_DURATION;
+        float scale = Mathf.Lerp(KNOCKOUT_CONFIRM_SLOWMO_SCALE, 1f, t);
+        Time.timeScale = scale;
+        Time.fixedDeltaTime = SLOWMO_BASE_FIXED_DELTA_TIME * scale;
+    }
+
     internal void TickStunSlowMotion()
     {
         if (!_stunSlowMotionActive)

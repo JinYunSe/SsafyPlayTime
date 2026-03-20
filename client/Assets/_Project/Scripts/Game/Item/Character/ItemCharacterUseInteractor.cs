@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemCharacterUseInteractor 스크립트가 들어 있는 파일이다.
  * - Character 계층에서 캐릭터와 아이템 시스템의 결합 지점을 담당한다.
