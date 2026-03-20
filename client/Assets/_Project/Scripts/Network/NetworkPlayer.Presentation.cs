@@ -171,6 +171,14 @@ public sealed partial class NetworkPlayer
         // 기절 진입 → 래그돌 메시 표시, 회복 → 애니메이션 메시 복원
         SetStunVisualMode(!isRecovering);
 
+        // 회복 시: 호스트의 CompleteRecoveryStandUpHandoff → RaiseAnimationEvent(StunRecover)는
+        // RecoverStabilizing 종료 시점(~0.4초 후)에 도착하지만, ShouldUseHardPhysicsVisualMode가
+        // 이미 false를 반환하여 TryRestoreAnimatorDrivenPresentation이 먼저 실행된다.
+        // 이 시점에 recoveryQueued가 false이면 스탠드업 애니메이션이 누락되므로
+        // NetworkedRecoveryAnimationVariant(ForceRecover에서 동일 틱에 설정됨)를 사용해 미리 큐잉한다.
+        if (isRecovering)
+            QueueRecoveryAnimationForVisuals();
+
         // 로컬 플레이어(OwnerProxy)가 기절 진입 시 슬로우모션 연출
         if (!isRecovering && HasInputAuthority)
             TriggerStunSlowMotion();
