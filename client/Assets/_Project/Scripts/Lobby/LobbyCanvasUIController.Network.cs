@@ -625,6 +625,10 @@ namespace SSAFYPlayTime
             _netRightMouseDownTime = 0f;
             _netRightMouseConsumedAsGrab = false;
 
+            // 우클릭 = 던지기 (잡고 있을 때)
+            if (Input.GetMouseButtonDown(1))
+                _netThrowQueued = true;
+
             if (Input.GetKeyDown(KeyCode.Space))
                 _netJumpQueued = true;
 
@@ -760,7 +764,7 @@ namespace SSAFYPlayTime
                 Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
                 Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
                 Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
-                Throw = false,
+                Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
                 LeftGrabHold = latchedLeftGrabHold,
                 RightGrabHold = false,
                 Headbutt = ConsumeLatchedNetworkFlag(ref _netHeadbuttQueued),
