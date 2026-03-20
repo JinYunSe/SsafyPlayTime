@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemFieldDropDevTestInput 스크립트가 들어 있는 파일이다.
  * - Dev/Testing 계층에서 개발 전용 입력과 회귀 테스트 보조 기능을 제공한다.

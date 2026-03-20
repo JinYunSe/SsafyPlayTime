@@ -1,4 +1,4 @@
-﻿sfxId,assetKey,mixerGroup,defaultVolume,loop,spatial,maxVoices,enabled,note
+sfxId,assetKey,mixerGroup,defaultVolume,loop,spatial,maxVoices,enabled,note
 SFX_ITEM_BLACKHOLE,Assets/2000 Game Sound FX/EXPLOSIONS - DESTRUCTION - (80)/EXPLOSION Bang Rumbling Long Deep 01.wav,Master/SFX,1.0,false,false,8,true,블랙홀 폭탄 사용음
 SFX_ITEM_GROWTH,Assets/2000 Game Sound FX/SUCCESS - CHIMES - (55)/SUCCESS CHIME Mystery Magic Mana Swell 02.wav,Master/SFX,1.0,false,false,8,true,커지는 아이템 사용음
 SFX_ITEM_SHRINK,Assets/2000 Game Sound FX/SUCCESS - CHIMES - (55)/SUCCESS CHIME Mystery Magic Spell Sparkle 04.wav,Master/SFX,1.0,false,false,8,true,작아지는 아이템 사용음
