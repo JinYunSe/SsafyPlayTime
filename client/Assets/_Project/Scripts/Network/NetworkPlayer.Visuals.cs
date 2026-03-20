@@ -174,7 +174,17 @@ public sealed partial class NetworkPlayer
             return false;
 
         // Carry keeps the animated visual rig visible and blends only key bones toward physics.
-        return GetPhysicalPhase() != PhysicalPhase.BeingCarriedStunned;
+        if (GetPhysicalPhase() == PhysicalPhase.BeingCarriedStunned)
+            return false;
+
+        // 비호스트 RecoverStabilizing: SetStunVisualMode(false)가 이미 애니메이션 메시를
+        // 복원했으므로 하드 물리 본 복사를 끄지 않으면 래그돌 포즈가 일어서기 애니메이션을 덮어쓴다.
+        // 호스트는 stabilization 완료까지 물리 비주얼을 유지해야 하므로 호스트만 true.
+        if (!HasStateAuthority &&
+            GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing)
+            return false;
+
+        return true;
     }
 
     private void TickVisualPoseBlendWeights()
