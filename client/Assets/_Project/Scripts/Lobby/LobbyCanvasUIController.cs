@@ -1269,6 +1269,7 @@ namespace SSAFYPlayTime
             if (passwordModal != null) passwordModal.SetActive(false);
             if (mainPanel != null) mainPanel.SetActive(false);
             if (gamePanel != null) gamePanel.SetActive(false);
+            HideAllCharacterSlots();
             gameEndPanel.SetActive(true);
 
             Cursor.lockState = CursorLockMode.None;
@@ -1316,7 +1317,7 @@ namespace SSAFYPlayTime
                     var nickname = !string.IsNullOrWhiteSpace(entry.Nickname)
                         ? entry.Nickname
                         : $"Player{entry.PlayerId}";
-                    rankingItems[i].SetData(entry.Rank, nickname);
+                    rankingItems[i].SetData(entry.Rank, nickname, entry.CharacterTypeIndex);
                 }
             }
         }
@@ -1472,6 +1473,8 @@ namespace SSAFYPlayTime
         // 참가자 목록을 PlayerId 오름차순으로 정렬해 플레이어 슬롯 텍스트와 캐릭터 표시를 갱신한다.
         private void UpdatePlayerSlots()
         {
+            // GameEndPanel 표시 중에는 캐릭터 슬롯을 갱신하지 않는다.
+            if (_isShowingGameEndPanel) return;
             var slotTexts = new[] { playerOneText, playerTwoText, playerThreeText, playerFourText };
             var readyBadges = new[] { playerOneReadyBadge, playerTwoReadyBadge, playerThreeReadyBadge, playerFourReadyBadge };
             var orderedParticipants = _roomParticipantsByPlayerId.Values
