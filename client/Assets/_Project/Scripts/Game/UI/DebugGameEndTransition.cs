@@ -141,13 +141,19 @@ public class DebugGameEndTransition : NetworkBehaviour
         int count = NetworkedPlayerCount;
         if (count == 0) return;
 
+        // GameScene에 살아있는 NetworkPlayer에서 PlayerId → CharacterTypeIndex 테이블 구성
+        var charIndexByPlayerId = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None)
+            .Where(np => np.Object != null && np.Object.InputAuthority.IsRealPlayer)
+            .ToDictionary(np => np.Object.InputAuthority.PlayerId, np => np.CharacterTypeIndex);
+
         GameResultData.Clear();
         for (int i = 0; i < count && i < 8; i++)
         {
             int pid = RankedPlayerIds[i];
             int rank = i + 1;
             string nickname = lobby != null ? lobby.GetParticipantNickname(pid) : $"Player{pid}";
-            GameResultData.AddEntry(pid, nickname, rank);
+            charIndexByPlayerId.TryGetValue(pid, out var charIdx);
+            GameResultData.AddEntry(pid, nickname, rank, charIdx);
         }
 
         int localPid = runner.LocalPlayer.PlayerId;
