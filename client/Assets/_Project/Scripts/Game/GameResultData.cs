@@ -10,6 +10,7 @@ public static class GameResultData
         public int PlayerId;
         public string Nickname;
         public int Rank; // 1=1등, 숫자가 클수록 낮은 순위
+        public int CharacterTypeIndex; // 0=Ssaty,1=AlG,2=Fit,3=Wise, -1=unknown
     }
 
     private static readonly List<RankEntry> _entries = new();
@@ -25,10 +26,10 @@ public static class GameResultData
         LocalPlayerRank = 0;
     }
 
-    public static void AddEntry(int playerId, string nickname, int rank)
+    public static void AddEntry(int playerId, string nickname, int rank, int characterTypeIndex = -1)
     {
         if (playerId > 0)
-            _entries.Add(new RankEntry { PlayerId = playerId, Nickname = nickname, Rank = rank });
+            _entries.Add(new RankEntry { PlayerId = playerId, Nickname = nickname, Rank = rank, CharacterTypeIndex = characterTypeIndex });
     }
 
     public static int GetRank(int playerId)

@@ -7,8 +7,7 @@ public class RankingItemUI : MonoBehaviour
 {
     [SerializeField] private TMP_Text rankText;
     [SerializeField] private TMP_Text nicknameText;
-
-    public void SetData(int rank, string nickname)
+    public void SetData(int rank, string nickname, int characterTypeIndex = -1)
     {
         if (rankText != null)
             rankText.text = $"{rank}등";

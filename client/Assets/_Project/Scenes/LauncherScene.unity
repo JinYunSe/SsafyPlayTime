@@ -1663,7 +1663,8 @@ MonoBehaviour:
   readyButtonText: {fileID: 0}
   gameplaySceneName: GameScene
   launcherSceneName: LauncherScene
-  launcherBackgroundMusicClip: {fileID: 8300000, guid: d33f9694b4f88434eba4074e4f01acb7, type: 3}
+  launcherBackgroundMusicClip: {fileID: 8300000, guid: d33f9694b4f88434eba4074e4f01acb7,
+    type: 3}
   gamePanel: {fileID: 0}
   leaveGameButton: {fileID: 0}
   gameHUDPrefab: {fileID: 0}
@@ -9939,7 +9940,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 0, y: 1}
-  m_AnchoredPosition: {x: 560.6366, y: -440.24}
+  m_AnchoredPosition: {x: 396.82877, y: -440.24}
   m_SizeDelta: {x: 1113.9, y: 670.48}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &653431212
@@ -15160,7 +15161,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 0, y: 1}
-  m_AnchoredPosition: {x: 86.66667, y: -25}
+  m_AnchoredPosition: {x: 86.66669, y: -25}
   m_SizeDelta: {x: 100, y: 45}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1308502934
@@ -18104,7 +18105,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 0, y: 1}
-  m_AnchoredPosition: {x: 560.6366, y: -52.5}
+  m_AnchoredPosition: {x: 396.82877, y: -52.5}
   m_SizeDelta: {x: 1020, y: 105}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!1 &1524584167
