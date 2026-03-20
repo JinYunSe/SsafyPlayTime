@@ -59,6 +59,8 @@ public class ProceduralGrabArm : MonoBehaviour
 
     float _leftBlend;
     float _rightBlend;
+    bool _wasLeftReaching;
+    bool _wasRightReaching;
 
     // 오버헤드 캐리 포즈 전환 블렌드 (0=frontCarry, 1=overheadCarry)
     float _overheadBlend;
@@ -250,9 +252,16 @@ public class ProceduralGrabArm : MonoBehaviour
         bool leftShouldReach = (grabActive || leftHolding || weaponEquipped) && !suppressReach;
         bool rightShouldReach = (grabActive || rightHolding || weaponEquipped) && !suppressReach;
 
+        // 잡기/운반 → 해제 전환 시 IK를 즉시 0으로 — 점진 페이드하면 떠나는 대상을 추적해서 팔이 늘어남
+        bool leftReleased = _wasLeftReaching && !leftShouldReach;
+        bool rightReleased = _wasRightReaching && !rightShouldReach;
+
         float dt = Time.deltaTime * blendSpeed;
-        _leftBlend = Mathf.MoveTowards(_leftBlend, leftShouldReach ? 1f : 0f, dt);
-        _rightBlend = Mathf.MoveTowards(_rightBlend, rightShouldReach ? 1f : 0f, dt);
+        _leftBlend = leftReleased ? 0f : Mathf.MoveTowards(_leftBlend, leftShouldReach ? 1f : 0f, dt);
+        _rightBlend = rightReleased ? 0f : Mathf.MoveTowards(_rightBlend, rightShouldReach ? 1f : 0f, dt);
+
+        _wasLeftReaching = leftShouldReach;
+        _wasRightReaching = rightShouldReach;
 
         // 오버헤드 캐리 포즈 전환: 한 손이든 양 손이든 기절자 잡으면 오버헤드
         float overheadTarget = (phase == NetworkPlayer.PhysicalPhase.CarryingStunned && _networkPlayer != null && _networkPlayer.IsAnyHandHoldingStunnedPlayer) ? 1f : 0f;

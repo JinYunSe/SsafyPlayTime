@@ -43,7 +43,8 @@ namespace SSAFYPlayTime.Character
             Stunned,
             CarriedStunned,
             Recovering,
-            StunnedCollapse
+            StunnedCollapse,
+            CarryingStunned
         }
 
         [Header("Normal")]

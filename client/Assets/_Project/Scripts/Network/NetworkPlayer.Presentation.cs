@@ -11,6 +11,7 @@ public sealed partial class NetworkPlayer
     private const string PM_PunchLeftState = "PunchLeft";
     private const string PM_PunchRightState = "PunchRight";
     private const string PM_ThrowState = "Throw";
+    private const string PM_DefaultAerialKickState = "Attack02";
     private const float PM_LocomotionThreshold = 0.1f;
     private const float PM_DefaultPunchPredictionWindow = 0.35f;
     private const float PM_ThrowLockDuration = 0.85f;
@@ -53,6 +54,18 @@ public sealed partial class NetworkPlayer
     internal void NotifyLocalThrowPrediction()
     {
         _localThrowPredictionTime = Time.time;
+    }
+
+    internal void PlayProceduralKickPresentation(bool isLeft)
+    {
+        TriggerProceduralKick(isLeft);
+    }
+
+    internal float ResolveKickPresentationLockDuration()
+    {
+        var kickLeg = GetOrCreateProceduralKickLeg();
+        var proceduralDuration = kickLeg != null ? kickLeg.TotalKickDuration : 0f;
+        return Mathf.Max(GetConfiguredKickCooldown(), proceduralDuration > 0f ? proceduralDuration : 0.45f);
     }
 
     // ─── 스냅샷 보간 버퍼 ───
@@ -478,7 +491,7 @@ public sealed partial class NetworkPlayer
                         : SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry;
                     var settleProfile = carryPhysicsProfile != null
                         ? carryPhysicsProfile.GetSettings(settleMode)
-                        : new SSAFYPlayTime.Character.CarryPhysicsProfile.CarryModeSettings { carryReleaseSettleDuration = 0.15f };
+                        : new SSAFYPlayTime.Character.CarryPhysicsProfile.CarryModeSettings { carryReleaseSettleDuration = 0.45f };
                     _carryReleaseSettleRemaining = settleProfile.carryReleaseSettleDuration;
                 }
             }
@@ -955,6 +968,15 @@ public sealed partial class NetworkPlayer
             case AnimationEventType.PunchRight:
                 animator.SetTrigger(H_Punch);
                 break;
+            case AnimationEventType.KickLeft:
+                TriggerProceduralKick(true);
+                break;
+            case AnimationEventType.KickRight:
+                TriggerProceduralKick(false);
+                break;
+            case AnimationEventType.AerialKick:
+                TriggerFallbackAerialKickAnimation();
+                break;
             case AnimationEventType.Throw:
                 animator.SetTrigger(H_Throw);
                 break;
@@ -989,13 +1011,17 @@ public sealed partial class NetworkPlayer
         {
             // Host-side proxies have state authority, so Render() will not replay their
             // replicated events. Apply the action immediately on that local copy.
-            if (HasStateAuthority && !HasInputAuthority)
+            if ((eventType == AnimationEventType.KickLeft || eventType == AnimationEventType.KickRight || eventType == AnimationEventType.AerialKick)
+                ? (HasStateAuthority || Runner == null)
+                : (HasStateAuthority && !HasInputAuthority))
                 ApplyExternalDriverAnimationEvent(eventType);
         }
         else if (animator != null)
         {
             if (_usePuppetMasterAnimation)
                 ApplyPuppetMasterAnimationEvent(eventType);
+            else if (eventType == AnimationEventType.AerialKick)
+                TriggerFallbackAerialKickAnimation();
             else
                 animator.SetTrigger(triggerHash);
         }
@@ -1023,6 +1049,15 @@ public sealed partial class NetworkPlayer
                 break;
             case AnimationEventType.Throw:
                 _externalAnimationDriver.PlayThrowFromNetwork();
+                break;
+            case AnimationEventType.KickLeft:
+                _externalAnimationDriver.PlayKickLeft();
+                break;
+            case AnimationEventType.KickRight:
+                _externalAnimationDriver.PlayKickRight();
+                break;
+            case AnimationEventType.AerialKick:
+                _externalAnimationDriver.PlayAerialKick();
                 break;
             case AnimationEventType.GetHit:
                 ApplyPuppetMasterAnimationEvent(eventType);
@@ -1075,6 +1110,17 @@ public sealed partial class NetworkPlayer
                 PlayPMFastPunch(ResolvePMPunchStateName(false));
                 TriggerProceduralPunchFromPM(false);
                 break;
+            case AnimationEventType.KickLeft:
+                _pmActionLockedUntil = Time.time + ResolvePMKickLockDuration();
+                TriggerProceduralKick(true);
+                break;
+            case AnimationEventType.KickRight:
+                _pmActionLockedUntil = Time.time + ResolvePMKickLockDuration();
+                TriggerProceduralKick(false);
+                break;
+            case AnimationEventType.AerialKick:
+                PlayPMAerialKick();
+                break;
             case AnimationEventType.Throw:
                 PlayPMLockedAction(PM_ThrowState, PM_ThrowLockDuration);
                 break;
@@ -1100,6 +1146,49 @@ public sealed partial class NetworkPlayer
             punchArm.TriggerLeftPunch(forward);
         else
             punchArm.TriggerRightPunch(forward);
+    }
+
+    private void TriggerProceduralKick(bool isLeft)
+    {
+        var kickLeg = GetOrCreateProceduralKickLeg();
+        if (kickLeg == null)
+            return;
+
+        var forward = _targetRoot != null ? _targetRoot.forward : transform.forward;
+        if (isLeft)
+            kickLeg.TriggerLeftKick(forward);
+        else
+            kickLeg.TriggerRightKick(forward);
+    }
+
+    private ProceduralKickLeg GetOrCreateProceduralKickLeg()
+    {
+        var kickLeg = GetComponent<ProceduralKickLeg>();
+        if (kickLeg != null || !Application.isPlaying)
+            return kickLeg;
+
+        return gameObject.AddComponent<ProceduralKickLeg>();
+    }
+
+    private string ResolveConfiguredAerialKickStateName()
+    {
+        var stat = CombatSettings.Instance?.GetAttackStat(AerialKickCombatStatId);
+        if (stat.HasValue && !string.IsNullOrWhiteSpace(stat.Value.AnimationClip))
+            return stat.Value.AnimationClip;
+
+        return PM_DefaultAerialKickState;
+    }
+
+    private void TriggerFallbackAerialKickAnimation()
+    {
+        var aerialKickState = ResolveConfiguredAerialKickStateName();
+        if (animator != null && animator.HasState(0, Animator.StringToHash(aerialKickState)))
+        {
+            animator.CrossFadeInFixedTime(aerialKickState, 0.06f, 0, 0f);
+            return;
+        }
+
+        TriggerProceduralKick(false);
     }
 
     private void PlayPMFastPunch(string stateName)
@@ -1138,6 +1227,32 @@ public sealed partial class NetworkPlayer
         var punchArm = GetComponent<ProceduralPunchArm>();
         var proceduralDuration = punchArm != null ? punchArm.TotalPunchDuration : 0f;
         return Mathf.Max(GetConfiguredPunchCooldown(), proceduralDuration);
+    }
+
+    private float ResolvePMKickLockDuration()
+    {
+        return ResolveKickPresentationLockDuration();
+    }
+
+    private void PlayPMAerialKick()
+    {
+        _pmActionLockedUntil = Time.time + ResolvePMAerialKickLockDuration();
+        var aerialKickState = ResolveConfiguredAerialKickStateName();
+
+        if (animator != null && animator.HasState(0, Animator.StringToHash(aerialKickState)))
+        {
+            RestorePMPunchSpeed();
+            animator.Play(aerialKickState, 0, 0f);
+            _pmCurrentStateName = aerialKickState;
+            return;
+        }
+
+        TriggerProceduralKick(false);
+    }
+
+    private float ResolvePMAerialKickLockDuration()
+    {
+        return 0.72f;
     }
 
     private string ResolvePMPunchStateName(bool isLeft)
