@@ -40,6 +40,11 @@ public sealed partial class NetworkPlayer
     private GhostSpectatorCamera _localGhostSpectatorCamera;
     private GhostThrowManager _localGhostThrowManager;
 
+    // 호스트 마이그레이션 직전 고스트 카메라 위치를 보관하는 클라이언트 전용 static 필드.
+    // LobbyCanvasUIController.CaptureCharacterStatesForMigration()이 설정하고
+    // ActivateLocalGhostMode()에서 소비(1회)한다.
+    internal static Vector3? PendingGhostCameraRestorePosition;
+
     public bool IsDeadState => GetIsDeadState();
     public int CurrentHealth => GetCurrentHealth();
     public int MaxHealth => GetMaxHealth();
@@ -451,6 +456,13 @@ public sealed partial class NetworkPlayer
             ghostCamera.tag = "MainCamera";
             spectatorCam.enabled = true;
 
+            // 호스트 마이그레이션 후 카메라 위치 복원 (방장 퇴장 직전 위치 유지)
+            if (PendingGhostCameraRestorePosition.HasValue)
+            {
+                spectatorCam.RestoreOrbitPosition(PendingGhostCameraRestorePosition.Value);
+                PendingGhostCameraRestorePosition = null;
+            }
+
             if (throwManager != null)
             {
                 throwManager.enabled = true;
@@ -494,6 +506,14 @@ public sealed partial class NetworkPlayer
             _localGhostRoot.AddComponent<AudioListener>();
 
             _localGhostSpectatorCamera = _localGhostRoot.AddComponent<GhostSpectatorCamera>();
+
+            // 호스트 마이그레이션 후 카메라 위치 복원
+            if (PendingGhostCameraRestorePosition.HasValue)
+            {
+                _localGhostSpectatorCamera.RestoreOrbitPosition(PendingGhostCameraRestorePosition.Value);
+                PendingGhostCameraRestorePosition = null;
+            }
+
             _localGhostThrowManager = _localGhostRoot.AddComponent<GhostThrowManager>();
             _localGhostThrowManager.SetGhostControlEnabled(true);
             _localGhostThrowManager.SetEnableOutOfBoundsKillCheck(false);
