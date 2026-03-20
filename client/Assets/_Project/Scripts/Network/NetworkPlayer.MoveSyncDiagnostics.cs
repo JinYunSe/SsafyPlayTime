@@ -4,7 +4,7 @@ using UnityEngine;
 public sealed partial class NetworkPlayer
 {
     [Header("Move Sync Diagnostics")]
-    [SerializeField] private bool enableMoveSyncDiagnostics = true;
+    [SerializeField] private bool enableMoveSyncDiagnostics = false;
     [SerializeField] private bool moveSyncDiagnosticsLogToConsole = false;
     [SerializeField] private bool moveSyncDiagnosticsIncludeAuthority = true;
     [SerializeField] private bool moveSyncDiagnosticsIncludeOwnerProxy = true;
