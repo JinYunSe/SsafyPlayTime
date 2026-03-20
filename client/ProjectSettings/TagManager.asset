@@ -16,8 +16,8 @@ TagManager:
   - 
   - Character
   - Ragdoll
-  - 
-  - 
+  - GrabHurtbox
+  - GrabSensor
   - 
   - 
   - 
