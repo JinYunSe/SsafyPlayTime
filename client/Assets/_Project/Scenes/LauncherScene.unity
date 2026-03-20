@@ -1663,6 +1663,7 @@ MonoBehaviour:
   readyButtonText: {fileID: 0}
   gameplaySceneName: GameScene
   launcherSceneName: LauncherScene
+  launcherBackgroundMusicClip: {fileID: 8300000, guid: d33f9694b4f88434eba4074e4f01acb7, type: 3}
   gamePanel: {fileID: 0}
   leaveGameButton: {fileID: 0}
   gameHUDPrefab: {fileID: 0}

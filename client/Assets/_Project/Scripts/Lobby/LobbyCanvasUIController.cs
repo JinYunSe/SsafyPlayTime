@@ -220,6 +220,7 @@ namespace SSAFYPlayTime
         [SerializeField] private TMP_Text readyButtonText;
         [SerializeField] private string gameplaySceneName = string.Empty;
         [SerializeField] private string launcherSceneName = "LauncherScene";
+        [SerializeField] private AudioClip launcherBackgroundMusicClip;
         [Header("In-Game Panel (GameScene)")]
         [SerializeField] private GameObject gamePanel;
         [SerializeField] private Button leaveGameButton;
@@ -323,6 +324,8 @@ namespace SSAFYPlayTime
         // 게임 종료 후 LauncherScene 진입 시 백그라운드에서 실행되는 방 자동 입장 Task.
         // 버튼 클릭 시 이 Task를 await해 완료 여부를 확인한다.
         private Task<bool> _gameEndAutoRoomJoinTask;
+        private AudioSource _launcherBackgroundMusicSource;
+        private GameAudioSource _launcherBackgroundMusicCategory;
 
         // MonoBehaviour 초기화. 패널·이벤트·캐릭터 슬롯을 순서대로 준비하고 닉네임 입력 화면을 표시한다.
         // 모든 UI 참조는 Inspector에서 SerializeField로 직접 할당해야 한다.
@@ -347,7 +350,10 @@ namespace SSAFYPlayTime
             EnsurePersistentAcrossScenes();
             EnsureLocalClientId();
             RuntimeLogOverlay.EnsureInstance();
+            GameAudioSettingsService.EnsureInstance();
             EnsureCharacterSelectionUi();
+            EnsureGameSettingModal();
+            EnsureLauncherBackgroundMusic();
             NormalizeCanvasRoot();
             NormalizeRoomListBindings();
             BindEvents();
@@ -356,6 +362,7 @@ namespace SSAFYPlayTime
             {
                 characterPreview.Initialize(GetNameSlots());
             }
+            SceneManager.sceneLoaded += OnManagedSceneLoaded;
             ShowNicknamePanel();
         }
 
@@ -365,6 +372,82 @@ namespace SSAFYPlayTime
             playerTwoReadyBadge ??= FindReadyBadge(playerTwoText);
             playerThreeReadyBadge ??= FindReadyBadge(playerThreeText);
             playerFourReadyBadge ??= FindReadyBadge(playerFourText);
+        }
+
+        private void EnsureGameSettingModal()
+        {
+            if (gameSettingModal == null)
+            {
+                return;
+            }
+
+            var modalController = gameSettingModal.GetComponent<LobbyAudioSettingsModal>();
+            if (modalController == null)
+            {
+                modalController = gameSettingModal.AddComponent<LobbyAudioSettingsModal>();
+            }
+
+            modalController.InitializeIfNeeded();
+        }
+
+        private void EnsureLauncherBackgroundMusic()
+        {
+            if (_launcherBackgroundMusicSource == null)
+            {
+                var sourceRoot = new GameObject("LauncherBackgroundMusic");
+                sourceRoot.transform.SetParent(transform, false);
+
+                _launcherBackgroundMusicSource = sourceRoot.AddComponent<AudioSource>();
+                _launcherBackgroundMusicSource.playOnAwake = false;
+                _launcherBackgroundMusicSource.loop = true;
+                _launcherBackgroundMusicSource.spatialBlend = 0f;
+                _launcherBackgroundMusicSource.volume = 1f;
+
+                _launcherBackgroundMusicCategory = sourceRoot.AddComponent<GameAudioSource>();
+                _launcherBackgroundMusicCategory.SetCategory(GameAudioCategory.BackgroundSound);
+                _launcherBackgroundMusicCategory.RefreshBaseVolumeFromCurrentSource();
+            }
+
+            _launcherBackgroundMusicSource.clip = launcherBackgroundMusicClip;
+            RefreshLauncherBackgroundMusicState();
+        }
+
+        private void OnManagedSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            RefreshLauncherBackgroundMusicState();
+        }
+
+        private void RefreshLauncherBackgroundMusicState()
+        {
+            if (_launcherBackgroundMusicSource == null)
+            {
+                return;
+            }
+
+            var isLauncherSceneActive = string.Equals(
+                SceneManager.GetActiveScene().name,
+                launcherSceneName,
+                StringComparison.Ordinal);
+
+            if (!isLauncherSceneActive || launcherBackgroundMusicClip == null)
+            {
+                if (_launcherBackgroundMusicSource.isPlaying)
+                {
+                    _launcherBackgroundMusicSource.Stop();
+                }
+
+                return;
+            }
+
+            if (_launcherBackgroundMusicSource.clip != launcherBackgroundMusicClip)
+            {
+                _launcherBackgroundMusicSource.clip = launcherBackgroundMusicClip;
+            }
+
+            if (!_launcherBackgroundMusicSource.isPlaying)
+            {
+                _launcherBackgroundMusicSource.Play();
+            }
         }
 
         private static GameObject FindReadyBadge(TMP_Text slotText)
@@ -468,6 +551,7 @@ namespace SSAFYPlayTime
         // 오브젝트 파괴 시 NetworkRunner를 안전하게 종료한다.
         private async void OnDestroy()
         {
+            SceneManager.sceneLoaded -= OnManagedSceneLoaded;
             await ShutdownRunnerAsync();
         }
 
