@@ -1150,8 +1150,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private float _rightMouseDownTime;
     private bool _rightMouseConsumedAsGrab;
 
-    // 호스트 측 좌우 펀치 토글
+    // 호스트 측 좌우 근접 공격 토글
     private bool _hostNextPunchLeft;
+    private bool _hostNextKickLeft;
 
     // 로컬 트리거
     private bool _dropTriggered;
@@ -1177,7 +1178,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         StunFall = 4,
         StunRecover = 5,
         PunchLeft = 6,
-        PunchRight = 7
+        PunchRight = 7,
+        KickLeft = 8,
+        KickRight = 9,
+        AerialKick = 10
     }
 
     private void Awake()

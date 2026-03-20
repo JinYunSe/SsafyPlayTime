@@ -28,8 +28,8 @@ MonoBehaviour:
       dynamicFriction: 0.14
       frictionCombine: 0
     head:
-      pinWeight: 0.5
-      muscleWeight: 0.34
+      pinWeight: 0.46
+      muscleWeight: 0.3
       mappingWeight: 0.92
       staticFriction: 0.12
       dynamicFriction: 0.08
