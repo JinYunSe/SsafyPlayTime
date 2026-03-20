@@ -1,4 +1,6 @@
 using UnityEngine;
+using UnityEngine.Animations;
+using UnityEngine.Playables;
 using RootMotion.Dynamics;
 
 [DisallowMultipleComponent]
@@ -39,6 +41,12 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     [SerializeField]
     float throwLockDuration = 0.85f;
 
+    [SerializeField]
+    AnimationClip recoverySupineClip;
+
+    [SerializeField]
+    AnimationClip recoveryProneClip;
+
     PuppetMaster puppetMaster;
     BehaviourPuppet behaviourPuppet;
     NetworkPlayer networkPlayer;
@@ -65,14 +73,13 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     bool isRemoteProxy;
     // 피호스트 로컬 플레이어: 입력은 읽지만 로코모션은 네트워크 기반
     bool isLocalWithoutAuthority;
-    [SerializeField] bool enableAnimationDriverDiagnostics = true;
-    bool animationDriverDiagInitialized;
-    bool animationDriverDiagLastCanDrive;
-    bool animationDriverDiagLastAnimatorEnabled;
-    bool animationDriverDiagLastPreserveGrabPose;
-    bool animationDriverDiagLastRemoteProxy;
-    bool animationDriverDiagLastLocalWithoutAuthority;
-    string animationDriverDiagLastStateName;
+    bool recoveryQueued;
+    bool isRecoveryAnimationActive;
+    NetworkPlayer.RecoveryAnimationVariant queuedRecoveryVariant;
+    AnimationClip currentRecoveryClip;
+    PlayableGraph recoveryGraph;
+    AnimationClipPlayable recoveryPlayable;
+    AnimationPlayableOutput recoveryOutput;
 
     void Reset()
     {
@@ -101,6 +108,16 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             animator.SetLayerWeight(UpperBodyLayer, 0f);
     }
 
+    void OnDisable()
+    {
+        CancelRecoveryAnimation();
+    }
+
+    void OnDestroy()
+    {
+        CancelRecoveryAnimation();
+    }
+
     void Update()
     {
         if (animator == null)
@@ -109,14 +126,46 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         var canDriveAnimation = CanDriveAnimation();
         if (!canDriveAnimation)
         {
+            if (isRecoveryAnimationActive)
+                CancelRecoveryAnimation();
+
             ResetActionState();
             animator.enabled = false;
-            TraceAnimationDriverDiagnostics("Update-Disabled", canDriveAnimation);
             return;
         }
 
         if (!animator.enabled)
             animator.enabled = true;
+
+        bool isRecoveryPhase = networkPlayer != null &&
+                               (networkPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.Recovering ||
+                                networkPlayer.GetStunPresentationPhase() == NetworkPlayer.StunPresentationPhase.RecoverStabilizing);
+
+        if (!isRecoveryPhase && recoveryQueued)
+        {
+            recoveryQueued = false;
+            queuedRecoveryVariant = NetworkPlayer.RecoveryAnimationVariant.None;
+        }
+
+        if (!isRecoveryPhase && isRecoveryAnimationActive)
+        {
+            StopRecoveryAnimation();
+        }
+
+        // Handoff transition can occasionally miss the visual restore latch in player builds.
+        // Keep the fallback strictly inside the actual recovery phase so it cannot affect normal combat.
+        if (recoveryQueued)
+        {
+            RestoreAnimatorAfterPhysicsPresentation();
+            if (isRecoveryAnimationActive)
+                return;
+        }
+
+        if (isRecoveryAnimationActive)
+        {
+            TickRecoveryAnimation();
+            return;
+        }
 
         if (isRemoteProxy)
         {
@@ -138,7 +187,6 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
             TryFlushPunchBuffer();
             UpdateUpperBodyLayerState();
-            TraceAnimationDriverDiagnostics("Update-Remote", canDriveAnimation);
             return;
         }
 
@@ -149,7 +197,6 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         UpdateLocomotion();
 
         UpdateUpperBodyLayerState();
-        TraceAnimationDriverDiagnostics("Update-Local", canDriveAnimation);
     }
 
     /// <summary>
@@ -192,10 +239,33 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         currentUpperBodyStateName = null;
         upperBodyStateVisibleUntil = 0f;
         animator.enabled = true;
-        animator.Rebind();
         animator.Update(0f);
         animator.SetLayerWeight(UpperBodyLayer, 0f);
+
+        if (TryPlayQueuedRecoveryAnimation())
+            return;
+
+        if (!animator.isInitialized)
+            animator.Rebind();
+        animator.Update(0f);
         UpdateCurrentLocomotion();
+    }
+
+    internal void QueueRecoveryAnimation(NetworkPlayer.RecoveryAnimationVariant variant)
+    {
+        queuedRecoveryVariant = variant == NetworkPlayer.RecoveryAnimationVariant.None
+            ? NetworkPlayer.RecoveryAnimationVariant.Supine
+            : variant;
+        recoveryQueued = true;
+    }
+
+    internal void CancelRecoveryAnimation()
+    {
+        recoveryQueued = false;
+        queuedRecoveryVariant = NetworkPlayer.RecoveryAnimationVariant.None;
+        isRecoveryAnimationActive = false;
+        currentRecoveryClip = null;
+        DestroyRecoveryGraph();
     }
 
     public void PlayAttack()
@@ -208,7 +278,6 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         string punchState = isLeft ? PunchLeftState : PunchRightState;
         PlayLockedAction(punchState, attackLockDuration, attackVisualDuration);
-        TraceOwnerProxyInputDiagnostics("PlayAttack", $"punchState={punchState} nextAttackLeft={nextAttackLeft} lockedUntil={actionLockedUntil:F3}");
 
         // OwnerProxy: NetworkPlayer에 예측 방향을 알려서 reconcile 시 비교 가능하게
         if (networkPlayer != null)
@@ -298,6 +367,89 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             animator = (puppetMaster != null && puppetMaster.targetRoot != null ? puppetMaster.targetRoot.GetComponentInChildren<Animator>(true) : null) ?? GetComponentInChildren<Animator>(true);
     }
 
+    bool TryPlayQueuedRecoveryAnimation()
+    {
+        if (!recoveryQueued)
+            return false;
+
+        recoveryQueued = false;
+        var clip = ResolveRecoveryClip(queuedRecoveryVariant);
+        queuedRecoveryVariant = NetworkPlayer.RecoveryAnimationVariant.None;
+        if (clip == null)
+            return false;
+
+        StartRecoveryAnimation(clip);
+        return true;
+    }
+
+    AnimationClip ResolveRecoveryClip(NetworkPlayer.RecoveryAnimationVariant variant)
+    {
+        return variant switch
+        {
+            NetworkPlayer.RecoveryAnimationVariant.Prone => recoveryProneClip != null ? recoveryProneClip : recoverySupineClip,
+            _ => recoverySupineClip != null ? recoverySupineClip : recoveryProneClip
+        };
+    }
+
+    void StartRecoveryAnimation(AnimationClip clip)
+    {
+        DestroyRecoveryGraph();
+
+        currentRecoveryClip = clip;
+        isRecoveryAnimationActive = true;
+        actionLockedUntil = Time.time + clip.length;
+        upperBodyStateVisibleUntil = actionLockedUntil;
+        currentStateName = null;
+        currentUpperBodyStateName = null;
+
+        recoveryGraph = PlayableGraph.Create($"{name}_Recovery");
+        recoveryGraph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
+        recoveryOutput = AnimationPlayableOutput.Create(recoveryGraph, "Recovery", animator);
+        recoveryPlayable = AnimationClipPlayable.Create(recoveryGraph, clip);
+        recoveryPlayable.SetApplyFootIK(false);
+        recoveryPlayable.SetApplyPlayableIK(false);
+        recoveryPlayable.SetTime(0d);
+        recoveryPlayable.SetDuration(clip.length);
+        recoveryOutput.SetSourcePlayable(recoveryPlayable);
+        recoveryOutput.SetWeight(1f);
+        recoveryGraph.Play();
+    }
+
+    void TickRecoveryAnimation()
+    {
+        if (!isRecoveryAnimationActive)
+            return;
+
+        if (!recoveryGraph.IsValid() || currentRecoveryClip == null)
+        {
+            StopRecoveryAnimation();
+            return;
+        }
+
+        if (recoveryPlayable.IsDone())
+            StopRecoveryAnimation();
+    }
+
+    void StopRecoveryAnimation()
+    {
+        isRecoveryAnimationActive = false;
+        currentRecoveryClip = null;
+        DestroyRecoveryGraph();
+
+        if (animator == null)
+            return;
+
+        animator.enabled = true;
+        animator.SetLayerWeight(UpperBodyLayer, 0f);
+        UpdateCurrentLocomotion();
+    }
+
+    void DestroyRecoveryGraph()
+    {
+        if (recoveryGraph.IsValid())
+            recoveryGraph.Destroy();
+    }
+
     Rigidbody FindMainRigidbody()
     {
         if (puppetMaster == null)
@@ -347,12 +499,6 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         if (Input.GetMouseButtonDown(0))
             attackButtonPressedAt = Time.time;
 
-        if (Input.GetMouseButton(0) && !isGrabPoseActive && attackButtonPressedAt >= 0f)
-        {
-            if (Time.time - attackButtonPressedAt >= grabHoldThreshold)
-                BeginGrab();
-        }
-
         if (Input.GetMouseButtonUp(0))
         {
             bool isQuickClick = !isGrabPoseActive &&
@@ -370,14 +516,9 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
                     _punchBufferExpiry = Time.time + PunchBufferWindow;
                 }
             }
-            else if (isGrabPoseActive)
-                EndGrab();
 
             attackButtonPressedAt = -1f;
         }
-
-        if (Input.GetMouseButtonDown(1) && isGrabPoseActive)
-            ThrowHeld();
 
         // HandGrabHandler 물리 그랩 상태와 애니메이션 동기화
         SyncGrabAnimation();
@@ -387,19 +528,9 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     {
         if (networkPlayer == null) return;
 
-        var phase = networkPlayer.GetPhysicalPhase();
-        bool shouldGrabPose = phase == NetworkPlayer.PhysicalPhase.GrabIntent ||
-                              phase == NetworkPlayer.PhysicalPhase.Holding ||
-                              networkPlayer.IsGrabActive;
-
-        // 물리적으로 잡고 있는데 그랩 포즈가 아니면 → 상체 레이어에서 그랩 애니메이션 시작
-        if (shouldGrabPose && !isGrabPoseActive && !IsActionLocked())
-        {
-            isGrabPoseActive = true;
-            PlayUpperBodyState(GrabState);
-        }
-        // 물리적으로 아무것도 안 잡고 있는데 그랩 포즈가 활성이면 → 상체 레이어 해제
-        else if (!shouldGrabPose && isGrabPoseActive)
+        // Grab presentation stays procedural through ProceduralGrabArm.
+        // The legacy GrabIdle layer forces both arms into the same forward pose, so keep it disabled.
+        if (isGrabPoseActive)
         {
             isGrabPoseActive = false;
             ClearUpperBodyState();
@@ -510,7 +641,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     bool CanDriveAnimation()
     {
         // 기절 중이면 애니메이션 구동 불가 (래그돌이 대신 보임)
-        if (networkPlayer != null && networkPlayer.ShouldUseHardPhysicsPresentation())
+        if (networkPlayer != null && networkPlayer.ShouldUseHardPhysicsVisualMode())
             return false;
 
         // 원격 프록시는 로컬 BehaviourPuppet 상태와 무관하게 항상 애니메이션 구동
@@ -643,63 +774,5 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         animator.SetLayerWeight(UpperBodyLayer, 0f);
         upperBodyStateVisibleUntil = 0f;
         currentUpperBodyStateName = null;
-    }
-
-    void TraceAnimationDriverDiagnostics(string source, bool canDriveAnimation)
-    {
-        if (!enableAnimationDriverDiagnostics || !Application.isPlaying || networkPlayer == null)
-            return;
-
-        if (!(Debug.isDebugBuild || Application.isEditor))
-            return;
-
-        if (networkPlayer.Runner == null || networkPlayer.Object == null || !networkPlayer.Object.IsValid || networkPlayer.HasStateAuthority)
-            return;
-
-        var animatorEnabled = animator != null && animator.enabled;
-        var preserveGrabPose = ShouldPreserveGrabPose();
-        var changed = !animationDriverDiagInitialized
-                      || animationDriverDiagLastCanDrive != canDriveAnimation
-                      || animationDriverDiagLastAnimatorEnabled != animatorEnabled
-                      || animationDriverDiagLastPreserveGrabPose != preserveGrabPose
-                      || animationDriverDiagLastRemoteProxy != isRemoteProxy
-                      || animationDriverDiagLastLocalWithoutAuthority != isLocalWithoutAuthority
-                      || animationDriverDiagLastStateName != currentStateName;
-
-        if (!changed)
-            return;
-
-        animationDriverDiagInitialized = true;
-        animationDriverDiagLastCanDrive = canDriveAnimation;
-        animationDriverDiagLastAnimatorEnabled = animatorEnabled;
-        animationDriverDiagLastPreserveGrabPose = preserveGrabPose;
-        animationDriverDiagLastRemoteProxy = isRemoteProxy;
-        animationDriverDiagLastLocalWithoutAuthority = isLocalWithoutAuthority;
-        animationDriverDiagLastStateName = currentStateName;
-
-        Debug.Log(
-            $"[AnimDriverDiag:{source}] name={name} remoteProxy={isRemoteProxy} localWithoutAuthority={isLocalWithoutAuthority} " +
-            $"canDrive={canDriveAnimation} animatorEnabled={animatorEnabled} preserveGrab={preserveGrabPose} " +
-            $"phase={networkPlayer.GetPhysicalPhase()} hard={networkPlayer.ShouldUseHardPhysicsPresentation()} " +
-            $"loco={networkPlayer.GetNetworkedLocomotionState()} moveSpeed={networkPlayer.GetNetworkedMoveSpeed():F2} " +
-            $"state={currentStateName ?? "<null>"} ubState={currentUpperBodyStateName ?? "<null>"}",
-            this);
-    }
-
-    void TraceOwnerProxyInputDiagnostics(string source, string detail)
-    {
-        if (!enableAnimationDriverDiagnostics || !Application.isPlaying || networkPlayer == null)
-            return;
-
-        if (!(Debug.isDebugBuild || Application.isEditor))
-            return;
-
-        if (!isRemoteProxy || !isLocalWithoutAuthority)
-            return;
-
-        Debug.Log(
-            $"[AnimInputDiag:{source}] name={name} canDrive={CanDriveAnimation()} grabPose={isGrabPoseActive} " +
-            $"phase={networkPlayer.GetPhysicalPhase()} hard={networkPlayer.ShouldUseHardPhysicsPresentation()} detail={detail}",
-            this);
     }
 }
