@@ -29,8 +29,8 @@ public sealed partial class NetworkPlayer
     private const float CarryProxyRootSnapDistance = 1.10f;
     private const float CarryResidualRootGapThreshold = 0.90f;
     private const float CarryRootDebugGapThreshold = 1.35f;
-    private const float RemoteStablePresentationRootFollowSpeed = 18f;
-    private const float RemoteBufferedPresentationRootFollowSpeed = 12f;
+    private const float RemoteStablePresentationRootFollowSpeed = 10f;
+    private const float RemoteBufferedPresentationRootFollowSpeed = 7f;
     private const float OwnerBufferedPresentationRootFollowSpeed = 9f;
     private const float ProxyPresentationRootSnapDistance = 2.75f;
     private bool _pmNextAttackLeft;
