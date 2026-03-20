@@ -192,6 +192,23 @@ namespace SSAFYPlayTime
                 _migratedPositionsByOldPlayerId[playerId] = (np.transform.position, np.transform.rotation);
                 Debug.Log($"[Lobby] Captured migration state. object={np.name}, player={playerId}, inputAuthority={no.InputAuthority}, stateAuthority={no.StateAuthority}, pos={np.transform.position}");
 
+                // IsDeadState는 [Networked] 값이므로 모든 클라이언트에서 정확히 읽힌다.
+                // 서버에서만 채워지던 _deadGameplayPlayerIds를 migration 전에 networked 상태로 동기화한다.
+                // 이렇게 하면 기존 클라이언트가 새 방장이 되어도 사망 정보가 올바르게 전달된다.
+                if (np.IsDeadState)
+                {
+                    _deadGameplayPlayerIds.Add(playerId);
+                    Debug.Log($"[Lobby] Captured dead state from networked player during migration. player={playerId}");
+
+                    // 로컬 플레이어가 죽어있는 경우, 현재 고스트 카메라 위치를 보존한다.
+                    // migration 완료 후 ActivateLocalGhostMode()에서 이 위치로 공전 각도를 복원한다.
+                    if (no.HasInputAuthority && Camera.main != null)
+                    {
+                        NetworkPlayer.PendingGhostCameraRestorePosition = Camera.main.transform.position;
+                        Debug.Log($"[Lobby] Captured ghost camera position for migration restore. player={playerId}, pos={Camera.main.transform.position}");
+                    }
+                }
+
                 // 실제 스폰된 캐릭터 타입을 Networked 속성에서 읽어 캐릭터 선택 테이블을 덮어쓴다.
                 // ? 선택자는 _selectedCharacterIndexByPlayerId에 4(Random)가 남아있을 수 있으나
                 // CharacterTypeIndex에는 onBeforeSpawned에서 확정된 실제 인덱스(0~3)가 저장돼 있다.
@@ -329,6 +346,12 @@ namespace SSAFYPlayTime
                 _selectedCharacterIndexByPlayerId.Remove(oldPlayerId);
                 Debug.Log($"[Lobby] Remapped character selection. oldPlayer={oldPlayerId} → newPlayer={newPlayerId}, charIdx={charIdx}");
             }
+
+            if (_deadGameplayPlayerIds.Remove(oldPlayerId))
+            {
+                _deadGameplayPlayerIds.Add(newPlayerId);
+                Debug.Log($"[Lobby] Remapped dead player state. oldPlayer={oldPlayerId} → newPlayer={newPlayerId}");
+            }
         }
 
         internal void RemapMigrationEntries(IReadOnlyDictionary<int, int> oldToNewPlayerIds)
@@ -340,6 +363,7 @@ namespace SSAFYPlayTime
 
             var migratedPositionsSnapshot = new Dictionary<int, (Vector3 position, Quaternion rotation)>(_migratedPositionsByOldPlayerId);
             var selectedCharacterSnapshot = new Dictionary<int, int>(_selectedCharacterIndexByPlayerId);
+            var deadPlayerIdsSnapshot = new HashSet<int>(_deadGameplayPlayerIds);
 
             _migratedPositionsByOldPlayerId.Clear();
             foreach (var kvp in migratedPositionsSnapshot)
@@ -357,6 +381,15 @@ namespace SSAFYPlayTime
                     ? remappedPlayerId
                     : kvp.Key;
                 _selectedCharacterIndexByPlayerId[finalPlayerId] = kvp.Value;
+            }
+
+            _deadGameplayPlayerIds.Clear();
+            foreach (var oldId in deadPlayerIdsSnapshot)
+            {
+                var finalPlayerId = oldToNewPlayerIds.TryGetValue(oldId, out var remappedPlayerId)
+                    ? remappedPlayerId
+                    : oldId;
+                _deadGameplayPlayerIds.Add(finalPlayerId);
             }
 
             foreach (var kvp in oldToNewPlayerIds)
@@ -466,11 +499,13 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            if (_deadGameplayPlayerIds.Contains(player.PlayerId))
-            {
-                Debug.Log($"[Lobby] Skip gameplay spawn for dead player={player.PlayerId}.");
-                return;
-            }
+            // 죽은 플레이어도 스폰한다.
+            // GhostSpectatorCamera / GhostThrowManager는 NetworkPlayer 프리팹에 붙어 있으므로
+            // 스폰하지 않으면 고스트 카메라·투척·A/D 이동이 모두 동작하지 않는다.
+            // 스폰 직후 서버에서 KillImmediately()로 사망 상태를 즉시 복원한다.
+            var isDeadAfterMigration = _deadGameplayPlayerIds.Contains(player.PlayerId);
+            if (isDeadAfterMigration)
+                Debug.Log($"[Lobby] Dead player={player.PlayerId} will be spawned and immediately killed for ghost mode.");
 
             var selectedCharacter = _selectedCharacterIndexByPlayerId.TryGetValue(player.PlayerId, out var selected)
                 ? SanitizeCharacterIndexOrNone(selected)
@@ -595,6 +630,11 @@ namespace SSAFYPlayTime
                 Debug.LogWarning($"[Lobby] No migration state found for player={player.PlayerId}, clientId={capturedMigrationClientId}. Falling back to spawn points.");
             }
 
+            // 죽은 플레이어는 ApplyDeathImmobilize()로 원점에 고정된 상태이므로
+            // 스폰 포인트를 점유하지 않고 원점에 그대로 스폰한다.
+            if (isDeadAfterMigration && !useMigratedPosition)
+                useMigratedPosition = true; // spawnPosition = (0,1,0) 기본값 사용
+
             if (!useMigratedPosition)
             {
                 var spawnGroup = GetOrFindSpawnPointGroup();
@@ -641,6 +681,17 @@ namespace SSAFYPlayTime
                 }
 
                 TrackGameplayPlayer(player.PlayerId, spawned);
+
+                // 마이그레이션 전 사망 상태를 즉시 복원한다.
+                // 서버에서 KillImmediately()를 호출하면 NetworkedIsDead = true가 전체 클라이언트에 복제되고,
+                // 해당 클라이언트의 UpdateLocalDeathPresentation() → ActivateLocalGhostMode()가 정상 동작한다.
+                if (isDeadAfterMigration)
+                {
+                    var np = spawned.GetComponent<NetworkPlayer>();
+                    if (np != null)
+                        np.KillImmediately("migration-dead-restore");
+                    Debug.Log($"[Lobby] Re-applied death state for migrated dead player={player.PlayerId}.");
+                }
 
                 if (hasCapturedMigrationState &&
                     !string.IsNullOrWhiteSpace(capturedMigrationClientId) &&

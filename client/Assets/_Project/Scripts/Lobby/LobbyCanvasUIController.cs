@@ -287,6 +287,9 @@ namespace SSAFYPlayTime
         private bool _isProcessing;
         private bool _isInLobby;
         private bool _isShuttingDownRunner;
+        // 처리 중(_isProcessing)에 수신된 migration token을 보관한다.
+        // finally에서 _isProcessing = false 직후 재처리한다.
+        private HostMigrationToken _pendingMigrationToken;
         private DateTime _lastSessionListUpdatedAtUtc = DateTime.MinValue;
         // async 메서드 간 NetworkRunner 생성/종료 순서를 보장하는 뮤텍스.
         // SemaphoreSlim(1, 1) : 최대 1개의 코루틴만 동시에 러너를 조작할 수 있도록 제한한다.

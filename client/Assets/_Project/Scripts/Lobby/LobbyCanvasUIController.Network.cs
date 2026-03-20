@@ -229,6 +229,10 @@ namespace SSAFYPlayTime
 
             if (_isProcessing)
             {
+                // 이전 migration 처리 중 새 token이 도착한 경우 최신 token만 보관한다.
+                // finally에서 _isProcessing = false 이후 재처리된다.
+                Debug.Log("[Lobby] Host migration received while processing. Queuing latest token for retry.");
+                _pendingMigrationToken = hostMigrationToken;
                 return;
             }
 
@@ -245,6 +249,11 @@ namespace SSAFYPlayTime
                     .OrderBy(id => id)
                     .ToList();
                 var priorityIndex = orderedRemaining.IndexOf(localPlayerId);
+                // roster에 아직 등록되지 않은 플레이어(-1)는 최하위 우선순위로 처리한다.
+                // -1 > 0 이 false이므로 딜레이 없이 즉시 StartGame을 시도하게 되어
+                // PlayerId가 낮은 정상 후보와 race condition이 발생하는 것을 방지한다.
+                if (priorityIndex < 0)
+                    priorityIndex = orderedRemaining.Count;
 
                 // ShutdownRunnerAsync 가 _selectedCharacterIndexByPlayerId 를 Clear 하므로
                 // 재연결 후 복원할 수 있도록 미리 캡처해 둠 (async 로컬 변수는 await 를 넘어 유지됨)
@@ -488,6 +497,17 @@ namespace SSAFYPlayTime
                 _isMigrating = false;
                 // 마이그레이션 중 수신됐으나 _isMigrating 가드로 보류된 캐릭터 선택을 처리한다.
                 FlushPendingMigrationSpawns();
+
+                // 처리 중 도착한 migration token이 있으면 지금 처리한다.
+                // token이 만료됐거나 세션이 이미 변경된 경우 StartGame이 실패하며
+                // 해당 경고 로그로 추적할 수 있다.
+                if (_pendingMigrationToken != null)
+                {
+                    var token = _pendingMigrationToken;
+                    _pendingMigrationToken = null;
+                    Debug.Log("[Lobby] Processing deferred host migration token.");
+                    ((INetworkRunnerCallbacks)this).OnHostMigration(_runner, token);
+                }
             }
         }
 
@@ -954,7 +974,6 @@ namespace SSAFYPlayTime
             _spawnedGameplayNetworkCharacters.Clear();
             _spawnedCharacterIndexByPlayerId.Clear();
             UntrackAllGameplayPlayers();
-            _deadGameplayPlayerIds.Clear();
             _cachedSpawnPointGroup = null;
             _gameplaySceneSpawnBootstrapComplete = false;
 
@@ -962,12 +981,16 @@ namespace SSAFYPlayTime
             // StartGame(HostMigrationToken) 과정에서 OnSceneLoadStart 가 발동할 수 있으나
             // 이 데이터는 재스폰에 반드시 필요하므로 _isMigrating 플래그로 보호한다.
             //
+            // 사망 상태(_deadGameplayPlayerIds)도 마이그레이션 중에는 보존한다.
+            // migration 완료 후 RemapMigrationEntries()에서 새 PlayerId로 리매핑된다.
+            //
             // 환경 마이그레이션 데이터(_migratedSeaLevelsByPath, _migratedDeathZonesByPath)는
             // _isMigrating = false 이후에도 씬 리로드가 일어날 수 있으므로
             // 데이터가 남아있는 한 OnSceneLoadDone에서 복원할 수 있도록 지우지 않는다.
             // RestoreEnvironmentStatesAfterMigration()이 직접 초기화한다.
             if (!_isMigrating)
             {
+                _deadGameplayPlayerIds.Clear();
                 _migratedPositionsByOldPlayerId.Clear();
                 _migratedPositionsByClientId.Clear();
                 _migrationOldPlayerIdByClientId.Clear();
