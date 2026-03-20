@@ -33,6 +33,14 @@ namespace SSAFYPlayTime.Game.GhostThrow
         [Networked]
         public Vector3 NetworkedInitialVelocity { get; set; }
 
+        /// <summary>폭발 여부. Despawned() 콜백에서 모든 클라이언트가 읽어 이펙트를 생성한다.</summary>
+        [Networked]
+        private NetworkBool NetworkedHasExploded { get; set; }
+
+        /// <summary>폭발 위치. Despawn 시 최종 상태로 모든 클라이언트에 전달된다.</summary>
+        [Networked]
+        private Vector3 NetworkedExplosionPos { get; set; }
+
         // 이미 폭발했는지 여부 (중복 폭발 방지)
         private bool _hasExploded = false;
 
@@ -44,20 +52,29 @@ namespace SSAFYPlayTime.Game.GhostThrow
         public override void Spawned()
         {
             if (HasStateAuthority)
+            {
                 LifeTimer = TickTimer.CreateFromSeconds(Runner, lifeTime);
 
-            // 모든 클라이언트: 호스트가 onBeforeSpawned에서 저장한 초기 속도를 적용.
-            // NetworkRigidbody 없이 탄도를 동기화하는 핵심 처리.
-            if (NetworkedInitialVelocity.sqrMagnitude > 0.001f)
-            {
-                var rb = GetComponent<Rigidbody>();
-                if (rb != null)
+                // StateAuthority(호스트)만 Rigidbody 초기 속도를 적용해 물리 시뮬레이션을 실행.
+                // NetworkTransform이 매 틱마다 위치를 클라이언트에 동기화한다.
+                if (NetworkedInitialVelocity.sqrMagnitude > 0.001f)
                 {
-                    rb.drag = 0f;
-                    rb.angularDrag = 0.05f;
-                    rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-                    rb.velocity = NetworkedInitialVelocity;
+                    var rb = GetComponent<Rigidbody>();
+                    if (rb != null)
+                    {
+                        rb.drag = 0f;
+                        rb.angularDrag = 0.05f;
+                        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                        rb.velocity = NetworkedInitialVelocity;
+                    }
                 }
+            }
+            else
+            {
+                // 비-StateAuthority 클라이언트: Rigidbody를 kinematic으로 설정해
+                // 로컬 물리 시뮬레이션을 비활성화. NetworkTransform이 호스트의 위치를 복제한다.
+                var rb = GetComponent<Rigidbody>();
+                if (rb != null) rb.isKinematic = true;
             }
         }
 
@@ -149,10 +166,24 @@ namespace SSAFYPlayTime.Game.GhostThrow
             if (_hasExploded) return;
             _hasExploded = true;
 
-            ApplyExplosionKnockback(transform.position);
-            SpawnExplosionEffect(transform.position);
+            // 폭발 위치·플래그를 네트워크 상태에 기록.
+            // Runner.Despawn() 시 Fusion이 최종 상태를 모든 클라이언트에 전달하며
+            // Despawned() 콜백에서 이펙트를 생성한다.
+            NetworkedExplosionPos = transform.position;
+            NetworkedHasExploded = true;
 
+            ApplyExplosionKnockback(transform.position);
             Runner.Despawn(Object);
+        }
+
+        /// <summary>
+        /// Despawn 시 Fusion이 최종 네트워크 상태와 함께 모든 클라이언트에서 호출.
+        /// NetworkedHasExploded가 true이면 파티클 이펙트를 로컬 생성한다.
+        /// </summary>
+        public override void Despawned(NetworkRunner runner, bool hasState)
+        {
+            if (hasState && NetworkedHasExploded)
+                SpawnExplosionEffect(NetworkedExplosionPos);
         }
 
         /// <summary>오프라인/테스트 환경 폭발.</summary>

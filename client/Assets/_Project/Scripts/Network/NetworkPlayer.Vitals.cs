@@ -455,8 +455,6 @@ public sealed partial class NetworkPlayer
             {
                 throwManager.enabled = true;
                 throwManager.ForceEnableGhostThrow($"{name} death");
-                // 캐릭터가 0,0,0에 고정됐으므로 스폰 포인트를 null로 → 카메라 기반 발사 위치 사용
-                throwManager.SetGhostThrowSpawnPoint(null);
             }
 
             // 프리팹 카메라를 재사용하므로 Destroy하지 않도록 _localGhostCamera는 null 유지
