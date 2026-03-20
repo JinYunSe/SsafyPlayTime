@@ -1,4 +1,4 @@
-﻿itemId,useSfxId,hitSfxId,startVfxId,impactVfxId,endVfxId
+itemId,useSfxId,hitSfxId,startVfxId,impactVfxId,endVfxId
 ITEM_BLACKHOLE_BOMB,SFX_ITEM_BLACKHOLE,,,,
 ITEM_GROWTH,SFX_ITEM_GROWTH,,VFX_ITEM_GROWTH,,
 ITEM_SHRINK,SFX_ITEM_SHRINK,,VFX_ITEM_SHRINK,,
