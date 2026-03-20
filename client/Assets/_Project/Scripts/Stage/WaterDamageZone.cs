@@ -44,27 +44,31 @@ public class WaterDamageZone : MonoBehaviour
 
         var networkPlayer = other.GetComponentInParent<NetworkPlayer>();
         if (networkPlayer == null || _damageCoroutines.ContainsKey(networkPlayer))
-        {
             return;
-        }
 
         var routine = StartCoroutine(DamageTickRoutine(networkPlayer));
         _damageCoroutines.Add(networkPlayer, routine);
+
+        // 로컬 플레이어에게만 물 오버레이 표시
+        if (networkPlayer.HasInputAuthority)
+            GameHUD.FindOrCreate().ShowWaterOverlay();
     }
 
     private void OnTriggerExit(Collider other)
     {
         var networkPlayer = other.GetComponentInParent<NetworkPlayer>();
         if (networkPlayer == null)
-        {
             return;
-        }
 
         if (_damageCoroutines.TryGetValue(networkPlayer, out var routine))
         {
             StopCoroutine(routine);
             _damageCoroutines.Remove(networkPlayer);
         }
+
+        // 로컬 플레이어에게만 물 오버레이 제거
+        if (networkPlayer.HasInputAuthority)
+            GameHUD.FindOrCreate().HideWaterOverlay();
     }
 
     private IEnumerator DamageTickRoutine(NetworkPlayer player)
