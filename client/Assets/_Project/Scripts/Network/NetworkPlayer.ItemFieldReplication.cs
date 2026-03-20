@@ -29,6 +29,16 @@ public sealed partial class NetworkPlayer
         ItemRuntimeHost runtimeHost,
         out ItemFieldDrop spawnedDrop)
     {
+        return TrySpawnNetworkedFieldDrop(itemId, worldPosition, runtimeHost, true, out spawnedDrop);
+    }
+
+    internal bool TrySpawnNetworkedFieldDrop(
+        string itemId,
+        Vector3 worldPosition,
+        ItemRuntimeHost runtimeHost,
+        bool snapToGround,
+        out ItemFieldDrop spawnedDrop)
+    {
         spawnedDrop = null;
         if (Runner == null || !HasStateAuthority || string.IsNullOrWhiteSpace(itemId))
             return false;
@@ -41,7 +51,7 @@ public sealed partial class NetworkPlayer
         }
 
         spawner.SetRuntimeHost(runtimeHost);
-        return spawner.TrySpawnItem(itemId, worldPosition, out spawnedDrop);
+        return spawner.TrySpawnItem(itemId, worldPosition, string.Empty, snapToGround, out spawnedDrop);
     }
 
     internal void TrackDroppedFieldItem(string dropInstanceId)
