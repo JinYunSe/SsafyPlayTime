@@ -144,6 +144,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [SerializeField] bool debugGrabLog = true;
     [SerializeField] bool enableProxyAnimationDiagnostics = true;
 
+    [Header("Startup Launch Diagnostics")]
+    [SerializeField] private bool enableStartupLaunchDiagnostics = true;
+    [SerializeField, Range(0.05f, 0.5f)] private float startupLaunchDiagnosticsSampleInterval = 0.15f;
+    [SerializeField, Range(1f, 8f)] private float startupLaunchDiagnosticsWindow = 4f;
+
     // ─── 로컬 변수 ───
     private float _localMoveSpeed;
     private int _localMotorState;
@@ -163,6 +168,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private readonly PlayerMotorStateMachine _stateMachine = new();
 
     private bool _isGrounded;
+    private float _startupLaunchDiagnosticsUntilTime = float.NegativeInfinity;
+    private float _startupLaunchDiagnosticsLastSampleTime = float.NegativeInfinity;
     private HandGrabHandler[] _handGrabHandlers;
     private ItemRuntimeHost _itemRuntimeHost;
     private ItemFieldInteractionService _itemFieldInteractionService;
@@ -290,6 +297,116 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     /// <summary>Spawned 이후에만 Networked 속성 접근 가능 여부.</summary>
     internal bool IsNetworkReady => Runner != null && Object != null && Object.IsValid;
+
+    private void ArmStartupLaunchDiagnostics(string source, string note = null)
+    {
+        if (!ShouldEmitStartupLaunchDiagnostics(allowOutsideWindow: true))
+            return;
+
+        _startupLaunchDiagnosticsUntilTime = Mathf.Max(
+            _startupLaunchDiagnosticsUntilTime,
+            Time.unscaledTime + startupLaunchDiagnosticsWindow);
+        _startupLaunchDiagnosticsLastSampleTime = float.NegativeInfinity;
+        TraceStartupLaunchDiagnostics(source, force: true, note: note);
+    }
+
+    private bool ShouldEmitStartupLaunchDiagnostics(bool allowOutsideWindow = false)
+    {
+        if (!enableStartupLaunchDiagnostics || !Application.isPlaying)
+            return false;
+
+        if (!HasStateAuthority || !HasInputAuthority)
+            return false;
+
+        return allowOutsideWindow || Time.unscaledTime <= _startupLaunchDiagnosticsUntilTime;
+    }
+
+    private void TraceStartupLaunchDiagnostics(
+        string source,
+        Vector3? targetPosition = null,
+        bool force = false,
+        string note = null)
+    {
+        if (!ShouldEmitStartupLaunchDiagnostics(force))
+            return;
+
+        var now = Time.unscaledTime;
+        if (!force && now - _startupLaunchDiagnosticsLastSampleTime < startupLaunchDiagnosticsSampleInterval)
+            return;
+
+        _startupLaunchDiagnosticsLastSampleTime = now;
+
+        var rootPosition = transform.position;
+        var bodyPosition = rigidbody3D != null ? rigidbody3D.position : rootPosition;
+        var bodyVelocity = rigidbody3D != null && !rigidbody3D.isKinematic
+            ? rigidbody3D.velocity
+            : Vector3.zero;
+        var pelvisPosition = ResolveStartupLaunchPelvisPosition(out var pelvisVelocity);
+        var phase = GetPhysicalPhase();
+        var carryMode = GetLocalCarryMode();
+        var rootBodyGap = (rootPosition - bodyPosition).magnitude;
+        var rootPelvisGap = (rootPosition - pelvisPosition).magnitude;
+        var hasTarget = targetPosition.HasValue;
+        var targetGap = hasTarget ? Vector3.Distance(rootPosition, targetPosition.Value) : 0f;
+
+        if (!force &&
+            phase == PhysicalPhase.Stable &&
+            carryMode == CarryPhysicsProfile.CarryMode.None &&
+            _beingGrabbedRefCount == 0 &&
+            _grabbedByCount == 0 &&
+            !IsAnyHandHoldingObject() &&
+            !IsAnyHandHoldingStunnedPlayer &&
+            rootBodyGap < 0.12f &&
+            rootPelvisGap < 0.85f &&
+            Mathf.Abs(bodyVelocity.y) < 2f &&
+            Mathf.Abs(pelvisVelocity.y) < 2f &&
+            (!hasTarget || targetGap < 0.2f))
+        {
+            return;
+        }
+
+        var tick = Runner != null ? Runner.Tick.Raw : -1;
+        var noteSuffix = string.IsNullOrWhiteSpace(note) ? string.Empty : $" note={note}";
+        var targetSuffix = hasTarget
+            ? $" target={FormatStartupLaunchVector(targetPosition.Value)} targetGap={targetGap:F3}"
+            : string.Empty;
+
+        Debug.Log(
+            $"[StartupLaunchDiag] tick={tick} name={name} source={source} " +
+            $"phase={phase} carry={carryMode} active={_isActiveRagdoll} grounded={_isGrounded} " +
+            $"grabbedRef={_beingGrabbedRefCount} grabbedBy={_grabbedByCount} " +
+            $"holding={IsAnyHandHoldingObject()} anyStunned={IsAnyHandHoldingStunnedPlayer} dual={IsDualGrabbingStunnedPlayer} " +
+            $"root={FormatStartupLaunchVector(rootPosition)} body={FormatStartupLaunchVector(bodyPosition)} " +
+            $"pelvis={FormatStartupLaunchVector(pelvisPosition)} bodyVel={FormatStartupLaunchVector(bodyVelocity)} " +
+            $"pelvisVel={FormatStartupLaunchVector(pelvisVelocity)} rootBodyGap={rootBodyGap:F3} " +
+            $"rootPelvisGap={rootPelvisGap:F3}{targetSuffix}{noteSuffix}",
+            this);
+    }
+
+    private Vector3 ResolveStartupLaunchPelvisPosition(out Vector3 pelvisVelocity)
+    {
+        pelvisVelocity = Vector3.zero;
+
+        if (_puppetMaster != null &&
+            _puppetMaster.muscles != null &&
+            _puppetMaster.muscles.Length > 0 &&
+            _puppetMaster.muscles[0].joint != null)
+        {
+            var pelvisJoint = _puppetMaster.muscles[0].joint;
+            var pelvisBody = pelvisJoint.GetComponent<Rigidbody>();
+            if (pelvisBody != null)
+                pelvisVelocity = pelvisBody.velocity;
+
+            return pelvisJoint.transform.position;
+        }
+
+        return rigidbody3D != null ? rigidbody3D.position : transform.position;
+    }
+
+    private static string FormatStartupLaunchVector(Vector3 value)
+    {
+        return $"({value.x:F2},{value.y:F2},{value.z:F2})";
+    }
 
     internal enum PresentationLocomotionState : byte
     {
@@ -1136,6 +1253,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         ConfigureLocalOwnershipPresentation();
         InitializeAnimationEventState();
         InitializeAnimationDriverNetworkMode();
+        ArmStartupLaunchDiagnostics("Spawned");
 
         // 호스트 마이그레이션 이후 로컬 플레이어의 필드 아이템 위치를 다시 동기화한다.
         if (HasStateAuthority && HasInputAuthority && Runner != null && Runner.IsServer)

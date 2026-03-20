@@ -121,6 +121,10 @@ public sealed partial class NetworkPlayer
 
     private void UpdateSecondaryClickState()
     {
+        // 우클릭 = 던지기 (잡고 있을 때)
+        if (Input.GetMouseButtonDown(1))
+            _throwTriggered = true;
+
         _rightMouseDown = false;
         _rightMouseDownTime = 0f;
         _rightMouseConsumedAsGrab = false;
@@ -136,7 +140,7 @@ public sealed partial class NetworkPlayer
             Punch = _leftClickUseTriggered,
             PrimaryUseHold = _leftMouseDown,
             Drop = _dropTriggered,
-            Throw = false,
+            Throw = _throwTriggered,
             LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab,
             RightGrabHold = false,
             Headbutt = Input.GetMouseButtonDown(2),
@@ -148,6 +152,7 @@ public sealed partial class NetworkPlayer
     {
         _sandboxJump = false;
         _leftClickUseTriggered = false;
+        _throwTriggered = false;
     }
 
     private void ResetAllLocalInputState()

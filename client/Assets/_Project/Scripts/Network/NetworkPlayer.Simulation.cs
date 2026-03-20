@@ -94,6 +94,7 @@ public sealed partial class NetworkPlayer
         UpdatePhysicalPhaseState(dt);
         TickPunchHitDetectionWindow();
         SyncHeldItemNetworkState();
+        TraceStartupLaunchDiagnostics("DoPhysicsStep");
     }
 
     public void ApplyStunDamage(
@@ -761,6 +762,15 @@ public sealed partial class NetworkPlayer
 
         var previousRootPos = transform.position;
         var delta = targetPos - previousRootPos;
+        if (delta.sqrMagnitude > 0.25f || targetPos.y - previousRootPos.y > 0.08f)
+        {
+            TraceStartupLaunchDiagnostics(
+                "SyncCarriedRootToPhysicsBody",
+                targetPos,
+                force: true,
+                note: $"mode={_localCarryMode} deltaY={targetPos.y - previousRootPos.y:F2}");
+        }
+
         if (delta.sqrMagnitude < 0.0004f)
             return;
 
@@ -936,6 +946,14 @@ public sealed partial class NetworkPlayer
         }
 
         _localCarryMode = newMode;
+
+        if (previousMode != newMode)
+        {
+            TraceStartupLaunchDiagnostics(
+                "UpdateLocalCarryMode",
+                force: true,
+                note: $"carry={previousMode}->{newMode}");
+        }
     }
 
     /// <summary>
@@ -987,6 +1005,7 @@ public sealed partial class NetworkPlayer
         if (!TryResolveRootSyncTargetPosition(out var targetPos))
             return;
 
+        var originalTargetPos = targetPos;
         if (ShouldUseCollapseAnchor())
         {
             targetPos.x = _recoverAnchorPosition.x;
@@ -1000,6 +1019,16 @@ public sealed partial class NetworkPlayer
         }
 
         var delta = targetPos - transform.position;
+        var upwardTarget = targetPos.y - transform.position.y;
+        if (upwardTarget > 0.08f || delta.sqrMagnitude > 0.25f)
+        {
+            TraceStartupLaunchDiagnostics(
+                "SyncRootToPhysicsBody",
+                targetPos,
+                force: true,
+                note: $"originalTargetY={originalTargetPos.y:F2} upwardTarget={upwardTarget:F2} collapseAnchor={ShouldUseCollapseAnchor()}");
+        }
+
         if (delta.sqrMagnitude < 0.001f)
             return;
 
@@ -1463,6 +1492,7 @@ public sealed partial class NetworkPlayer
 
     private void SetLocalPhysicalPhase(PhysicalPhase phase, float instability, bool dragged)
     {
+        var previousPhase = _localPhysicalPhase;
         if (debugGrabLog && phase != _localPhysicalPhase)
         {
             Debug.Log($"[Phase] {name}: {_localPhysicalPhase} → {phase} " +
@@ -1474,6 +1504,14 @@ public sealed partial class NetworkPlayer
         _localPhysicalPhase = phase;
         _localInstability = Mathf.Clamp01(instability);
         _localIsDragged = dragged;
+
+        if (previousPhase != phase)
+        {
+            TraceStartupLaunchDiagnostics(
+                "SetLocalPhysicalPhase",
+                force: true,
+                note: $"phase={previousPhase}->{phase} instability={instability:F2} dragged={dragged}");
+        }
     }
 
     private float ResolveStunStateMultiplier()
