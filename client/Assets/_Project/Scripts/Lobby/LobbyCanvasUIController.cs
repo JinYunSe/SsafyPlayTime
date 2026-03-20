@@ -1269,6 +1269,7 @@ namespace SSAFYPlayTime
             if (passwordModal != null) passwordModal.SetActive(false);
             if (mainPanel != null) mainPanel.SetActive(false);
             if (gamePanel != null) gamePanel.SetActive(false);
+            HideAllCharacterSlots();
             gameEndPanel.SetActive(true);
 
             Cursor.lockState = CursorLockMode.None;
@@ -1316,7 +1317,7 @@ namespace SSAFYPlayTime
                     var nickname = !string.IsNullOrWhiteSpace(entry.Nickname)
                         ? entry.Nickname
                         : $"Player{entry.PlayerId}";
-                    rankingItems[i].SetData(entry.Rank, nickname);
+                    rankingItems[i].SetData(entry.Rank, nickname, entry.CharacterTypeIndex);
                 }
             }
         }
@@ -1472,6 +1473,8 @@ namespace SSAFYPlayTime
         // 참가자 목록을 PlayerId 오름차순으로 정렬해 플레이어 슬롯 텍스트와 캐릭터 표시를 갱신한다.
         private void UpdatePlayerSlots()
         {
+            // GameEndPanel 표시 중에는 캐릭터 슬롯을 갱신하지 않는다.
+            if (_isShowingGameEndPanel) return;
             var slotTexts = new[] { playerOneText, playerTwoText, playerThreeText, playerFourText };
             var readyBadges = new[] { playerOneReadyBadge, playerTwoReadyBadge, playerThreeReadyBadge, playerFourReadyBadge };
             var orderedParticipants = _roomParticipantsByPlayerId.Values
@@ -2640,7 +2643,11 @@ namespace SSAFYPlayTime
             _spawnedGameplayNetworkCharacters.Clear();
             _spawnedCharacterIndexByPlayerId.Clear();
             _currentOwnerPlayerId = -1;
-            ResetGameEndReturnState();
+            // GameEndPanel 표시 중에는 리셋하지 않는다.
+            // StartAutoRoomJoinFromGameEndAsync에서 호출될 때 _isShowingGameEndPanel이 true이면
+            // 리셋하면 Network.cs의 가드가 뚫려 ShowRoomPanel이 잘못 호출될 수 있다.
+            if (!_isShowingGameEndPanel)
+                ResetGameEndReturnState();
         }
 
         // 새 GameObject에 NetworkRunner를 추가하고 콜백을 등록한다. 성공 시 true를 반환한다.
