@@ -57,6 +57,27 @@ namespace SSAFYPlayTime.Character
         private float[] _currentMuscleWeights;
         private bool _initialized;
 
+        // ─── Anchor Grab Overlay ───
+        // 특정 앵커 부위가 잡혔을 때 해당 근육의 pin/muscle weight를 낮추는 오버레이.
+        // GrabAnchorPoint.AnchorId별로 적용, 해제 시 복원.
+        private float[] _anchorGrabMultipliers;
+        private readonly List<GrabAnchorPoint.AnchorId> _activeAnchorGrabs = new();
+        private const float AnchorGrabDirectMuscleMultiplier = 0.55f;  // 잡힌 본 직접
+        private const float AnchorGrabAdjacentMuscleMultiplier = 0.75f;  // 인접 본
+
+        // ─── Combat Flinch Overlay ───
+        // 피격 시 방향성 per-muscle pin drop을 적용하는 임시 오버레이.
+        // 상태 enum 추가 없이 multiplier 채널로 동작.
+        private float[] _combatFlinchMultipliers;
+        private float _combatFlinchTimer;
+        private float _combatFlinchDuration;
+        private bool _combatFlinchActive;
+        private const float CombatFlinchHitSideDropMin = 0.35f;
+        private const float CombatFlinchHitSideDropMax = 0.15f;
+        private const float CombatFlinchOppositeSideDrop = 0.75f;
+        private const float CombatFlinchChestDrop = 0.55f;
+        private const float CombatFlinchHeadDrop = 0.40f;
+
         private Vector3 _lastMotionPosition;
         private float _lastMotionYaw;
         private float _wobbleAmount;
@@ -109,6 +130,8 @@ namespace SSAFYPlayTime.Character
             }
 
             ApplyDynamicWobble(Time.deltaTime);
+            TickCombatFlinch(Time.deltaTime);
+            ApplyAnchorGrabOverlay();
         }
 
         public void SetState(BodyPartPhysicsProfile.CharacterPhysicsState newState)
@@ -379,14 +402,14 @@ namespace SSAFYPlayTime.Character
         private static bool IsShapeCriticalState(BodyPartPhysicsProfile.CharacterPhysicsState state)
         {
             return state == BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed ||
-                   state == BodyPartPhysicsProfile.CharacterPhysicsState.Stunned ||
                    state == BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned ||
                    state == BodyPartPhysicsProfile.CharacterPhysicsState.Recovering;
         }
 
         private static bool ShouldApplyStateImmediately(BodyPartPhysicsProfile.CharacterPhysicsState state)
         {
-            return IsShapeCriticalState(state);
+            return IsShapeCriticalState(state) ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse;
         }
 
         private float UpdateWobbleAmount(float dt)
@@ -535,6 +558,215 @@ namespace SSAFYPlayTime.Character
             };
         }
 
+        /// <summary>
+        /// 피격 시 방향성 per-muscle pin drop 오버레이를 건다.
+        /// hitLocalOffset: 피격자 로컬 좌표계에서의 히트 오프셋 (x=좌우, y=높이).
+        /// impactMagnitude: 타격 세기 (0~18+ 범위, 내부에서 정규화).
+        /// duration: 오버레이 지속 시간 (0.08~0.15초 권장).
+        /// </summary>
+        public void ArmCombatFlinch(Vector3 hitLocalOffset, float impactMagnitude, float duration)
+        {
+            if (puppetMaster == null || puppetMaster.muscles == null || !_initialized)
+                return;
+
+            var count = puppetMaster.muscles.Length;
+            if (_combatFlinchMultipliers == null || _combatFlinchMultipliers.Length != count)
+                _combatFlinchMultipliers = new float[count];
+
+            var normalizedImpact = Mathf.InverseLerp(8f, 18f, impactMagnitude);
+            var hitSide = hitLocalOffset.x; // 양수 = 오른쪽, 음수 = 왼쪽
+            var isHighHit = hitLocalOffset.y > 0.4f;
+
+            for (int i = 0; i < count; i++)
+            {
+                var category = _muscleCategories[i];
+                float drop = 1f; // 1 = 변화 없음
+
+                switch (category)
+                {
+                    case BodyPartPhysicsProfile.BodyPartCategory.Head:
+                        // 머리는 항상 강하게 흔들림 (높은 타격일수록 더)
+                        drop = isHighHit
+                            ? Mathf.Lerp(CombatFlinchHeadDrop, CombatFlinchHitSideDropMax, normalizedImpact)
+                            : Mathf.Lerp(CombatFlinchHeadDrop + 0.15f, CombatFlinchHeadDrop, normalizedImpact);
+                        break;
+
+                    case BodyPartPhysicsProfile.BodyPartCategory.Arm:
+                    case BodyPartPhysicsProfile.BodyPartCategory.Hand:
+                    {
+                        // 맞은 쪽 팔은 크게 흔들리고 반대쪽은 적게
+                        var muscleName = puppetMaster.muscles[i].transform != null
+                            ? puppetMaster.muscles[i].transform.name
+                            : "";
+                        var isLeftMuscle = muscleName.Contains("Left");
+                        var hitOnLeft = hitSide < -0.02f;
+                        var isSameSide = (isLeftMuscle && hitOnLeft) || (!isLeftMuscle && !hitOnLeft);
+
+                        drop = isSameSide
+                            ? Mathf.Lerp(CombatFlinchHitSideDropMin, CombatFlinchHitSideDropMax, normalizedImpact)
+                            : CombatFlinchOppositeSideDrop;
+                        break;
+                    }
+
+                    case BodyPartPhysicsProfile.BodyPartCategory.Torso:
+                        drop = Mathf.Lerp(CombatFlinchChestDrop + 0.15f, CombatFlinchChestDrop, normalizedImpact);
+                        break;
+
+                    default:
+                        drop = 1f; // 다리는 건드리지 않음
+                        break;
+                }
+
+                _combatFlinchMultipliers[i] = drop;
+            }
+
+            _combatFlinchDuration = duration;
+            _combatFlinchTimer = duration;
+            _combatFlinchActive = true;
+        }
+
+        private void TickCombatFlinch(float dt)
+        {
+            if (!_combatFlinchActive)
+                return;
+
+            _combatFlinchTimer -= dt;
+            if (_combatFlinchTimer <= 0f)
+            {
+                _combatFlinchActive = false;
+                _combatFlinchTimer = 0f;
+                return;
+            }
+
+            // ease-in 복원: 초반에 느슨하게 유지, 후반에 빠르게 복원
+            var recovery = 1f - Mathf.Clamp01(_combatFlinchTimer / _combatFlinchDuration);
+            var easedRecovery = recovery * recovery;
+
+            var count = puppetMaster.muscles.Length;
+            for (int i = 0; i < count; i++)
+            {
+                if (_combatFlinchMultipliers == null || i >= _combatFlinchMultipliers.Length)
+                    break;
+
+                var targetMultiplier = Mathf.Lerp(_combatFlinchMultipliers[i], 1f, easedRecovery);
+                var muscle = puppetMaster.muscles[i];
+                muscle.props.pinWeight = Mathf.Clamp01(muscle.props.pinWeight * targetMultiplier);
+            }
+        }
+
+        // =========================================================
+        // Anchor Grab Overlay — 특정 앵커 부위가 잡혔을 때 해당 근육 약화
+        // =========================================================
+
+        /// <summary>
+        /// 특정 앵커 부위가 잡혔을 때 해당 근육의 pin/muscle weight를 낮추는 오버레이 적용.
+        /// HandGrabHandler가 AttachGrab 시 타겟 BodyPartPhysicsManager에 호출.
+        /// </summary>
+        public void NotifyAnchorGrabbed(GrabAnchorPoint.AnchorId anchorId)
+        {
+            if (!_initialized || puppetMaster == null || anchorId == GrabAnchorPoint.AnchorId.None)
+                return;
+
+            if (_activeAnchorGrabs.Contains(anchorId))
+                return;
+
+            _activeAnchorGrabs.Add(anchorId);
+            RebuildAnchorGrabMultipliers();
+        }
+
+        /// <summary>
+        /// 앵커 그랩 해제 시 오버레이 제거.
+        /// HandGrabHandler가 Release 시 타겟 BodyPartPhysicsManager에 호출.
+        /// </summary>
+        public void NotifyAnchorReleased(GrabAnchorPoint.AnchorId anchorId)
+        {
+            if (!_initialized || anchorId == GrabAnchorPoint.AnchorId.None)
+                return;
+
+            _activeAnchorGrabs.Remove(anchorId);
+            RebuildAnchorGrabMultipliers();
+        }
+
+        private void RebuildAnchorGrabMultipliers()
+        {
+            var count = puppetMaster.muscles.Length;
+            if (_anchorGrabMultipliers == null || _anchorGrabMultipliers.Length != count)
+                _anchorGrabMultipliers = new float[count];
+
+            // 초기화: 전부 1 (영향 없음)
+            for (int i = 0; i < count; i++)
+                _anchorGrabMultipliers[i] = 1f;
+
+            if (_activeAnchorGrabs.Count == 0)
+                return;
+
+            // 각 활성 앵커에 대해 관련 근육 멀티플라이어 적용
+            foreach (var anchorId in _activeAnchorGrabs)
+            {
+                MapAnchorToMuscleCategories(anchorId,
+                    out var directCategory, out var adjacentCategory);
+
+                for (int i = 0; i < count; i++)
+                {
+                    var cat = _muscleCategories[i];
+                    if (cat == directCategory)
+                        _anchorGrabMultipliers[i] = Mathf.Min(_anchorGrabMultipliers[i],
+                            AnchorGrabDirectMuscleMultiplier);
+                    else if (adjacentCategory.HasValue && cat == adjacentCategory.Value)
+                        _anchorGrabMultipliers[i] = Mathf.Min(_anchorGrabMultipliers[i],
+                            AnchorGrabAdjacentMuscleMultiplier);
+                }
+            }
+        }
+
+        /// <summary>현재 프레임에 앵커 그랩 오버레이 적용 (LateUpdate에서 호출)</summary>
+        private void ApplyAnchorGrabOverlay()
+        {
+            if (_anchorGrabMultipliers == null || _activeAnchorGrabs.Count == 0)
+                return;
+
+            var count = puppetMaster.muscles.Length;
+            for (int i = 0; i < count; i++)
+            {
+                if (_anchorGrabMultipliers[i] >= 1f) continue;
+                var muscle = puppetMaster.muscles[i];
+                muscle.props.pinWeight *= _anchorGrabMultipliers[i];
+                muscle.props.muscleWeight *= _anchorGrabMultipliers[i];
+            }
+        }
+
+        private static void MapAnchorToMuscleCategories(GrabAnchorPoint.AnchorId anchorId,
+            out BodyPartPhysicsProfile.BodyPartCategory direct,
+            out BodyPartPhysicsProfile.BodyPartCategory? adjacent)
+        {
+            switch (anchorId)
+            {
+                case GrabAnchorPoint.AnchorId.Chest:
+                case GrabAnchorPoint.AnchorId.Hips:
+                    direct = BodyPartPhysicsProfile.BodyPartCategory.Torso;
+                    adjacent = null;
+                    break;
+                case GrabAnchorPoint.AnchorId.LeftUpperArm:
+                case GrabAnchorPoint.AnchorId.RightUpperArm:
+                    direct = BodyPartPhysicsProfile.BodyPartCategory.Arm;
+                    adjacent = BodyPartPhysicsProfile.BodyPartCategory.Torso;
+                    break;
+                case GrabAnchorPoint.AnchorId.LeftForearm:
+                case GrabAnchorPoint.AnchorId.RightForearm:
+                    direct = BodyPartPhysicsProfile.BodyPartCategory.Hand;
+                    adjacent = BodyPartPhysicsProfile.BodyPartCategory.Arm;
+                    break;
+                case GrabAnchorPoint.AnchorId.Head:
+                    direct = BodyPartPhysicsProfile.BodyPartCategory.Head;
+                    adjacent = BodyPartPhysicsProfile.BodyPartCategory.Torso;
+                    break;
+                default:
+                    direct = BodyPartPhysicsProfile.BodyPartCategory.Torso;
+                    adjacent = null;
+                    break;
+            }
+        }
+
         private static BodyPartPhysicsProfile.CharacterPhysicsState MapPhysicalPhaseToState(NetworkPlayer.PhysicalPhase phase)
         {
             return phase switch
@@ -542,6 +774,7 @@ namespace SSAFYPlayTime.Character
                 NetworkPlayer.PhysicalPhase.BeingGrabbed => BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed,
                 NetworkPlayer.PhysicalPhase.Dragged => BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed,
                 NetworkPlayer.PhysicalPhase.Unstable => BodyPartPhysicsProfile.CharacterPhysicsState.Unstable,
+                NetworkPlayer.PhysicalPhase.StunnedCollapse => BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse,
                 NetworkPlayer.PhysicalPhase.Stunned => BodyPartPhysicsProfile.CharacterPhysicsState.Stunned,
                 NetworkPlayer.PhysicalPhase.BeingCarriedStunned => BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned,
                 NetworkPlayer.PhysicalPhase.Recovering => BodyPartPhysicsProfile.CharacterPhysicsState.Recovering,

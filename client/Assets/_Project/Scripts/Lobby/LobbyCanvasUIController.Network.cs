@@ -229,6 +229,10 @@ namespace SSAFYPlayTime
 
             if (_isProcessing)
             {
+                // 이전 migration 처리 중 새 token이 도착한 경우 최신 token만 보관한다.
+                // finally에서 _isProcessing = false 이후 재처리된다.
+                Debug.Log("[Lobby] Host migration received while processing. Queuing latest token for retry.");
+                _pendingMigrationToken = hostMigrationToken;
                 return;
             }
 
@@ -245,6 +249,11 @@ namespace SSAFYPlayTime
                     .OrderBy(id => id)
                     .ToList();
                 var priorityIndex = orderedRemaining.IndexOf(localPlayerId);
+                // roster에 아직 등록되지 않은 플레이어(-1)는 최하위 우선순위로 처리한다.
+                // -1 > 0 이 false이므로 딜레이 없이 즉시 StartGame을 시도하게 되어
+                // PlayerId가 낮은 정상 후보와 race condition이 발생하는 것을 방지한다.
+                if (priorityIndex < 0)
+                    priorityIndex = orderedRemaining.Count;
 
                 // ShutdownRunnerAsync 가 _selectedCharacterIndexByPlayerId 를 Clear 하므로
                 // 재연결 후 복원할 수 있도록 미리 캡처해 둠 (async 로컬 변수는 await 를 넘어 유지됨)
@@ -488,6 +497,17 @@ namespace SSAFYPlayTime
                 _isMigrating = false;
                 // 마이그레이션 중 수신됐으나 _isMigrating 가드로 보류된 캐릭터 선택을 처리한다.
                 FlushPendingMigrationSpawns();
+
+                // 처리 중 도착한 migration token이 있으면 지금 처리한다.
+                // token이 만료됐거나 세션이 이미 변경된 경우 StartGame이 실패하며
+                // 해당 경고 로그로 추적할 수 있다.
+                if (_pendingMigrationToken != null)
+                {
+                    var token = _pendingMigrationToken;
+                    _pendingMigrationToken = null;
+                    Debug.Log("[Lobby] Processing deferred host migration token.");
+                    ((INetworkRunnerCallbacks)this).OnHostMigration(_runner, token);
+                }
             }
         }
 
@@ -565,15 +585,20 @@ namespace SSAFYPlayTime
         private bool _netDropQueued;
         private bool _netHeadbuttQueued;
         private Vector2 _netMoveInput;
+        private Vector2 _netMoveInputRaw;
         private float _netCameraYaw;
         private bool _netSprintHeld;
         private const float NET_GRAB_HOLD_THRESHOLD = 0.15f;
+        private float _lastMoveSyncInputLogAt = float.NegativeInfinity;
+        private float _lastMoveSyncCaptureLogAt = float.NegativeInfinity;
+        private const float MOVE_SYNC_INPUT_LOG_INTERVAL = 0.12f;
 
         private void CaptureNetworkInputState()
         {
             if (_runner == null || !_runner.IsRunning || !GameStartCountdown.InputEnabled)
             {
                 ResetLatchedNetworkInputState();
+                TraceMoveSyncCapture("Reset");
                 return;
             }
 
@@ -583,6 +608,7 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            _netMoveInputRaw = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
             _netMoveInput = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
             // Camera.main이 null이면 직전 유효 yaw를 그대로 유지 (0으로 리셋하면 이동 방향이 북쪽으로 고정됨)
             if (Camera.main != null)
@@ -615,31 +641,13 @@ namespace SSAFYPlayTime
                 _netLeftMouseConsumedAsGrab = false;
             }
 
+            _netRightMouseDown = false;
+            _netRightMouseDownTime = 0f;
+            _netRightMouseConsumedAsGrab = false;
+
+            // 우클릭 = 던지기 (잡고 있을 때)
             if (Input.GetMouseButtonDown(1))
-            {
-                _netRightMouseDown = true;
-                _netRightMouseDownTime = Time.time;
-                _netRightMouseConsumedAsGrab = false;
-            }
-
-            if (_netRightMouseDown && Input.GetMouseButton(1) &&
-                Time.time - _netRightMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
-            {
-                _netRightMouseConsumedAsGrab = true;
-            }
-
-            if (Input.GetMouseButtonUp(1))
-            {
-                if (_netRightMouseDown &&
-                    !_netRightMouseConsumedAsGrab &&
-                    Time.time - _netRightMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
-                {
-                    _netThrowQueued = true;
-                }
-
-                _netRightMouseDown = false;
-                _netRightMouseConsumedAsGrab = false;
-            }
+                _netThrowQueued = true;
 
             if (Input.GetKeyDown(KeyCode.Space))
                 _netJumpQueued = true;
@@ -649,6 +657,8 @@ namespace SSAFYPlayTime
 
             if (Input.GetMouseButtonDown(2))
                 _netHeadbuttQueued = true;
+
+            TraceMoveSyncCapture("Capture");
         }
 
         private void ResetLatchedNetworkInputState()
@@ -663,6 +673,7 @@ namespace SSAFYPlayTime
             _netDropQueued = false;
             _netHeadbuttQueued = false;
             _netMoveInput = Vector2.zero;
+            _netMoveInputRaw = Vector2.zero;
             _netCameraYaw = 0f;
             _netSprintHeld = false;
         }
@@ -672,6 +683,75 @@ namespace SSAFYPlayTime
             var value = queued;
             queued = false;
             return value;
+        }
+
+        private void TraceMoveSyncInput(NetworkRunner runner, in PlayerNetworkInput payload)
+        {
+            if (!Application.isPlaying || !MoveSyncDiagnostics.Enabled)
+                return;
+
+            var forceLog =
+                (bool)payload.Jump ||
+                (bool)payload.Punch ||
+                (bool)payload.Throw ||
+                (bool)payload.Drop ||
+                (bool)payload.Headbutt ||
+                (bool)payload.LeftGrabHold ||
+                (bool)payload.RightGrabHold ||
+                (bool)payload.Sprint;
+
+            var now = Time.unscaledTime;
+            if (!forceLog && now - _lastMoveSyncInputLogAt < MOVE_SYNC_INPUT_LOG_INTERVAL)
+                return;
+
+            _lastMoveSyncInputLogAt = now;
+
+            var tick = runner != null ? runner.Tick.Raw : -1;
+            var playerId = runner != null && runner.LocalPlayer.IsRealPlayer ? runner.LocalPlayer.PlayerId : -1;
+            MoveSyncDiagnostics.Emit(
+                $"[MoveDiag:OnInput] role=LocalInput playerId={playerId} tick={tick} source=LobbyCanvasUIController.OnInput " +
+                $"move={MoveSyncDiagnostics.FormatVector2(payload.Move)} camYaw={payload.CameraYaw:F1} " +
+                $"jump={((bool)payload.Jump ? 1 : 0)} sprint={((bool)payload.Sprint ? 1 : 0)} " +
+                $"punch={((bool)payload.Punch ? 1 : 0)} throw={((bool)payload.Throw ? 1 : 0)} " +
+                $"drop={((bool)payload.Drop ? 1 : 0)} headbutt={((bool)payload.Headbutt ? 1 : 0)} " +
+                $"leftGrab={((bool)payload.LeftGrabHold ? 1 : 0)} rightGrab={((bool)payload.RightGrabHold ? 1 : 0)}",
+                this);
+        }
+
+        private void TraceMoveSyncCapture(string source)
+        {
+            if (!Application.isPlaying || !MoveSyncDiagnostics.Enabled || _runner == null || !_runner.IsRunning || !_runner.IsServer)
+                return;
+
+            var forceLog =
+                _netMoveInputRaw.sqrMagnitude > 0.0001f ||
+                _netMoveInput.sqrMagnitude > 0.0001f ||
+                _netSprintHeld ||
+                _netLeftMouseDown ||
+                _netRightMouseDown ||
+                _netPunchQueued ||
+                _netThrowQueued ||
+                _netJumpQueued ||
+                _netDropQueued ||
+                _netHeadbuttQueued;
+
+            var now = Time.unscaledTime;
+            if (!forceLog && now - _lastMoveSyncCaptureLogAt < MOVE_SYNC_INPUT_LOG_INTERVAL)
+                return;
+
+            _lastMoveSyncCaptureLogAt = now;
+
+            var playerId = _runner.LocalPlayer.IsRealPlayer ? _runner.LocalPlayer.PlayerId : -1;
+            MoveSyncDiagnostics.Emit(
+                $"[MoveDiag:Capture] role=HostCapture playerId={playerId} tick={_runner.Tick.Raw} source={source} " +
+                $"inputEnabled={(GameStartCountdown.InputEnabled ? 1 : 0)} focused={(Application.isFocused ? 1 : 0)} " +
+                $"cursorLocked={(Cursor.lockState == CursorLockMode.Locked ? 1 : 0)} cameraMain={(Camera.main != null ? 1 : 0)} " +
+                $"moveRaw={MoveSyncDiagnostics.FormatVector2(_netMoveInputRaw)} move={MoveSyncDiagnostics.FormatVector2(_netMoveInput)} " +
+                $"camYaw={_netCameraYaw:F1} sprint={(_netSprintHeld ? 1 : 0)} " +
+                $"leftGrab={(_netLeftMouseDown ? 1 : 0)} rightGrab={(_netRightMouseDown ? 1 : 0)} " +
+                $"punchQ={(_netPunchQueued ? 1 : 0)} throwQ={(_netThrowQueued ? 1 : 0)} jumpQ={(_netJumpQueued ? 1 : 0)} " +
+                $"dropQ={(_netDropQueued ? 1 : 0)} headbuttQ={(_netHeadbuttQueued ? 1 : 0)}",
+                this);
         }
 
         private bool IsGhostThrowInputModeActive()
@@ -697,7 +777,7 @@ namespace SSAFYPlayTime
             var latchedLeftGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
             var latchedRightGrabHold = _netRightMouseDown && _netRightMouseConsumedAsGrab;
 
-            input.Set(new PlayerNetworkInput
+            var payload = new PlayerNetworkInput
             {
                 Move = _netMoveInput,
                 CameraYaw = _netCameraYaw,
@@ -706,10 +786,12 @@ namespace SSAFYPlayTime
                 Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
                 Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
                 LeftGrabHold = latchedLeftGrabHold,
-                RightGrabHold = latchedRightGrabHold,
+                RightGrabHold = false,
                 Headbutt = ConsumeLatchedNetworkFlag(ref _netHeadbuttQueued),
                 Sprint = _netSprintHeld
-            });
+            };
+            input.Set(payload);
+            TraceMoveSyncInput(runner, payload);
             return;
 
             bool isPunch = false;
@@ -892,7 +974,6 @@ namespace SSAFYPlayTime
             _spawnedGameplayNetworkCharacters.Clear();
             _spawnedCharacterIndexByPlayerId.Clear();
             UntrackAllGameplayPlayers();
-            _deadGameplayPlayerIds.Clear();
             _cachedSpawnPointGroup = null;
             _gameplaySceneSpawnBootstrapComplete = false;
 
@@ -900,12 +981,16 @@ namespace SSAFYPlayTime
             // StartGame(HostMigrationToken) 과정에서 OnSceneLoadStart 가 발동할 수 있으나
             // 이 데이터는 재스폰에 반드시 필요하므로 _isMigrating 플래그로 보호한다.
             //
+            // 사망 상태(_deadGameplayPlayerIds)도 마이그레이션 중에는 보존한다.
+            // migration 완료 후 RemapMigrationEntries()에서 새 PlayerId로 리매핑된다.
+            //
             // 환경 마이그레이션 데이터(_migratedSeaLevelsByPath, _migratedDeathZonesByPath)는
             // _isMigrating = false 이후에도 씬 리로드가 일어날 수 있으므로
             // 데이터가 남아있는 한 OnSceneLoadDone에서 복원할 수 있도록 지우지 않는다.
             // RestoreEnvironmentStatesAfterMigration()이 직접 초기화한다.
             if (!_isMigrating)
             {
+                _deadGameplayPlayerIds.Clear();
                 _migratedPositionsByOldPlayerId.Clear();
                 _migratedPositionsByClientId.Clear();
                 _migrationOldPlayerIdByClientId.Clear();

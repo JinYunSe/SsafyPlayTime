@@ -32,6 +32,17 @@ namespace SSAFYPlayTime.Game.GhostThrow
             _orbitAngle = Mathf.Atan2(offset.x, offset.z) * Mathf.Rad2Deg;
         }
 
+        /// <summary>
+        /// 호스트 마이그레이션 후 카메라 위치를 복원한다.
+        /// transform.position과 _orbitAngle을 모두 갱신해 LateUpdate의 자동 이동과 충돌하지 않는다.
+        /// </summary>
+        public void RestoreOrbitPosition(Vector3 worldPosition)
+        {
+            transform.position = worldPosition;
+            var offset = worldPosition - mapCenter;
+            _orbitAngle = Mathf.Atan2(offset.x, offset.z) * Mathf.Rad2Deg;
+        }
+
         private void LateUpdate()
         {
             if (_cam == null) return;

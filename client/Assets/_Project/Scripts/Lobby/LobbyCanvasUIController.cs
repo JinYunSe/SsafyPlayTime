@@ -89,7 +89,7 @@ namespace SSAFYPlayTime
         [Header("Panels")]
         [SerializeField] private GameObject nicknamePanel;
         [SerializeField] private GameObject lobbyPanel;
-        [SerializeField] private GameObject roomPanel;
+        [SerializeField] private GameObject roomPanel;  
         [SerializeField] private GameObject createRoomModal;
         [SerializeField] private GameObject passwordModal;
         [SerializeField] private GameObject mainPanel;
@@ -288,6 +288,9 @@ namespace SSAFYPlayTime
         private bool _isProcessing;
         private bool _isInLobby;
         private bool _isShuttingDownRunner;
+        // 처리 중(_isProcessing)에 수신된 migration token을 보관한다.
+        // finally에서 _isProcessing = false 직후 재처리한다.
+        private HostMigrationToken _pendingMigrationToken;
         private DateTime _lastSessionListUpdatedAtUtc = DateTime.MinValue;
         // async 메서드 간 NetworkRunner 생성/종료 순서를 보장하는 뮤텍스.
         // SemaphoreSlim(1, 1) : 최대 1개의 코루틴만 동시에 러너를 조작할 수 있도록 제한한다.
@@ -838,13 +841,28 @@ namespace SSAFYPlayTime
                 var row = Instantiate(roomItemTemplate, roomListContent);
                 row.SetActive(true);
 
-                var text = row.GetComponentInChildren<TMP_Text>(true);
-                if (text != null)
+                var nameText = row.transform.Find("RoomNameText")?.GetComponent<TMP_Text>();
+                var countText = row.transform.Find("PlayerCountText")?.GetComponent<TMP_Text>();
+                var lockedIcon = row.transform.Find("LockedYN/LockedIcon")?.gameObject;
+                var unlockedIcon = row.transform.Find("LockedYN/UnlockedIcon")?.gameObject;
+
+                if(nameText != null)
                 {
-                    var joinable = room.IsOpen && room.PlayerCount < room.MaxPlayers;
-                    var accessState = room.IsPrivate ? accessPrivate : accessPublic;
-                    var roomState = joinable ? roomStateJoinable : roomStateFull;
-                    text.text = $"{accessState}/{roomState}  {room.Name}  ({room.PlayerCount}/{room.MaxPlayers})";
+                    nameText.text = room.Name;
+                }
+
+                if (countText != null)
+                {
+                    countText.text = $"{room.PlayerCount}/{room.MaxPlayers} In Game";
+                }
+
+                if (lockedIcon != null)
+                {
+                    lockedIcon.SetActive(room.IsPrivate); // 비밀방이면 켜짐
+                }
+                if (unlockedIcon != null)
+                {
+                    unlockedIcon.SetActive(!room.IsPrivate); // 공개방이면 켜짐
                 }
 
                 var button = row.GetComponent<Button>();
@@ -2915,6 +2933,9 @@ namespace SSAFYPlayTime
                     _localIsReady = localReady;
                 }
             }
+
+            UpdatePlayerSlots();
+            RefreshCharacterSelectionUiState();
         }
 
         // 서버에서 모든 플레이어에게 최신 참가자 Roster를 ReliableData로 전송한다.
@@ -2939,6 +2960,9 @@ namespace SSAFYPlayTime
                     Debug.LogWarning($"[Lobby] Failed to send roster to {player}: {e.Message}");
                 }
             }
+
+            UpdatePlayerSlots();
+            RefreshCharacterSelectionUiState();
         }
 
         // _currentOwnerPlayerId 기준으로 _currentRoomOwner 닉네임을 참가자 목록과 동기화한다.
@@ -3231,6 +3255,9 @@ namespace SSAFYPlayTime
             try
             {
                 target.interactable = interactable;
+
+                target.enabled = false;
+                target.enabled = true;
             }
             catch (MissingReferenceException)
             {
