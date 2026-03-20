@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - FlamethrowerItemUseModule 스크립트가 들어 있는 파일이다.
  * - Runtime/Modules 계층에서 특정 아이템 또는 특정 유형의 사용 규칙을 캡슐화한다.
