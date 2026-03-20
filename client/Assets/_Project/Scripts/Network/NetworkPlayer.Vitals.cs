@@ -379,9 +379,6 @@ public sealed partial class NetworkPlayer
 
     private IEnumerator CoRunLocalDeathTransition()
     {
-        var hud = GameHUD.FindOrCreate();
-        hud?.PlayDeathOverlay();
-
         yield return new WaitForSecondsRealtime(LocalDeathCameraHoldDuration);
 
         ActivateLocalGhostMode();
@@ -519,9 +516,6 @@ public sealed partial class NetworkPlayer
             _localGhostThrowManager.SetEnableOutOfBoundsKillCheck(false);
             _localGhostThrowManager.ForceEnableGhostThrow($"{name} death fallback");
         }
-
-        // 회색 오버레이 제거 → 고스트 카메라 뷰가 가려지지 않도록
-        GameHUD.FindOrCreate()?.HideDeathOverlayImmediate();
 
         // 고스트 모드: 마우스 커서를 표시해 투척 목적지를 화면에서 직접 지정할 수 있게 한다.
         // TryThrow()는 Camera.main.ScreenPointToRay(Input.mousePosition)로 커서 위치를 타겟으로 삼는다.
