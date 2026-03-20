@@ -68,6 +68,20 @@ public class CombatSettings : MonoBehaviour
     [Tooltip("맵 밖 추락 시 HP 데미지 (즉사)")]
     public float outOfBoundsHpDamage = 9999f;
 
+    [Header("Grab Joint (ConfigurableJoint)")]
+    public float grabJointSpring = 5000f;
+    public float grabJointDamper = 200f;
+    public float grabJointMaxForce = 3000f;
+    public float grabJointLinearLimit = 0.15f;
+    public float grabJointLimitSpring = 5000f;
+    public float grabJointLimitDamper = 200f;
+    public float grabMaxStretchDistance = 1.5f;
+
+    [Header("Grabbed Body Part Spring Multipliers")]
+    public float grabbedCoreSpringMultiplier = 2.5f;
+    public float grabbedHeadSpringMultiplier = 1.5f;
+    public float grabbedLimbSpringMultiplier = 0.3f;
+
     private bool _loaded;
 
     private void Awake()
@@ -149,6 +163,16 @@ public class CombatSettings : MonoBehaviour
         if (p.TryGetValue("PUNCH_HP_DAMAGE", out v)) punchHpDamage = v;
         if (p.TryGetValue("GHOST_BOMB_HP_DAMAGE", out v)) ghostBombHpDamage = v;
         if (p.TryGetValue("BANANA_HP_DAMAGE", out v)) bananaHpDamage = v;
+        if (p.TryGetValue("GRAB_JOINT_SPRING", out v)) grabJointSpring = v;
+        if (p.TryGetValue("GRAB_JOINT_DAMPER", out v)) grabJointDamper = v;
+        if (p.TryGetValue("GRAB_JOINT_MAX_FORCE", out v)) grabJointMaxForce = v;
+        if (p.TryGetValue("GRAB_JOINT_LINEAR_LIMIT", out v)) grabJointLinearLimit = v;
+        if (p.TryGetValue("GRAB_JOINT_LIMIT_SPRING", out v)) grabJointLimitSpring = v;
+        if (p.TryGetValue("GRAB_JOINT_LIMIT_DAMPER", out v)) grabJointLimitDamper = v;
+        if (p.TryGetValue("GRAB_MAX_STRETCH_DISTANCE", out v)) grabMaxStretchDistance = v;
+        if (p.TryGetValue("GRABBED_CORE_SPRING_MULTIPLIER", out v)) grabbedCoreSpringMultiplier = v;
+        if (p.TryGetValue("GRABBED_HEAD_SPRING_MULTIPLIER", out v)) grabbedHeadSpringMultiplier = v;
+        if (p.TryGetValue("GRABBED_LIMB_SPRING_MULTIPLIER", out v)) grabbedLimbSpringMultiplier = v;
     }
 
     /// <summary>공격 ID로 수치 조회. 없으면 null.</summary>
