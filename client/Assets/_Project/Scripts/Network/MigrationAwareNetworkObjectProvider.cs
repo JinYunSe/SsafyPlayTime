@@ -1,30 +1,177 @@
+using System.Collections.Generic;
 using Fusion;
+using SSAFYPlayTime.Gameplay.Items;
 using UnityEngine;
 
 /// <summary>
-/// 호스트 마이그레이션 시 씬에 배치된 NetworkObject GameObjects를
-/// runner 종료 시 파괴하지 않는 NetworkObjectProvider.
-///
-/// 기본 NetworkObjectProviderDefault.DestroySceneObject()는 runner.Shutdown() 시
-/// 씬 오브젝트(물, DeathZone 등)의 GameObject를 Destroy()한다.
-/// 이로 인해 새 runner가 IsSceneTakeOverEnabled=true로 씬을 테이크오버할 때
-/// 오브젝트가 없어 영구 소실된다.
-///
-/// 이 Provider는 씬 오브젝트를 파괴하지 않고 보존하여,
-/// 새 runner가 씬을 테이크오버 시 동일 오브젝트를 재등록할 수 있도록 한다.
+/// Preserves scene objects for host migration and pools the networked field-drop wrapper prefab.
 /// </summary>
 public class MigrationAwareNetworkObjectProvider : NetworkObjectProviderDefault
 {
+    [SerializeField] private bool enablePoolDebugLog;
+
+    private readonly Dictionary<NetworkPrefabId, Stack<NetworkObject>> _pooledPrefabs = new();
+
+    public override NetworkObjectAcquireResult AcquirePrefabInstance(
+        NetworkRunner runner,
+        in NetworkPrefabAcquireContext context,
+        out NetworkObject instance)
+    {
+        instance = null;
+
+        if (DelayIfSceneManagerIsBusy && runner.SceneManager.IsBusy)
+        {
+            return NetworkObjectAcquireResult.Retry;
+        }
+
+        NetworkObject prefab;
+        try
+        {
+            prefab = runner.Prefabs.Load(context.PrefabId, isSynchronous: context.IsSynchronous);
+        }
+        catch (System.Exception ex)
+        {
+            Log.Error($"Failed to load prefab: {ex}");
+            return NetworkObjectAcquireResult.Failed;
+        }
+
+        if (!prefab)
+        {
+            return NetworkObjectAcquireResult.Retry;
+        }
+
+        if (ShouldPoolFieldDropPrefab(prefab) &&
+            TryAcquirePooledInstance(context.PrefabId, out instance))
+        {
+            PreparePooledInstanceForReuse(runner, context, instance);
+            if (enablePoolDebugLog)
+            {
+                Debug.Log($"[MigrationAwareNetworkObjectProvider] Reused pooled field-drop wrapper: prefabId={context.PrefabId}, name={instance.name}", this);
+            }
+            runner.Prefabs.AddInstance(context.PrefabId);
+            return NetworkObjectAcquireResult.Success;
+        }
+
+        return base.AcquirePrefabInstance(runner, context, out instance);
+    }
+
+    public override void ReleaseInstance(NetworkRunner runner, in NetworkObjectReleaseContext context)
+    {
+        var instance = context.Object;
+
+        if (!context.IsBeingDestroyed &&
+            context.TypeId.IsPrefab &&
+            instance != null &&
+            ShouldPoolFieldDropPrefab(instance))
+        {
+            ReturnFieldDropInstanceToPool(context.TypeId.AsPrefabId, instance);
+            runner.Prefabs.RemoveInstance(context.TypeId.AsPrefabId);
+            return;
+        }
+
+        base.ReleaseInstance(runner, context);
+    }
+
     protected override void DestroySceneObject(
         NetworkRunner runner,
         NetworkSceneObjectId sceneObjectId,
         NetworkObject instance)
     {
-        // 씬에 배치된 오브젝트는 파괴하지 않는다.
-        // 호스트 마이그레이션으로 runner가 종료돼도 GameObject가 씬에 남아있어야
-        // 새 runner의 씬 테이크오버(IsSceneTakeOverEnabled) 시 재등록된다.
-        // 재등록 후 Spawned()에서 _localScaleY / _localPhaseStartY를 기반으로
-        // 올바른 상태가 복원된다.
-        Debug.Log($"[MigrationAwareNetworkObjectProvider] Preserving scene object '{instance.name}' (id={sceneObjectId}) for host migration.");
+        Debug.Log(
+            $"[MigrationAwareNetworkObjectProvider] Preserving scene object '{instance.name}' (id={sceneObjectId}) for host migration.");
+    }
+
+    private static bool ShouldPoolFieldDropPrefab(NetworkObject prefabOrInstance)
+    {
+        return prefabOrInstance != null &&
+               prefabOrInstance.GetComponent<NetworkedItemFieldDrop>() != null &&
+               prefabOrInstance.GetComponent<ItemFieldDrop>() != null;
+    }
+
+    private bool TryAcquirePooledInstance(NetworkPrefabId prefabId, out NetworkObject instance)
+    {
+        instance = null;
+        if (!_pooledPrefabs.TryGetValue(prefabId, out var pool))
+        {
+            return false;
+        }
+
+        while (pool.Count > 0)
+        {
+            instance = pool.Pop();
+            if (instance != null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void PreparePooledInstanceForReuse(
+        NetworkRunner runner,
+        in NetworkPrefabAcquireContext context,
+        NetworkObject instance)
+    {
+        if (instance == null)
+        {
+            return;
+        }
+
+        instance.gameObject.SetActive(true);
+        if (context.DontDestroyOnLoad)
+        {
+            runner.MakeDontDestroyOnLoad(instance.gameObject);
+        }
+        else
+        {
+            runner.MoveToRunnerScene(instance.gameObject);
+        }
+    }
+
+    private void ReturnFieldDropInstanceToPool(NetworkPrefabId prefabId, NetworkObject instance)
+    {
+        if (instance == null)
+        {
+            return;
+        }
+
+        if (!_pooledPrefabs.TryGetValue(prefabId, out var pool))
+        {
+            pool = new Stack<NetworkObject>();
+            _pooledPrefabs[prefabId] = pool;
+        }
+
+        var networkedDrop = instance.GetComponent<NetworkedItemFieldDrop>();
+        if (networkedDrop != null)
+        {
+            networkedDrop.ResetForDespawn();
+        }
+
+        var body = instance.GetComponent<Rigidbody>();
+        if (body != null)
+        {
+            body.velocity = Vector3.zero;
+            body.angularVelocity = Vector3.zero;
+            body.isKinematic = true;
+            body.useGravity = false;
+        }
+
+        var colliders = instance.GetComponentsInChildren<Collider>(true);
+        for (var i = 0; i < colliders.Length; i++)
+        {
+            if (colliders[i] != null)
+            {
+                colliders[i].enabled = false;
+            }
+        }
+
+        instance.gameObject.SetActive(false);
+        pool.Push(instance);
+
+        if (enablePoolDebugLog)
+        {
+            Debug.Log($"[MigrationAwareNetworkObjectProvider] Returned field-drop wrapper to pool: prefabId={prefabId}, pooledCount={pool.Count}, name={instance.name}", this);
+        }
     }
 }
