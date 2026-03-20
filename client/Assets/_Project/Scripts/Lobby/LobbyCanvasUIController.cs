@@ -2640,7 +2640,11 @@ namespace SSAFYPlayTime
             _spawnedGameplayNetworkCharacters.Clear();
             _spawnedCharacterIndexByPlayerId.Clear();
             _currentOwnerPlayerId = -1;
-            ResetGameEndReturnState();
+            // GameEndPanel 표시 중에는 리셋하지 않는다.
+            // StartAutoRoomJoinFromGameEndAsync에서 호출될 때 _isShowingGameEndPanel이 true이면
+            // 리셋하면 Network.cs의 가드가 뚫려 ShowRoomPanel이 잘못 호출될 수 있다.
+            if (!_isShowingGameEndPanel)
+                ResetGameEndReturnState();
         }
 
         // 새 GameObject에 NetworkRunner를 추가하고 콜백을 등록한다. 성공 시 true를 반환한다.
