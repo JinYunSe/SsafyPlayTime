@@ -109,6 +109,8 @@ namespace SSAFYPlayTime
         [Header("Game End 3D Podium")]
         [SerializeField] private Transform[] podiumSlots; // 1, 2, 3, 4등이 설 자리
         private readonly List<GameObject> _spawnedGameEndCharacters = new(); // 소환된 캐릭터 기억해둘 리스트
+        [Header("3D Podium")]
+        [SerializeField] private GameObject podiumParent;
 
         [Header("Nickname")]
         [SerializeField] private TMP_InputField nicknameInput;
@@ -335,10 +337,24 @@ namespace SSAFYPlayTime
         // 모든 UI 참조는 Inspector에서 SerializeField로 직접 할당해야 한다.
         private void Start()
         {
-            // LauncherScene 재로드 시 DontDestroyOnLoad 인스턴스가 이미 존재하면 새 인스턴스를 제거한다.
+            // LauncherScene 재로드 시 DontDestroyOnLoad 인스턴스가 이미 존재하면 새 인스턴스의 씬 참조를 넘겨주고 제거한다.
             var existing = FindObjectsByType<LobbyCanvasUIController>(FindObjectsSortMode.None);
             if (existing.Length > 1)
             {
+                var persistent = existing.FirstOrDefault(x => x != this);
+                if (persistent != null)
+                {
+                    persistent.podiumParent = this.podiumParent;
+                    persistent.podiumSlots = this.podiumSlots;
+                    persistent.characterRuntimeRoot = this.characterRuntimeRoot;
+                    persistent.characterPlacementCamera = this.characterPlacementCamera;
+                    persistent.ssatyCharacterRoot = this.ssatyCharacterRoot;
+                    persistent.alGCharacterRoot = this.alGCharacterRoot;
+                    persistent.fitCharacterRoot = this.fitCharacterRoot;
+                    persistent.wiseCharacterRoot = this.wiseCharacterRoot;
+                    persistent.randomCharacterRoot = this.randomCharacterRoot;
+                    persistent.fallbackSpawnPoints = this.fallbackSpawnPoints;
+                }
                 Destroy(gameObject);
                 return;
             }
@@ -366,6 +382,9 @@ namespace SSAFYPlayTime
             {
                 characterPreview.Initialize(GetNameSlots());
             }
+            
+            if (podiumParent != null) podiumParent.SetActive(false);
+
             SceneManager.sceneLoaded += OnManagedSceneLoaded;
             ShowNicknamePanel();
         }
@@ -555,6 +574,7 @@ namespace SSAFYPlayTime
         // 오브젝트 파괴 시 NetworkRunner를 안전하게 종료한다.
         private async void OnDestroy()
         {
+            if (_runner != null) _runner.RemoveCallbacks(this);
             SceneManager.sceneLoaded -= OnManagedSceneLoaded;
             await ShutdownRunnerAsync();
         }
@@ -1208,6 +1228,7 @@ namespace SSAFYPlayTime
                 _spawnedGameEndCharacters.Clear();
 
                 if (gameEndPanel != null) gameEndPanel.SetActive(false);
+                if (podiumParent != null) podiumParent.SetActive(false);
                 _currentRoomName = string.Empty;
                 _currentRoomOwner = "-";
                 _currentOwnerPlayerId = -1;
@@ -1237,6 +1258,7 @@ namespace SSAFYPlayTime
                 _spawnedGameEndCharacters.Clear();
 
                 if (gameEndPanel != null) gameEndPanel.SetActive(false);
+                if (podiumParent != null) podiumParent.SetActive(false);
                 ShowRoomPanel();
                 UpdateRoomPanel();
             }
@@ -1315,6 +1337,11 @@ namespace SSAFYPlayTime
         {
             if (rankingContainer == null) return;
 
+            if (podiumParent != null)
+            {
+                podiumParent.SetActive(true);
+            }
+
             var entries = GameResultData.Entries.OrderBy(e => e.Rank).ToList();
             var rankingItems = rankingContainer.GetComponentsInChildren<RankingItemUI>(true).ToList();
 
@@ -1345,6 +1372,14 @@ namespace SSAFYPlayTime
                 
                 var entry = entries[i];
                 int rankIndex = i; // 0=1등, 1=2등, 2=3등, 3=4등
+
+                // 닉네임 3D Text
+                var nickText3D = podiumSlots[rankIndex].GetComponentInChildren<TMPro.TextMeshPro>();
+                if (nickText3D != null)
+                {
+                    var nickname = !string.IsNullOrWhiteSpace(entry.Nickname) ? entry.Nickname : $"Player{entry.PlayerId}";
+                    nickText3D.text = nickname;
+                }
 
                 // 캐릭터 번호
                 int charIndex = entry.CharacterTypeIndex;
