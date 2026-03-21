@@ -106,6 +106,10 @@ namespace SSAFYPlayTime
         [Tooltip("처음으로 버튼")]
         [SerializeField] private Button returnToLobbyButton;
 
+        [Header("Game End 3D Podium")]
+        [SerializeField] private Transform[] podiumSlots; // 1, 2, 3, 4등이 설 자리
+        private readonly List<GameObject> _spawnedGameEndCharacters = new(); // 소환된 캐릭터 기억해둘 리스트
+
         [Header("Nickname")]
         [SerializeField] private TMP_InputField nicknameInput;
         [SerializeField] private Button nicknameConfirmButton;
@@ -1198,6 +1202,11 @@ namespace SSAFYPlayTime
                 // 로비 선택: gameEndPanel 닫기 → 방 세션 퇴장 → 로비 패널 표시.
                 // 퇴장 시 host migration이 발생하면 다음 순위 플레이어가 방장을 이어받는다.
                 _isShowingGameEndPanel = false;
+
+                foreach (var obj in _spawnedGameEndCharacters)
+                { if (obj != null) Destroy(obj); }
+                _spawnedGameEndCharacters.Clear();
+
                 if (gameEndPanel != null) gameEndPanel.SetActive(false);
                 _currentRoomName = string.Empty;
                 _currentRoomOwner = "-";
@@ -1222,6 +1231,11 @@ namespace SSAFYPlayTime
                 // LauncherScene에 이미 있으므로 씬 전환 없이 패널 전환만 한다.
                 _isProcessing = false;
                 _isShowingGameEndPanel = false;
+
+                foreach (var obj in _spawnedGameEndCharacters)
+                { if (obj != null) Destroy(obj); }
+                _spawnedGameEndCharacters.Clear();
+
                 if (gameEndPanel != null) gameEndPanel.SetActive(false);
                 ShowRoomPanel();
                 UpdateRoomPanel();
@@ -1301,12 +1315,10 @@ namespace SSAFYPlayTime
         {
             if (rankingContainer == null) return;
 
-            var entries = GameResultData.Entries
-                .OrderBy(e => e.Rank)
-                .ToList();
-
+            var entries = GameResultData.Entries.OrderBy(e => e.Rank).ToList();
             var rankingItems = rankingContainer.GetComponentsInChildren<RankingItemUI>(true).ToList();
 
+            // 기존 UI(글자) 리스트 업데이트
             for (int i = 0; i < rankingItems.Count; i++)
             {
                 bool shouldShow = i < entries.Count;
@@ -1314,10 +1326,45 @@ namespace SSAFYPlayTime
                 if (shouldShow)
                 {
                     var entry = entries[i];
-                    var nickname = !string.IsNullOrWhiteSpace(entry.Nickname)
-                        ? entry.Nickname
-                        : $"Player{entry.PlayerId}";
+                    var nickname = !string.IsNullOrWhiteSpace(entry.Nickname) ? entry.Nickname : $"Player{entry.PlayerId}";
+                    // 캐릭터 인덱스 파라미터
                     rankingItems[i].SetData(entry.Rank, nickname, entry.CharacterTypeIndex);
+                }
+            }
+
+            // 3D 캐릭터 단상 소환 (이전에 소환된 애들이 있으면 청소)
+            foreach (var obj in _spawnedGameEndCharacters) { if (obj != null) Destroy(obj); }
+            _spawnedGameEndCharacters.Clear();
+
+            // 단상 자리를 안 만들어뒀으면 그냥 종료 (에러 방지)
+            if (podiumSlots == null || podiumSlots.Length == 0) return;
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                if (i >= podiumSlots.Length) break; // 단상 개수보다 사람이 많으면 패스
+                
+                var entry = entries[i];
+                int rankIndex = i; // 0=1등, 1=2등, 2=3등, 3=4등
+
+                // 캐릭터 번호
+                int charIndex = entry.CharacterTypeIndex;
+
+                // 캐릭터 템플릿 가져오기
+                GameObject template = GetCharacterTemplateByIndex(charIndex);
+                if (template != null && podiumSlots[rankIndex] != null)
+                {
+                    // 단상 위치(podiumSlots)에 캐릭터 복사해서 소환!
+                    GameObject clone = Instantiate(template, podiumSlots[rankIndex].position, podiumSlots[rankIndex].rotation);
+                    clone.SetActive(true);
+                    _spawnedGameEndCharacters.Add(clone);
+
+                    // 애니메이터 꺼내서 등수별로 춤추게 만들기
+                    Animator anim = clone.GetComponentInChildren<Animator>();
+                    if (anim != null)
+                    {
+                        int actualRank = rankIndex + 1; 
+                        anim.SetInteger("Rank", actualRank);
+                    }
                 }
             }
         }
