@@ -198,10 +198,15 @@ public sealed partial class NetworkPlayer
         // 앵커가 최종 표시 비주얼 위치를 기준으로 추적한다.
         UpdateRemotePhysicsPresentationResetWindow();
         UpdatePhysicsDrivenVisualPose();
-        UpdateProxyPresentationRoot();
 
+        // Runner가 없을 때(오프라인/샌드박스)만 LateUpdate에서 presentationRoot 갱신.
+        // Runner가 있으면 Fusion Render()에서 보간된 위치로 이미 설정됐으므로
+        // 여기서 다시 호출하면 64Hz 물리 스텝 위치로 덮어써 뚝뚝 끊기는 현상 발생.
         if (Runner == null)
+        {
+            UpdateProxyPresentationRoot();
             UpdateAnimationParameters();
+        }
 
         UpdateCharacterPresentationEffects();
 

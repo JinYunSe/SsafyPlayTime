@@ -58,6 +58,9 @@ namespace SSAFYPlayTime.Game.GhostThrow
                 // 충분히 긴 최대 수명 (착지 후 LifeTimer 재설정)
                 LifeTimer = TickTimer.CreateFromSeconds(Runner, lifeAfterLanding + 30f);
 
+                if (_rb != null)
+                    _rb.interpolation = RigidbodyInterpolation.Interpolate;
+
                 // StateAuthority(호스트)만 Rigidbody 초기 속도를 적용해 물리 시뮬레이션을 실행.
                 // NetworkTransform이 매 틱마다 위치를 클라이언트에 동기화한다.
                 if (NetworkedInitialVelocity.sqrMagnitude > 0.001f && _rb != null)

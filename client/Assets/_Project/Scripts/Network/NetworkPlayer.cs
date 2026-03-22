@@ -1211,6 +1211,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     public override void Spawned()
     {
+        // 루트 Rigidbody에 Interpolate 적용: 물리(64Hz)와 렌더링 프레임 사이를 보간해
+        // 캐릭터 이동이 뚝뚝 끊겨 보이는 현상 제거. PuppetMaster muscle은 건드리지 않음.
+        if (rigidbody3D != null)
+            rigidbody3D.interpolation = RigidbodyInterpolation.Interpolate;
+
         InitializeInternal();
         MarkItemBuffNetworkReady();
         MarkItemWorldEffectNetworkReady();

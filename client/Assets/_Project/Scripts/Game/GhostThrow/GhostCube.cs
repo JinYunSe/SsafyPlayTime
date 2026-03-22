@@ -57,16 +57,16 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
                 // StateAuthority(호스트)만 Rigidbody 초기 속도를 적용해 물리 시뮬레이션을 실행.
                 // NetworkTransform이 매 틱마다 위치를 클라이언트에 동기화한다.
-                if (NetworkedInitialVelocity.sqrMagnitude > 0.001f)
+                var rb = GetComponent<Rigidbody>();
+                if (rb != null)
+                    rb.interpolation = RigidbodyInterpolation.Interpolate;
+
+                if (NetworkedInitialVelocity.sqrMagnitude > 0.001f && rb != null)
                 {
-                    var rb = GetComponent<Rigidbody>();
-                    if (rb != null)
-                    {
-                        rb.drag = 0f;
-                        rb.angularDrag = 0.05f;
-                        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-                        rb.velocity = NetworkedInitialVelocity;
-                    }
+                    rb.drag = 0f;
+                    rb.angularDrag = 0.05f;
+                    rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                    rb.velocity = NetworkedInitialVelocity;
                 }
             }
             else
