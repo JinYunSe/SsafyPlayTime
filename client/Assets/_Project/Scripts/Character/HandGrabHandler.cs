@@ -31,7 +31,7 @@ public class HandGrabHandler : MonoBehaviour
     [SerializeField] float dualGrabBreakMultiplier = 3f;
 
     [Header("Debug")]
-    [SerializeField] bool debugLog = true;
+    [SerializeField] bool debugLog = false;
 
     [Header("Grab Distance")]
     [Tooltip("손과 잡힌 앵커 사이 이 거리 초과 시 자동 해제")]
@@ -169,7 +169,6 @@ public class HandGrabHandler : MonoBehaviour
 
     void Awake()
     {
-        debugLog = true; // 디버그 진단용 강제 활성화
         networkPlayer = transform.root.GetComponent<NetworkPlayer>();
         rigidbody3D = GetComponent<Rigidbody>();
 

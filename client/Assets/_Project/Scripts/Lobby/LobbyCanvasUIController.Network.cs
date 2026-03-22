@@ -576,14 +576,10 @@ namespace SSAFYPlayTime
         private bool _netLeftMouseDown;
         private float _netLeftMouseDownTime;
         private bool _netLeftMouseConsumedAsGrab;
-        private bool _netRightMouseDown;
-        private float _netRightMouseDownTime;
-        private bool _netRightMouseConsumedAsGrab;
         private bool _netPunchQueued;
         private bool _netThrowQueued;
         private bool _netJumpQueued;
         private bool _netDropQueued;
-        private bool _netHeadbuttQueued;
         private Vector2 _netMoveInput;
         private Vector2 _netMoveInputRaw;
         private float _netCameraYaw;
@@ -641,10 +637,6 @@ namespace SSAFYPlayTime
                 _netLeftMouseConsumedAsGrab = false;
             }
 
-            _netRightMouseDown = false;
-            _netRightMouseDownTime = 0f;
-            _netRightMouseConsumedAsGrab = false;
-
             // 우클릭 = 던지기 (잡고 있을 때)
             if (Input.GetMouseButtonDown(1))
                 _netThrowQueued = true;
@@ -655,9 +647,6 @@ namespace SSAFYPlayTime
             if (Input.GetKeyDown(KeyCode.F))
                 _netDropQueued = true;
 
-            if (Input.GetMouseButtonDown(2))
-                _netHeadbuttQueued = true;
-
             TraceMoveSyncCapture("Capture");
         }
 
@@ -665,13 +654,10 @@ namespace SSAFYPlayTime
         {
             _netLeftMouseDown = false;
             _netLeftMouseConsumedAsGrab = false;
-            _netRightMouseDown = false;
-            _netRightMouseConsumedAsGrab = false;
             _netPunchQueued = false;
             _netThrowQueued = false;
             _netJumpQueued = false;
             _netDropQueued = false;
-            _netHeadbuttQueued = false;
             _netMoveInput = Vector2.zero;
             _netMoveInputRaw = Vector2.zero;
             _netCameraYaw = 0f;
@@ -695,9 +681,7 @@ namespace SSAFYPlayTime
                 (bool)payload.Punch ||
                 (bool)payload.Throw ||
                 (bool)payload.Drop ||
-                (bool)payload.Headbutt ||
                 (bool)payload.LeftGrabHold ||
-                (bool)payload.RightGrabHold ||
                 (bool)payload.Sprint;
 
             var now = Time.unscaledTime;
@@ -713,8 +697,7 @@ namespace SSAFYPlayTime
                 $"move={MoveSyncDiagnostics.FormatVector2(payload.Move)} camYaw={payload.CameraYaw:F1} " +
                 $"jump={((bool)payload.Jump ? 1 : 0)} sprint={((bool)payload.Sprint ? 1 : 0)} " +
                 $"punch={((bool)payload.Punch ? 1 : 0)} throw={((bool)payload.Throw ? 1 : 0)} " +
-                $"drop={((bool)payload.Drop ? 1 : 0)} headbutt={((bool)payload.Headbutt ? 1 : 0)} " +
-                $"leftGrab={((bool)payload.LeftGrabHold ? 1 : 0)} rightGrab={((bool)payload.RightGrabHold ? 1 : 0)}",
+                $"drop={((bool)payload.Drop ? 1 : 0)} leftGrab={((bool)payload.LeftGrabHold ? 1 : 0)}",
                 this);
         }
 
@@ -728,12 +711,10 @@ namespace SSAFYPlayTime
                 _netMoveInput.sqrMagnitude > 0.0001f ||
                 _netSprintHeld ||
                 _netLeftMouseDown ||
-                _netRightMouseDown ||
                 _netPunchQueued ||
                 _netThrowQueued ||
                 _netJumpQueued ||
-                _netDropQueued ||
-                _netHeadbuttQueued;
+                _netDropQueued;
 
             var now = Time.unscaledTime;
             if (!forceLog && now - _lastMoveSyncCaptureLogAt < MOVE_SYNC_INPUT_LOG_INTERVAL)
@@ -748,9 +729,9 @@ namespace SSAFYPlayTime
                 $"cursorLocked={(Cursor.lockState == CursorLockMode.Locked ? 1 : 0)} cameraMain={(Camera.main != null ? 1 : 0)} " +
                 $"moveRaw={MoveSyncDiagnostics.FormatVector2(_netMoveInputRaw)} move={MoveSyncDiagnostics.FormatVector2(_netMoveInput)} " +
                 $"camYaw={_netCameraYaw:F1} sprint={(_netSprintHeld ? 1 : 0)} " +
-                $"leftGrab={(_netLeftMouseDown ? 1 : 0)} rightGrab={(_netRightMouseDown ? 1 : 0)} " +
+                $"leftGrab={(_netLeftMouseDown ? 1 : 0)} " +
                 $"punchQ={(_netPunchQueued ? 1 : 0)} throwQ={(_netThrowQueued ? 1 : 0)} jumpQ={(_netJumpQueued ? 1 : 0)} " +
-                $"dropQ={(_netDropQueued ? 1 : 0)} headbuttQ={(_netHeadbuttQueued ? 1 : 0)}",
+                $"dropQ={(_netDropQueued ? 1 : 0)}",
                 this);
         }
 
@@ -774,9 +755,6 @@ namespace SSAFYPlayTime
         {
             if (!GameStartCountdown.InputEnabled) return;
 
-            var latchedLeftGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
-            var latchedRightGrabHold = _netRightMouseDown && _netRightMouseConsumedAsGrab;
-
             var payload = new PlayerNetworkInput
             {
                 Move = _netMoveInput,
@@ -785,79 +763,11 @@ namespace SSAFYPlayTime
                 Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
                 Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
                 Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
-                LeftGrabHold = latchedLeftGrabHold,
-                RightGrabHold = false,
-                Headbutt = ConsumeLatchedNetworkFlag(ref _netHeadbuttQueued),
+                LeftGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab,
                 Sprint = _netSprintHeld
             };
             input.Set(payload);
             TraceMoveSyncInput(runner, payload);
-            return;
-
-            bool isPunch = false;
-            bool isThrow = false;
-
-
-            // 좌클릭 상태 추적 (왼손 그랩)
-            if (Input.GetMouseButtonDown(0))
-            {
-                _netLeftMouseDown = true;
-                _netLeftMouseDownTime = Time.time;
-                _netLeftMouseConsumedAsGrab = false;
-            }
-
-            if (runner == null && Input.GetMouseButton(0) && _netLeftMouseDown)
-            {
-                if (Time.time - _netLeftMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
-                    _netLeftMouseConsumedAsGrab = true;
-            }
-
-            if (runner == null && Input.GetMouseButtonUp(0))
-            {
-                if (!_netLeftMouseConsumedAsGrab && Time.time - _netLeftMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
-                    isPunch = true;
-
-                _netLeftMouseDown = false;
-            }
-
-            // 우클릭 상태 추적 (오른손 그랩)
-            if (runner == null && Input.GetMouseButtonDown(1))
-            {
-                _netRightMouseDown = true;
-                _netRightMouseDownTime = Time.time;
-                _netRightMouseConsumedAsGrab = false;
-            }
-
-            if (runner == null && Input.GetMouseButton(1) && _netRightMouseDown)
-            {
-                if (Time.time - _netRightMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
-                    _netRightMouseConsumedAsGrab = true;
-            }
-
-            if (runner == null && Input.GetMouseButtonUp(1))
-            {
-                if (!_netRightMouseConsumedAsGrab && Time.time - _netRightMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
-                    isThrow = true;
-
-                _netRightMouseDown = false;
-            }
-
-            bool isLeftGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
-            bool isRightGrabHold = _netRightMouseDown && _netRightMouseConsumedAsGrab;
-
-            input.Set(new PlayerNetworkInput
-            {
-                Move = _netMoveInput,
-                CameraYaw = _netCameraYaw,
-                Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
-                Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
-                Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
-                Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
-                LeftGrabHold = isLeftGrabHold,
-                RightGrabHold = isRightGrabHold,
-                Headbutt = ConsumeLatchedNetworkFlag(ref _netHeadbuttQueued),
-                Sprint = _netSprintHeld
-            });
         }
         void INetworkRunnerCallbacks.OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
 
