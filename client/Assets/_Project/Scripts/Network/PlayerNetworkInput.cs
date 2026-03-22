@@ -27,12 +27,6 @@ public struct PlayerNetworkInput : INetworkInput
     // Hold left click past threshold: keep left-hand grab active.
     public NetworkBool LeftGrabHold;
 
-    // Hold right click past threshold: keep right-hand grab active.
-    public NetworkBool RightGrabHold;
-
-    // Middle mouse button.
-    public NetworkBool Headbutt;
-
     // Sprint.
     public NetworkBool Sprint;
 }

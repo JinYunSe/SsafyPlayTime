@@ -291,7 +291,7 @@ public sealed partial class NetworkPlayer
 
         // OwnerProxy prediction: reflect local grab instantly, then roll back if not confirmed.
         bool localPredicting = HasInputAuthority && !HasStateAuthority
-            && ((_leftMouseDown && _leftMouseConsumedAsGrab) || (_rightMouseDown && _rightMouseConsumedAsGrab));
+            && (_leftMouseDown && _leftMouseConsumedAsGrab);
 
         bool showGrab;
         if (localPredicting && !confirmedHolding)

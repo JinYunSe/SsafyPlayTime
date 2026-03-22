@@ -52,7 +52,7 @@ public class ProceduralGrabArm : MonoBehaviour
     [SerializeField] CarryPoseProfile carryPoseProfile;
 
     [Header("Debug")]
-    [SerializeField] bool debugLog = true;
+    [SerializeField] bool debugLog = false;
     float _debugLogTimer;
     float _debugPhysicsLogTimer;
     float _debugCarryLogTimer;
@@ -91,7 +91,6 @@ public class ProceduralGrabArm : MonoBehaviour
 
     void Awake()
     {
-        debugLog = true; // 디버그 진단용 강제 활성화
         _networkPlayer = GetComponent<NetworkPlayer>();
 
         if (puppetMaster == null)
