@@ -85,6 +85,15 @@ namespace SSAFYPlayTime.Character
         /// </summary>
         public bool TryGetVictimAnchorWorld(out Vector3 position, out Vector3 forward)
         {
+            return TryGetVictimSupportFrameWorld(out position, out forward);
+        }
+
+        /// <summary>
+        /// 피해자 hips/chest 기반 support frame을 반환.
+        /// carry victim root follow와 stunned attach target의 공통 기준점이다.
+        /// </summary>
+        public bool TryGetVictimSupportFrameWorld(out Vector3 position, out Vector3 forward)
+        {
             if (carryVictimAnchor != null)
             {
                 position = carryVictimAnchor.position;
@@ -119,12 +128,16 @@ namespace SSAFYPlayTime.Character
         /// </summary>
         public bool TryGetCarrierAnchorWorld(CarryPhysicsProfile.CarryMode mode, out Vector3 position, out Vector3 forward)
         {
-            Transform anchor = mode switch
-            {
-                CarryPhysicsProfile.CarryMode.StunnedDualCarry => carryDualAnchor != null ? carryDualAnchor : carryOverheadAnchor,
-                CarryPhysicsProfile.CarryMode.StunnedSingleCarry => carryFrontAnchor,
-                _ => carryFrontAnchor
-            };
+            return TryGetCarrierAnchorWorld(mode, CharacterGrabController.HoldVariant.None, out position, out forward);
+        }
+
+        public bool TryGetCarrierAnchorWorld(
+            CarryPhysicsProfile.CarryMode mode,
+            CharacterGrabController.HoldVariant holdVariant,
+            out Vector3 position,
+            out Vector3 forward)
+        {
+            var anchor = ResolveCarrierAnchor(mode, holdVariant);
 
             if (anchor != null)
             {
@@ -133,10 +146,65 @@ namespace SSAFYPlayTime.Character
                 return true;
             }
 
-            // 폴백: 현재 transform
+            return TryGetCarrierSupportFrameWorld(mode, holdVariant, out position, out forward);
+        }
+
+        /// <summary>
+        /// carrier torso 기반 support frame을 반환.
+        /// 손이 특정 anchor transform 자체를 쫓기보다 몸통 기준 frame을 따라가게 만들기 위한 기준점이다.
+        /// </summary>
+        public bool TryGetCarrierSupportFrameWorld(CarryPhysicsProfile.CarryMode mode, out Vector3 position, out Vector3 forward)
+        {
+            return TryGetCarrierSupportFrameWorld(mode, CharacterGrabController.HoldVariant.None, out position, out forward);
+        }
+
+        public bool TryGetCarrierSupportFrameWorld(
+            CarryPhysicsProfile.CarryMode mode,
+            CharacterGrabController.HoldVariant holdVariant,
+            out Vector3 position,
+            out Vector3 forward)
+        {
+            var anchor = ResolveCarrierAnchor(mode, holdVariant);
+            TryResolveReferences();
+
+            if (_hipsTransform != null)
+            {
+                var supportBlend = Mathf.Clamp01(chestWeight + 0.15f);
+                if (_chestTransform != null)
+                {
+                    position = Vector3.Lerp(_hipsTransform.position, _chestTransform.position, supportBlend);
+                    forward = Vector3.Slerp(_hipsTransform.forward, _chestTransform.forward, supportBlend).normalized;
+                }
+                else
+                {
+                    position = _hipsTransform.position;
+                    forward = _hipsTransform.forward;
+                }
+
+                if (anchor != null)
+                {
+                    var supportToAnchor = anchor.position - position;
+                    supportToAnchor.y = 0f;
+                    if (supportToAnchor.sqrMagnitude > 0.0001f)
+                        forward = Vector3.Slerp(forward, supportToAnchor.normalized, 0.5f).normalized;
+                }
+
+                if (forward.sqrMagnitude <= 0.0001f)
+                    forward = transform.forward;
+
+                return true;
+            }
+
+            if (anchor != null)
+            {
+                position = anchor.position;
+                forward = anchor.forward;
+                return true;
+            }
+
             position = transform.position;
             forward = transform.forward;
-            return anchor != null;
+            return false;
         }
 
         /// <summary>
@@ -212,6 +280,49 @@ namespace SSAFYPlayTime.Character
                 carryChestSample.position = _chestTransform.position;
                 carryChestSample.rotation = _chestTransform.rotation;
             }
+        }
+
+        private Transform ResolveCarrierAnchor(CarryPhysicsProfile.CarryMode mode)
+        {
+            return ResolveCarrierAnchor(mode, CharacterGrabController.HoldVariant.None);
+        }
+
+        private Transform ResolveCarrierAnchor(
+            CarryPhysicsProfile.CarryMode mode,
+            CharacterGrabController.HoldVariant holdVariant)
+        {
+            var variantAnchor = ResolveHoldVariantAnchor(holdVariant);
+            if (variantAnchor != null)
+                return variantAnchor;
+
+            return mode switch
+            {
+                CarryPhysicsProfile.CarryMode.StunnedDualCarry => SelectFirstAvailable(carryDualAnchor, carryOverheadAnchor, carryFrontAnchor),
+                CarryPhysicsProfile.CarryMode.StunnedSingleCarry => SelectFirstAvailable(carryFrontAnchor, carryOverheadAnchor, carryDualAnchor),
+                _ => SelectFirstAvailable(carryFrontAnchor, carryOverheadAnchor, carryDualAnchor)
+            };
+        }
+
+        private Transform ResolveHoldVariantAnchor(CharacterGrabController.HoldVariant holdVariant)
+        {
+            return holdVariant switch
+            {
+                CharacterGrabController.HoldVariant.FrontCarry => SelectFirstAvailable(carryFrontAnchor, carryOverheadAnchor, carryDualAnchor),
+                CharacterGrabController.HoldVariant.OverheadCarry => SelectFirstAvailable(carryOverheadAnchor, carryFrontAnchor, carryDualAnchor),
+                CharacterGrabController.HoldVariant.DualCarry => SelectFirstAvailable(carryDualAnchor, carryOverheadAnchor, carryFrontAnchor),
+                _ => null
+            };
+        }
+
+        private static Transform SelectFirstAvailable(Transform primary, Transform secondary, Transform tertiary)
+        {
+            if (primary != null)
+                return primary;
+
+            if (secondary != null)
+                return secondary;
+
+            return tertiary;
         }
     }
 }

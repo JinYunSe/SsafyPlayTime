@@ -18,6 +18,8 @@ using UnityEngine;
 // - 부위별/상태별 배율, 그로기 시스템
 public sealed partial class NetworkPlayer : NetworkBehaviour
 {
+    private static readonly HashSet<NetworkPlayer> RegisteredPlayers = new();
+
     [Header("References")]
     [SerializeField] private Rigidbody rigidbody3D;
     [SerializeField] private ConfigurableJoint mainJoint;
@@ -34,6 +36,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     [Header("Grab")]
     [SerializeField] private Transform holdPoint;
+    [SerializeField] private CharacterGrabController characterGrabController;
 
     [Header("Carry Solve Frame")]
     [SerializeField] private CarryRig carryRig;
@@ -58,6 +61,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [SerializeField] private float cameraAnchorOwnerProxyLeadDistance = 0.18f;
     [SerializeField] private float cameraAnchorOwnerProxyPresentationCorrectionScale = 0.35f;
     [SerializeField] private float cameraAnchorOwnerProxyMaxCorrectionDistance = 0.12f;
+    [SerializeField, Range(0f, 1f)] private float cameraAnchorHoldingOwnerProxyLeadScale = 0.32f;
+    [SerializeField, Range(0f, 1f)] private float cameraAnchorHoldingOwnerProxyCorrectionMultiplier = 0.18f;
+    [SerializeField, Range(0f, 1f)] private float cameraAnchorHoldingOwnerProxyMaxCorrectionMultiplier = 0.22f;
 
     // 네트워크 동기화 변수
     [Networked] private float NetworkedMoveSpeed { get; set; }
@@ -119,6 +125,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [Networked] private Vector3 NetworkedCarrierAnchorForward { get; set; }
     [Networked] private NetworkBool NetworkedCarrierAnchorValid { get; set; }
     [Networked] private byte NetworkedCarryMode { get; set; }
+    [Networked] private byte NetworkedGrabActionState { get; set; }
+    [Networked] private byte NetworkedGrabHoldVariant { get; set; }
+    [Networked] private byte NetworkedLeftHandHoldMode { get; set; }
+    [Networked] private byte NetworkedRightHandHoldMode { get; set; }
 
     // OwnerProxy에서 다른 플레이어에게 잡힌 상태
     [Networked] public NetworkBool NetworkedIsBeingGrabbed { get; set; }
@@ -242,6 +252,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     internal CarryRig GetCarryRig() => carryRig;
     /// <summary>CarryPhysicsProfile 참조</summary>
     internal CarryPhysicsProfile GetCarryPhysicsProfile() => carryPhysicsProfile;
+    /// <summary>Grab/carry 상태 허브 참조</summary>
+    internal CharacterGrabController GetCharacterGrabController() => characterGrabController;
     /// <summary>
     /// 현재 carry 모드. StateAuthority는 로컬 값, proxy는 네트워크 값을 반환.
     /// </summary>
@@ -250,6 +262,28 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (IsNetworkReady && !HasStateAuthority)
             return (CarryPhysicsProfile.CarryMode)NetworkedCarryMode;
         return _localCarryMode;
+    }
+
+    internal bool TryGetReplicatedGrabControllerState(
+        out CharacterGrabController.GrabActionState actionState,
+        out CharacterGrabController.HoldVariant holdVariant,
+        out CharacterGrabController.HandHoldMode leftMode,
+        out CharacterGrabController.HandHoldMode rightMode)
+    {
+        actionState = CharacterGrabController.GrabActionState.Idle;
+        holdVariant = CharacterGrabController.HoldVariant.None;
+        leftMode = CharacterGrabController.HandHoldMode.None;
+        rightMode = CharacterGrabController.HandHoldMode.None;
+
+        // Owner proxies should keep their locally resolved grab state for presentation.
+        if (!IsNetworkReady || HasStateAuthority || HasInputAuthority)
+            return false;
+
+        actionState = (CharacterGrabController.GrabActionState)NetworkedGrabActionState;
+        holdVariant = (CharacterGrabController.HoldVariant)NetworkedGrabHoldVariant;
+        leftMode = (CharacterGrabController.HandHoldMode)NetworkedLeftHandHoldMode;
+        rightMode = (CharacterGrabController.HandHoldMode)NetworkedRightHandHoldMode;
+        return true;
     }
     /// <summary>carry release settle 중인지 여부</summary>
     internal bool IsCarryReleaseSettling => _carryReleaseSettleRemaining > 0f;
@@ -265,6 +299,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     // 다른 플레이어에 의해 잡힌 횟수 (여러 손에 동시에 잡힐 수 있으므로 카운터)
     private int _grabbedByCount;
     public bool IsGrabbedByOther => _grabbedByCount > 0;
+    private Vector3 _cachedIncomingHeldAnchorWorld;
+    private Vector3 _cachedIncomingHeldHolderWorld;
+    private GrabAnchorPoint.AnchorId _cachedIncomingHeldAnchorId = GrabAnchorPoint.AnchorId.None;
+    private float _cachedIncomingHeldUntilTime = float.NegativeInfinity;
+    private bool _hasCachedIncomingHeldPresentation;
 
     public bool IsHandGrabActive(HandGrabHandler.HandSide side)
     {
@@ -582,23 +621,115 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             true);
     }
 
-    internal bool TryGetHeldAnchorWorldPosition(HandGrabHandler.HandSide side, out Vector3 anchorWorld)
+    private bool TryGetNetworkHeldAnchorData(
+        HandGrabHandler.HandSide side,
+        out NetworkId targetId,
+        out Vector3 anchorLocal,
+        out byte anchorId)
     {
-        anchorWorld = Vector3.zero;
-        if (_handGrabHandlers == null)
+        targetId = default;
+        anchorLocal = Vector3.zero;
+        anchorId = 0;
+
+        var isConfirmed = side == HandGrabHandler.HandSide.Left
+            ? (bool)LeftGrabConfirmed
+            : (bool)RightGrabConfirmed;
+        if (!isConfirmed)
             return false;
 
-        for (var i = 0; i < _handGrabHandlers.Length; i++)
+        targetId = side == HandGrabHandler.HandSide.Left ? LeftGrabTargetId : RightGrabTargetId;
+        anchorLocal = side == HandGrabHandler.HandSide.Left ? LeftGrabAnchorLocal : RightGrabAnchorLocal;
+        anchorId = side == HandGrabHandler.HandSide.Left ? LeftGrabAnchorId : RightGrabAnchorId;
+        return targetId.IsValid;
+    }
+
+    internal bool TryGetReplicatedGrabAnchorWorld(byte anchorIdByte, Vector3 anchorLocal, out Vector3 anchorWorld)
+    {
+        anchorWorld = Vector3.zero;
+
+        GrabRigRuntimeBootstrap.EnsureCharacterRig(transform, null, null);
+
+        var desiredAnchorId = (GrabAnchorPoint.AnchorId)anchorIdByte;
+        var anchors = GetComponentsInChildren<GrabAnchorPoint>(true);
+        GrabAnchorPoint bestLocalMatch = null;
+        var bestLocalMatchDistance = float.PositiveInfinity;
+
+        for (var i = 0; i < anchors.Length; i++)
         {
-            var handler = _handGrabHandlers[i];
-            if (handler == null || handler.Side != side || !handler.IsHolding)
+            var anchor = anchors[i];
+            if (anchor == null)
                 continue;
 
-            anchorWorld = handler.GetGrabAnchorWorldPosition();
+            if (desiredAnchorId != GrabAnchorPoint.AnchorId.None && anchor.Id == desiredAnchorId)
+            {
+                anchorWorld = anchor.GetGripWorldPosition();
+                return true;
+            }
+
+            if (anchorLocal == Vector3.zero)
+                continue;
+
+            var localDistance = (anchor.GetGripLocalInBone() - anchorLocal).sqrMagnitude;
+            if (localDistance >= bestLocalMatchDistance)
+                continue;
+
+            bestLocalMatchDistance = localDistance;
+            bestLocalMatch = anchor;
+        }
+
+        if (bestLocalMatch != null)
+        {
+            anchorWorld = bestLocalMatch.GetGripWorldPosition();
             return true;
         }
 
         return false;
+    }
+
+    private bool TryResolveNetworkHeldAnchorWorldPosition(HandGrabHandler.HandSide side, out Vector3 anchorWorld)
+    {
+        anchorWorld = Vector3.zero;
+
+        if (Runner == null || !Object.IsValid)
+            return false;
+
+        if (!TryGetNetworkHeldAnchorData(side, out var targetId, out var anchorLocal, out var anchorId))
+            return false;
+
+        var targetObject = Runner.FindObject(targetId);
+        if (targetObject == null)
+            return false;
+
+        var targetPlayer = targetObject.GetComponent<NetworkPlayer>();
+        if (targetPlayer != null && targetPlayer.TryGetReplicatedGrabAnchorWorld(anchorId, anchorLocal, out anchorWorld))
+            return true;
+
+        if (anchorLocal != Vector3.zero)
+        {
+            anchorWorld = targetObject.transform.TransformPoint(anchorLocal);
+            return true;
+        }
+
+        return false;
+    }
+
+    internal bool TryGetHeldAnchorWorldPosition(HandGrabHandler.HandSide side, out Vector3 anchorWorld)
+    {
+        anchorWorld = Vector3.zero;
+        if (_handGrabHandlers != null)
+        {
+            for (var i = 0; i < _handGrabHandlers.Length; i++)
+            {
+                var handler = _handGrabHandlers[i];
+                if (handler == null || handler.Side != side || !handler.IsHolding)
+                    continue;
+
+                anchorWorld = handler.GetGrabAnchorWorldPosition();
+                return true;
+            }
+        }
+
+        return !HasStateAuthority && TryResolveNetworkHeldAnchorWorldPosition(side, out anchorWorld);
     }
 
     internal bool TryGetAverageHeldAnchorWorldPosition(out Vector3 anchorWorld)
@@ -625,11 +756,238 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         return true;
     }
 
+    private CharacterGrabController.HoldVariant ResolveCurrentOrReplicatedHoldVariant()
+    {
+        if (IsNetworkReady && !HasStateAuthority)
+            return (CharacterGrabController.HoldVariant)NetworkedGrabHoldVariant;
+
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            return characterGrabController.CurrentHoldVariant;
+        }
+
+        return CharacterGrabController.HoldVariant.None;
+    }
+
+    private bool IsEligibleForIncomingHeldPresentation()
+    {
+        return GetPhysicalPhase() switch
+        {
+            PhysicalPhase.Stable => true,
+            PhysicalPhase.Holding => true,
+            PhysicalPhase.Recovering => true,
+            PhysicalPhase.Unstable => true,
+            _ => false
+        };
+    }
+
+    private static float ResolveIncomingHeldAnchorPriority(GrabAnchorPoint.AnchorId anchorId)
+    {
+        return anchorId switch
+        {
+            GrabAnchorPoint.AnchorId.Chest => 4f,
+            GrabAnchorPoint.AnchorId.Hips => 3f,
+            GrabAnchorPoint.AnchorId.LeftUpperArm => 2f,
+            GrabAnchorPoint.AnchorId.RightUpperArm => 2f,
+            GrabAnchorPoint.AnchorId.LeftForearm => 1f,
+            GrabAnchorPoint.AnchorId.RightForearm => 1f,
+            GrabAnchorPoint.AnchorId.Head => 0.5f,
+            _ => 0f
+        };
+    }
+
+    private bool TryAccumulateIncomingHeldSide(
+        NetworkPlayer holder,
+        HandGrabHandler.HandSide side,
+        NetworkId selfId,
+        ref int count,
+        ref Vector3 anchorWorldSum,
+        ref Vector3 holderWorldSum,
+        ref GrabAnchorPoint.AnchorId resolvedAnchorId,
+        ref float resolvedAnchorPriority)
+    {
+        if (holder == null ||
+            !holder.TryGetNetworkHeldAnchorData(side, out var targetId, out _, out var anchorIdByte) ||
+            targetId != selfId)
+        {
+            return false;
+        }
+
+        if (!holder.TryGetHeldAnchorWorldPosition(side, out var sideAnchorWorld))
+            return false;
+
+        anchorWorldSum += sideAnchorWorld;
+        holderWorldSum += holder.transform.position;
+        count++;
+
+        var anchorId = (GrabAnchorPoint.AnchorId)anchorIdByte;
+        var anchorPriority = ResolveIncomingHeldAnchorPriority(anchorId);
+        if (anchorPriority > resolvedAnchorPriority)
+        {
+            resolvedAnchorPriority = anchorPriority;
+            resolvedAnchorId = anchorId;
+        }
+
+        return true;
+    }
+
+    private bool TryResolveIncomingHeldPresentationData(
+        out Vector3 anchorWorld,
+        out Vector3 holderWorld,
+        out GrabAnchorPoint.AnchorId anchorId)
+    {
+        anchorWorld = Vector3.zero;
+        holderWorld = transform.position;
+        anchorId = GrabAnchorPoint.AnchorId.None;
+
+        if (!IsNetworkReady || !Object.IsValid)
+            return false;
+
+        var selfId = Object.Id;
+        var resolvedCount = 0;
+        var anchorWorldSum = Vector3.zero;
+        var holderWorldSum = Vector3.zero;
+        var resolvedAnchorPriority = float.NegativeInfinity;
+
+        foreach (var candidate in RegisteredPlayers)
+        {
+            if (candidate == null || candidate == this || !candidate.IsNetworkReady || !candidate.Object.IsValid)
+                continue;
+
+            if (candidate.ResolveCurrentOrReplicatedHoldVariant() != CharacterGrabController.HoldVariant.ConsciousPlayer)
+                continue;
+
+            TryAccumulateIncomingHeldSide(
+                candidate,
+                HandGrabHandler.HandSide.Left,
+                selfId,
+                ref resolvedCount,
+                ref anchorWorldSum,
+                ref holderWorldSum,
+                ref anchorId,
+                ref resolvedAnchorPriority);
+            TryAccumulateIncomingHeldSide(
+                candidate,
+                HandGrabHandler.HandSide.Right,
+                selfId,
+                ref resolvedCount,
+                ref anchorWorldSum,
+                ref holderWorldSum,
+                ref anchorId,
+                ref resolvedAnchorPriority);
+        }
+
+        if (resolvedCount <= 0)
+            return false;
+
+        anchorWorld = anchorWorldSum / resolvedCount;
+        holderWorld = holderWorldSum / resolvedCount;
+        return true;
+    }
+
+    internal bool TryGetIncomingHeldPresentationData(
+        out Vector3 anchorWorld,
+        out Vector3 holderWorld,
+        out GrabAnchorPoint.AnchorId anchorId,
+        out bool isRecoveringTarget)
+    {
+        anchorWorld = Vector3.zero;
+        holderWorld = transform.position;
+        anchorId = GrabAnchorPoint.AnchorId.None;
+        isRecoveringTarget = GetPhysicalPhase() == PhysicalPhase.Recovering;
+
+        if (!IsEligibleForIncomingHeldPresentation())
+        {
+            _hasCachedIncomingHeldPresentation = false;
+            _cachedIncomingHeldAnchorId = GrabAnchorPoint.AnchorId.None;
+            return false;
+        }
+
+        if (TryResolveIncomingHeldPresentationData(out anchorWorld, out holderWorld, out anchorId))
+        {
+            _cachedIncomingHeldAnchorWorld = anchorWorld;
+            _cachedIncomingHeldHolderWorld = holderWorld;
+            _cachedIncomingHeldAnchorId = anchorId;
+            _cachedIncomingHeldUntilTime = Time.time + 0.14f;
+            _hasCachedIncomingHeldPresentation = true;
+            return true;
+        }
+
+        if (_hasCachedIncomingHeldPresentation && Time.time <= _cachedIncomingHeldUntilTime)
+        {
+            anchorWorld = _cachedIncomingHeldAnchorWorld;
+            holderWorld = _cachedIncomingHeldHolderWorld;
+            anchorId = _cachedIncomingHeldAnchorId;
+            return true;
+        }
+
+        _hasCachedIncomingHeldPresentation = false;
+        _cachedIncomingHeldAnchorId = GrabAnchorPoint.AnchorId.None;
+        return false;
+    }
+
+    internal bool TryGetCarrierSupportFrameWorld(out Vector3 supportWorld, out Vector3 supportForward)
+    {
+        supportWorld = Vector3.zero;
+        supportForward = transform.forward;
+
+        var phase = GetPhysicalPhase();
+        var carryMode = GetLocalCarryMode();
+        var holdVariant = CharacterGrabController.HoldVariant.None;
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            holdVariant = characterGrabController.CurrentHoldVariant;
+        }
+        var isCarrierMode = phase == PhysicalPhase.CarryingStunned ||
+                            carryMode == CarryPhysicsProfile.CarryMode.StunnedSingleCarry ||
+                            carryMode == CarryPhysicsProfile.CarryMode.StunnedDualCarry;
+        if (!isCarrierMode)
+            return false;
+
+        if (!HasStateAuthority && (bool)NetworkedCarrierAnchorValid)
+        {
+            supportWorld = NetworkedCarrierAnchorPosition;
+            supportForward = NetworkedCarrierAnchorForward.sqrMagnitude > 0.0001f
+                ? NetworkedCarrierAnchorForward.normalized
+                : transform.forward;
+            return true;
+        }
+
+        if (carryRig != null &&
+            carryMode != CarryPhysicsProfile.CarryMode.None &&
+            carryMode != CarryPhysicsProfile.CarryMode.CarriedVictim &&
+            carryRig.TryGetCarrierSupportFrameWorld(carryMode, holdVariant, out supportWorld, out supportForward))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    internal bool TryGetCarryOrHeldReferenceWorldPosition(out Vector3 referenceWorld)
+    {
+        referenceWorld = Vector3.zero;
+
+        if (TryGetCarrierSupportFrameWorld(out referenceWorld, out _))
+            return true;
+
+        return TryGetAverageHeldAnchorWorldPosition(out referenceWorld);
+    }
+
     internal bool IsGrabFacingLocked()
     {
         var phase = GetPhysicalPhase();
         if (UsesPhysicsPosePresentation(phase))
             return false;
+
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            return (phase == PhysicalPhase.Holding || phase == PhysicalPhase.CarryingStunned) &&
+                   characterGrabController.ShouldLockFacingToHoldTarget;
+        }
 
         if (HasStateAuthority)
             return IsAnyHandHoldingObject();
@@ -675,7 +1033,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     {
         var phase = GetPhysicalPhase();
         if ((phase == PhysicalPhase.Holding || phase == PhysicalPhase.CarryingStunned) &&
-            TryGetAverageHeldAnchorWorldPosition(out var grabAnchorWorld))
+            TryGetCarryOrHeldReferenceWorldPosition(out var grabAnchorWorld))
         {
             var pivotPosition = ResolveGrabFacingPivotPosition();
             var anchorPlanar = grabAnchorWorld - pivotPosition;
@@ -957,8 +1315,18 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         }
 
         var phase = GetPhysicalPhase();
-        if (phase == PhysicalPhase.Holding ||
-            phase == PhysicalPhase.CarryingStunned ||
+        if (phase == PhysicalPhase.Holding)
+        {
+            return new CameraAnchorFollowSettings(
+                cameraAnchorHoldingFollowSpeed,
+                cameraAnchorHoldingVerticalFollowMultiplier,
+                cameraAnchorSnapDistance * cameraAnchorHoldingSnapMultiplier,
+                cameraAnchorHoldingOwnerProxyLeadScale,
+                cameraAnchorOwnerProxyPresentationCorrectionScale * cameraAnchorHoldingOwnerProxyCorrectionMultiplier,
+                cameraAnchorOwnerProxyMaxCorrectionDistance * cameraAnchorHoldingOwnerProxyMaxCorrectionMultiplier);
+        }
+
+        if (phase == PhysicalPhase.CarryingStunned ||
             phase == PhysicalPhase.GrabIntent)
         {
             return new CameraAnchorFollowSettings(
@@ -1186,6 +1554,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     private void Awake()
     {
+        RegisteredPlayers.Add(this);
         debugGrabLog = true; // 디버그 진단용 강제 활성화
         InitializeInternal();
     }
@@ -1198,6 +1567,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     private void OnDestroy()
     {
+        RegisteredPlayers.Remove(this);
         DestroyLocalGhostMode();
         CleanupDetachedCameraRoots();
         if (_cameraFollowAnchor != null)
@@ -1231,6 +1601,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             NetworkedVictimRootOffsetValid = false;
             NetworkedCarrierAnchorValid = false;
             NetworkedCarryMode = (byte)CarryPhysicsProfile.CarryMode.None;
+            NetworkedGrabActionState = (byte)CharacterGrabController.GrabActionState.Idle;
+            NetworkedGrabHoldVariant = (byte)CharacterGrabController.HoldVariant.None;
+            NetworkedLeftHandHoldMode = (byte)CharacterGrabController.HandHoldMode.None;
+            NetworkedRightHandHoldMode = (byte)CharacterGrabController.HandHoldMode.None;
         }
 
         _lastObservedPhysicsPresentationResetVersion = NetworkedPhysicsPresentationResetVersion;
@@ -1316,6 +1690,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         _handGrabHandlers = GetComponentsInChildren<HandGrabHandler>(true);
         EnsureItemRuntimeIntegration();
 
+        if (characterGrabController == null)
+            characterGrabController = GetComponent<CharacterGrabController>();
+        if (characterGrabController == null)
+            characterGrabController = gameObject.AddComponent<CharacterGrabController>();
+
         if (holdPoint == null)
         {
             var go = new GameObject("HoldPoint");
@@ -1326,6 +1705,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         foreach (var handler in _handGrabHandlers)
             handler.SetHoldPoint(holdPoint);
+
+        characterGrabController.RefreshNow();
 
         if (mainJoint != null)
             _startSlerpPositionSpring = mainJoint.slerpDrive.positionSpring;

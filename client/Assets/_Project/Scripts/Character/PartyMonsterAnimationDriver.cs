@@ -18,6 +18,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     const string PunchLeftState = "PunchLeft";
     const string PunchRightState = "PunchRight";
     const string GrabState = "GrabIdle";
+    const string CarryState = "Carry";
     const string ThrowState = "Throw";
     const string DefaultAerialKickClipName = "Attack02";
     const string AerialKickCombatStatId = "JET_KICK";
@@ -61,6 +62,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     PuppetMaster puppetMaster;
     BehaviourPuppet behaviourPuppet;
     NetworkPlayer networkPlayer;
+    CharacterGrabController characterGrabController;
     float attackButtonPressedAt = -1f;
     float actionLockedUntil;
     float upperBodyStateVisibleUntil;
@@ -223,6 +225,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         }
 
         HandleInput();
+        SyncGrabAnimation();
         TryFlushPunchBuffer();
 
         // 그랩 중에도 locomotion 애니메이션 유지 (전투는 Upper Body Layer에서 처리)
@@ -479,6 +482,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         puppetMaster = GetComponentInChildren<PuppetMaster>(true);
         behaviourPuppet = GetComponentInChildren<BehaviourPuppet>(true);
         networkPlayer = GetComponent<NetworkPlayer>();
+        characterGrabController = GetComponent<CharacterGrabController>();
 
         if (rigidbody3D == null)
             rigidbody3D = FindMainRigidbody();
@@ -800,21 +804,36 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         }
 
         // HandGrabHandler 물리 그랩 상태와 애니메이션 동기화
-        SyncGrabAnimation();
     }
 
     void SyncGrabAnimation()
     {
-        if (networkPlayer == null) return;
+        if (animator == null)
+            return;
 
-        // Grab presentation stays procedural through ProceduralGrabArm.
-        // The legacy GrabIdle layer forces both arms into the same forward pose, so keep it disabled.
-        if (isGrabPoseActive)
+        var shouldPreserve = ShouldPreserveGrabPose();
+        var holdStateActive = IsHoldUpperBodyState(currentUpperBodyStateName);
+        isGrabPoseActive = shouldPreserve;
+
+        if (!shouldPreserve)
         {
-            isGrabPoseActive = false;
-            ClearUpperBodyState();
-            UpdateCurrentLocomotion();
+            if (holdStateActive && !IsActionLocked())
+            {
+                ClearUpperBodyState();
+                UpdateCurrentLocomotion();
+            }
+
+            return;
         }
+
+        if (IsActionLocked() && !holdStateActive)
+            return;
+
+        var holdStateName = ResolveHoldUpperBodyStateName();
+        if (string.IsNullOrEmpty(holdStateName))
+            return;
+
+        PlayUpperBodyState(holdStateName);
     }
 
     void UpdateLocomotion()
@@ -857,9 +876,20 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         var localMove = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
         var predictedMagnitude = Mathf.Clamp01(localMove.magnitude);
         var networkSpeed = networkPlayer.GetNetworkedMoveSpeed();
-        var speed = Mathf.Max(networkSpeed, predictedMagnitude);
-        var locomotionState = predictedMagnitude > locomotionThreshold
-            ? (Input.GetKey(KeyCode.LeftShift)
+        var isHolding = networkPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.Holding;
+        var predictedSpeed = predictedMagnitude;
+        if (isHolding)
+            predictedSpeed = Mathf.Lerp(networkSpeed, predictedMagnitude, 0.35f);
+
+        var speed = Mathf.Max(networkSpeed, predictedSpeed);
+        var movementThreshold = isHolding ? locomotionThreshold * 0.85f : locomotionThreshold;
+        var wantsLocomotion = isHolding
+            ? speed > movementThreshold
+            : predictedMagnitude > movementThreshold;
+        var allowSprintPresentation = Input.GetKey(KeyCode.LeftShift) &&
+                                      (!isHolding || speed > locomotionThreshold * 1.2f);
+        var locomotionState = wantsLocomotion
+            ? (allowSprintPresentation
                 ? NetworkPlayer.PresentationLocomotionState.Sprint
                 : NetworkPlayer.PresentationLocomotionState.Walk)
             : networkPlayer.GetNetworkedLocomotionState();
@@ -902,7 +932,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     /// </summary>
     void UpdateUpperBodyLayerState()
     {
-        if (isGrabPoseActive)
+        if (ShouldPreserveGrabPose())
             return;
 
         if (Time.time < upperBodyStateVisibleUntil)
@@ -936,11 +966,54 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         if (networkPlayer == null)
             return isGrabPoseActive;
 
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            if (characterGrabController.ShouldPreserveGrabPose)
+                return true;
+        }
+
         var phase = networkPlayer.GetPhysicalPhase();
-        if (phase == NetworkPlayer.PhysicalPhase.GrabIntent || phase == NetworkPlayer.PhysicalPhase.Holding)
+        if (phase == NetworkPlayer.PhysicalPhase.GrabIntent ||
+            phase == NetworkPlayer.PhysicalPhase.Holding ||
+            phase == NetworkPlayer.PhysicalPhase.CarryingStunned)
             return true;
 
-        return networkPlayer.IsGrabActive || (!isRemoteProxy && isGrabPoseActive);
+        return networkPlayer.IsGrabActive ||
+               networkPlayer.IsAnyHandHolding ||
+               (!isRemoteProxy && isGrabPoseActive);
+    }
+
+    string ResolveHoldUpperBodyStateName()
+    {
+        if (ShouldUseCarryUpperBodyState() && HasUpperBodyState(CarryState))
+            return CarryState;
+
+        return HasUpperBodyState(GrabState) ? GrabState : string.Empty;
+    }
+
+    bool ShouldUseCarryUpperBodyState()
+    {
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            return characterGrabController.ShouldUseCarryPresentation;
+        }
+
+        return networkPlayer != null &&
+               networkPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.CarryingStunned;
+    }
+
+    bool HasUpperBodyState(string stateName)
+    {
+        return animator != null &&
+               !string.IsNullOrEmpty(stateName) &&
+               animator.HasState(UpperBodyLayer, Animator.StringToHash(stateName));
+    }
+
+    static bool IsHoldUpperBodyState(string stateName)
+    {
+        return stateName == GrabState || stateName == CarryState;
     }
 
     void ResetActionState()
