@@ -29,6 +29,11 @@ namespace SSAFYPlayTime.Character
 
         public float SensorRadius => sensorRadius;
 
+        public void ConfigureRuntime(float radius)
+        {
+            sensorRadius = radius;
+        }
+
         private void Awake()
         {
             ResolveReferences();

@@ -48,10 +48,6 @@ public sealed partial class NetworkPlayer
     private const float CarriedStunnedMuscleAngularSpeedCap = 4.0f;
     private const float CarriedStunnedMaxUpwardSpeed = 3.0f;
     private const float StunRootUpwardSyncStep = 0.08f;
-    private const float CarriedRootPlanarSyncSpeed = 7.5f;
-    private const float CarriedRootVerticalSyncSpeed = 14f;
-    private const float CarriedRootSnapDistance = 1.15f;
-    private const float CarriedRootSnapVerticalGap = 0.65f;
     private const float CarriedRootTraceGapThreshold = 0.3f;
     private const float HitInstabilityBoostMin = 0.08f;
     private const float HitInstabilityBoostMax = 0.22f;
@@ -1154,6 +1150,21 @@ public sealed partial class NetworkPlayer
         return $"({value.x:F2},{value.y:F2},{value.z:F2})";
     }
 
+    private static float ResolveCarryEmergencySnapDistance(float baseSnapDistance)
+    {
+        return Mathf.Max(baseSnapDistance * 1.75f, baseSnapDistance + 0.75f);
+    }
+
+    private static float ResolveCarryEmergencyVerticalGap(float baseVerticalGap)
+    {
+        return Mathf.Max(baseVerticalGap * 1.60f, baseVerticalGap + 0.25f);
+    }
+
+    private static float ResolveCarryCorrectionFollowSpeed(float baseSpeed, bool largeCorrection)
+    {
+        return baseSpeed * (largeCorrection ? 2.35f : 1f);
+    }
+
     private void SyncCarriedRootToPhysicsBody()
     {
         // CarrySolveFrame: carry anchor 기준으로 root follow
@@ -1181,11 +1192,15 @@ public sealed partial class NetworkPlayer
         var dt = Runner != null ? Runner.DeltaTime : Time.fixedDeltaTime;
         var settings = ResolveCarryModeSettings();
         var verticalGap = targetPos.y - previousRootPos.y;
-        var shouldSnap = delta.sqrMagnitude > settings.rootSnapDistance * settings.rootSnapDistance ||
-                         verticalGap > settings.rootSnapVerticalGap;
+        var requiresStrongCorrection = delta.sqrMagnitude > settings.rootSnapDistance * settings.rootSnapDistance ||
+                                       verticalGap > settings.rootSnapVerticalGap;
+        var emergencySnapDistance = ResolveCarryEmergencySnapDistance(settings.rootSnapDistance);
+        var emergencyVerticalGap = ResolveCarryEmergencyVerticalGap(settings.rootSnapVerticalGap);
+        var shouldEmergencySnap = delta.sqrMagnitude > emergencySnapDistance * emergencySnapDistance ||
+                                  verticalGap > emergencyVerticalGap;
 
         Vector3 newRootPos;
-        if (shouldSnap)
+        if (shouldEmergencySnap)
         {
             newRootPos = targetPos;
         }
@@ -1193,13 +1208,19 @@ public sealed partial class NetworkPlayer
         {
             var planarCurrent = new Vector3(previousRootPos.x, 0f, previousRootPos.z);
             var planarTarget = new Vector3(targetPos.x, 0f, targetPos.z);
-            var planarNext = Vector3.MoveTowards(planarCurrent, planarTarget, settings.rootPlanarFollowSpeed * dt);
-            var yNext = Mathf.MoveTowards(previousRootPos.y, targetPos.y, settings.rootVerticalFollowSpeed * dt);
+            var planarNext = Vector3.MoveTowards(
+                planarCurrent,
+                planarTarget,
+                ResolveCarryCorrectionFollowSpeed(settings.rootPlanarFollowSpeed, requiresStrongCorrection) * dt);
+            var yNext = Mathf.MoveTowards(
+                previousRootPos.y,
+                targetPos.y,
+                ResolveCarryCorrectionFollowSpeed(settings.rootVerticalFollowSpeed, requiresStrongCorrection) * dt);
             newRootPos = new Vector3(planarNext.x, yNext, planarNext.z);
         }
 
         // 운반 중에는 항상 velocity 리셋 — 잔여 중력/충돌 속도가 root를 끌어내리는 것 방지
-        ApplyCarryRootPosition(newRootPos, resetVelocity: true);
+        ApplyCarryRootPosition(newRootPos, resetVelocity: shouldEmergencySnap);
 
         // carry anchor 캐시 갱신 (네트워크 동기화 + settle 용)
         _lastCarryAnchorPosition = targetPos;
@@ -1211,7 +1232,7 @@ public sealed partial class NetworkPlayer
                 "CarryAnchorSolve",
                 $"mode={_localCarryMode} prevRoot={FormatCarryDebugVector(previousRootPos)} target={FormatCarryDebugVector(targetPos)} " +
                 $"newRoot={FormatCarryDebugVector(newRootPos)} delta={FormatCarryDebugVector(delta)} " +
-                $"verticalGap={verticalGap:F2} remainingGap={remainingGap:F2} snap={shouldSnap}",
+                $"verticalGap={verticalGap:F2} remainingGap={remainingGap:F2} correction={requiresStrongCorrection} emergencySnap={shouldEmergencySnap}",
                 remainingGap > CarryRootDebugGapThreshold);
         }
     }
@@ -1245,7 +1266,7 @@ public sealed partial class NetworkPlayer
         if (carryRig != null)
         {
             carryRig.UpdateVictimAnchor();
-            if (carryRig.TryGetVictimAnchorWorld(out anchorPos, out anchorFwd))
+            if (carryRig.TryGetVictimSupportFrameWorld(out anchorPos, out anchorFwd))
                 return true;
         }
 
@@ -1279,24 +1300,17 @@ public sealed partial class NetworkPlayer
     /// </summary>
     private SSAFYPlayTime.Character.CarryPhysicsProfile.CarryModeSettings ResolveCarryModeSettings()
     {
+        return ResolveCarryModeSettings(_localCarryMode);
+    }
+
+    private SSAFYPlayTime.Character.CarryPhysicsProfile.CarryModeSettings ResolveCarryModeSettings(
+        SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode mode)
+    {
         if (carryPhysicsProfile != null)
-            return carryPhysicsProfile.GetSettings(_localCarryMode);
+            return carryPhysicsProfile.GetSettings(mode);
 
         // 폴백: 기존 하드코드 값
-        return new SSAFYPlayTime.Character.CarryPhysicsProfile.CarryModeSettings
-        {
-            rootPlanarFollowSpeed = CarriedRootPlanarSyncSpeed,
-            rootVerticalFollowSpeed = CarriedRootVerticalSyncSpeed,
-            rootSnapDistance = CarriedRootSnapDistance,
-            rootSnapVerticalGap = CarriedRootSnapVerticalGap,
-            proxyRootFollowSpeed = CarryProxyRootFollowSpeed,
-            proxyRootSnapDistance = CarryProxyRootSnapDistance,
-            carryReleaseSettleDuration = 0.45f,
-            carrierTorsoReactionMultiplier = 1.15f,
-            carrierTurnAssistMultiplier = 1.1f,
-            victimCoreDriveSpringMultiplier = 0.9f,
-            victimCoreDriveDamperMultiplier = 0.95f
-        };
+        return SSAFYPlayTime.Character.CarryPhysicsProfile.GetDefaultSettings(mode);
     }
 
     /// <summary>
@@ -1351,9 +1365,15 @@ public sealed partial class NetworkPlayer
         }
 
         _localCarryMode = newMode;
+        if (newMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None)
+            _lastObservedCarryMode = newMode;
 
         if (previousMode != newMode)
         {
+            TraceCarryDebugSample(
+                "UpdateLocalCarryMode",
+                $"carry={previousMode}->{newMode} phase={phase} hasVictimRootOffset={_hasCarriedVictimRootOffset}",
+                forceSample: true);
             TraceStartupLaunchDiagnostics(
                 "UpdateLocalCarryMode",
                 force: true,
@@ -1378,9 +1398,22 @@ public sealed partial class NetworkPlayer
             var toAnchor = _lastCarryAnchorPosition - currentRoot;
             if (toAnchor.sqrMagnitude > 0.01f)
             {
-                var settleSpeed = 8f * dt;
-                var settledRoot = Vector3.MoveTowards(currentRoot, _lastCarryAnchorPosition, settleSpeed);
-                ApplyCarryRootPosition(settledRoot, true);
+                var settleMode = _lastObservedCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None
+                    ? _lastObservedCarryMode
+                    : SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry;
+                var settings = ResolveCarryModeSettings(settleMode);
+                var planarCurrent = new Vector3(currentRoot.x, 0f, currentRoot.z);
+                var planarTarget = new Vector3(_lastCarryAnchorPosition.x, 0f, _lastCarryAnchorPosition.z);
+                var planarNext = Vector3.MoveTowards(
+                    planarCurrent,
+                    planarTarget,
+                    ResolveCarryCorrectionFollowSpeed(settings.rootPlanarFollowSpeed, largeCorrection: true) * dt);
+                var yNext = Mathf.MoveTowards(
+                    currentRoot.y,
+                    _lastCarryAnchorPosition.y,
+                    ResolveCarryCorrectionFollowSpeed(settings.rootVerticalFollowSpeed, largeCorrection: true) * dt);
+                var settledRoot = new Vector3(planarNext.x, yNext, planarNext.z);
+                ApplyCarryRootPosition(settledRoot, resetVelocity: false);
 
                 TraceCarryDebugSample(
                     "CarryReleaseSettle",
@@ -1507,7 +1540,7 @@ public sealed partial class NetworkPlayer
             : Vector3.Dot(moveDirection, rigidbody3D.velocity);
 
         RotateTowardInput(cameraRelativeMove, inputMagnitude, dt);
-        ApplyMovementForce(moveDirection, inputMagnitude, moveSpeedMultiplier, dt);
+        ApplyMovementForce(moveDirection, inputMagnitude, moveSpeedMultiplier, input.Sprint, dt);
         ApplyJumpIfPossible(input.Jump, jumpMultiplier);
         _stateMachine.Tick(_isGrounded, inputMagnitude, dt, config);
 
@@ -1568,7 +1601,7 @@ public sealed partial class NetworkPlayer
         desiredRotation = Quaternion.identity;
         rotateSpeed = config != null ? config.rotateSpeedDeg : 360f;
 
-        if (!IsAnyHandHoldingObject() || !TryGetAverageHeldAnchorWorldPosition(out var grabAnchorWorld))
+        if (!IsAnyHandHoldingObject() || !TryGetCarryOrHeldReferenceWorldPosition(out var grabAnchorWorld))
             return false;
 
         var pivotPosition = ResolveGrabFacingPivotPosition();
@@ -1612,6 +1645,19 @@ public sealed partial class NetworkPlayer
             var turnScale = config != null && config.grabTurnSpeedScale > 0f ? config.grabTurnSpeedScale : 0.45f;
             rotateSpeed *= turnScale;
         }
+
+        TraceMoveHoldFacing(
+            "TryResolveGrabFacingRotation",
+            currentYaw,
+            anchorYaw,
+            desiredYaw,
+            currentDelta,
+            desiredDelta,
+            clampedDelta,
+            softLimit,
+            hardLimit,
+            rotateSpeed,
+            hasMoveInput);
 
         return true;
     }
@@ -1658,7 +1704,12 @@ public sealed partial class NetworkPlayer
         return transform.position;
     }
 
-    private void ApplyMovementForce(Vector3 moveDirection, float inputMagnitude, float moveSpeedMultiplier, float dt)
+    private void ApplyMovementForce(
+        Vector3 moveDirection,
+        float inputMagnitude,
+        float moveSpeedMultiplier,
+        bool sprintPressed,
+        float dt)
     {
         var planarVelocity = rigidbody3D.velocity;
         planarVelocity.y = 0f;
@@ -1684,6 +1735,19 @@ public sealed partial class NetworkPlayer
             acceleration *= HIT_RECOIL_ACCEL_SCALE;
         var maxVelocityChange = Mathf.Max(0f, acceleration) * dt;
         var velocityDelta = Vector3.ClampMagnitude(targetVelocity - planarVelocity, maxVelocityChange);
+
+        TraceMoveHoldForce(
+            "ApplyMovementForce",
+            moveDirection,
+            inputMagnitude,
+            moveSpeedMultiplier,
+            planarVelocity,
+            targetVelocity,
+            velocityDelta,
+            acceleration,
+            sprintPressed,
+            recoilActive,
+            unstableHitPenalty);
 
         if (dt > 0f)
         {
@@ -2266,7 +2330,8 @@ public sealed partial class NetworkPlayer
         var rootPlanarBefore = new Vector2(rootVelocityBefore.x, rootVelocityBefore.z).magnitude;
         var rootPlanarAfter = new Vector2(rootVelocityAfter.x, rootVelocityAfter.z).magnitude;
         var rootToPelvisGap = Mathf.Abs(transform.position.y - pelvisY);
-        if (rootToPelvisGap <= CarriedRootSnapVerticalGap)
+        var carriedVictimSettings = ResolveCarryModeSettings(SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim);
+        if (rootToPelvisGap <= carriedVictimSettings.rootSnapVerticalGap)
             return;
 
         TraceCarryDebugSample(

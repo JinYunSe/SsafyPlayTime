@@ -55,69 +55,80 @@ namespace SSAFYPlayTime.Character
             public float victimCoreDriveDamperMultiplier;
         }
 
-        [Header("Normal Grab")]
-        public CarryModeSettings normalGrab = new CarryModeSettings
+        public static CarryModeSettings GetDefaultSettings(CarryMode mode)
         {
-            rootPlanarFollowSpeed = 7.5f,
-            rootVerticalFollowSpeed = 14f,
-            rootSnapDistance = 1.15f,
-            rootSnapVerticalGap = 0.65f,
-            proxyRootFollowSpeed = 20f,
-            proxyRootSnapDistance = 1.10f,
-            carryReleaseSettleDuration = 0.30f,
-            carrierTorsoReactionMultiplier = 1.0f,
-            carrierTurnAssistMultiplier = 1.0f,
-            victimCoreDriveSpringMultiplier = 1.0f,
-            victimCoreDriveDamperMultiplier = 1.0f
-        };
+            return mode switch
+            {
+                CarryMode.StunnedSingleCarry => new CarryModeSettings
+                {
+                    rootPlanarFollowSpeed = 10f,
+                    rootVerticalFollowSpeed = 17f,
+                    rootSnapDistance = 1.20f,
+                    rootSnapVerticalGap = 0.68f,
+                    proxyRootFollowSpeed = 24f,
+                    proxyRootSnapDistance = 1.18f,
+                    carryReleaseSettleDuration = 0.55f,
+                    carrierTorsoReactionMultiplier = 1.08f,
+                    carrierTurnAssistMultiplier = 1.06f,
+                    victimCoreDriveSpringMultiplier = 0.82f,
+                    victimCoreDriveDamperMultiplier = 0.88f
+                },
+                CarryMode.StunnedDualCarry => new CarryModeSettings
+                {
+                    rootPlanarFollowSpeed = 11f,
+                    rootVerticalFollowSpeed = 19f,
+                    rootSnapDistance = 1.08f,
+                    rootSnapVerticalGap = 0.60f,
+                    proxyRootFollowSpeed = 26f,
+                    proxyRootSnapDistance = 1.08f,
+                    carryReleaseSettleDuration = 0.60f,
+                    carrierTorsoReactionMultiplier = 1.22f,
+                    carrierTurnAssistMultiplier = 1.16f,
+                    victimCoreDriveSpringMultiplier = 0.72f,
+                    victimCoreDriveDamperMultiplier = 0.78f
+                },
+                CarryMode.CarriedVictim => new CarryModeSettings
+                {
+                    rootPlanarFollowSpeed = 10.5f,
+                    rootVerticalFollowSpeed = 18.5f,
+                    rootSnapDistance = 1.08f,
+                    rootSnapVerticalGap = 0.60f,
+                    proxyRootFollowSpeed = 25f,
+                    proxyRootSnapDistance = 1.08f,
+                    carryReleaseSettleDuration = 0.55f,
+                    carrierTorsoReactionMultiplier = 1.0f,
+                    carrierTurnAssistMultiplier = 1.0f,
+                    victimCoreDriveSpringMultiplier = 0.68f,
+                    victimCoreDriveDamperMultiplier = 0.74f
+                },
+                _ => new CarryModeSettings
+                {
+                    rootPlanarFollowSpeed = 7.5f,
+                    rootVerticalFollowSpeed = 14f,
+                    rootSnapDistance = 1.15f,
+                    rootSnapVerticalGap = 0.65f,
+                    proxyRootFollowSpeed = 20f,
+                    proxyRootSnapDistance = 1.10f,
+                    carryReleaseSettleDuration = 0.30f,
+                    carrierTorsoReactionMultiplier = 1.0f,
+                    carrierTurnAssistMultiplier = 1.0f,
+                    victimCoreDriveSpringMultiplier = 1.0f,
+                    victimCoreDriveDamperMultiplier = 1.0f
+                }
+            };
+        }
+
+        [Header("Normal Grab")]
+        public CarryModeSettings normalGrab = GetDefaultSettings(CarryMode.NormalGrab);
 
         [Header("Stunned Single Carry (한손)")]
-        public CarryModeSettings stunnedSingleCarry = new CarryModeSettings
-        {
-            rootPlanarFollowSpeed = 9f,
-            rootVerticalFollowSpeed = 16f,
-            rootSnapDistance = 1.0f,
-            rootSnapVerticalGap = 0.55f,
-            proxyRootFollowSpeed = 22f,
-            proxyRootSnapDistance = 1.0f,
-            carryReleaseSettleDuration = 0.45f,
-            carrierTorsoReactionMultiplier = 1.15f,
-            carrierTurnAssistMultiplier = 1.1f,
-            victimCoreDriveSpringMultiplier = 0.75f,
-            victimCoreDriveDamperMultiplier = 0.80f
-        };
+        public CarryModeSettings stunnedSingleCarry = GetDefaultSettings(CarryMode.StunnedSingleCarry);
 
         [Header("Stunned Dual Carry (양손)")]
-        public CarryModeSettings stunnedDualCarry = new CarryModeSettings
-        {
-            rootPlanarFollowSpeed = 10f,
-            rootVerticalFollowSpeed = 18f,
-            rootSnapDistance = 0.9f,
-            rootSnapVerticalGap = 0.50f,
-            proxyRootFollowSpeed = 24f,
-            proxyRootSnapDistance = 0.90f,
-            carryReleaseSettleDuration = 0.50f,
-            carrierTorsoReactionMultiplier = 1.35f,
-            carrierTurnAssistMultiplier = 1.25f,
-            victimCoreDriveSpringMultiplier = 0.65f,
-            victimCoreDriveDamperMultiplier = 0.70f
-        };
+        public CarryModeSettings stunnedDualCarry = GetDefaultSettings(CarryMode.StunnedDualCarry);
 
         [Header("Carried Victim (운반 당하는 쪽)")]
-        public CarryModeSettings carriedVictim = new CarryModeSettings
-        {
-            rootPlanarFollowSpeed = 10f,
-            rootVerticalFollowSpeed = 18f,
-            rootSnapDistance = 0.90f,
-            rootSnapVerticalGap = 0.50f,
-            proxyRootFollowSpeed = 24f,
-            proxyRootSnapDistance = 0.90f,
-            carryReleaseSettleDuration = 0.45f,
-            carrierTorsoReactionMultiplier = 1.0f,
-            carrierTurnAssistMultiplier = 1.0f,
-            victimCoreDriveSpringMultiplier = 0.60f,
-            victimCoreDriveDamperMultiplier = 0.65f
-        };
+        public CarryModeSettings carriedVictim = GetDefaultSettings(CarryMode.CarriedVictim);
 
         public CarryModeSettings GetSettings(CarryMode mode)
         {
