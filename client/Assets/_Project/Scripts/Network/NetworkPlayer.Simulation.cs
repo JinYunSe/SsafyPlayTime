@@ -1480,12 +1480,12 @@ public sealed partial class NetworkPlayer
             return PhysicalPhase.Holding;
         }
 
-        if (_isGrabActive)
-            return PhysicalPhase.GrabIntent;
-
         // 장비 아이템(수박칼, 화염방사기 등) 장착 중
         if (_itemRuntimeHost != null && _itemRuntimeHost.IsHeldItemEquipment)
             return PhysicalPhase.WeaponEquipped;
+
+        if (_isGrabActive)
+            return PhysicalPhase.GrabIntent;
 
         return PhysicalPhase.Stable;
     }
