@@ -59,6 +59,10 @@ namespace SSAFYPlayTime.Gameplay.Items
         private readonly DefaultItemFieldPrefabResolver _prefabResolver = new();
         private GameObject _spawnedHeldVisual;
         private string _replicatedHeldItemId = string.Empty;
+        private Vector3 _currentHeldEulerOffset = Vector3.zero;
+        private Vector3 _muzzleAimTarget;
+        private bool _hasMuzzleAimTarget;
+        private Vector3 _muzzleRotationOffset = Vector3.zero;
         public Transform CurrentHeldVisualRoot => _spawnedHeldVisual != null ? _spawnedHeldVisual.transform : null;
 
         private static readonly string[] HandNameCandidates =
@@ -109,6 +113,17 @@ namespace SSAFYPlayTime.Gameplay.Items
         public void SetCharacterRoot(Transform root)
         {
             characterRoot = root;
+        }
+
+        public void SetMuzzleAimTarget(Vector3 target)
+        {
+            _muzzleAimTarget = target;
+            _hasMuzzleAimTarget = true;
+        }
+
+        public void ClearMuzzleAimTarget()
+        {
+            _hasMuzzleAimTarget = false;
         }
 
         public void SetHandAnchor(Transform handAnchor)
@@ -200,29 +215,28 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            if (!string.Equals(ResolveCurrentHeldItemId(), ItemIds.Flamethrower, StringComparison.Ordinal))
-            {
-                return;
-            }
-
             var handAnchor = ResolveHandAnchor();
             if (handAnchor == null)
             {
                 return;
             }
 
-            var searchRoot = characterRoot != null
-                ? characterRoot
-                : itemRuntimeHost != null && itemRuntimeHost.OwnerTransform != null
-                    ? itemRuntimeHost.OwnerTransform
-                    : transform;
+            // 부모-자식 관계에만 의존하지 않고 LateUpdate에서 매 프레임 위치/회전을 동기화한다.
+            // 무기의 방향을 항상 캐릭터 정면(searchRoot.rotation)으로 강제 고정하여 총구가 바닥을 향하지 않게 한다.
+            // 아이템별로 설정된 오프셋 회전을 반영하면서 손의 본(Bone) 회전을 그대로 따른다.
+            // 이렇게 함으로써 캐릭터가 위/아래를 볼 때 총구도 같이 기울어지게 된다.
+            _spawnedHeldVisual.transform.position = handAnchor.position;
 
-            // 한국어: hyekang 원본 WeaponEquipper의 강제 전방 정렬 방식을 그대로 적용해 총구가 캐릭터 전방을 보게 맞춘다.
-            _spawnedHeldVisual.transform.position = handAnchor.TransformPoint(flamethrowerLocalPositionOffset);
-            _spawnedHeldVisual.transform.rotation =
-                Quaternion.LookRotation(-searchRoot.forward, Vector3.up) *
-                Quaternion.Euler(flamethrowerLocalEulerOffset);
-            _spawnedHeldVisual.transform.localScale = flamethrowerLocalScale;
+            if (_hasMuzzleAimTarget)
+            {
+                // 명시적인 총구 조준 지점이 있다면 해당 좌표를 바라보게 한다. (Z축이 전방인 프리팹 기준)
+                _spawnedHeldVisual.transform.LookAt(_muzzleAimTarget);
+            }
+            else
+            {
+                // 명시적인 조준점이 없을 때만 손의 회전과 보정 오차를 따른다.
+                _spawnedHeldVisual.transform.rotation = handAnchor.rotation * Quaternion.Euler(_currentHeldEulerOffset);
+            }
         }
 
         private string ResolveCurrentHeldItemId()
@@ -267,6 +281,11 @@ namespace SSAFYPlayTime.Gameplay.Items
                 position = flamethrowerLocalPositionOffset;
                 euler = flamethrowerLocalEulerOffset;
                 scale = flamethrowerLocalScale;
+                _muzzleRotationOffset = Vector3.zero;
+            }
+            else
+            {
+                _muzzleRotationOffset = Vector3.zero;
             }
 
             if (watermelonSwordAutoGripSnap &&
@@ -276,6 +295,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 position += compensation + watermelonSwordGripFineTune;
             }
 
+            _currentHeldEulerOffset = euler;
             visualTransform.localPosition = position;
             visualTransform.localRotation = Quaternion.Euler(euler);
             visualTransform.localScale = scale;
