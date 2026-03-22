@@ -1,4 +1,5 @@
 using Fusion;
+using RootMotion.Dynamics;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Game.GhostThrow
@@ -173,9 +174,20 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
             _isConsumed = true;
 
-            Rigidbody playerRb = networkPlayer != null
-                ? networkPlayer.transform.root.GetComponent<Rigidbody>()
-                : playerObj.GetComponentInParent<Rigidbody>();
+            // root rigidbody가 kinematic일 수 있으므로(회복 구간 등) PuppetMaster hips muscle을 우선 타겟으로 사용
+            Rigidbody playerRb = null;
+            if (networkPlayer != null)
+            {
+                var puppet = networkPlayer.GetComponentInChildren<RootMotion.Dynamics.PuppetMaster>(true);
+                if (puppet != null && puppet.muscles != null && puppet.muscles.Length > 0 &&
+                    puppet.muscles[0].joint != null)
+                    playerRb = puppet.muscles[0].joint.GetComponent<Rigidbody>();
+                playerRb ??= networkPlayer.transform.root.GetComponent<Rigidbody>();
+            }
+            else
+            {
+                playerRb = playerObj.GetComponentInParent<Rigidbody>();
+            }
             if (playerRb != null && !playerRb.isKinematic)
             {
                 Vector3 randomHorizontal = new Vector3(
