@@ -167,9 +167,20 @@ public sealed partial class NetworkPlayer
 
         // BodyPartPhysicsManager 상태 전환
 
-        // 비호스트 비주얼 모드 동기화: 호스트의 SetStunVisualMode 호출을 미러링
-        // 기절 진입 → 래그돌 메시 표시, 회복 → 애니메이션 메시 복원
-        SetStunVisualMode(!isRecovering);
+        // 비호스트 비주얼 모드 동기화
+        if (!isRecovering)
+        {
+            // 기절 진입: 래그돌(물리) 메시 표시
+            SetStunVisualMode(true);
+        }
+        else if (GetStunPresentationPhase() != StunPresentationPhase.RecoverStabilizing)
+        {
+            // 안정화 단계가 아닌 회복(완전 회복): 애니메이션 메시 복원
+            // RecoverStabilizing 중에는 SynchronizePhysicsPresentationState()가
+            // 단계 종료를 감지하여 자동으로 복원하므로 여기서 호출하지 않는다.
+            // (조기 복원 시 안정화 0.4초 동안 캐릭터가 Idle 포즈로 보이는 버그 발생)
+            SetStunVisualMode(false);
+        }
 
         // 로컬 플레이어(OwnerProxy)가 기절 진입 시 슬로우모션 연출
         if (!isRecovering && HasInputAuthority)
@@ -219,6 +230,7 @@ public sealed partial class NetworkPlayer
                phase == PhysicalPhase.GrabIntent ||
                phase == PhysicalPhase.Recovering ||
                phase == PhysicalPhase.CarryingStunned ||
+               phase == PhysicalPhase.BeingCarriedStunned ||  // 운반 당하는 쪽도 포함
                UsesPhysicsPosePresentation(phase);
     }
 
@@ -262,8 +274,31 @@ public sealed partial class NetworkPlayer
             return;
 
         var targetPosition = transform.position;
+
+        // BeingCarriedStunned: 운반 중 presentation root를 transform.position에 즉시 동기화.
+        // 클라이언트의 transform.position은 Fusion 네트워크 동기화(호스트 기준) carry 위치.
+        // SyncCarriedRootToPhysicsBody()는 StateAuthority(호스트)에서만 실행되므로
+        // 클라이언트에서는 Fusion이 전달한 carry 위치가 그대로 유지된다.
+        if (!HasStateAuthority && GetPhysicalPhase() == PhysicalPhase.BeingCarriedStunned)
+        {
+            presentationRoot.position = targetPosition;
+            _proxyPresentationRootSmoothingActive = false;
+            return;
+        }
+
         if (!ShouldSmoothProxyPresentationRoot(presentationRoot))
         {
+            // 물리 포즈 페이즈(BeingGrabbed/Dragged 등)에서는 ShouldUseHardPhysicsVisualMode()=true로
+            // smoothing이 꺼지지만, presentationRoot는 여전히 갱신되어야 한다.
+            // 그렇지 않으면 _proxyPresentationRootSmoothingActive=false인 상태에서
+            // 아무것도 하지 않아 비주얼 메시 루트가 그랩 이전 위치에 고정된다.
+            if (UsesPhysicsPosePresentation(GetPhysicalPhase()) && !HasStateAuthority)
+            {
+                presentationRoot.position = targetPosition;
+                _proxyPresentationRootSmoothingActive = false;
+                return;
+            }
+
             if (_proxyPresentationRootSmoothingActive &&
                 (presentationRoot.position - targetPosition).sqrMagnitude > 0.0001f)
             {
@@ -432,9 +467,14 @@ public sealed partial class NetworkPlayer
                 _lastObservedCarryMode = currentCarryMode;
             if (isCarryNow && !_wasCarryPhaseLastFrame)
             {
-                _hipsSnapshotFrom = syncPhysicsObjects[0] != null
-                    ? syncPhysicsObjects[0].transform.position
-                    : latestHips;
+                // BeingCarriedStunned 클라이언트: 로컬 muscle 위치(기절 진입 위치)를 hipsFrom으로 쓰면
+                // Fusion Alpha가 0→1을 순환할 때마다 hips가 기절위치↔carry위치를 진동해
+                // 캐릭터·카메라가 원래 위치로 돌아가는 버그 발생.
+                // 피운반자(victim) 클라이언트에서는 네트워크 carry 위치를 즉시 기준으로 삼는다.
+                bool victimCarryOnClient = !HasStateAuthority && phase == PhysicalPhase.BeingCarriedStunned;
+                _hipsSnapshotFrom = victimCarryOnClient
+                    ? latestHips
+                    : (syncPhysicsObjects[0] != null ? syncPhysicsObjects[0].transform.position : latestHips);
                 _hipsSnapshotTo = latestHips;
 
                 if (!HasStateAuthority &&
@@ -458,8 +498,10 @@ public sealed partial class NetworkPlayer
                 _carryExitSnapshotAnchor = _lastCarryAnchorPosition != Vector3.zero
                     ? _lastCarryAnchorPosition
                     : transform.position;
-                _hipsSnapshotFrom = syncPhysicsObjects[0] != null
-                    ? syncPhysicsObjects[0].transform.position
+                // carry 종료 직후: 로컬 물리(stun entry) 대신 마지막 carry 위치를 from으로.
+                // 로컬 물리 위치를 쓰면 carry 종료 후에도 진동 버그가 동일하게 재발.
+                _hipsSnapshotFrom = _lastCarryAnchorPosition != Vector3.zero
+                    ? _lastCarryAnchorPosition
                     : latestHips;
                 _hipsSnapshotTo = latestHips;
 
@@ -571,6 +613,13 @@ public sealed partial class NetworkPlayer
             }
 
             syncPhysicsObjects[0].transform.position = desiredHipsPosition;
+
+            // carry anchor 정보 미수신 등으로 TryApplyCarryProxyRootCorrection()이
+            // 실패했을 때 hips 위치를 root로 사용하는 최소 fallback.
+            if (isCarryPhase && !HasStateAuthority && !didApplyRootCorrection)
+            {
+                ApplyProxyCarryRootPosition(desiredHipsPosition, isSettling: true);
+            }
 
             var appliedHips = syncPhysicsObjects[0].transform.position;
             var rootGap = Vector3.Distance(appliedHips, transform.position);
@@ -979,9 +1028,10 @@ public sealed partial class NetworkPlayer
         // PartyMonsterAnimationDriver가 있으면 애니메이션은 거기서 직접 제어
         if (_hasExternalAnimationDriver && _externalAnimationDriver != null)
         {
-            // Host-side proxies have state authority, so Render() will not replay their
-            // replicated events. Apply the action immediately on that local copy.
-            if (HasStateAuthority && !HasInputAuthority)
+            // StateAuthority 플레이어는 Render()에서 replicated event를 재생하지 않으므로 즉시 적용.
+            // HasInputAuthority(호스트 본인)도 포함 — 기절 이벤트(StunFall/StunRecover)는
+            // HandleInput() 경로를 거치지 않으므로 RaiseAnimationEvent에서 직접 드라이버에 전달해야 한다.
+            if (HasStateAuthority)
                 ApplyExternalDriverAnimationEvent(eventType);
         }
         else if (animator != null)
