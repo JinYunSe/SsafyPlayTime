@@ -519,6 +519,13 @@ public sealed partial class NetworkPlayer
     /// </summary>
     public void SetAnchorGrabBoneBlend(SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId anchorId, float weight = 0.75f)
     {
+        if (_physicsPoseBindings.Count == 0)
+        {
+            var presentationRoot = GetPresentationRootTransform();
+            if (presentationRoot != null)
+                EnsurePhysicsPoseBindings(presentationRoot);
+        }
+
         if (_physicsPoseBindings.Count == 0) return;
 
         var boneNames = ResolveAnchorBoneNames(anchorId);
@@ -553,6 +560,13 @@ public sealed partial class NetworkPlayer
     /// </summary>
     public void ClearAnchorGrabBoneBlend(SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId anchorId)
     {
+        if (_physicsPoseBindings.Count == 0)
+        {
+            var presentationRoot = GetPresentationRootTransform();
+            if (presentationRoot != null)
+                EnsurePhysicsPoseBindings(presentationRoot);
+        }
+
         if (_physicsPoseBindings.Count == 0) return;
 
         var boneNames = ResolveAnchorBoneNames(anchorId);

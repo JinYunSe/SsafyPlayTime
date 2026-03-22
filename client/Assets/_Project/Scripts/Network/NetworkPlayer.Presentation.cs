@@ -26,14 +26,24 @@ public sealed partial class NetworkPlayer
     private const float OwnerCarryBoneRotationLerpScale = 1.1f;
     private const float CarryHipsImmediateSnapDistance = 0.85f;
     private const float CarryPresentationTraceGapThreshold = 0.3f;
-    private const float CarryProxyRootFollowSpeed = 20f;
-    private const float CarryProxyRootSnapDistance = 1.10f;
     private const float CarryResidualRootGapThreshold = 0.90f;
     private const float CarryRootDebugGapThreshold = 1.35f;
+    private const float CarryProxyHipsSoftAlignDistance = 0.35f;
+    private const float CarryReleaseSettleHipsSoftAlignDistance = 0.55f;
+    private const float CarryReleaseSettleHipsSnapDistance = 1.35f;
+    private const float CarryReleaseSettleEmergencySnapDistance = 2.25f;
+    private const float CarryProxyTargetCacheWindow = 0.18f;
+    private const float CarryProxyMinimumHipsAlpha = 0.72f;
     private const float RemoteStablePresentationRootFollowSpeed = 10f;
     private const float RemoteBufferedPresentationRootFollowSpeed = 7f;
     private const float OwnerBufferedPresentationRootFollowSpeed = 9f;
     private const float ProxyPresentationRootSnapDistance = 2.75f;
+    private const float IncomingHeldVictimStableRootOffset = 0.1f;
+    private const float IncomingHeldVictimRecoveringRootOffset = 0.16f;
+    private const float IncomingHeldVictimStableBoneBlendWeight = 0.42f;
+    private const float IncomingHeldVictimRecoveringBoneBlendWeight = 0.58f;
+    private const float IncomingHeldVictimMinSeparation = 0.2f;
+    private const float IncomingHeldVictimMaxSeparation = 1.15f;
     private bool _pmNextAttackLeft;
 
     // OwnerProxy 로컬 예측 reconcile
@@ -81,6 +91,13 @@ public sealed partial class NetworkPlayer
     // CarrySolveFrame: carry 진입/종료 시 snapshot 재시드용
     private bool _wasCarryPhaseLastFrame;
     private Vector3 _carryExitSnapshotAnchor;
+    private Vector3 _proxyCarrySupportRootOffset;
+    private bool _hasProxyCarrySupportRootOffset;
+    private PhysicalPhase _lastInterpolatedPhase = PhysicalPhase.Stable;
+    private PhysicalPhase _cachedProxyCarryTargetPhase = PhysicalPhase.Stable;
+    private Vector3 _cachedProxyCarryAnchorTarget;
+    private Vector3 _cachedProxyCarryRootTarget;
+    private float _cachedProxyCarryTargetUntilTime = float.NegativeInfinity;
 
     // PuppetMaster 애니메이션 모드 런타임 상태
     private bool _usePuppetMasterAnimation;
@@ -89,6 +106,8 @@ public sealed partial class NetworkPlayer
     private bool _pmHasMovementSpeedParam;
     private string _pmCurrentStateName;
     private float _pmActionLockedUntil;
+    private SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId _incomingHeldVictimBlendAnchorId =
+        SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.None;
 
     public override void Render()
     {
@@ -283,7 +302,17 @@ public sealed partial class NetworkPlayer
             return;
 
         var targetPosition = transform.position;
-        if (!ShouldSmoothProxyPresentationRoot(presentationRoot))
+        var hasIncomingHeldVictimPresentation = TryResolveIncomingHeldVictimPresentation(
+            out var incomingHeldRootOffset,
+            out var incomingHeldRecoveringTarget);
+        if (hasIncomingHeldVictimPresentation && incomingHeldRootOffset.sqrMagnitude > 0.0001f)
+            targetPosition += incomingHeldRootOffset;
+
+        var shouldSmoothPresentationRoot =
+            ShouldSmoothProxyPresentationRoot(presentationRoot) ||
+            hasIncomingHeldVictimPresentation;
+
+        if (!shouldSmoothPresentationRoot)
         {
             if (_proxyPresentationRootSmoothingActive &&
                 (presentationRoot.position - targetPosition).sqrMagnitude > 0.0001f)
@@ -304,13 +333,106 @@ public sealed partial class NetworkPlayer
             return;
         }
 
-        var alpha = 1f - Mathf.Exp(-ResolveProxyPresentationRootFollowSpeed() * Time.deltaTime);
+        var followSpeed = ResolveProxyPresentationRootFollowSpeed();
+        if (hasIncomingHeldVictimPresentation)
+            followSpeed = Mathf.Max(followSpeed, incomingHeldRecoveringTarget ? 12f : 10f);
+
+        var alpha = 1f - Mathf.Exp(-followSpeed * Time.deltaTime);
         presentationRoot.position = Vector3.Lerp(presentationRoot.position, targetPosition, alpha);
         _proxyPresentationRootSmoothingActive = true;
     }
 
+    private void ClearIncomingHeldVictimPresentation()
+    {
+        if (_incomingHeldVictimBlendAnchorId == SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.None)
+            return;
+
+        ClearAnchorGrabBoneBlend(_incomingHeldVictimBlendAnchorId);
+        _incomingHeldVictimBlendAnchorId = SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.None;
+    }
+
+    private void ApplyIncomingHeldVictimBoneBlend(
+        SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId anchorId,
+        bool isRecoveringTarget)
+    {
+        if (anchorId == SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.None)
+        {
+            ClearIncomingHeldVictimPresentation();
+            return;
+        }
+
+        if (_incomingHeldVictimBlendAnchorId != SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.None &&
+            _incomingHeldVictimBlendAnchorId != anchorId)
+        {
+            ClearAnchorGrabBoneBlend(_incomingHeldVictimBlendAnchorId);
+        }
+
+        _incomingHeldVictimBlendAnchorId = anchorId;
+        SetAnchorGrabBoneBlend(
+            anchorId,
+            isRecoveringTarget
+                ? IncomingHeldVictimRecoveringBoneBlendWeight
+                : IncomingHeldVictimStableBoneBlendWeight);
+    }
+
+    private bool TryResolveIncomingHeldVictimPresentation(
+        out Vector3 rootOffset,
+        out bool isRecoveringTarget)
+    {
+        rootOffset = Vector3.zero;
+        isRecoveringTarget = false;
+
+        if (HasStateAuthority || ShouldUseHardPhysicsVisualMode())
+        {
+            ClearIncomingHeldVictimPresentation();
+            return false;
+        }
+
+        var phase = GetPhysicalPhase();
+        if (phase == PhysicalPhase.Stunned ||
+            phase == PhysicalPhase.StunnedCollapse ||
+            phase == PhysicalPhase.BeingCarriedStunned ||
+            phase == PhysicalPhase.CarryingStunned)
+        {
+            ClearIncomingHeldVictimPresentation();
+            return false;
+        }
+
+        if (!TryGetIncomingHeldPresentationData(
+                out _,
+                out var holderWorld,
+                out var anchorId,
+                out isRecoveringTarget))
+        {
+            ClearIncomingHeldVictimPresentation();
+            return false;
+        }
+
+        ApplyIncomingHeldVictimBoneBlend(anchorId, isRecoveringTarget);
+
+        var planarToHolder = Vector3.ProjectOnPlane(holderWorld - transform.position, Vector3.up);
+        var separation = planarToHolder.magnitude;
+        if (separation <= 0.0001f)
+            return true;
+
+        var pullStrength = 1f - Mathf.InverseLerp(
+            IncomingHeldVictimMinSeparation,
+            IncomingHeldVictimMaxSeparation,
+            separation);
+        if (pullStrength <= 0.001f)
+            return true;
+
+        var maxOffset = isRecoveringTarget
+            ? IncomingHeldVictimRecoveringRootOffset
+            : IncomingHeldVictimStableRootOffset;
+        rootOffset = planarToHolder.normalized * (maxOffset * pullStrength);
+        return true;
+    }
+
     private bool TryApplyCarryProxyRootCorrection(
         Vector3 carryRootTarget,
+        Vector3 residualRootTarget,
+        float residualGapHint,
         SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode carryMode,
         float slowMoAlphaScale,
         out Vector3 rootBefore,
@@ -322,37 +444,152 @@ public sealed partial class NetworkPlayer
     {
         rootBefore = transform.position;
         rootAfter = rootBefore;
-        gapBefore = Vector3.Distance(rootBefore, carryRootTarget);
+        var correctionTarget = carryRootTarget;
+        gapBefore = Vector3.Distance(rootBefore, correctionTarget);
         gapAfter = gapBefore;
         didSnap = false;
+
+        if (!HasStateAuthority &&
+            gapBefore <= 0.0001f &&
+            residualGapHint > CarryResidualRootGapThreshold)
+        {
+            correctionTarget = residualRootTarget;
+            gapBefore = Vector3.Distance(rootBefore, correctionTarget);
+            gapAfter = gapBefore;
+        }
 
         if (HasStateAuthority || gapBefore <= 0.0001f)
             return false;
 
         // CarrySolveFrame: CarryPhysicsProfile에서 proxy 설정값 가져오기
-        var proxyFollowSpeed = CarryProxyRootFollowSpeed;
-        var proxySnapDistance = CarryProxyRootSnapDistance;
-        if (carryPhysicsProfile != null)
-        {
-            var settings = carryPhysicsProfile.GetSettings(carryMode);
-            proxyFollowSpeed = settings.proxyRootFollowSpeed;
-            proxySnapDistance = settings.proxyRootSnapDistance;
-        }
+        var settings = ResolveCarryModeSettings(carryMode);
+        var proxyFollowSpeed = settings.proxyRootFollowSpeed;
+        var proxySnapDistance = settings.proxyRootSnapDistance;
+        var effectiveGap = Mathf.Max(gapBefore, residualGapHint);
+        var emergencySnapDistance = isSettling
+            ? Mathf.Max(CarryReleaseSettleEmergencySnapDistance, proxySnapDistance * 1.15f)
+            : ResolveCarryEmergencySnapDistance(proxySnapDistance);
+        var shouldEmergencySnap = effectiveGap >= emergencySnapDistance;
 
-        if (gapBefore >= proxySnapDistance)
+        if (shouldEmergencySnap)
         {
-            rootAfter = carryRootTarget;
+            rootAfter = correctionTarget;
             didSnap = true;
         }
         else
         {
-            var step = Mathf.Max(0.10f, proxyFollowSpeed * Time.deltaTime * Mathf.Max(slowMoAlphaScale, 0.35f));
-            rootAfter = Vector3.MoveTowards(rootBefore, carryRootTarget, step);
+            var step = Mathf.Max(
+                0.10f,
+                ResolveCarryCorrectionFollowSpeed(proxyFollowSpeed, effectiveGap >= proxySnapDistance) *
+                Time.deltaTime *
+                Mathf.Max(slowMoAlphaScale, 0.35f));
+            rootAfter = Vector3.MoveTowards(rootBefore, correctionTarget, step);
         }
 
         ApplyProxyCarryRootPosition(rootAfter, isSettling);
-        gapAfter = Vector3.Distance(rootAfter, carryRootTarget);
+        gapAfter = Vector3.Distance(rootAfter, correctionTarget);
         return (rootAfter - rootBefore).sqrMagnitude > 0.000001f;
+    }
+
+    private void CacheProxyCarryTargets(PhysicalPhase phase, Vector3 carryAnchorTarget, Vector3 carryRootTarget)
+    {
+        _cachedProxyCarryTargetPhase = phase;
+        _cachedProxyCarryAnchorTarget = carryAnchorTarget;
+        _cachedProxyCarryRootTarget = carryRootTarget;
+        _cachedProxyCarryTargetUntilTime = Time.time + CarryProxyTargetCacheWindow;
+    }
+
+    private void ClearCachedProxyCarryTargets()
+    {
+        _cachedProxyCarryTargetPhase = PhysicalPhase.Stable;
+        _cachedProxyCarryAnchorTarget = Vector3.zero;
+        _cachedProxyCarryRootTarget = Vector3.zero;
+        _cachedProxyCarryTargetUntilTime = float.NegativeInfinity;
+    }
+
+    private bool TryGetCachedProxyCarryTargets(
+        PhysicalPhase phase,
+        out Vector3 carryAnchorTarget,
+        out Vector3 carryRootTarget)
+    {
+        carryAnchorTarget = _cachedProxyCarryAnchorTarget;
+        carryRootTarget = _cachedProxyCarryRootTarget;
+
+        if (!IsCarryPhysicalPhase(phase))
+            return false;
+
+        if (_cachedProxyCarryTargetPhase != phase)
+            return false;
+
+        if (Time.time > _cachedProxyCarryTargetUntilTime)
+            return false;
+
+        return carryAnchorTarget != Vector3.zero || carryRootTarget != Vector3.zero;
+    }
+
+    private Vector3 ResolveProxyCarryDesiredHipsPosition(
+        PhysicalPhase phase,
+        Vector3 desiredHipsPosition,
+        Vector3 carryAnchorTarget,
+        out bool didOverride,
+        out bool didSnap,
+        out float carryAnchorGap)
+    {
+        carryAnchorGap = Vector3.Distance(desiredHipsPosition, carryAnchorTarget);
+        didOverride = false;
+        didSnap = false;
+
+        if (HasStateAuthority || carryAnchorGap <= CarryProxyHipsSoftAlignDistance)
+            return desiredHipsPosition;
+
+        var hardSnapDistance = phase == PhysicalPhase.BeingCarriedStunned
+            ? CarryHipsImmediateSnapDistance
+            : CarryHipsImmediateSnapDistance * 1.35f;
+
+        didOverride = true;
+        if (carryAnchorGap >= hardSnapDistance)
+        {
+            didSnap = true;
+            return carryAnchorTarget;
+        }
+
+        var blend = Mathf.InverseLerp(CarryProxyHipsSoftAlignDistance, hardSnapDistance, carryAnchorGap);
+        blend = Mathf.Lerp(0.45f, 1f, blend);
+        return Vector3.Lerp(desiredHipsPosition, carryAnchorTarget, blend);
+    }
+
+    private Vector3 ResolveCarryReleaseSettleDesiredHipsPosition(
+        PhysicalPhase phase,
+        Vector3 desiredHipsPosition,
+        out bool didOverride,
+        out bool didSnap,
+        out float exitAnchorGap)
+    {
+        didOverride = false;
+        didSnap = false;
+        exitAnchorGap = 0f;
+
+        if (HasStateAuthority || _carryExitSnapshotAnchor == Vector3.zero)
+            return desiredHipsPosition;
+
+        exitAnchorGap = Vector3.Distance(desiredHipsPosition, _carryExitSnapshotAnchor);
+        if (exitAnchorGap <= CarryReleaseSettleHipsSoftAlignDistance)
+            return desiredHipsPosition;
+
+        didOverride = true;
+        var hardSnapDistance = phase == PhysicalPhase.Recovering
+            ? CarryReleaseSettleHipsSnapDistance
+            : CarryReleaseSettleHipsSnapDistance * 1.15f;
+
+        if (exitAnchorGap >= hardSnapDistance)
+        {
+            didSnap = true;
+            return _carryExitSnapshotAnchor;
+        }
+
+        var blend = Mathf.InverseLerp(CarryReleaseSettleHipsSoftAlignDistance, hardSnapDistance, exitAnchorGap);
+        blend = Mathf.Lerp(0.45f, 1f, blend);
+        return Vector3.Lerp(desiredHipsPosition, _carryExitSnapshotAnchor, blend);
     }
 
     private void ApplyProxyCarryRootPosition(Vector3 nextRootPosition, bool isSettling = false)
@@ -376,20 +613,66 @@ public sealed partial class NetworkPlayer
         if (phase == PhysicalPhase.BeingCarriedStunned)
         {
             if (!(bool)NetworkedVictimAnchorValid)
+            {
+                if (TryGetCachedProxyCarryTargets(phase, out carryAnchorTarget, out carryRootTarget))
+                    return true;
+
+                TraceCarryDebugSample(
+                    "TryResolveProxyCarryTargets",
+                    $"missingVictimAnchor desiredHips={FormatCarryDebugVector(desiredHipsPosition)} " +
+                    $"rootOffsetValid={(bool)NetworkedVictimRootOffsetValid}",
+                    forceSample: false);
                 return false;
+            }
 
             carryAnchorTarget = NetworkedVictimAnchorPosition;
             carryRootTarget = carryAnchorTarget;
             if ((bool)NetworkedVictimRootOffsetValid)
                 carryRootTarget += NetworkedVictimRootOffset;
 
+            CacheProxyCarryTargets(phase, carryAnchorTarget, carryRootTarget);
             return true;
         }
 
         if (phase == PhysicalPhase.CarryingStunned)
+        {
+            if ((bool)NetworkedCarrierAnchorValid)
+            {
+                carryAnchorTarget = NetworkedCarrierAnchorPosition;
+                var rootOffset = _hasProxyCarrySupportRootOffset
+                    ? _proxyCarrySupportRootOffset
+                    : Vector3.ClampMagnitude(desiredHipsPosition - carryAnchorTarget, 1.75f);
+                carryRootTarget = carryAnchorTarget + rootOffset;
+                CacheProxyCarryTargets(phase, carryAnchorTarget, carryRootTarget);
+            }
+            else
+            {
+                if (TryGetCachedProxyCarryTargets(phase, out carryAnchorTarget, out carryRootTarget))
+                    return true;
+
+                TraceCarryDebugSample(
+                    "TryResolveProxyCarryTargets",
+                    $"missingCarrierAnchor desiredHips={FormatCarryDebugVector(desiredHipsPosition)} " +
+                    $"supportOffsetCached={_hasProxyCarrySupportRootOffset}",
+                    forceSample: false);
+            }
+
             return true;
+        }
 
         return false;
+    }
+
+    private void CaptureProxyCarrySupportRootOffset(Vector3 rootPosition, Vector3 supportAnchorPosition)
+    {
+        _proxyCarrySupportRootOffset = Vector3.ClampMagnitude(rootPosition - supportAnchorPosition, 1.75f);
+        _hasProxyCarrySupportRootOffset = true;
+    }
+
+    private void ClearProxyCarrySupportRootOffset()
+    {
+        _proxyCarrySupportRootOffset = Vector3.zero;
+        _hasProxyCarrySupportRootOffset = false;
     }
 
     private void InterpolateRemoteBoneRotations()
@@ -401,6 +684,7 @@ public sealed partial class NetworkPlayer
         int boneCount = syncPhysicsObjects.Length;
         var phase = GetPhysicalPhase();
         var isCarryPhase = IsCarryPhysicalPhase(phase);
+        var phaseChanged = phase != _lastInterpolatedPhase;
 
         // ── 스냅샷 버퍼 초기화 ──
         if (!_snapshotBufferInitialized || _boneSnapshotFrom == null || _boneSnapshotFrom.Length != boneCount)
@@ -451,23 +735,40 @@ public sealed partial class NetworkPlayer
             var currentCarryMode = GetLocalCarryMode();
             if (isCarryNow && currentCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None)
                 _lastObservedCarryMode = currentCarryMode;
-            if (isCarryNow && !_wasCarryPhaseLastFrame)
+            if (isCarryNow && (!_wasCarryPhaseLastFrame || phaseChanged))
             {
                 _hipsSnapshotFrom = syncPhysicsObjects[0] != null
                     ? syncPhysicsObjects[0].transform.position
                     : latestHips;
                 _hipsSnapshotTo = latestHips;
+                _carryExitSnapshotAnchor = Vector3.zero;
+                _carryReleaseSettleRemaining = 0f;
+                ClearCachedProxyCarryTargets();
 
                 if (!HasStateAuthority &&
                     TryResolveProxyCarryTargets(phase, latestHips, out _, out var carryRootTarget))
                 {
                     _lastCarryAnchorPosition = carryRootTarget;
+
+                    if (phase == PhysicalPhase.CarryingStunned && (bool)NetworkedCarrierAnchorValid)
+                        CaptureProxyCarrySupportRootOffset(transform.position, NetworkedCarrierAnchorPosition);
                 }
             }
             else if (isCarryNow)
             {
                 if (!HasStateAuthority)
                 {
+                    if (phase == PhysicalPhase.CarryingStunned &&
+                        !_hasProxyCarrySupportRootOffset &&
+                        (bool)NetworkedCarrierAnchorValid)
+                    {
+                        CaptureProxyCarrySupportRootOffset(transform.position, NetworkedCarrierAnchorPosition);
+                    }
+                    else if (phase != PhysicalPhase.CarryingStunned && _hasProxyCarrySupportRootOffset)
+                    {
+                        ClearProxyCarrySupportRootOffset();
+                    }
+
                     if (TryResolveProxyCarryTargets(phase, latestHips, out _, out var carryRootTarget))
                         _lastCarryAnchorPosition = carryRootTarget;
                     else
@@ -479,6 +780,8 @@ public sealed partial class NetworkPlayer
                 _carryExitSnapshotAnchor = _lastCarryAnchorPosition != Vector3.zero
                     ? _lastCarryAnchorPosition
                     : transform.position;
+                ClearProxyCarrySupportRootOffset();
+                ClearCachedProxyCarryTargets();
                 _hipsSnapshotFrom = syncPhysicsObjects[0] != null
                     ? syncPhysicsObjects[0].transform.position
                     : latestHips;
@@ -491,11 +794,12 @@ public sealed partial class NetworkPlayer
                         : SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry;
                     var settleProfile = carryPhysicsProfile != null
                         ? carryPhysicsProfile.GetSettings(settleMode)
-                        : new SSAFYPlayTime.Character.CarryPhysicsProfile.CarryModeSettings { carryReleaseSettleDuration = 0.45f };
+                        : SSAFYPlayTime.Character.CarryPhysicsProfile.GetDefaultSettings(settleMode);
                     _carryReleaseSettleRemaining = settleProfile.carryReleaseSettleDuration;
                 }
             }
             _wasCarryPhaseLastFrame = isCarryNow;
+            _lastInterpolatedPhase = phase;
         }
 
         // ── 슬로우모션 보간 스케일 ──
@@ -509,7 +813,7 @@ public sealed partial class NetworkPlayer
             var hipsFrom = _hipsSnapshotFrom;
             var hipsTo = _hipsSnapshotTo;
             var hipsCurrent = syncPhysicsObjects[0].transform.position;
-            var deadzone = ResolveOwnerProxyHipsDeadzone();
+            var deadzone = isCarryPhase ? 0f : ResolveOwnerProxyHipsDeadzone();
             var snapSqrDistance = isCarryPhase
                 ? CarryHipsImmediateSnapDistance * CarryHipsImmediateSnapDistance
                 : 15f;
@@ -527,10 +831,12 @@ public sealed partial class NetworkPlayer
             }
             else
             {
-                hipsAlpha = ResolveHipsInterpolationAlpha(interpolator.Alpha) * slowMoAlphaScale;
+                hipsAlpha = isCarryPhase
+                    ? Mathf.Clamp01(Mathf.Max(interpolator.Alpha, CarryProxyMinimumHipsAlpha) * Mathf.Max(slowMoAlphaScale, 0.5f))
+                    : ResolveHipsInterpolationAlpha(interpolator.Alpha) * slowMoAlphaScale;
                 var interpolatedHips = Vector3.Lerp(hipsFrom, hipsTo, hipsAlpha);
 
-                if (deadzone > 0f && (interpolatedHips - hipsCurrent).sqrMagnitude <= deadzone * deadzone)
+                if (!isCarryPhase && deadzone > 0f && (interpolatedHips - hipsCurrent).sqrMagnitude <= deadzone * deadzone)
                     desiredHipsPosition = hipsCurrent;
                 else
                     desiredHipsPosition = interpolatedHips;
@@ -542,6 +848,12 @@ public sealed partial class NetworkPlayer
             var rootGapAfterCorrection = rootGapBeforeCorrection;
             var didRootSnap = false;
             var didApplyRootCorrection = false;
+            var didCarryHipsOverride = false;
+            var didCarryHipsSnap = false;
+            var carryAnchorGap = 0f;
+            var didReleaseSettleHipsOverride = false;
+            var didReleaseSettleHipsSnap = false;
+            var releaseSettleExitGap = 0f;
             var proxyCarryAnchor = desiredHipsPosition;
             var proxyCarryRootTarget = desiredHipsPosition;
             if (isCarryPhase)
@@ -555,9 +867,23 @@ public sealed partial class NetworkPlayer
                     proxyCarryAnchor = desiredHipsPosition;
                     proxyCarryRootTarget = desiredHipsPosition;
                 }
+                else
+                {
+                    desiredHipsPosition = ResolveProxyCarryDesiredHipsPosition(
+                        phase,
+                        desiredHipsPosition,
+                        proxyCarryAnchor,
+                        out didCarryHipsOverride,
+                        out didCarryHipsSnap,
+                        out carryAnchorGap);
+                }
+
+                var residualGapBeforeCorrection = Vector3.Distance(rootBeforeCorrection, desiredHipsPosition);
 
                 didApplyRootCorrection = TryApplyCarryProxyRootCorrection(
                     proxyCarryRootTarget,
+                    desiredHipsPosition,
+                    residualGapBeforeCorrection,
                     carryModeForProxy,
                     slowMoAlphaScale,
                     out rootBeforeCorrection,
@@ -575,9 +901,20 @@ public sealed partial class NetworkPlayer
                 var settleMode = _lastObservedCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None
                     ? _lastObservedCarryMode
                     : SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry;
+                var settleRootTarget = _carryExitSnapshotAnchor != Vector3.zero
+                    ? _carryExitSnapshotAnchor
+                    : desiredHipsPosition;
+                desiredHipsPosition = ResolveCarryReleaseSettleDesiredHipsPosition(
+                    phase,
+                    desiredHipsPosition,
+                    out didReleaseSettleHipsOverride,
+                    out didReleaseSettleHipsSnap,
+                    out releaseSettleExitGap);
 
                 didApplyRootCorrection = TryApplyCarryProxyRootCorrection(
+                    settleRootTarget,
                     desiredHipsPosition,
+                    Vector3.Distance(transform.position, desiredHipsPosition),
                     settleMode,
                     slowMoAlphaScale,
                     out rootBeforeCorrection,
@@ -587,7 +924,10 @@ public sealed partial class NetworkPlayer
                     out didRootSnap,
                     isSettling: true);
 
-                if (_carryReleaseSettleRemaining <= 0f)
+                if (_carryReleaseSettleRemaining <= 0f ||
+                    (_carryExitSnapshotAnchor != Vector3.zero &&
+                     !didReleaseSettleHipsOverride &&
+                     releaseSettleExitGap <= CarryPresentationTraceGapThreshold))
                     _carryExitSnapshotAnchor = Vector3.zero;
             }
 
@@ -605,7 +945,8 @@ public sealed partial class NetworkPlayer
                         $"hipsTarget={FormatCarryDebugVector(hipsTo)} hipsApplied={FormatCarryDebugVector(appliedHips)} " +
                         $"rootBefore={FormatCarryDebugVector(rootBeforeCorrection)} rootAfter={FormatCarryDebugVector(rootAfterCorrection)} " +
                         $"gapBefore={rootGapBeforeCorrection:F2} gapAfter={rootGapAfterCorrection:F2} residualGap={rootGap:F2} " +
-                        $"hipsAlpha={hipsAlpha:F2} deadzone={deadzone:F2} hipsSnap={didHipsSnap} rootSnap={didRootSnap} rootMoved={didApplyRootCorrection}",
+                        $"hipsAlpha={hipsAlpha:F2} deadzone={deadzone:F2} hipsSnap={didHipsSnap} rootSnap={didRootSnap} rootMoved={didApplyRootCorrection} " +
+                        $"carryAnchorGap={carryAnchorGap:F2} carryHipsOverride={didCarryHipsOverride} carryHipsSnap={didCarryHipsSnap}",
                         rootGap > CarryRootDebugGapThreshold);
                 }
             }
@@ -617,7 +958,8 @@ public sealed partial class NetworkPlayer
                     $"hipsTarget={FormatCarryDebugVector(hipsTo)} hipsApplied={FormatCarryDebugVector(appliedHips)} " +
                     $"rootBefore={FormatCarryDebugVector(rootBeforeCorrection)} rootAfter={FormatCarryDebugVector(rootAfterCorrection)} " +
                     $"gapBefore={rootGapBeforeCorrection:F2} gapAfter={rootGapAfterCorrection:F2} residualGap={rootGap:F2} " +
-                    $"remaining={_carryReleaseSettleRemaining:F2} hipsAlpha={hipsAlpha:F2} rootSnap={didRootSnap} rootMoved={didApplyRootCorrection}");
+                    $"remaining={_carryReleaseSettleRemaining:F2} hipsAlpha={hipsAlpha:F2} rootSnap={didRootSnap} rootMoved={didApplyRootCorrection} " +
+                    $"exitGap={releaseSettleExitGap:F2} settleHipsOverride={didReleaseSettleHipsOverride} settleHipsSnap={didReleaseSettleHipsSnap}");
             }
             else if (rootGap > CarryPresentationTraceGapThreshold)
             {

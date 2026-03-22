@@ -695,10 +695,7 @@ namespace SSAFYPlayTime
                 (bool)payload.Punch ||
                 (bool)payload.Throw ||
                 (bool)payload.Drop ||
-                (bool)payload.Headbutt ||
-                (bool)payload.LeftGrabHold ||
-                (bool)payload.RightGrabHold ||
-                (bool)payload.Sprint;
+                (bool)payload.Headbutt;
 
             var now = Time.unscaledTime;
             if (!forceLog && now - _lastMoveSyncInputLogAt < MOVE_SYNC_INPUT_LOG_INTERVAL)
@@ -724,11 +721,6 @@ namespace SSAFYPlayTime
                 return;
 
             var forceLog =
-                _netMoveInputRaw.sqrMagnitude > 0.0001f ||
-                _netMoveInput.sqrMagnitude > 0.0001f ||
-                _netSprintHeld ||
-                _netLeftMouseDown ||
-                _netRightMouseDown ||
                 _netPunchQueued ||
                 _netThrowQueued ||
                 _netJumpQueued ||

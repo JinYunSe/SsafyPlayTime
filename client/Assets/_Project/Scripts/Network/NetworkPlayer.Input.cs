@@ -194,6 +194,18 @@ public sealed partial class NetworkPlayer
         NetworkedPhysicalPhase = (byte)_localPhysicalPhase;
         NetworkedInstability = _localInstability;
         NetworkedIsDragged = _localIsDragged;
+        var currentGrabActionState = CharacterGrabController.GrabActionState.Idle;
+        var currentHoldVariant = CharacterGrabController.HoldVariant.None;
+        var currentLeftHandHoldMode = CharacterGrabController.HandHoldMode.None;
+        var currentRightHandHoldMode = CharacterGrabController.HandHoldMode.None;
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            currentGrabActionState = characterGrabController.CurrentActionState;
+            currentHoldVariant = characterGrabController.CurrentHoldVariant;
+            currentLeftHandHoldMode = characterGrabController.LeftHandMode;
+            currentRightHandHoldMode = characterGrabController.RightHandMode;
+        }
 
         // ── CarrySolveFrame: carry anchor 네트워크 동기화 (carrier/victim 분리) ──
         NetworkedCarryMode = (byte)_localCarryMode;
@@ -203,7 +215,7 @@ public sealed partial class NetworkPlayer
             {
                 // victim: 자신의 hips-chest 가중 평균 anchor 전송
                 carryRig.UpdateVictimAnchor();
-                if (carryRig.TryGetVictimAnchorWorld(out var vPos, out var vFwd))
+                if (carryRig.TryGetVictimSupportFrameWorld(out var vPos, out var vFwd))
                 {
                     NetworkedVictimAnchorPosition = vPos;
                     NetworkedVictimAnchorForward = vFwd;
@@ -228,8 +240,8 @@ public sealed partial class NetworkPlayer
             }
             else
             {
-                // carrier: 자신의 carry rig anchor 전송
-                if (carryRig.TryGetCarrierAnchorWorld(_localCarryMode, out var cPos, out var cFwd))
+                // carrier: 자신의 torso 기반 support frame 전송
+                if (carryRig.TryGetCarrierSupportFrameWorld(_localCarryMode, currentHoldVariant, out var cPos, out var cFwd))
                 {
                     NetworkedCarrierAnchorPosition = cPos;
                     NetworkedCarrierAnchorForward = cFwd;
@@ -249,6 +261,44 @@ public sealed partial class NetworkPlayer
             NetworkedVictimAnchorValid = false;
             NetworkedVictimRootOffsetValid = false;
             NetworkedCarrierAnchorValid = false;
+        }
+
+        if (_localCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None)
+        {
+            var victimAnchorDetails = (bool)NetworkedVictimAnchorValid
+                ? $" victimAnchor={FormatCarryDebugVector(NetworkedVictimAnchorPosition)}"
+                : string.Empty;
+            var victimRootOffsetDetails = (bool)NetworkedVictimRootOffsetValid
+                ? $" victimRootOffset={FormatCarryDebugVector(NetworkedVictimRootOffset)}"
+                : string.Empty;
+            var carrierAnchorDetails = (bool)NetworkedCarrierAnchorValid
+                ? $" carrierAnchor={FormatCarryDebugVector(NetworkedCarrierAnchorPosition)}"
+                : string.Empty;
+            TraceCarryDebugSample(
+                "PublishCarryState",
+                $"holdVariant={currentHoldVariant} " +
+                $"victimAnchorValid={(bool)NetworkedVictimAnchorValid} " +
+                $"victimRootOffsetValid={(bool)NetworkedVictimRootOffsetValid} " +
+                $"carrierAnchorValid={(bool)NetworkedCarrierAnchorValid}" +
+                victimAnchorDetails +
+                victimRootOffsetDetails +
+                carrierAnchorDetails,
+                forceSample: false);
+        }
+
+        if (characterGrabController != null)
+        {
+            NetworkedGrabActionState = (byte)currentGrabActionState;
+            NetworkedGrabHoldVariant = (byte)currentHoldVariant;
+            NetworkedLeftHandHoldMode = (byte)currentLeftHandHoldMode;
+            NetworkedRightHandHoldMode = (byte)currentRightHandHoldMode;
+        }
+        else
+        {
+            NetworkedGrabActionState = (byte)CharacterGrabController.GrabActionState.Idle;
+            NetworkedGrabHoldVariant = (byte)CharacterGrabController.HoldVariant.None;
+            NetworkedLeftHandHoldMode = (byte)CharacterGrabController.HandHoldMode.None;
+            NetworkedRightHandHoldMode = (byte)CharacterGrabController.HandHoldMode.None;
         }
 
         SynchronizeStunPresentationPhase();
