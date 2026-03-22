@@ -19,7 +19,7 @@ public sealed partial class NetworkPlayer
     private const string BlackholeVisualAssetPath = "Assets/_Project/Prefabs/Items/BlackholeBomb.prefab";
     private const string BlackholeVisualResourcePath = "_Project/Prefabs/Items/BlackholeBomb";
     private const string BlackholeEffectResourcePath = "Polygon Arsenal/Prefabs/Interactive/BlackHole/Mega/MegaBlackHolePurple";
-    private const string FlamethrowerEffectAssetPath = "Assets/Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky.prefab";
+    private const string FlamethrowerEffectAssetPath = "Assets/Resources/Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky.prefab";
     private const string FlamethrowerEffectResourcePath = "Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky";
     private const string SatelliteProjectileAssetPath =
         "Assets/Polygon Arsenal/Prefabs/Combat/Missiles/Sci-Fi/Antimatter/AntimatterMissileBlue.prefab";
@@ -62,12 +62,14 @@ public sealed partial class NetworkPlayer
     [SerializeField] private float flamethrowerVisualForwardOffset = 0.7f;
     [SerializeField] private float flamethrowerVisualHeightOffset = 1.2f;
     [SerializeField] private float flamethrowerVisualScale = 2f;
-    [SerializeField] private Vector3 flamethrowerMuzzleLocalOffset = new(0f, 0f, 0.5f);
+    [SerializeField] private Vector3 flamethrowerMuzzleLocalOffset = new(0f, 0f, 0.8f);
     [SerializeField] private Vector3 flamethrowerMuzzleLocalEulerOffset = Vector3.zero;
     [SerializeField] private bool enableItemWorldEffectLog;
 
     private readonly Collider[] _replicatedBlackholeOverlapBuffer = new Collider[256];
     private readonly Collider[] _replicatedSatelliteOverlapBuffer = new Collider[256];
+    private readonly Collider[] _replicatedFlamethrowerOverlapBuffer = new Collider[128];
+    private readonly HashSet<int> _replicatedFlamethrowerUniqueTargets = new();
     private readonly DefaultItemFieldPrefabResolver _replicatedEffectPrefabResolver = new();
     private static PhysicMaterial s_blackholeProjectileLowFrictionMaterial;
 
@@ -257,51 +259,74 @@ public sealed partial class NetworkPlayer
 
         NetworkedFlamethrowerActive = true;
         ItemRuntimeLog.Info(itemId, $"Flamethrower start replicated: endAt={endAtSec:0.00}", this);
-        var forward = Quaternion.Euler(0f, GetNetworkedVisualYaw(), 0f) * Vector3.forward;
-        forward.y = 0f;
-        if (forward.sqrMagnitude <= 0.0001f)
-        {
-            forward = transform.forward.sqrMagnitude > 0.0001f ? transform.forward.normalized : Vector3.forward;
-        }
-        var origin = ResolveFlamethrowerEffectOrigin(forward);
-        EnsureOrUpdateFlamethrowerEffectProxy(
-            origin,
-            forward,
-            Mathf.Max(1f, NetworkedFlamethrowerRange),
-            Mathf.Max(0.25f, NetworkedFlamethrowerRadius));
+        
+        // 프록시 생성 제거: 이제 모든 클라이언트가 무기에 부착된 비주얼을 직접 렌더링함.
+        // EnsureOrUpdateFlamethrowerEffectProxy(...)
     }
 
     private void HandleFlamethrowerTicked(FlamethrowerTickRequest request)
     {
-        if (!CanWriteItemWorldEffectState())
-        {
-            ItemRuntimeLog.Warn(ItemIds.Flamethrower, "Flamethrower tick ignored because this peer does not have StateAuthority.", this);
-            return;
-        }
-
-        NetworkedFlamethrowerActive = true;
-        NetworkedFlamethrowerOrigin = request.Origin;
-        NetworkedFlamethrowerForward = request.Forward;
-        NetworkedFlamethrowerRange = request.Range;
-        NetworkedFlamethrowerRadius = request.Radius;
-        NetworkedFlamethrowerTickSeq++;
-        ItemRuntimeLog.Info(ItemIds.Flamethrower, $"Flamethrower tick replicated: seq={NetworkedFlamethrowerTickSeq}, origin={request.Origin}, range={request.Range:0.00}, radius={request.Radius:0.00}", this);
+        if (!_itemWorldEffectNetworkReady || Object == null || !Object.IsValid) return;
 
         var safeForward = request.Forward.sqrMagnitude > 0.0001f ? request.Forward.normalized : transform.forward;
-        EnsureOrUpdateFlamethrowerEffectProxy(request.Origin, safeForward, request.Range, request.Radius);
+        var muzzleOrigin = ResolveFlamethrowerEffectOrigin(safeForward);
+
+        // 1. 모든 클라이언트(Owner 포함)는 무기에 부착된 시각 효과를 렌더링한다.
+        if (Object != null && Object.IsValid)
+        {
+            ApplyReplicatedFlamethrowerTick(muzzleOrigin, safeForward, request.Range, request.Radius);
+        }
+
+        // 2. 네트워크 동기화: 가용 시(StateAuthority) 네트워크 변수를 업데이트하여 타인에게 전파한다.
+        if (HasStateAuthority)
+        {
+            NetworkedFlamethrowerActive = true;
+            NetworkedFlamethrowerForward = safeForward;
+            NetworkedFlamethrowerOrigin = muzzleOrigin;
+            NetworkedFlamethrowerRange = request.Range;
+            NetworkedFlamethrowerRadius = request.Radius;
+            NetworkedFlamethrowerTickSeq++;
+
+            ApplyFlamethrowerGameplay(
+                muzzleOrigin,
+                safeForward,
+                request.Range,
+                request.Radius,
+                request.DamagePerTick,
+                request.StunDamagePerTick,
+                request.PushForce);
+
+            // 프록시 동기화 제거: 화염방사기는 무기에 부착된 비주얼로 통합됨.
+            // EnsureOrUpdateFlamethrowerEffectProxy(muzzleOrigin, safeForward, request.Range, request.Radius);
+            
+            if (enableItemWorldEffectLog)
+            {
+                ItemRuntimeLog.Info(ItemIds.Flamethrower, $"Flamethrower tick replicated: seq={NetworkedFlamethrowerTickSeq}, origin={muzzleOrigin}", this);
+            }
+        }
     }
 
     private void HandleFlamethrowerStopped(string itemId)
     {
+        // 로컬 정지 예측: 본인은 즉시 시각 효과를 끈다.
+        if (HasInputAuthority)
+        {
+            StopReplicatedFlamethrowerVisual();
+        }
+
         if (!CanWriteItemWorldEffectState())
         {
-            ItemRuntimeLog.Warn(itemId, "Flamethrower stop ignored because this peer does not have StateAuthority.", this);
             return;
         }
 
         NetworkedFlamethrowerActive = false;
         NetworkedFlamethrowerStopSeq++;
-        ItemRuntimeLog.Info(itemId, $"Flamethrower stop replicated: seq={NetworkedFlamethrowerStopSeq}", this);
+        
+        if (enableItemWorldEffectLog)
+        {
+            ItemRuntimeLog.Info(itemId, $"Flamethrower stop replicated: seq={NetworkedFlamethrowerStopSeq}", this);
+        }
+
         StopReplicatedFlamethrowerVisual();
     }
 
@@ -342,6 +367,24 @@ public sealed partial class NetworkPlayer
             _lastAppliedMeleeSwingSeq = NetworkedMeleeSwingSeq;
             ItemRuntimeLog.Info(ItemIds.WaterMelonSword, $"Replicated melee swing applied: seq={NetworkedMeleeSwingSeq}, duration={NetworkedMeleeSwingDuration:0.00}", this);
             TriggerReplicatedMeleeSwing();
+        }
+
+        // 화염방사기 틱 동기화 (원격 클라이언트 전용)
+        if (NetworkedFlamethrowerTickSeq > 0 && _lastAppliedFlamethrowerTickSeq != NetworkedFlamethrowerTickSeq)
+        {
+            _lastAppliedFlamethrowerTickSeq = NetworkedFlamethrowerTickSeq;
+            ApplyReplicatedFlamethrowerTick(
+                NetworkedFlamethrowerOrigin,
+                NetworkedFlamethrowerForward,
+                NetworkedFlamethrowerRange,
+                NetworkedFlamethrowerRadius);
+        }
+
+        // 화염방사기 정지 동기화
+        if (NetworkedFlamethrowerStopSeq > 0 && _lastAppliedFlamethrowerStopSeq != NetworkedFlamethrowerStopSeq)
+        {
+            _lastAppliedFlamethrowerStopSeq = NetworkedFlamethrowerStopSeq;
+            StopReplicatedFlamethrowerVisual();
         }
     }
 
@@ -1051,6 +1094,76 @@ public sealed partial class NetworkPlayer
         body.velocity += toCenterDir * (awaySpeed * damping);
     }
 
+    private void ApplyFlamethrowerGameplay(
+        Vector3 origin,
+        Vector3 forward,
+        float range,
+        float radius,
+        float damagePerTick,
+        float stunPerTick,
+        float pushForce)
+    {
+        if (!HasStateAuthority)
+        {
+            return;
+        }
+
+        var safeForward = forward.sqrMagnitude > 0.0001f ? forward.normalized : transform.forward;
+        var start = origin;
+        var end = origin + safeForward * range;
+
+        var overlapCount = Physics.OverlapCapsuleNonAlloc(
+            start,
+            end,
+            radius,
+            _replicatedFlamethrowerOverlapBuffer,
+            itemWorldEffectMask,
+            QueryTriggerInteraction.Ignore);
+
+        _replicatedFlamethrowerUniqueTargets.Clear();
+        for (var i = 0; i < overlapCount; i++)
+        {
+            var hitCollider = _replicatedFlamethrowerOverlapBuffer[i];
+            _replicatedFlamethrowerOverlapBuffer[i] = null;
+            if (hitCollider == null)
+            {
+                continue;
+            }
+
+            var hitTransform = hitCollider.attachedRigidbody != null
+                ? hitCollider.attachedRigidbody.transform
+                : hitCollider.transform.root;
+
+            if (hitTransform == null || hitTransform == transform)
+            {
+                continue;
+            }
+
+            if (!_replicatedFlamethrowerUniqueTargets.Add(hitTransform.GetInstanceID()))
+            {
+                continue;
+            }
+
+            var targetPlayer = hitCollider.GetComponentInParent<NetworkPlayer>();
+            if (targetPlayer != null && targetPlayer != this)
+            {
+                targetPlayer.ApplyCombinedDamage(
+                    damagePerTick,
+                    stunPerTick,
+                    "Flamethrower",
+                    0f,
+                    pushForce,
+                    instigator: this);
+            }
+
+            var body = hitCollider.attachedRigidbody;
+            if (body != null && !body.isKinematic && pushForce > 0f)
+            {
+                body.AddForce(safeForward * pushForce, ForceMode.Acceleration);
+            }
+        }
+    }
+
     private void ApplySatelliteStrikeGameplay(
         Vector3 center,
         float radius,
@@ -1354,16 +1467,25 @@ public sealed partial class NetworkPlayer
 
     private void UpdateReplicatedFlamethrowerVisualFollow()
     {
-        if (!HasStateAuthority || !NetworkedFlamethrowerActive)
+        if (_heldItemPresenter == null)
         {
             return;
         }
 
+        if (!NetworkedFlamethrowerActive)
+        {
+            _heldItemPresenter.ClearMuzzleAimTarget();
+            return;
+        }
+
+        // 모든 클랜드는 네트워크 동기화된 방향을 기반으로 가상의 조준점(Target)을 만든다.
         var forward = NetworkedFlamethrowerForward.sqrMagnitude > 0.0001f
             ? NetworkedFlamethrowerForward.normalized
             : transform.forward;
-        var origin = ResolveFlamethrowerEffectOrigin(forward);
-        EnsureOrUpdateFlamethrowerEffectProxy(origin, forward, NetworkedFlamethrowerRange, NetworkedFlamethrowerRadius);
+        
+        // 조준점은 현재 위치에서 발사 방향으로 20m 앞 지점으로 설정한다.
+        var targetPos = ResolveFlamethrowerEffectOrigin(forward) + forward * 20f;
+        _heldItemPresenter.SetMuzzleAimTarget(targetPos);
     }
 
     private void ApplyReplicatedFlamethrowerTick(Vector3 origin, Vector3 forward, float range, float radius)
@@ -1476,13 +1598,10 @@ public sealed partial class NetworkPlayer
 
     private Vector3 ResolveFlamethrowerEffectOrigin(Vector3 forward)
     {
-        var anchor = ResolveFlamethrowerEffectAnchor();
-        if (_heldItemPresenter != null && _heldItemPresenter.CurrentHeldVisualRoot != null && anchor == _heldItemPresenter.CurrentHeldVisualRoot)
-        {
-            return anchor.TransformPoint(flamethrowerMuzzleLocalOffset);
-        }
-
-        return transform.position + Vector3.up * flamethrowerVisualHeightOffset + forward * flamethrowerVisualForwardOffset;
+        // 무기 비주얼의 TransformPoint에 의존하면 무기가 조준 보정 중 뒤집혔을 때 원점도 뒤바뀌는 문제가 발생한다.
+        // 따라서 캐릭터의 루트 위치(또는 에임 타겟의 기준점)에서 발사 방향으로 일정 오프셋을 준 지점을 원점으로 사용한다.
+        // 높이는 대략 캐릭터의 가슴/어깨 높이(0.8m)로 설정한다.
+        return transform.position + Vector3.up * 0.8f + forward * 0.3f;
     }
 
     private void EnsureOrUpdateFlamethrowerEffectProxy(Vector3 origin, Vector3 forward, float range, float radius)
@@ -1502,7 +1621,11 @@ public sealed partial class NetworkPlayer
             _activeFlamethrowerEffectProxy = SpawnNetworkedItemEffectProxy(
                 origin,
                 rotation,
-                proxy => proxy.InitializeFlamethrower(safeRange, safeRadius, safeForward));
+                proxy =>
+                {
+                    proxy.InitializeFlamethrower(safeRange, safeRadius, safeForward);
+                    proxy.SetActivated(true);
+                });
             return;
         }
 
@@ -1511,6 +1634,7 @@ public sealed partial class NetworkPlayer
         if (proxyBehaviour != null)
         {
             proxyBehaviour.InitializeFlamethrower(safeRange, safeRadius, safeForward);
+            proxyBehaviour.SetActivated(true);
             proxyBehaviour.SyncNetworkPose(origin, rotation, zeroVelocity: true);
         }
     }
@@ -1839,6 +1963,14 @@ public sealed partial class NetworkPlayer
 
     private void StopReplicatedFlamethrowerVisual()
     {
+        if (_activeFlamethrowerEffectProxy != null && _activeFlamethrowerEffectProxy)
+        {
+            var proxy = _activeFlamethrowerEffectProxy.GetComponent<NetworkedItemEffectProxy>();
+            if (proxy != null)
+            {
+                proxy.SetActivated(false);
+            }
+        }
         DespawnNetworkedItemEffectProxy(ref _activeFlamethrowerEffectProxy);
 
         if (_replicatedFlamethrowerParticles != null)
