@@ -53,6 +53,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private Vector3 flamethrowerLocalEulerOffset = new Vector3(-90f, -90f, -90f);
         [SerializeField] private Vector3 flamethrowerAimEulerOffset = new Vector3(0f, 0f, 180f);
         [SerializeField] private Vector3 flamethrowerLocalScale = Vector3.one * 0.7f;
+        [SerializeField] private Vector3 blackholeHeldLocalScale = Vector3.one * 0.008f;
 
         [Header("디버그")]
         [SerializeField] private bool enableDebugLog;
@@ -233,7 +234,19 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            RefreshHeldVisual(heldItemId);
+            if (_spawnedHeldVisual == null)
+            {
+                RefreshHeldVisual(heldItemId);
+                return;
+            }
+
+            ApplyPose(heldItemId, _spawnedHeldVisual.transform);
+            DisablePhysicsForHeldVisual(_spawnedHeldVisual);
+            EnsureHeldVisualRenderersEnabled(_spawnedHeldVisual);
+            RefreshBlackholeHeldVisualIfNeeded(heldItemId, _spawnedHeldVisual);
+            DisableNonHeldVisualEffects(heldItemId, _spawnedHeldVisual);
+            RestartHeldVisualEffects(_spawnedHeldVisual);
+            ApplyHeldVisualWorldTransform(ResolveHandAnchor());
         }
 
         private void RefreshHeldVisual(string heldItemId)
@@ -261,7 +274,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            _spawnedHeldVisual = Instantiate(prefab, handAnchor);
+            _spawnedHeldVisual = Instantiate(prefab);
             _spawnedHeldVisual.name = $"HeldItem_{heldItemId}";
             var isWatermelonSword = string.Equals(heldItemId, ItemIds.WaterMelonSword, StringComparison.Ordinal);
             var isBlackhole = string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal);
@@ -276,6 +289,8 @@ namespace SSAFYPlayTime.Gameplay.Items
             EnsureHeldVisualRenderersEnabled(_spawnedHeldVisual);
             RefreshBlackholeHeldVisualIfNeeded(heldItemId, _spawnedHeldVisual);
             DisableNonHeldVisualEffects(heldItemId, _spawnedHeldVisual);
+            RestartHeldVisualEffects(_spawnedHeldVisual);
+            ApplyHeldVisualWorldTransform(handAnchor);
             DebugLog($"Held visual attached: {heldItemId}");
             ItemRuntimeLog.Info(heldItemId, $"손 장착 비주얼 생성: prefab={definition.Master.PrefabPath}, anchor={handAnchor.name}", this);
         }
@@ -297,25 +312,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             // 무기의 방향을 항상 캐릭터 정면(searchRoot.rotation)으로 강제 고정하여 총구가 바닥을 향하지 않게 한다.
             // 아이템별로 설정된 오프셋 회전을 반영하면서 손의 본(Bone) 회전을 그대로 따른다.
             // 이렇게 함으로써 캐릭터가 위/아래를 볼 때 총구도 같이 기울어지게 된다.
-            _spawnedHeldVisual.transform.position = handAnchor.TransformPoint(_currentHeldLocalPositionOffset);
-
-            if (_hasMuzzleAimTarget &&
-                string.Equals(_currentHeldItemId, ItemIds.Flamethrower, StringComparison.Ordinal))
-            {
-                var aimDirection = _muzzleAimTarget - _spawnedHeldVisual.transform.position;
-                if (aimDirection.sqrMagnitude > 0.0001f)
-                {
-                    _spawnedHeldVisual.transform.rotation =
-                        Quaternion.LookRotation(aimDirection.normalized, handAnchor.up) *
-                        Quaternion.Euler(flamethrowerAimEulerOffset);
-                }
-            }
-            else
-            {
-                _spawnedHeldVisual.transform.rotation = handAnchor.rotation * Quaternion.Euler(_currentHeldEulerOffset);
-            }
-
-            _spawnedHeldVisual.transform.localScale = _currentHeldLocalScale;
+            ApplyHeldVisualWorldTransform(handAnchor);
 
         }
 
@@ -363,6 +360,11 @@ namespace SSAFYPlayTime.Gameplay.Items
                 scale = flamethrowerLocalScale;
                 _muzzleRotationOffset = Vector3.zero;
             }
+            else if (string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal))
+            {
+                scale = blackholeHeldLocalScale;
+                _muzzleRotationOffset = Vector3.zero;
+            }
             else if (ShouldUseFullScaleHeldPose(heldItemId))
             {
                 position = localPositionOffset;
@@ -387,7 +389,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             _currentHeldLocalScale = scale;
             visualTransform.localPosition = position;
             visualTransform.localRotation = Quaternion.Euler(euler);
-            visualTransform.localScale = scale;
+            visualTransform.localScale = ResolveHeldVisualLocalScale(visualTransform.parent, scale);
         }
 
         private bool TryGetPoseOverride(string itemId, out HeldPoseOverride pose)
@@ -424,10 +426,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private static bool ShouldSkipHeldFallback(string heldItemId)
         {
-            return string.Equals(heldItemId, ItemIds.Growth, StringComparison.Ordinal) ||
-                   string.Equals(heldItemId, ItemIds.Shrink, StringComparison.Ordinal) ||
-                   string.Equals(heldItemId, ItemIds.Invisibility, StringComparison.Ordinal) ||
-                   string.Equals(heldItemId, ItemIds.SatelliteStrike, StringComparison.Ordinal);
+            return false;
         }
 
         private bool TryApplyWatermelonSwordGripCompensation(
@@ -687,6 +686,14 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
         }
 
+        private static void DisableBlackholeHeldArtifacts(GameObject visualRoot)
+        {
+            if (visualRoot == null)
+            {
+                return;
+            }
+        }
+
         private static void RefreshBlackholeHeldVisualIfNeeded(string heldItemId, GameObject visualRoot)
         {
             if (!string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal) || visualRoot == null)
@@ -708,12 +715,215 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
+            CleanupHeldVisualBeforeDestroy(_spawnedHeldVisual);
             Destroy(_spawnedHeldVisual);
             _spawnedHeldVisual = null;
             _currentHeldItemId = string.Empty;
             _currentHeldLocalPositionOffset = Vector3.zero;
             _currentHeldEulerOffset = Vector3.zero;
             _currentHeldLocalScale = Vector3.one;
+        }
+
+        private static void CleanupHeldVisualBeforeDestroy(GameObject visualRoot)
+        {
+            if (visualRoot == null)
+            {
+                return;
+            }
+
+            var particles = visualRoot.GetComponentsInChildren<ParticleSystem>(true);
+            for (var i = 0; i < particles.Length; i++)
+            {
+                var particle = particles[i];
+                if (particle == null)
+                {
+                    continue;
+                }
+
+                particle.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                particle.Clear(true);
+            }
+
+            var trails = visualRoot.GetComponentsInChildren<TrailRenderer>(true);
+            for (var i = 0; i < trails.Length; i++)
+            {
+                var trail = trails[i];
+                if (trail == null)
+                {
+                    continue;
+                }
+
+                trail.Clear();
+                trail.enabled = false;
+            }
+
+            var lines = visualRoot.GetComponentsInChildren<LineRenderer>(true);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (lines[i] != null)
+                {
+                    lines[i].enabled = false;
+                }
+            }
+
+            var renderers = visualRoot.GetComponentsInChildren<Renderer>(true);
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] != null)
+                {
+                    renderers[i].enabled = false;
+                }
+            }
+        }
+
+        private static void DisableHeldRendererArtifacts(GameObject visualRoot, bool disableCirclingArtifacts)
+        {
+            var particles = visualRoot.GetComponentsInChildren<ParticleSystem>(true);
+            for (var i = 0; i < particles.Length; i++)
+            {
+                var particle = particles[i];
+                if (particle == null)
+                {
+                    continue;
+                }
+
+                particle.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                var emission = particle.emission;
+                emission.enabled = false;
+            }
+
+            var renderers = visualRoot.GetComponentsInChildren<Renderer>(true);
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                var renderer = renderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                var rendererName = renderer.gameObject.name ?? string.Empty;
+                var shouldDisable =
+                    renderer is ParticleSystemRenderer ||
+                    rendererName.IndexOf("Glow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    rendererName.IndexOf("Particle", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    rendererName.IndexOf("Distort", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                if (!shouldDisable && disableCirclingArtifacts)
+                {
+                    shouldDisable = rendererName.IndexOf("Circling", StringComparison.OrdinalIgnoreCase) >= 0;
+                }
+
+                if (shouldDisable)
+                {
+                    renderer.enabled = false;
+                }
+            }
+
+            var trails = visualRoot.GetComponentsInChildren<TrailRenderer>(true);
+            for (var i = 0; i < trails.Length; i++)
+            {
+                if (trails[i] != null)
+                {
+                    trails[i].enabled = false;
+                }
+            }
+
+            var lines = visualRoot.GetComponentsInChildren<LineRenderer>(true);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (lines[i] != null)
+                {
+                    lines[i].enabled = false;
+                }
+            }
+        }
+
+        private static void RestartHeldVisualEffects(GameObject visualRoot)
+        {
+            if (visualRoot == null)
+            {
+                return;
+            }
+
+            var particles = visualRoot.GetComponentsInChildren<ParticleSystem>(true);
+            for (var i = 0; i < particles.Length; i++)
+            {
+                var particle = particles[i];
+                if (particle == null)
+                {
+                    continue;
+                }
+
+                var main = particle.main;
+                main.scalingMode = ParticleSystemScalingMode.Local;
+                main.simulationSpace = ParticleSystemSimulationSpace.Local;
+                particle.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                particle.Clear(true);
+                particle.Play(true);
+            }
+
+            var trails = visualRoot.GetComponentsInChildren<TrailRenderer>(true);
+            for (var i = 0; i < trails.Length; i++)
+            {
+                var trail = trails[i];
+                if (trail != null)
+                {
+                    trail.Clear();
+                }
+            }
+        }
+
+        private static Vector3 ResolveHeldVisualLocalScale(Transform parent, Vector3 desiredScale)
+        {
+            if (parent == null)
+            {
+                return desiredScale;
+            }
+
+            var parentLossyScale = parent.lossyScale;
+            return new Vector3(
+                DivideScaleAxis(desiredScale.x, parentLossyScale.x),
+                DivideScaleAxis(desiredScale.y, parentLossyScale.y),
+                DivideScaleAxis(desiredScale.z, parentLossyScale.z));
+        }
+
+        private static float DivideScaleAxis(float value, float divisor)
+        {
+            var safeDivisor = Mathf.Abs(divisor);
+            if (safeDivisor < 0.0001f)
+            {
+                return value;
+            }
+
+            return value / safeDivisor;
+        }
+
+        private void ApplyHeldVisualWorldTransform(Transform handAnchor)
+        {
+            if (_spawnedHeldVisual == null || handAnchor == null)
+            {
+                return;
+            }
+
+            _spawnedHeldVisual.transform.position = handAnchor.TransformPoint(_currentHeldLocalPositionOffset);
+
+            if (_hasMuzzleAimTarget &&
+                string.Equals(_currentHeldItemId, ItemIds.Flamethrower, StringComparison.Ordinal))
+            {
+                var aimDirection = _muzzleAimTarget - _spawnedHeldVisual.transform.position;
+                if (aimDirection.sqrMagnitude > 0.0001f)
+                {
+                    _spawnedHeldVisual.transform.rotation =
+                        Quaternion.LookRotation(aimDirection.normalized, handAnchor.up) *
+                        Quaternion.Euler(flamethrowerAimEulerOffset);
+                }
+            }
+            else
+            {
+                _spawnedHeldVisual.transform.rotation = handAnchor.rotation * Quaternion.Euler(_currentHeldEulerOffset);
+            }
+
+            _spawnedHeldVisual.transform.localScale = _currentHeldLocalScale;
         }
 
         private void ResolveReferences()
