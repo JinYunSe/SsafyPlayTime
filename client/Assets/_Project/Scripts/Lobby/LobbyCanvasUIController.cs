@@ -373,8 +373,9 @@ namespace SSAFYPlayTime
                 {
                     persistent.podiumParent = this.podiumParent;
                     persistent.podiumSlots = this.podiumSlots;
-                    persistent.sceneRoomSlots = this.sceneRoomSlots;
-                    persistent.sceneDirectSlots = this.sceneDirectSlots;
+                    // sceneRoomSlots, sceneDirectSlots는 이전하지 않는다.
+                    // persistent 인스턴스의 자식(DontDestroyOnLoad)이 이미 유효한 참조를 갖고 있으므로
+                    // 새 씬의 참조로 교체하면 Destroy(gameObject) 시 파괴되어 캐릭터가 미표시된다.
                     persistent.characterRuntimeRoot = this.characterRuntimeRoot;
                     persistent.characterPlacementCamera = this.characterPlacementCamera;
                     persistent.ssatyCharacterRoot = this.ssatyCharacterRoot;
