@@ -120,6 +120,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [Networked] private NetworkBool NetworkedVictimAnchorValid { get; set; }
     [Networked] private Vector3 NetworkedVictimRootOffset { get; set; }
     [Networked] private NetworkBool NetworkedVictimRootOffsetValid { get; set; }
+    [Networked] private Vector3 NetworkedVictimCarryRootPosition { get; set; }
+    [Networked] private NetworkBool NetworkedVictimCarryRootValid { get; set; }
     // carrier anchor: CarryingStunned인 플레이어가 자신의 carry rig anchor를 전송
     [Networked] private Vector3 NetworkedCarrierAnchorPosition { get; set; }
     [Networked] private Vector3 NetworkedCarrierAnchorForward { get; set; }
@@ -972,6 +974,15 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     {
         referenceWorld = Vector3.zero;
 
+        if (GetPhysicalPhase() == PhysicalPhase.CarryingStunned)
+        {
+            // Carry facing/camera should follow the actual held target, not a self-relative support point.
+            if (TryGetAverageHeldAnchorWorldPosition(out referenceWorld))
+                return true;
+
+            return TryGetCarrierSupportFrameWorld(out referenceWorld, out _);
+        }
+
         if (TryGetCarrierSupportFrameWorld(out referenceWorld, out _))
             return true;
 
@@ -1006,15 +1017,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         switch (phase)
         {
             case PhysicalPhase.Holding:
-                if (!IsAnyHandHolding)
-                    return false;
-
-                halfAngle = 62f;
-                return true;
+                return false;
 
             case PhysicalPhase.CarryingStunned:
-                halfAngle = IsDualGrabbingStunnedPlayer ? 52f : 58f;
-                return true;
+                return false;
 
             case PhysicalPhase.BeingGrabbed:
             case PhysicalPhase.Dragged:
@@ -1600,6 +1606,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             NetworkedLocomotionState = (byte)_localPresentationLocomotionState;
             NetworkedVictimAnchorValid = false;
             NetworkedVictimRootOffsetValid = false;
+            NetworkedVictimCarryRootValid = false;
             NetworkedCarrierAnchorValid = false;
             NetworkedCarryMode = (byte)CarryPhysicsProfile.CarryMode.None;
             NetworkedGrabActionState = (byte)CharacterGrabController.GrabActionState.Idle;
@@ -2115,6 +2122,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private Vector3 _diagPrevAnchorPos;
     private Vector3 _diagPrevPresentationPos;
     private bool _diagCameraDeltaInitialized;
+    private float _carryDiagnosticsLastSampleTime = float.NegativeInfinity;
+    private const float CarryDiagnosticsSampleInterval = 0.05f;
 
     /// <summary>
     /// 카메라 Follow용 앵커를 월드 공간에 생성한다.
