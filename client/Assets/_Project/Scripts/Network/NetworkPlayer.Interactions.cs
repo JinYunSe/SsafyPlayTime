@@ -49,6 +49,10 @@ public sealed partial class NetworkPlayer
         if (!TryPrepareItemInteractionService(out var runtimeHost) || runtimeHost == null)
             return;
 
+        if (isHoldingPrimaryUse)
+        {
+            Debug.Log($"[Flamethrower] Firing state sent to host: {isHoldingPrimaryUse}");
+        }
         runtimeHost.TrySetFlamethrowerActive(isHoldingPrimaryUse, out _);
     }
 
