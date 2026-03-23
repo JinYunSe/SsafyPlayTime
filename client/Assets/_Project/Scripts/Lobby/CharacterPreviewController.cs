@@ -51,7 +51,6 @@ namespace SSAFYPlayTime
         [SerializeField] private float fitCharacterVerticalOffsetAdjustment = 32f;
         [SerializeField] private float fitCharacterWorldYAdjustment = -0.73f;
         [SerializeField] private float wiseCharacterVerticalOffsetAdjustment = 10f;
-        [SerializeField] private Transform characterRuntimeRoot;
         [SerializeField] private Camera characterPlacementCamera;
         [SerializeField] private float characterWorldDepth = 8f;
         [SerializeField] private Vector3 characterWorldOffset = Vector3.zero;
@@ -84,17 +83,8 @@ namespace SSAFYPlayTime
         };
 
         private TMP_Text[] _nameSlots;
-
-        private readonly Transform[,] _slotCharacterRoots = new Transform[PlayerSlotCount, CharacterOptionCount];
         private readonly int[] _selectedCharacterIndexBySlot = { -1, -1, -1, -1 };
         private readonly int[] _playerIdBySlot = { -1, -1, -1, -1 };
-        private readonly Dictionary<Transform, Vector3> _characterBaseLocalScales = new();
-        private readonly Dictionary<Transform, Quaternion> _characterBaseLocalRotations = new();
-        private readonly Dictionary<Transform, Quaternion> _characterVisualChildBaseLocalRotations = new();
-        private readonly Dictionary<Transform, float> _characterBaseBoundsHeights = new();
-        private readonly Dictionary<Transform, int> _characterOptionIndexByTransform = new();
-        private readonly Dictionary<Transform, float> _characterPrePlacedWorldY = new();
-        private bool _characterSlotsInitialized;
 
         /// <summary>Fired when the local player clicks a character select button (passes character index 0-3).</summary>
         public event Action<int> CharacterSelected;
@@ -105,13 +95,10 @@ namespace SSAFYPlayTime
         {
             _nameSlots = nameSlots;
             BindButtonEvents();
-            InitializeCharacterSlotsIfNeeded();
         }
 
         public void UpdateFrame()
         {
-            LayoutNameSlotsForCurrentViewport();
-            AlignAllCharacterCandidatesToNameSlots();
         }
 
         /// <summary>Updates the visual state for one player slot.</summary>
@@ -129,16 +116,6 @@ namespace SSAFYPlayTime
 
         public void ResetSlots()
         {
-            _characterSlotsInitialized = false;
-            for (var slot = 0; slot < PlayerSlotCount; slot++)
-                for (var option = 0; option < CharacterOptionCount; option++)
-                    _slotCharacterRoots[slot, option] = null;
-            _characterPrePlacedWorldY.Clear();
-            _characterBaseBoundsHeights.Clear();
-            _characterBaseLocalScales.Clear();
-            _characterBaseLocalRotations.Clear();
-            _characterOptionIndexByTransform.Clear();
-            _characterVisualChildBaseLocalRotations.Clear();
         }
 
         public void ClearAllSlots()
@@ -237,244 +214,6 @@ namespace SSAFYPlayTime
             }
         }
 
-        private void InitializeCharacterSlotsIfNeeded()
-        {
-            if (_characterSlotsInitialized)
-            {
-                return;
-            }
-
-            var templates = new[] { ssatyCharacterRoot, alGCharacterRoot, fitCharacterRoot, wiseCharacterRoot };
-            var nameSlots = _nameSlots;
-            if (nameSlots == null || templates.Any(t => t == null) || nameSlots.Any(t => t == null))
-            {
-                return;
-            }
-
-            var runtimeRoot = ResolveCharacterRuntimeRoot();
-            for (var slot = 0; slot < PlayerSlotCount; slot++)
-            {
-                for (var option = 0; option < CharacterOptionCount; option++)
-                {
-                    var template = templates[option];
-                    var prePlacedName = $"{template.name}_Slot{slot + 1}";
-                    var prePlaced = runtimeRoot.Find(prePlacedName);
-
-                    Transform cloneTransform;
-                    if (prePlaced != null)
-                    {
-                        cloneTransform = prePlaced;
-                        ConfigureCharacterPreviewClone(cloneTransform.gameObject);
-                        _characterPrePlacedWorldY[cloneTransform] = cloneTransform.position.y;
-                    }
-                    else
-                    {
-                        var clone = Instantiate(template, runtimeRoot, true);
-                        clone.name = prePlacedName;
-                        ConfigureCharacterPreviewClone(clone);
-                        cloneTransform = clone.transform;
-                    }
-
-                    cloneTransform.gameObject.SetActive(false);
-                    _slotCharacterRoots[slot, option] = cloneTransform;
-                    _characterBaseLocalScales[cloneTransform] = cloneTransform.localScale;
-                    _characterBaseLocalRotations[cloneTransform] = cloneTransform.localRotation;
-                    CacheCharacterVisualChildRotations(cloneTransform);
-                    _characterBaseBoundsHeights[cloneTransform] = CalculateCombinedBoundsHeight(cloneTransform);
-                    _characterOptionIndexByTransform[cloneTransform] = option;
-                }
-            }
-
-            for (var i = 0; i < templates.Length; i++)
-            {
-                if (templates[i] != null)
-                {
-                    templates[i].SetActive(false);
-                }
-            }
-
-            _characterSlotsInitialized = true;
-            AlignAllCharacterCandidatesToNameSlots();
-        }
-
-        private void AlignAllCharacterCandidatesToNameSlots()
-        {
-            InitializeCharacterSlotsIfNeeded();
-            if (!_characterSlotsInitialized)
-            {
-                return;
-            }
-
-            var nameSlots = _nameSlots;
-            if (nameSlots == null)
-            {
-                return;
-            }
-
-            for (var slot = 0; slot < PlayerSlotCount; slot++)
-            {
-                var nameSlot = nameSlots[slot];
-                for (var option = 0; option < CharacterOptionCount; option++)
-                {
-                    AlignCharacterSlot(_slotCharacterRoots[slot, option], nameSlot, slot);
-                }
-            }
-        }
-
-        private void AlignCharacterSlot(Transform characterSlot, TMP_Text nameSlot, int slotIndex = -1)
-        {
-            if (characterSlot == null || nameSlot == null || nameSlot.transform is not RectTransform nameRect)
-            {
-                return;
-            }
-
-            if (characterSlot is RectTransform charRect)
-            {
-                if (characterSlot.parent != nameRect.parent)
-                {
-                    characterSlot.SetParent(nameRect.parent, false);
-                }
-
-                var characterSpecificOffset = GetCharacterSpecificVerticalOffset(characterSlot);
-                var slotPosOffset = GetSlotPositionOffset(slotIndex);
-                charRect.anchorMin = nameRect.anchorMin;
-                charRect.anchorMax = nameRect.anchorMax;
-                charRect.pivot = nameRect.pivot;
-                charRect.anchoredPosition = nameRect.anchoredPosition + new Vector2(
-                    slotPosOffset.x,
-                    characterVerticalOffset + characterExtraVerticalOffset + characterSpecificOffset + slotPosOffset.y);
-                ApplySlotRotationToVisuals(characterSlot, slotIndex);
-                if (useFixedCharacterScale)
-                {
-                    charRect.localScale = GetSlotScale(slotIndex);
-                }
-                return;
-            }
-
-            var worldCam = ResolveCharacterPlacementCamera();
-            if (worldCam == null)
-            {
-                return;
-            }
-
-            var uiCam = ResolveUiCamera();
-            var uiWorldPoint = GetNameAnchorWorldPoint(nameSlot, nameRect);
-            var screenPoint = RectTransformUtility.WorldToScreenPoint(uiCam, uiWorldPoint);
-            var worldSlotPosOffset = GetSlotPositionOffset(slotIndex);
-            screenPoint.x += worldSlotPosOffset.x;
-            screenPoint.y += characterVerticalOffset + characterExtraVerticalOffset
-                             + GetCharacterSpecificVerticalOffset(characterSlot)
-                             + worldSlotPosOffset.y;
-            var padding = Mathf.Max(0f, characterScreenPaddingPixels);
-            screenPoint.x = Mathf.Clamp(screenPoint.x, padding, Screen.width - padding);
-            screenPoint.y = Mathf.Clamp(screenPoint.y, padding, Screen.height - padding);
-
-            var depth = characterWorldDepth;
-            if (depth <= 0f)
-            {
-                depth = Vector3.Dot(characterSlot.position - worldCam.transform.position,
-                    worldCam.transform.forward);
-                if (depth <= 0f)
-                {
-                    depth = 8f;
-                }
-            }
-
-            var targetWorld = worldCam.ScreenToWorldPoint(new Vector3(screenPoint.x, screenPoint.y, depth));
-            var finalPos = targetWorld + characterWorldOffset + new Vector3(0f, 0f, worldSlotPosOffset.z);
-            if (_characterPrePlacedWorldY.TryGetValue(characterSlot, out var lockedY))
-            {
-                finalPos.y = lockedY + GetCharacterPrePlacedWorldYAdjustment(characterSlot);
-            }
-
-            characterSlot.position = finalPos;
-            ApplySlotRotationToVisuals(characterSlot, slotIndex);
-
-            if (useFixedCharacterScale)
-            {
-                characterSlot.localScale = GetSlotScale(slotIndex);
-            }
-            else if (keepCharacterScreenSize)
-            {
-                ApplyCharacterScreenHeightScale(characterSlot, worldCam);
-            }
-        }
-
-        private void LayoutNameSlotsForCurrentViewport()
-        {
-            if (!lockPlayerSlotLayoutToViewport || _nameSlots == null)
-            {
-                return;
-            }
-
-            var canvasRect = GetComponentInParent<Canvas>()?.transform as RectTransform;
-            if (canvasRect == null)
-            {
-                return;
-            }
-
-            var slotX = new[] { 0.125f, 0.375f, 0.625f, 0.875f };
-            var y = Mathf.Clamp01(playerSlotViewportY + playerSlotExtraViewportY);
-            var sizeMultiplier = Mathf.Max(0.5f, playerSlotSizeMultiplier);
-            var width = Mathf.Clamp(
-                canvasRect.rect.width * Mathf.Max(0.05f, playerSlotWidthRatio) * sizeMultiplier,
-                Mathf.Max(1f, playerSlotMinWidth),
-                Mathf.Max(playerSlotMinWidth, playerSlotMaxWidth * sizeMultiplier));
-
-            if (useQuarterWidthNameSlots)
-            {
-                var quarterWidth = canvasRect.rect.width / PlayerSlotCount;
-                var margin = Mathf.Max(0f, playerSlotQuarterHorizontalMargin);
-                var quarterScaledWidth = (quarterWidth - margin * 2f) * Mathf.Max(0.5f, playerSlotQuarterWidthScale);
-                width = Mathf.Max(1f, quarterScaledWidth);
-            }
-
-            var height = Mathf.Max(1f, playerSlotHeight * sizeMultiplier);
-
-            for (var i = 0; i < _nameSlots.Length; i++)
-            {
-                var text = _nameSlots[i];
-                if (text == null || text.transform is not RectTransform rect)
-                {
-                    continue;
-                }
-
-                rect.anchorMin = new Vector2(slotX[i], y);
-                rect.anchorMax = new Vector2(slotX[i], y);
-                rect.pivot = new Vector2(0.5f, 0.5f);
-                rect.anchoredPosition = new Vector2(0f, playerSlotVerticalPixelOffset);
-                rect.sizeDelta = new Vector2(width, height);
-
-                text.alignment = TextAlignmentOptions.Center;
-                text.enableWordWrapping = false;
-                text.overflowMode = TextOverflowModes.Ellipsis;
-                text.enableAutoSizing = true;
-                text.fontSizeMin = Mathf.Max(8f, nicknameFontSizeMin);
-                text.fontSizeMax = Mathf.Max(text.fontSizeMin, nicknameFontSizeMax);
-            }
-        }
-
-        private float GetCharacterSpecificVerticalOffset(Transform characterSlot)
-        {
-            if (characterSlot == null)
-            {
-                return 0f;
-            }
-
-            if (!_characterOptionIndexByTransform.TryGetValue(characterSlot, out var option))
-            {
-                return 0f;
-            }
-
-            return option switch
-            {
-                1 => algCharacterVerticalOffsetAdjustment,
-                2 => fitCharacterVerticalOffsetAdjustment,
-                3 => wiseCharacterVerticalOffsetAdjustment,
-                _ => 0f
-            };
-        }
-
         private Vector3 GetSlotPositionOffset(int slotIndex)
         {
             if (slotPositionOffsets != null && slotIndex >= 0 && slotIndex < slotPositionOffsets.Length)
@@ -500,72 +239,6 @@ namespace SSAFYPlayTime
                 return slotScaleOverrides[slotIndex];
             }
             return fixedCharacterScale;
-        }
-
-        private void CacheCharacterVisualChildRotations(Transform characterSlot)
-        {
-            if (characterSlot == null)
-            {
-                return;
-            }
-
-            for (var i = 0; i < characterSlot.childCount; i++)
-            {
-                var child = characterSlot.GetChild(i);
-                if (child == null)
-                {
-                    continue;
-                }
-
-                _characterVisualChildBaseLocalRotations[child] = child.localRotation;
-            }
-        }
-
-        private void ApplySlotRotationToVisuals(Transform characterSlot, int slotIndex)
-        {
-            if (characterSlot == null)
-            {
-                return;
-            }
-
-            var slotRotation = Quaternion.Euler(GetSlotRotation(slotIndex));
-            if (_characterBaseLocalRotations.TryGetValue(characterSlot, out var rootBaseRotation))
-            {
-                characterSlot.localRotation = rootBaseRotation;
-            }
-
-            if (characterSlot.childCount <= 0)
-            {
-                characterSlot.localRotation *= slotRotation;
-                return;
-            }
-
-            for (var i = 0; i < characterSlot.childCount; i++)
-            {
-                var child = characterSlot.GetChild(i);
-                if (child == null)
-                {
-                    continue;
-                }
-
-                if (!_characterVisualChildBaseLocalRotations.TryGetValue(child, out var childBaseRotation))
-                {
-                    childBaseRotation = child.localRotation;
-                    _characterVisualChildBaseLocalRotations[child] = childBaseRotation;
-                }
-
-                child.localRotation = childBaseRotation * slotRotation;
-            }
-        }
-
-        private float GetCharacterPrePlacedWorldYAdjustment(Transform characterSlot)
-        {
-            if (_characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) && option == 2)
-            {
-                return fitCharacterWorldYAdjustment;
-            }
-
-            return 0f;
         }
 
         private static void ConfigureCharacterPreviewClone(GameObject clone)
@@ -611,116 +284,9 @@ namespace SSAFYPlayTime
 
         private void ApplySelectedCharacterForSlot(int slotIndex, bool slotHasPlayer)
         {
-            InitializeCharacterSlotsIfNeeded();
-            if (!_characterSlotsInitialized || slotIndex < 0 || slotIndex >= PlayerSlotCount)
-            {
-                return;
-            }
-
-            var selectedIndex = _selectedCharacterIndexBySlot[slotIndex];
-            var shouldShow = slotHasPlayer;
-            for (var option = 0; option < CharacterOptionCount; option++)
-            {
-                var rect = _slotCharacterRoots[slotIndex, option];
-                if (rect == null) continue;
-                rect.gameObject.SetActive(shouldShow && selectedIndex >= 0 && option == selectedIndex);
-            }
+            // sceneRoomSlots 방식으로 전환 후 CharacterPreviewController는 슬롯 추적만 담당
         }
 
-        private void ApplyCharacterScreenHeightScale(Transform characterRoot, Camera worldCam)
-        {
-            if (characterRoot == null || worldCam == null)
-            {
-                return;
-            }
-
-            if (!_characterBaseLocalScales.TryGetValue(characterRoot, out var baseLocalScale))
-            {
-                baseLocalScale = characterRoot.localScale;
-                _characterBaseLocalScales[characterRoot] = baseLocalScale;
-            }
-
-            if (!_characterBaseBoundsHeights.TryGetValue(characterRoot, out var baseBoundsHeight) ||
-                baseBoundsHeight <= 0.001f)
-            {
-                baseBoundsHeight = Mathf.Max(0.001f, CalculateCombinedBoundsHeight(characterRoot));
-                _characterBaseBoundsHeights[characterRoot] = baseBoundsHeight;
-            }
-
-            var origin = characterRoot.position;
-            var pxA = worldCam.WorldToScreenPoint(origin);
-            var pxB = worldCam.WorldToScreenPoint(origin + worldCam.transform.up);
-            var pixelsPerWorldUnit = Mathf.Abs(pxB.y - pxA.y);
-            if (pixelsPerWorldUnit <= 0.0001f)
-            {
-                return;
-            }
-
-            var effectiveTargetScreenHeight = Mathf.Max(1f, characterTargetScreenHeightPixels) *
-                                              Mathf.Max(0.5f, characterScreenHeightMultiplier);
-            var targetWorldHeight = effectiveTargetScreenHeight / pixelsPerWorldUnit;
-            var scaleRatio = targetWorldHeight / baseBoundsHeight;
-            characterRoot.localScale = baseLocalScale * scaleRatio;
-        }
-
-        private static float CalculateCombinedBoundsHeight(Transform root)
-        {
-            if (root == null) return 1f;
-
-            var renderers = root.GetComponentsInChildren<Renderer>(true);
-            if (renderers == null || renderers.Length == 0) return 1f;
-
-            var bounds = renderers[0].bounds;
-            for (var i = 1; i < renderers.Length; i++)
-            {
-                if (renderers[i] != null) bounds.Encapsulate(renderers[i].bounds);
-            }
-
-            return Mathf.Max(0.001f, bounds.size.y);
-        }
-
-        private static Vector3 GetNameAnchorWorldPoint(TMP_Text nameSlot, RectTransform nameRect)
-        {
-            if (nameSlot == null || nameRect == null) return Vector3.zero;
-
-            nameSlot.ForceMeshUpdate();
-            var bounds = nameSlot.textBounds;
-            if (bounds.size.sqrMagnitude > 0.0001f)
-            {
-                return nameRect.TransformPoint(bounds.center);
-            }
-
-            return nameRect.TransformPoint(nameRect.rect.center);
-        }
-
-        private Transform ResolveCharacterRuntimeRoot()
-        {
-            if (characterRuntimeRoot != null) return characterRuntimeRoot;
-
-            var root = GameObject.Find("LobbyCharacterRuntimeRoot");
-            if (root == null)
-            {
-                root = new GameObject("LobbyCharacterRuntimeRoot");
-            }
-
-            characterRuntimeRoot = root.transform;
-            return characterRuntimeRoot;
-        }
-
-        private Camera ResolveCharacterPlacementCamera()
-        {
-            if (characterPlacementCamera != null) return characterPlacementCamera;
-            if (Camera.main != null) return Camera.main;
-            return FindObjectOfType<Camera>();
-        }
-
-        private Camera ResolveUiCamera()
-        {
-            var canvas = GetComponentInParent<Canvas>();
-            if (canvas == null) return null;
-            if (canvas.renderMode == RenderMode.ScreenSpaceOverlay) return null;
-            return canvas.worldCamera != null ? canvas.worldCamera : ResolveCharacterPlacementCamera();
-        }
 
         private static int SanitizeCharacterIndexOrNone(int rawIndex)
         {
