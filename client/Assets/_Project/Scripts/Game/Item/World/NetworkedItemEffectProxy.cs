@@ -183,8 +183,11 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 _rigidbody.position = transform.position;
                 _rigidbody.rotation = transform.rotation;
-                _rigidbody.velocity = Vector3.zero;
-                _rigidbody.angularVelocity = Vector3.zero;
+                if (!_rigidbody.isKinematic)
+                {
+                    _rigidbody.velocity = Vector3.zero;
+                    _rigidbody.angularVelocity = Vector3.zero;
+                }
             }
 
             _networkTransform.Teleport(transform.position, transform.rotation);
@@ -221,8 +224,11 @@ namespace SSAFYPlayTime.Gameplay.Items
                 _collider.enabled = false;
             }
 
-            _rigidbody.velocity = Vector3.zero;
-            _rigidbody.angularVelocity = Vector3.zero;
+            if (!_rigidbody.isKinematic)
+            {
+                _rigidbody.velocity = Vector3.zero;
+                _rigidbody.angularVelocity = Vector3.zero;
+            }
             _rigidbody.isKinematic = true;
             _rigidbody.useGravity = false;
         }
