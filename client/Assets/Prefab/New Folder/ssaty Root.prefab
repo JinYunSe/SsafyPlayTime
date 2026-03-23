@@ -4314,7 +4314,7 @@ MonoBehaviour:
       axis: {x: -1, y: -0, z: -0}
       baseForwardOffsetEuler: {x: 0, y: 0, z: 0}
     eyes: []
-    bodyWeight: 0.3
+    bodyWeight: 0.2
     headWeight: 0.8
     eyesWeight: 0
     clampWeight: 0.5

@@ -1,0 +1,62 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d5f6b449c40ac614baff38c7c9b056ab, type: 3}
+  m_Name: DefaultCarryPhysicsProfile
+  m_EditorClassIdentifier: 
+  normalGrab:
+    rootPlanarFollowSpeed: 7.5
+    rootVerticalFollowSpeed: 14
+    rootSnapDistance: 1.15
+    rootSnapVerticalGap: 0.65
+    proxyRootFollowSpeed: 20
+    proxyRootSnapDistance: 1.1
+    carryReleaseSettleDuration: 0.3
+    carrierTorsoReactionMultiplier: 1
+    carrierTurnAssistMultiplier: 1
+    victimCoreDriveSpringMultiplier: 1
+    victimCoreDriveDamperMultiplier: 1
+  stunnedSingleCarry:
+    rootPlanarFollowSpeed: 10
+    rootVerticalFollowSpeed: 17
+    rootSnapDistance: 1.2
+    rootSnapVerticalGap: 0.68
+    proxyRootFollowSpeed: 24
+    proxyRootSnapDistance: 1.18
+    carryReleaseSettleDuration: 0.55
+    carrierTorsoReactionMultiplier: 1.08
+    carrierTurnAssistMultiplier: 1.06
+    victimCoreDriveSpringMultiplier: 0.82
+    victimCoreDriveDamperMultiplier: 0.88
+  stunnedDualCarry:
+    rootPlanarFollowSpeed: 11
+    rootVerticalFollowSpeed: 19
+    rootSnapDistance: 1.08
+    rootSnapVerticalGap: 0.6
+    proxyRootFollowSpeed: 26
+    proxyRootSnapDistance: 1.08
+    carryReleaseSettleDuration: 0.6
+    carrierTorsoReactionMultiplier: 1.22
+    carrierTurnAssistMultiplier: 1.16
+    victimCoreDriveSpringMultiplier: 0.72
+    victimCoreDriveDamperMultiplier: 0.78
+  carriedVictim:
+    rootPlanarFollowSpeed: 10.5
+    rootVerticalFollowSpeed: 18.5
+    rootSnapDistance: 1.08
+    rootSnapVerticalGap: 0.6
+    proxyRootFollowSpeed: 25
+    proxyRootSnapDistance: 1.08
+    carryReleaseSettleDuration: 0.55
+    carrierTorsoReactionMultiplier: 1
+    carrierTurnAssistMultiplier: 1
+    victimCoreDriveSpringMultiplier: 0.68
+    victimCoreDriveDamperMultiplier: 0.74
