@@ -299,6 +299,8 @@ public sealed partial class NetworkPlayer
             // 프록시 동기화 제거: 화염방사기는 무기에 부착된 비주얼로 통합됨.
             // EnsureOrUpdateFlamethrowerEffectProxy(muzzleOrigin, safeForward, request.Range, request.Radius);
             
+            EnsureOrUpdateFlamethrowerEffectProxy(muzzleOrigin, safeForward, request.Range, request.Radius);
+
             if (enableItemWorldEffectLog)
             {
                 ItemRuntimeLog.Info(ItemIds.Flamethrower, $"Flamethrower tick replicated: seq={NetworkedFlamethrowerTickSeq}, origin={muzzleOrigin}", this);
@@ -1601,6 +1603,12 @@ public sealed partial class NetworkPlayer
         // 무기 비주얼의 TransformPoint에 의존하면 무기가 조준 보정 중 뒤집혔을 때 원점도 뒤바뀌는 문제가 발생한다.
         // 따라서 캐릭터의 루트 위치(또는 에임 타겟의 기준점)에서 발사 방향으로 일정 오프셋을 준 지점을 원점으로 사용한다.
         // 높이는 대략 캐릭터의 가슴/어깨 높이(0.8m)로 설정한다.
+        if (_heldItemPresenter != null &&
+            _heldItemPresenter.TryGetHeldPointWorldPosition(flamethrowerMuzzleLocalOffset, out var heldMuzzleOrigin))
+        {
+            return heldMuzzleOrigin;
+        }
+
         return transform.position + Vector3.up * 0.8f + forward * 0.3f;
     }
 
@@ -1660,8 +1668,23 @@ public sealed partial class NetworkPlayer
         if (hasHeldFlamethrower)
         {
             // 손에 든 화염방사기 시각 효과는 총구 오프셋을 그대로 따라가게 한다.
-            _replicatedFlamethrowerFxRoot.transform.localPosition = flamethrowerMuzzleLocalOffset;
-            _replicatedFlamethrowerFxRoot.transform.localRotation = Quaternion.Euler(flamethrowerMuzzleLocalEulerOffset);
+            if (_heldItemPresenter.TryGetHeldPointWorldPosition(flamethrowerMuzzleLocalOffset, out var muzzleWorldPosition))
+            {
+                _replicatedFlamethrowerFxRoot.transform.position = muzzleWorldPosition;
+            }
+            else
+            {
+                _replicatedFlamethrowerFxRoot.transform.localPosition = flamethrowerMuzzleLocalOffset;
+            }
+
+            if (_heldItemPresenter.TryGetHeldWorldRotation(flamethrowerMuzzleLocalEulerOffset, out var muzzleWorldRotation))
+            {
+                _replicatedFlamethrowerFxRoot.transform.rotation = muzzleWorldRotation;
+            }
+            else
+            {
+                _replicatedFlamethrowerFxRoot.transform.localRotation = Quaternion.Euler(flamethrowerMuzzleLocalEulerOffset);
+            }
             _replicatedFlamethrowerFxRoot.transform.localScale = Vector3.one * Mathf.Max(0.01f, flamethrowerVisualScale);
             return;
         }

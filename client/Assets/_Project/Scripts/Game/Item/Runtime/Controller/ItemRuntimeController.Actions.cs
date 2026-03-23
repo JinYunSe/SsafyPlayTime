@@ -182,8 +182,8 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             if (now >= _equipmentEndAt)
             {
+                StopFlamethrowerIfNeeded();
                 _remainingFlamethrowerUseSec = 0f;
-                _isFlamethrowerActive = false; // Stop first to avoid re-entry
                 ConsumeHeldItem(flameDef);
                 return;
             }
