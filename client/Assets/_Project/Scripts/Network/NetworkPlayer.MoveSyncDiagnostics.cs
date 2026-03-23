@@ -54,8 +54,7 @@ public sealed partial class NetworkPlayer
             $"move={MoveSyncDiagnostics.FormatVector2(input.Move)} camYaw={input.CameraYaw:F1} " +
             $"jump={FormatMoveSyncBool((bool)input.Jump)} sprint={FormatMoveSyncBool((bool)input.Sprint)} " +
             $"punch={FormatMoveSyncBool((bool)input.Punch)} throw={FormatMoveSyncBool((bool)input.Throw)} " +
-            $"drop={FormatMoveSyncBool((bool)input.Drop)} headbutt={FormatMoveSyncBool((bool)input.Headbutt)} " +
-            $"leftGrab={FormatMoveSyncBool((bool)input.LeftGrabHold)} rightGrab={FormatMoveSyncBool((bool)input.RightGrabHold)}");
+            $"drop={FormatMoveSyncBool((bool)input.Drop)} leftGrab={FormatMoveSyncBool((bool)input.LeftGrabHold)}");
     }
 
     internal void TraceMoveAuthorityState(string source)
@@ -222,9 +221,7 @@ public sealed partial class NetworkPlayer
                (bool)input.Punch ||
                (bool)input.Throw ||
                (bool)input.Drop ||
-               (bool)input.Headbutt ||
                (bool)input.LeftGrabHold ||
-               (bool)input.RightGrabHold ||
                (bool)input.Sprint;
     }
 

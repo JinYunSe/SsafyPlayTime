@@ -57,16 +57,16 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
                 // StateAuthority(호스트)만 Rigidbody 초기 속도를 적용해 물리 시뮬레이션을 실행.
                 // NetworkTransform이 매 틱마다 위치를 클라이언트에 동기화한다.
-                if (NetworkedInitialVelocity.sqrMagnitude > 0.001f)
+                var rb = GetComponent<Rigidbody>();
+                if (rb != null)
+                    rb.interpolation = RigidbodyInterpolation.Interpolate;
+
+                if (NetworkedInitialVelocity.sqrMagnitude > 0.001f && rb != null)
                 {
-                    var rb = GetComponent<Rigidbody>();
-                    if (rb != null)
-                    {
-                        rb.drag = 0f;
-                        rb.angularDrag = 0.05f;
-                        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-                        rb.velocity = NetworkedInitialVelocity;
-                    }
+                    rb.drag = 0f;
+                    rb.angularDrag = 0.05f;
+                    rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                    rb.velocity = NetworkedInitialVelocity;
                 }
             }
             else
@@ -203,41 +203,57 @@ namespace SSAFYPlayTime.Game.GhostThrow
         private void ApplyExplosionKnockback(Vector3 explosionPos)
         {
             Collider[] cols = Physics.OverlapSphere(explosionPos, explosionRadius);
+
+            // PuppetMaster 캐릭터는 근육 뼈마다 별도 Rigidbody를 가지므로
+            // 중복 처리를 막지 않으면 1명에게 ~15배의 힘이 가해진다.
+            // 루트 transform 기준으로 플레이어당 1회만 처리한다.
+            var processedRoots = new System.Collections.Generic.HashSet<Transform>();
+            var processedNetworkPlayers = new System.Collections.Generic.HashSet<NetworkPlayer>();
+
             foreach (var col in cols)
             {
                 if (col == null) continue;
                 if (col.transform.IsChildOf(transform) || col.gameObject == gameObject) continue;
 
-                Rigidbody rb = col.attachedRigidbody;
-                if (rb == null)
-                    rb = col.GetComponentInParent<Rigidbody>();
+                var colRoot = col.transform.root;
 
-                if (rb == null || rb.isKinematic) continue;
-
-                rb.AddExplosionForce(
-                    explosionForce,
-                    explosionPos,
-                    explosionRadius,
-                    upwardModifier,
-                    ForceMode.VelocityChange
-                );
-
-                Debug.Log($"[GhostCube] 넉백: {rb.gameObject.name} (거리: {Vector3.Distance(explosionPos, rb.position):F1}m)");
-
-                // ─── HP 데미지: 거리 감쇠 적용 ───────────────────────
-                var np = col.GetComponentInParent<NetworkPlayer>();
-                if (np != null)
+                // ─── 넉백: 루트당 1회 ─────────────────────────────────
+                if (processedRoots.Add(colRoot))
                 {
-                    float dist = Vector3.Distance(explosionPos, col.transform.position);
-                    float ratio = Mathf.Clamp01(1f - dist / explosionRadius); // 중심=1, 가장자리=0
+                    // NetworkPlayer는 root rigidbody3D에만 힘을 가해야 정확한 동기화 보장
+                    var np = col.GetComponentInParent<NetworkPlayer>();
+                    Rigidbody rb = np != null
+                        ? colRoot.GetComponent<Rigidbody>()
+                        : col.attachedRigidbody ?? col.GetComponentInParent<Rigidbody>();
+
+                    if (rb != null && !rb.isKinematic)
+                    {
+                        rb.AddExplosionForce(
+                            explosionForce,
+                            explosionPos,
+                            explosionRadius,
+                            upwardModifier,
+                            ForceMode.VelocityChange
+                        );
+
+                        Debug.Log($"[GhostCube] 넉백: {colRoot.name} (거리: {Vector3.Distance(explosionPos, rb.position):F1}m)");
+                    }
+                }
+
+                // ─── HP 데미지: 플레이어당 1회 ───────────────────────
+                var hitNp = col.GetComponentInParent<NetworkPlayer>();
+                if (hitNp != null && processedNetworkPlayers.Add(hitNp))
+                {
+                    float dist = Vector3.Distance(explosionPos, hitNp.transform.position);
+                    float ratio = Mathf.Clamp01(1f - dist / explosionRadius);
                     float baseDmg = CombatSettings.Instance != null
                         ? CombatSettings.Instance.ghostBombHpDamage
                         : 30f;
                     float hpDmg = baseDmg * ratio;
                     if (hpDmg > 0.5f)
                     {
-                        np.ApplyHealthDamage(hpDmg);
-                        Debug.Log($"[GhostCube] HP 데미지: {np.name} -{hpDmg:F1} (거리비율={ratio:F2})");
+                        hitNp.ApplyHealthDamage(hpDmg);
+                        Debug.Log($"[GhostCube] HP 데미지: {hitNp.name} -{hpDmg:F1} (거리비율={ratio:F2})");
                     }
                 }
             }

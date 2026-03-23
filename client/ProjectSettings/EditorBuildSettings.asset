@@ -14,10 +14,10 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/_Project/Scenes/GameScene.unity
     guid: 6e7ebca16e8287145b3955e886dfa821
-  - enabled: 0
+  - enabled: 1
     path: Assets/_Project/Scenes/GhostThrow.unity
     guid: a728dbd4e29213049911aabb56fff3cb
-  - enabled: 0
+  - enabled: 1
     path: Assets/_Project/Scenes/GameEndScene.unity
     guid: 7c603a47598bc7b49a3f45a8e9b9b9ef
   m_configObjects:
