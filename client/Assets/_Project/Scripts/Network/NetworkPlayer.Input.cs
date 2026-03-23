@@ -9,6 +9,7 @@ public sealed partial class NetworkPlayer
     private Quaternion _lastSafeRotation = Quaternion.identity;
     private bool _hasLastSafeTransform;
     private float _nextOutOfBoundsRecoverAt;
+    private SpawnPointGroup _cachedSpawnPointGroup;
 
     private float ResolveCameraYaw()
     {
@@ -48,7 +49,12 @@ public sealed partial class NetworkPlayer
         if (GetIsDeadState())
             return;
 
-        if (GetInput(out PlayerNetworkInput input))
+        // 타임 기반 타이머는 패킷 손실 여부와 무관하게 항상 실행
+        // (기절·회복·HP 무적 타이머가 GetInput 실패 시 멈추는 문제 방지)
+        TickAlwaysStates(Runner.DeltaTime);
+
+        // 기절 중이 아닌 경우에만 입력 기반 물리(로코모션·상호작용) 처리
+        if (_isActiveRagdoll && GetInput(out PlayerNetworkInput input))
         {
             TraceMoveAuthorityInput("FixedUpdateNetwork.Input", input);
             DoPhysicsStep(input, Runner.DeltaTime);
@@ -56,6 +62,15 @@ public sealed partial class NetworkPlayer
 
         UpdateGrabHandlers();
         UpdatePhysicalPhaseState(Runner.DeltaTime);
+
+        // 의식 있는 플레이어가 잡히거나 끌릴 때(BeingGrabbed/Dragged):
+        // 잡기 조인트가 hips 뼈를 끌고 가지만 locomotion은 root를 별도로 구동하므로
+        // root transform이 실제 물리 위치와 괴리가 생긴다.
+        // GetInput() 성공 여부와 무관하게 항상 실행해야 모든 틱에서 올바른 위치를
+        // NetworkTransform이 클라이언트에 전달할 수 있다.
+        // (이전에는 DoPhysicsStep() 안에 있어 GetInput 실패 시 실행되지 않는 문제가 있었음)
+        SyncInteractionRootPosition();
+
         SynchronizeNetworkSimulationState();
         TraceMoveAuthorityState("FixedUpdateNetwork.AfterPhase");
         TraceMovePublish("FixedUpdateNetwork.Publish");
@@ -125,9 +140,6 @@ public sealed partial class NetworkPlayer
         if (Input.GetMouseButtonDown(1))
             _throwTriggered = true;
 
-        _rightMouseDown = false;
-        _rightMouseDownTime = 0f;
-        _rightMouseConsumedAsGrab = false;
     }
 
     private PlayerNetworkInput BuildSandboxInput()
@@ -142,8 +154,6 @@ public sealed partial class NetworkPlayer
             Drop = _dropTriggered,
             Throw = _throwTriggered,
             LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab,
-            RightGrabHold = false,
-            Headbutt = Input.GetMouseButtonDown(2),
             Sprint = Input.GetKey(KeyCode.LeftShift)
         };
     }
@@ -160,12 +170,9 @@ public sealed partial class NetworkPlayer
         _sandboxInput = Vector2.zero;
         _sandboxJump = false;
         _dropTriggered = false;
-        // Sync absolute hips position for remote grab / drag presentation.
         _leftClickUseTriggered = false;
         _leftMouseDown = false;
         _leftMouseConsumedAsGrab = false;
-        _rightMouseDown = false;
-        _rightMouseConsumedAsGrab = false;
         _isLeftGrabActive = false;
         _isRightGrabActive = false;
         _isGrabActive = false;
@@ -173,6 +180,7 @@ public sealed partial class NetworkPlayer
 
     private void SynchronizeNetworkSimulationState()
     {
+        // FixedUpdateNetwork()가 HasStateAuthority에서만 실행되므로 이 함수도 host-only.
         if (syncPhysicsObjects != null)
         {
             for (int i = 0; i < syncPhysicsObjects.Length; i++)
@@ -302,7 +310,8 @@ public sealed partial class NetworkPlayer
             return true;
         }
 
-        var spawnGroup = FindObjectOfType<SpawnPointGroup>();
+        _cachedSpawnPointGroup ??= FindObjectOfType<SpawnPointGroup>();
+        var spawnGroup = _cachedSpawnPointGroup;
         if (spawnGroup != null && spawnGroup.transform.childCount > 0)
         {
             var index = Random.Range(0, spawnGroup.transform.childCount);
@@ -368,13 +377,16 @@ public sealed partial class NetworkPlayer
         if (!TryResolveRecoveryTransform(out var recoveryPosition, out var recoveryRotation))
             recoveryRotation = transform.rotation;
 
-        rigidbody3D.position = recoveryPosition;
-        rigidbody3D.rotation = recoveryRotation;
         transform.SetPositionAndRotation(recoveryPosition, recoveryRotation);
-        if (rigidbody3D != null && !rigidbody3D.isKinematic)
+        if (rigidbody3D != null)
         {
-            rigidbody3D.velocity = Vector3.zero;
-            rigidbody3D.angularVelocity = Vector3.zero;
+            rigidbody3D.position = recoveryPosition;
+            rigidbody3D.rotation = recoveryRotation;
+            if (!rigidbody3D.isKinematic)
+            {
+                rigidbody3D.velocity = Vector3.zero;
+                rigidbody3D.angularVelocity = Vector3.zero;
+            }
         }
         RememberSafeTransform(recoveryPosition, recoveryRotation);
         ForceRecover();
