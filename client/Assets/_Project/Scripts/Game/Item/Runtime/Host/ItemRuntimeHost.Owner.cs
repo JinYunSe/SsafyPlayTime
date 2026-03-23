@@ -40,11 +40,14 @@ namespace SSAFYPlayTime.Gameplay.Items
             var networkPlayer = owner != null ? owner.GetComponentInParent<global::NetworkPlayer>() : null;
             if (networkPlayer != null)
             {
+                // (Reverted: Do not use weapon visual's forward as it causes feedback loops with LookAt logic)
+
                 var visualYaw = networkPlayer.GetNetworkedVisualYaw();
                 var visualForward = Quaternion.Euler(0f, visualYaw, 0f) * Vector3.forward;
                 visualForward.y = 0f;
                 if (visualForward.sqrMagnitude >= 0.0001f)
                 {
+                    // (Re-inverting as requested by user)
                     return visualForward.normalized;
                 }
             }

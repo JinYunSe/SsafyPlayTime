@@ -1,6 +1,8 @@
 using System.Collections;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.UI;
 
 public class GameHUD : MonoBehaviour
@@ -24,11 +26,24 @@ public class GameHUD : MonoBehaviour
     private const float DeathOverlayFadeDuration = 0.45f;
     private const float WaterOverlayFadeDuration = 0.35f;
 
+    // 수중 오버레이 맥동 설정
+    private const float WaterPulseMin = 0.28f;
+    private const float WaterPulseMax = 0.44f;
+    private const float WaterPulsePeriod = 2.0f;
+
+    // 수중 URP Volume 설정
+    private const float UnderwaterVolumeFadeDuration = 0.5f;
+
     private static GameHUD _instance;
 
     private Coroutine _pulseCoroutine;
     private Coroutine _deathOverlayCoroutine;
     private Coroutine _waterOverlayCoroutine;
+    private Coroutine _waterPulseCoroutine;
+    private Coroutine _underwaterVolumeCoroutine;
+
+    private Volume _underwaterVolume;
+    private VolumeProfile _underwaterProfile;
 
     public static GameHUD FindOrCreate()
     {
@@ -61,6 +76,11 @@ public class GameHUD : MonoBehaviour
     {
         if (_instance == this)
             _instance = null;
+
+        if (_underwaterVolume != null)
+            Destroy(_underwaterVolume.gameObject);
+        if (_underwaterProfile != null)
+            Destroy(_underwaterProfile);
     }
 
     public void HideLoadingAndShow(string text, Color color)
@@ -108,6 +128,13 @@ public class GameHUD : MonoBehaviour
         if (waterOverlay == null) return;
         if (_waterOverlayCoroutine != null) StopCoroutine(_waterOverlayCoroutine);
         _waterOverlayCoroutine = StartCoroutine(FadeWaterOverlay(show: true));
+
+        if (_waterPulseCoroutine != null) StopCoroutine(_waterPulseCoroutine);
+        _waterPulseCoroutine = StartCoroutine(PulseWaterOverlay());
+
+        EnsureUnderwaterVolume();
+        if (_underwaterVolumeCoroutine != null) StopCoroutine(_underwaterVolumeCoroutine);
+        _underwaterVolumeCoroutine = StartCoroutine(FadeUnderwaterVolume(show: true));
     }
 
     public void HideWaterOverlay()
@@ -116,6 +143,15 @@ public class GameHUD : MonoBehaviour
         if (waterOverlay == null) return;
         if (_waterOverlayCoroutine != null) StopCoroutine(_waterOverlayCoroutine);
         _waterOverlayCoroutine = StartCoroutine(FadeWaterOverlay(show: false));
+
+        if (_waterPulseCoroutine != null)
+        {
+            StopCoroutine(_waterPulseCoroutine);
+            _waterPulseCoroutine = null;
+        }
+
+        if (_underwaterVolumeCoroutine != null) StopCoroutine(_underwaterVolumeCoroutine);
+        _underwaterVolumeCoroutine = StartCoroutine(FadeUnderwaterVolume(show: false));
     }
 
     public void HideDeathOverlayImmediate()
@@ -186,6 +222,102 @@ public class GameHUD : MonoBehaviour
         waterOverlay.color = targetColor;
         if (!show) waterOverlay.gameObject.SetActive(false);
         _waterOverlayCoroutine = null;
+    }
+
+    // 수면 아래에 있을 때 overlay alpha를 파동처럼 진동시켜 물속 느낌을 강조
+    private IEnumerator PulseWaterOverlay()
+    {
+        yield return new WaitForSecondsRealtime(WaterOverlayFadeDuration);
+
+        float time = 0f;
+        while (true)
+        {
+            time += Time.unscaledDeltaTime;
+            var t = (Mathf.Sin(time * (Mathf.PI * 2f / WaterPulsePeriod)) + 1f) * 0.5f;
+            var alpha = Mathf.Lerp(WaterPulseMin, WaterPulseMax, t);
+            if (waterOverlay != null && waterOverlay.gameObject.activeSelf)
+            {
+                waterOverlay.color = WithAlpha(waterOverlayColor, alpha);
+            }
+            yield return null;
+        }
+    }
+
+    // URP Volume을 생성하고 수중 후처리 효과를 설정
+    private void EnsureUnderwaterVolume()
+    {
+        if (_underwaterVolume != null) return;
+
+        var volumeGo = new GameObject("UnderwaterVolume");
+        volumeGo.transform.SetParent(null);
+        DontDestroyOnLoad(volumeGo);
+
+        _underwaterVolume = volumeGo.AddComponent<Volume>();
+        _underwaterVolume.isGlobal = true;
+        _underwaterVolume.priority = 50f;
+        _underwaterVolume.weight = 0f;
+
+        _underwaterProfile = ScriptableObject.CreateInstance<VolumeProfile>();
+        _underwaterVolume.profile = _underwaterProfile;
+
+        // 색상 보정: 파란 색조 + 채도 감소
+        var colorAdj = _underwaterProfile.Add<ColorAdjustments>(true);
+        colorAdj.active = true;
+        colorAdj.colorFilter.overrideState = true;
+        colorAdj.colorFilter.value = new Color(0.45f, 0.72f, 1.0f);
+        colorAdj.saturation.overrideState = true;
+        colorAdj.saturation.value = -18f;
+        colorAdj.contrast.overrideState = true;
+        colorAdj.contrast.value = 8f;
+
+        // 비네트: 어두운 파란 테두리로 물속 깊이감 표현
+        var vignette = _underwaterProfile.Add<Vignette>(true);
+        vignette.active = true;
+        vignette.color.overrideState = true;
+        vignette.color.value = new Color(0f, 0.08f, 0.25f);
+        vignette.intensity.overrideState = true;
+        vignette.intensity.value = 0.52f;
+        vignette.smoothness.overrideState = true;
+        vignette.smoothness.value = 0.35f;
+        vignette.rounded.overrideState = true;
+        vignette.rounded.value = true;
+
+        // 약한 색수차: 물속 굴절 암시
+        var ca = _underwaterProfile.Add<ChromaticAberration>(true);
+        ca.active = true;
+        ca.intensity.overrideState = true;
+        ca.intensity.value = 0.12f;
+
+        // 피사계심도(Gaussian): 먼 거리 약간 흐릿하게
+        var dof = _underwaterProfile.Add<DepthOfField>(true);
+        dof.active = true;
+        dof.mode.overrideState = true;
+        dof.mode.value = DepthOfFieldMode.Gaussian;
+        dof.gaussianStart.overrideState = true;
+        dof.gaussianStart.value = 2f;
+        dof.gaussianEnd.overrideState = true;
+        dof.gaussianEnd.value = 12f;
+        dof.gaussianMaxRadius.overrideState = true;
+        dof.gaussianMaxRadius.value = 0.8f;
+    }
+
+    private IEnumerator FadeUnderwaterVolume(bool show)
+    {
+        if (_underwaterVolume == null) yield break;
+
+        var startWeight = _underwaterVolume.weight;
+        var targetWeight = show ? 1f : 0f;
+
+        float elapsed = 0f;
+        while (elapsed < UnderwaterVolumeFadeDuration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            _underwaterVolume.weight = Mathf.Lerp(startWeight, targetWeight, Mathf.Clamp01(elapsed / UnderwaterVolumeFadeDuration));
+            yield return null;
+        }
+
+        _underwaterVolume.weight = targetWeight;
+        _underwaterVolumeCoroutine = null;
     }
 
     private IEnumerator FadeDeathOverlay()
