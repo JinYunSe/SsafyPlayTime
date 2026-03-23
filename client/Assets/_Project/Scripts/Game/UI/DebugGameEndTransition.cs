@@ -52,19 +52,37 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
     public void PlayerLeft(PlayerRef player)
     {
         if (_triggered) return;
-        if (NetworkedHostPlayerId <= 0) return;
-        if (player.PlayerId != NetworkedHostPlayerId) return;
 
-        _triggered = true;
-        Debug.Log($"[GameEnd] 방장(Player{NetworkedHostPlayerId}) 퇴장 → 로비로 복귀");
+        // 방장 퇴장 → 로비로 복귀
+        if (NetworkedHostPlayerId > 0 && player.PlayerId == NetworkedHostPlayerId)
+        {
+            _triggered = true;
+            Debug.Log($"[GameEnd] 방장(Player{NetworkedHostPlayerId}) 퇴장 → 로비로 복귀");
 
-        // _isShowingGameEndPanel 플래그를 먼저 세워 이후
-        // OnShutdown/OnDisconnectedFromServer에서 중복 처리를 방지한다.
-        var lobby = FindAnyObjectByType<LobbyCanvasUIController>();
-        if (lobby != null)
-            lobby.TriggerHostExitAndReturnToLobby();
-        else
-            SceneManager.LoadScene(gameEndSceneName);
+            // _isShowingGameEndPanel 플래그를 먼저 세워 이후
+            // OnShutdown/OnDisconnectedFromServer에서 중복 처리를 방지한다.
+            var lobby = FindAnyObjectByType<LobbyCanvasUIController>();
+            if (lobby != null)
+                lobby.TriggerHostExitAndReturnToLobby();
+            else
+                SceneManager.LoadScene(gameEndSceneName);
+            return;
+        }
+
+        // 비방장 퇴장 → 생존자 수 재체크 (StateAuthority만)
+        if (!HasStateAuthority) return;
+
+        var aliveCount = _subscribedPlayers.Count(
+            np => np != null &&
+                  np.Object != null &&
+                  np.Object.InputAuthority.IsRealPlayer &&
+                  np.Object.InputAuthority.PlayerId != player.PlayerId &&
+                  !np.IsDeadState);
+
+        Debug.Log($"[GameEnd] 비방장(Player{player.PlayerId}) 퇴장 → 생존자 수: {aliveCount}명");
+
+        if (aliveCount <= 1)
+            TriggerGameEnd();
     }
 
     public override void Despawned(NetworkRunner runner, bool hasState)
