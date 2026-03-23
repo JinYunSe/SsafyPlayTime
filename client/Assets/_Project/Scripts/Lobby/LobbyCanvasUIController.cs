@@ -1280,6 +1280,8 @@ namespace SSAFYPlayTime
                 // LauncherScene에 이미 있으므로 씬 전환 없이 패널 전환만 한다.
                 _isProcessing = false;
                 _isShowingGameEndPanel = false;
+                _localIsReady = false;
+                _localSelectedCharacterIndex = -1;
 
                 foreach (var obj in _spawnedGameEndCharacters)
                 { if (obj != null) Destroy(obj); }
@@ -1287,8 +1289,44 @@ namespace SSAFYPlayTime
 
                 if (gameEndPanel != null) gameEndPanel.SetActive(false);
                 if (podiumParent != null) podiumParent.SetActive(false);
+
+                // sceneDirectSlots 캐릭터를 모두 숨긴다 (podiumParent 하위가 아닐 경우 대비).
+                if (sceneDirectSlots != null)
+                {
+                    foreach (var slot in sceneDirectSlots)
+                    {
+                        if (slot == null) continue;
+                        if (slot.questionMark != null) slot.questionMark.SetActive(false);
+                        if (slot.characterModels != null)
+                            foreach (var model in slot.characterModels)
+                                if (model != null) model.SetActive(false);
+                    }
+                }
+
+                // stale _playerIdBySlot 초기화 → UpdatePlayerSlots에서 isSamePlayer 판정 오류 방지.
+                for (int s = 0; s < _playerIdBySlot.Length; s++)
+                {
+                    _playerIdBySlot[s] = -1;
+                    _selectedCharacterIndexBySlot[s] = -1;
+                }
+
+                HideAllCharacterSlots();
                 ShowRoomPanel();
                 UpdateRoomPanel();
+
+                // 클라이언트(비방장)는 준비 취소 상태를 HOST에 명시적으로 전파한다.
+                // ApplyRosterPayload가 비동기로 _localIsReady를 덮어쓸 수 있으므로 강제 전송.
+                if (_runner != null && _runner.IsRunning && !_runner.IsServer && _runner.LocalPlayer.IsRealPlayer)
+                {
+                    _localIsReady = false;
+                    var localPid = _runner.LocalPlayer.PlayerId;
+                    _readyStateByPlayerId[localPid] = false;
+                    if (_roomParticipantsByPlayerId.TryGetValue(localPid, out var pres) && pres != null)
+                        pres.IsReady = false;
+                    SendReadyStateToHost(false);
+                    RefreshReadyButtonState();
+                    RefreshRoomActionButtonState();
+                }
             }
         }
 
