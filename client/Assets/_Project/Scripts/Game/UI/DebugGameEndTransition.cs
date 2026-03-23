@@ -7,25 +7,23 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 
 /// <summary>
-/// Ends the match and moves back to LauncherScene.
-/// - Host automatically finishes the match when one real player remains.
-/// - When debugEnabled is true, F9 can still force a debug transition.
+/// 최후의 1인이 남으면 자동으로 게임을 종료하고 결과 화면으로 전환한다.
+/// 순위: 먼저 사망한 플레이어가 낮은 순위, 마지막 생존자가 1등.
+/// StateAuthority(호스트)에서만 종료 판정·순위 배정을 수행하고,
+/// RPC_BroadcastRankings로 모든 클라이언트에 순위를 전달한 뒤 씬을 전환한다.
 /// </summary>
 public class DebugGameEndTransition : NetworkBehaviour
 {
-    [Header("Debug")]
-    [Tooltip("When enabled, pressing F9 forces an immediate game-end transition.")]
-    [SerializeField] private bool debugEnabled = false;
-
     [SerializeField] private string gameEndSceneName = "LauncherScene";
 
-    // RankedPlayerIds[i] = PlayerId of rank (i + 1).
+    // RankedPlayerIds[i] = (i+1)등 플레이어의 PlayerId
     [Networked, Capacity(8)]
     private NetworkArray<int> RankedPlayerIds { get; }
 
     [Networked]
     private int NetworkedPlayerCount { get; set; }
 
+    // StateAuthority 전용: 사망 순서 기록 (인덱스 0 = 가장 먼저 사망)
     private readonly List<int> _deathOrder = new();
     private readonly HashSet<NetworkPlayer> _subscribedPlayers = new();
 
@@ -33,276 +31,222 @@ public class DebugGameEndTransition : NetworkBehaviour
     private const float SubscribeCheckInterval = 0.5f;
     private float _subscribeCheckTimer = SubscribeCheckInterval;
 
+    // ─── Fusion 생명주기 ───────────────────────────────────────────
+
     public override void Spawned()
     {
-        if (!HasStateAuthority)
-            return;
-
+        if (!HasStateAuthority) return;
         SubscribeToPlayers();
     }
 
     public override void Despawned(NetworkRunner runner, bool hasState)
     {
-        foreach (var player in _subscribedPlayers)
+        foreach (var np in _subscribedPlayers)
         {
-            if (player != null)
-                player.OnNetworkPlayerDied -= OnNetworkPlayerDied;
+            if (np != null)
+                np.OnNetworkPlayerDied -= OnNetworkPlayerDied;
         }
-
         _subscribedPlayers.Clear();
 
         if (GameResultData.Entries.Count > 0)
-            Debug.Log($"[GameEnd] Despawned: GameResultData saved (count={GameResultData.Entries.Count})");
+            Debug.Log($"[GameEnd] Despawned: GameResultData 저장됨 (count={GameResultData.Entries.Count})");
         else
-            Debug.LogWarning("[GameEnd] Despawned: GameResultData missing.");
+            Debug.LogWarning("[GameEnd] Despawned: GameResultData 없음 - RPC가 도달하지 않았을 수 있음");
     }
+
+    // ─── 새 플레이어 주기적 구독 등록 ─────────────────────────────
 
     private void Update()
     {
-        if (!_triggered && debugEnabled && Input.GetKeyDown(KeyCode.F9))
-        {
-            HandleDebugTrigger();
-            return;
-        }
-
-        if (!HasStateAuthority || _triggered)
-            return;
+        if (!HasStateAuthority || _triggered) return;
 
         _subscribeCheckTimer -= Time.deltaTime;
-        if (_subscribeCheckTimer > 0f)
-            return;
+        if (_subscribeCheckTimer > 0f) return;
 
         _subscribeCheckTimer = SubscribeCheckInterval;
         SubscribeToPlayers();
     }
 
-    private void HandleDebugTrigger()
-    {
-        var runner = Runner ?? FindAnyObjectByType<NetworkRunner>();
-
-        if (runner != null && runner.IsRunning && runner.IsServer)
-        {
-            TriggerDebugGameEnd(runner);
-            return;
-        }
-
-        if (runner != null && runner.IsRunning)
-        {
-            _triggered = true;
-            RPC_RequestDebugGameEnd();
-            return;
-        }
-
-        _triggered = true;
-        SetMockRankingsForLocalTest();
-        var lobby = FindAnyObjectByType<LobbyCanvasUIController>();
-        if (lobby != null)
-            lobby.LoadSceneAndShowGameEndPanel(gameEndSceneName);
-        else
-            SceneManager.LoadScene(gameEndSceneName);
-    }
-
     private void SubscribeToPlayers()
     {
         var players = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None);
-        foreach (var player in players)
+        foreach (var np in players)
         {
-            if (player == null || _subscribedPlayers.Contains(player))
-                continue;
-
-            _subscribedPlayers.Add(player);
-            player.OnNetworkPlayerDied += OnNetworkPlayerDied;
+            if (np == null || _subscribedPlayers.Contains(np)) continue;
+            _subscribedPlayers.Add(np);
+            np.OnNetworkPlayerDied += OnNetworkPlayerDied;
         }
     }
 
+    // ─── 사망 이벤트 → 순서 기록 → 종료 판정 ─────────────────────
+
     private void OnNetworkPlayerDied(NetworkPlayer deadPlayer)
     {
-        if (!HasStateAuthority || _triggered)
-            return;
+        if (!HasStateAuthority || _triggered) return;
 
         if (deadPlayer?.Object != null && deadPlayer.Object.InputAuthority.IsRealPlayer)
         {
-            var playerId = deadPlayer.Object.InputAuthority.PlayerId;
-            if (!_deathOrder.Contains(playerId))
+            var pid = deadPlayer.Object.InputAuthority.PlayerId;
+            if (!_deathOrder.Contains(pid))
             {
-                _deathOrder.Add(playerId);
-                Debug.Log($"[GameEnd] Recorded death order for Player{playerId}.");
+                _deathOrder.Add(pid);
+                Debug.Log($"[GameEnd] 사망 기록: Player{pid} ({_deathOrder.Count}번째)");
             }
         }
 
         var aliveCount = _subscribedPlayers.Count(
-            player => player != null &&
-                      player.Object != null &&
-                      player.Object.InputAuthority.IsRealPlayer &&
-                      !player.IsDeadState);
+            np => np != null &&
+                  np.Object != null &&
+                  np.Object.InputAuthority.IsRealPlayer &&
+                  !np.IsDeadState);
 
-        Debug.Log($"[GameEnd] Alive real players: {aliveCount}");
+        Debug.Log($"[GameEnd] 생존자 수: {aliveCount}명");
 
         if (aliveCount <= 1)
             TriggerGameEnd();
     }
 
-    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
-    private void RPC_RequestDebugGameEnd()
-    {
-        var runner = Runner ?? FindAnyObjectByType<NetworkRunner>();
-        if (runner == null || !runner.IsRunning || !runner.IsServer)
-            return;
-
-        TriggerDebugGameEnd(runner);
-    }
-
-    private void TriggerDebugGameEnd(NetworkRunner runner)
-    {
-        if (_triggered)
-            return;
-
-        _triggered = true;
-        AssignRandomRankings(runner);
-        StartCoroutine(LoadSceneAfterSync(runner));
-    }
+    // ─── 게임 종료 트리거 ──────────────────────────────────────────
 
     private void TriggerGameEnd()
     {
-        if (_triggered)
-            return;
-
+        if (_triggered) return;
         _triggered = true;
 
         var winner = _subscribedPlayers.FirstOrDefault(
-            player => player != null &&
-                      player.Object != null &&
-                      player.Object.InputAuthority.IsRealPlayer &&
-                      !player.IsDeadState);
+            np => np != null &&
+                  np.Object != null &&
+                  np.Object.InputAuthority.IsRealPlayer &&
+                  !np.IsDeadState);
+
+        string winnerName = winner != null
+            ? $"Player{winner.Object.InputAuthority.PlayerId}"
+            : "없음 (전원 사망)";
+        Debug.Log($"[GameEnd] 게임 종료! 최후 생존자: {winnerName}");
 
         AssignDeathOrderRankings(winner);
         StartCoroutine(LoadSceneAfterSync());
     }
 
-    private void AssignRandomRankings(NetworkRunner runner)
-    {
-        var playerIds = runner.ActivePlayers
-            .Where(player => player.IsRealPlayer)
-            .Select(player => player.PlayerId)
-            .ToList();
-
-        Shuffle(playerIds);
-
-        var count = Mathf.Min(playerIds.Count, 8);
-        NetworkedPlayerCount = count;
-        for (var i = 0; i < count; i++)
-            RankedPlayerIds.Set(i, playerIds[i]);
-    }
+    // ─── 순위 배정 ─────────────────────────────────────────────────
+    // 1등   = 마지막 생존자
+    // 2등~  = 사망 역순 (나중에 죽을수록 높은 순위)
+    // 꼴등  = 가장 먼저 죽은 플레이어
 
     private void AssignDeathOrderRankings(NetworkPlayer winner)
     {
         var runner = Runner ?? FindAnyObjectByType<NetworkRunner>();
-        if (runner == null)
-            return;
+        if (runner == null) return;
 
         var rankedIds = new List<int>();
 
+        // 1등: 마지막 생존자
         if (winner?.Object != null && winner.Object.InputAuthority.IsRealPlayer)
             rankedIds.Add(winner.Object.InputAuthority.PlayerId);
 
-        for (var i = _deathOrder.Count - 1; i >= 0; i--)
+        // 2등~: 나중에 죽은 순서부터 (역순)
+        for (int i = _deathOrder.Count - 1; i >= 0; i--)
         {
-            var playerId = _deathOrder[i];
-            if (!rankedIds.Contains(playerId))
-                rankedIds.Add(playerId);
+            var pid = _deathOrder[i];
+            if (!rankedIds.Contains(pid))
+                rankedIds.Add(pid);
         }
 
-        foreach (var playerId in runner.ActivePlayers.Where(player => player.IsRealPlayer).Select(player => player.PlayerId))
+        // 누락된 플레이어 보완 (비정상 케이스 방어)
+        foreach (var pid in runner.ActivePlayers
+                     .Where(p => p.IsRealPlayer)
+                     .Select(p => p.PlayerId))
         {
-            if (!rankedIds.Contains(playerId))
-                rankedIds.Add(playerId);
+            if (!rankedIds.Contains(pid))
+                rankedIds.Add(pid);
         }
 
-        var count = Mathf.Min(rankedIds.Count, 8);
+        int count = Mathf.Min(rankedIds.Count, 8);
         NetworkedPlayerCount = count;
-        for (var i = 0; i < count; i++)
+        for (int i = 0; i < count; i++)
             RankedPlayerIds.Set(i, rankedIds[i]);
 
-        Debug.Log($"[GameEnd] Rankings: {string.Join(", ", rankedIds.Select((id, i) => $"{i + 1}=Player{id}"))}");
+        Debug.Log($"[GameEnd] 순위: {string.Join(", ", rankedIds.Select((id, i) => $"{i + 1}등=Player{id}"))}");
     }
 
-    private IEnumerator LoadSceneAfterSync(NetworkRunner runner = null)
+    // ─── 씬 전환 ───────────────────────────────────────────────────
+
+    private IEnumerator LoadSceneAfterSync()
     {
+        // NetworkArray 변경분이 클라이언트에 전달되도록 2프레임 대기
         yield return null;
         yield return null;
 
-        runner ??= Runner ?? FindAnyObjectByType<NetworkRunner>();
+        var runner = Runner ?? FindAnyObjectByType<NetworkRunner>();
         if (runner != null && runner.IsRunning)
         {
             RPC_BroadcastRankings();
+            // RPC 전달 보장을 위해 2프레임 추가 대기
             yield return null;
             yield return null;
             runner.LoadScene(gameEndSceneName, LoadSceneMode.Single);
-            yield break;
         }
-
-        SetMockRankingsForLocalTest();
-        var lobby = FindAnyObjectByType<LobbyCanvasUIController>();
-        if (lobby != null)
-            lobby.LoadSceneAndShowGameEndPanel(gameEndSceneName);
         else
-            SceneManager.LoadScene(gameEndSceneName);
+        {
+            // 네트워크 없는 로컬 테스트
+            SetMockRankingsForLocalTest();
+            var lobby = FindAnyObjectByType<LobbyCanvasUIController>();
+            if (lobby != null)
+                lobby.LoadSceneAndShowGameEndPanel(gameEndSceneName);
+            else
+                SceneManager.LoadScene(gameEndSceneName);
+        }
     }
+
+    // ─── RPC: 순위 브로드캐스트 ───────────────────────────────────
 
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
     private void RPC_BroadcastRankings()
     {
         var runner = Runner ?? FindAnyObjectByType<NetworkRunner>();
-        if (runner == null || !runner.LocalPlayer.IsRealPlayer)
-            return;
+        if (runner == null || !runner.LocalPlayer.IsRealPlayer) return;
 
         var lobby = FindAnyObjectByType<LobbyCanvasUIController>();
         SaveRankingsToGameResultData(runner, lobby);
         lobby?.NotifyGameEndTransition();
-        Debug.Log($"[GameEnd] RPC_BroadcastRankings complete: count={NetworkedPlayerCount}");
+        Debug.Log($"[GameEnd] RPC_BroadcastRankings 완료: count={NetworkedPlayerCount}");
     }
+
+    // ─── GameResultData 저장 ───────────────────────────────────────
 
     private void SaveRankingsToGameResultData(NetworkRunner runner, LobbyCanvasUIController lobby)
     {
-        var count = NetworkedPlayerCount;
-        if (count == 0)
-            return;
+        int count = NetworkedPlayerCount;
+        if (count == 0) return;
 
         var charIndexByPlayerId = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None)
-            .Where(player => player.Object != null && player.Object.InputAuthority.IsRealPlayer)
-            .ToDictionary(player => player.Object.InputAuthority.PlayerId, player => player.CharacterTypeIndex);
+            .Where(np => np.Object != null && np.Object.InputAuthority.IsRealPlayer)
+            .ToDictionary(np => np.Object.InputAuthority.PlayerId, np => np.CharacterTypeIndex);
 
         GameResultData.Clear();
-        for (var i = 0; i < count && i < 8; i++)
+        for (int i = 0; i < count && i < 8; i++)
         {
-            var playerId = RankedPlayerIds[i];
-            var rank = i + 1;
-            var nickname = lobby != null ? lobby.GetParticipantNickname(playerId) : $"Player{playerId}";
-            charIndexByPlayerId.TryGetValue(playerId, out var charIndex);
-            GameResultData.AddEntry(playerId, nickname, rank, charIndex);
+            int pid = RankedPlayerIds[i];
+            int rank = i + 1;
+            string nickname = lobby != null ? lobby.GetParticipantNickname(pid) : $"Player{pid}";
+            charIndexByPlayerId.TryGetValue(pid, out var charIdx);
+            GameResultData.AddEntry(pid, nickname, rank, charIdx);
         }
 
-        var localPlayerId = runner.LocalPlayer.PlayerId;
-        GameResultData.LocalPlayerRank = GameResultData.GetRank(localPlayerId);
-        Debug.Log($"[GameEnd] GameResultData saved: localRank={GameResultData.LocalPlayerRank}, count={count}");
+        int localPid = runner.LocalPlayer.PlayerId;
+        GameResultData.LocalPlayerRank = GameResultData.GetRank(localPid);
+        Debug.Log($"[GameEnd] GameResultData 저장 완료: localRank={GameResultData.LocalPlayerRank}, count={count}");
     }
+
+    // ─── 로컬 테스트용 목업 ────────────────────────────────────────
 
     private static void SetMockRankingsForLocalTest()
     {
         GameResultData.Clear();
-        GameResultData.AddEntry(1, "Test1", 1);
-        GameResultData.AddEntry(2, "Test2", 2);
-        GameResultData.AddEntry(3, "Test3", 3);
-        GameResultData.AddEntry(4, "Test4", 4);
+        GameResultData.AddEntry(1, "테스트1", 1);
+        GameResultData.AddEntry(2, "테스트2", 2);
+        GameResultData.AddEntry(3, "테스트3", 3);
+        GameResultData.AddEntry(4, "테스트4", 4);
         GameResultData.LocalPlayerRank = 1;
-    }
-
-    private static void Shuffle<T>(List<T> list)
-    {
-        for (var i = list.Count - 1; i > 0; i--)
-        {
-            var j = Random.Range(0, i + 1);
-            (list[i], list[j]) = (list[j], list[i]);
-        }
     }
 }
