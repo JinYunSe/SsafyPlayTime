@@ -165,8 +165,10 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         bool isRecoveryPhase = networkPlayer != null &&
                                (networkPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.Recovering ||
                                 networkPlayer.GetStunPresentationPhase() == NetworkPlayer.StunPresentationPhase.RecoverStabilizing);
+        bool preserveQueuedRecoveryDuringResetWindow = networkPlayer != null &&
+                                                       networkPlayer.IsRemoteRecoveryPresentationResetWindowActive();
 
-        if (!isRecoveryPhase && recoveryQueued)
+        if (!isRecoveryPhase && recoveryQueued && !preserveQueuedRecoveryDuringResetWindow)
         {
             recoveryQueued = false;
             queuedRecoveryVariant = NetworkPlayer.RecoveryAnimationVariant.None;
