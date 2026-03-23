@@ -141,11 +141,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [Networked] private float StunTimeRemaining { get; set; }
 
     [Header("Grab Debug")]
-    [SerializeField] bool debugGrabLog = true;
-    [SerializeField] bool enableProxyAnimationDiagnostics = true;
+    [SerializeField] bool debugGrabLog = false;
+    [SerializeField] bool enableProxyAnimationDiagnostics = false;
 
     [Header("Startup Launch Diagnostics")]
-    [SerializeField] private bool enableStartupLaunchDiagnostics = true;
+    [SerializeField] private bool enableStartupLaunchDiagnostics = false;
     [SerializeField, Range(0.05f, 0.5f)] private float startupLaunchDiagnosticsSampleInterval = 0.15f;
     [SerializeField, Range(1f, 8f)] private float startupLaunchDiagnosticsWindow = 4f;
 
@@ -945,6 +945,24 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     private CameraAnchorFollowSettings ResolveCameraAnchorFollowSettings()
     {
+        var phase = GetPhysicalPhase();
+
+        // 기절 운반 중: 운반자가 이동하는 속도에 맞게 카메라를 빠르게 추적해야 한다.
+        // ShouldUseHardPhysicsPresentation()=true로 6f 속도가 먼저 적용되면
+        // 운반 도중 카메라가 끌려가기 전 위치에 고정되어 보이는 문제가 발생하므로 선처리.
+        if (phase == PhysicalPhase.BeingCarriedStunned)
+        {
+            // 운반 중: 운반자 이동 속도에 맞게 즉시 스냅(snapDistance 최소화).
+            // cameraAnchorSnapDistance * 0.2f 로 0.4m 이상이면 즉시 스냅 → 부드럽게 따라감.
+            return new CameraAnchorFollowSettings(
+                cameraAnchorStableFollowSpeed,
+                cameraAnchorVerticalFollowMultiplier,
+                cameraAnchorSnapDistance * 0.2f,
+                0f,
+                0f,
+                0f);
+        }
+
         if (ShouldUseHardPhysicsPresentation())
         {
             return new CameraAnchorFollowSettings(
@@ -955,8 +973,6 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
                 0f,
                 0f);
         }
-
-        var phase = GetPhysicalPhase();
         if (phase == PhysicalPhase.Holding ||
             phase == PhysicalPhase.CarryingStunned ||
             phase == PhysicalPhase.GrabIntent)
@@ -984,8 +1000,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (phase == PhysicalPhase.BeingGrabbed ||
             phase == PhysicalPhase.Dragged ||
             phase == PhysicalPhase.StunnedCollapse ||
-            phase == PhysicalPhase.Stunned ||
-            phase == PhysicalPhase.BeingCarriedStunned)
+            phase == PhysicalPhase.Stunned)
         {
             return new CameraAnchorFollowSettings(
                 cameraAnchorHardPhysicsFollowSpeed,
@@ -1145,11 +1160,6 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private bool _leftClickUseTriggered;
     private const float GRAB_HOLD_THRESHOLD = 0.15f;
 
-    // 우클릭 짧게 vs 길게 구분 (짧게 = 빠른 그랩, 길게 = 던지기)
-    private bool _rightMouseDown;
-    private float _rightMouseDownTime;
-    private bool _rightMouseConsumedAsGrab;
-
     // 호스트 측 좌우 펀치 토글
     private bool _hostNextPunchLeft;
 
@@ -1182,7 +1192,6 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     private void Awake()
     {
-        debugGrabLog = true; // 디버그 진단용 강제 활성화
         InitializeInternal();
     }
 
@@ -1202,6 +1211,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     public override void Spawned()
     {
+        // 루트 Rigidbody에 Interpolate 적용: 물리(64Hz)와 렌더링 프레임 사이를 보간해
+        // 캐릭터 이동이 뚝뚝 끊겨 보이는 현상 제거. PuppetMaster muscle은 건드리지 않음.
+        if (rigidbody3D != null)
+            rigidbody3D.interpolation = RigidbodyInterpolation.Interpolate;
+
         InitializeInternal();
         MarkItemBuffNetworkReady();
         MarkItemWorldEffectNetworkReady();
