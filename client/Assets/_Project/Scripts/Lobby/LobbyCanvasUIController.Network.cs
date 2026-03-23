@@ -761,6 +761,7 @@ namespace SSAFYPlayTime
                 CameraYaw = _netCameraYaw,
                 Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
                 Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
+                PrimaryUseHold = _netLeftMouseDown,
                 Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
                 Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
                 LeftGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab,
