@@ -246,7 +246,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             _spawnedHeldVisual.name = $"HeldItem_{heldItemId}";
             var isWatermelonSword = string.Equals(heldItemId, ItemIds.WaterMelonSword, StringComparison.Ordinal);
             var isBlackhole = string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal);
-            if (!isBlackhole)
+            if (!isBlackhole && !ShouldSkipHeldFallback(heldItemId))
             {
                 // 수박칼은 조건과 무관하게 Lit 셰이더로 강제 교체해 마젠타를 방지한다.
                 ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_spawnedHeldVisual, isWatermelonSword);
@@ -398,6 +398,14 @@ namespace SSAFYPlayTime.Gameplay.Items
         {
             return string.Equals(heldItemId, ItemIds.Americano, StringComparison.Ordinal) ||
                    string.Equals(heldItemId, ItemIds.Growth, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.Shrink, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.Invisibility, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.SatelliteStrike, StringComparison.Ordinal);
+        }
+
+        private static bool ShouldSkipHeldFallback(string heldItemId)
+        {
+            return string.Equals(heldItemId, ItemIds.Growth, StringComparison.Ordinal) ||
                    string.Equals(heldItemId, ItemIds.Shrink, StringComparison.Ordinal) ||
                    string.Equals(heldItemId, ItemIds.Invisibility, StringComparison.Ordinal) ||
                    string.Equals(heldItemId, ItemIds.SatelliteStrike, StringComparison.Ordinal);
@@ -639,28 +647,6 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (!isSatellite)
             {
                 return;
-            }
-
-            var particles = visualRoot.GetComponentsInChildren<ParticleSystem>(true);
-            for (var i = 0; i < particles.Length; i++)
-            {
-                var particle = particles[i];
-                if (particle == null)
-                {
-                    continue;
-                }
-
-                particle.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-                particle.gameObject.SetActive(false);
-            }
-
-            var lights = visualRoot.GetComponentsInChildren<Light>(true);
-            for (var i = 0; i < lights.Length; i++)
-            {
-                if (lights[i] != null)
-                {
-                    lights[i].enabled = false;
-                }
             }
         }
 
