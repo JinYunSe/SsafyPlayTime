@@ -1208,14 +1208,8 @@ public sealed partial class NetworkPlayer
                 continue;
             }
 
-            if (IsSatelliteStrikeSelfHit(hitCollider))
-            {
-                continue;
-            }
-
             var targetPlayer = ResolveSatelliteStrikeTargetPlayer(hitCollider);
             if (targetPlayer != null &&
-                targetPlayer != this &&
                 damagedPlayerIds.Add(targetPlayer.GetInstanceID()))
             {
                 targetPlayer.ApplyCombinedDamage(
@@ -1298,36 +1292,6 @@ public sealed partial class NetworkPlayer
         return hitCollider.GetComponentInParent<Rigidbody>();
     }
 
-    private bool IsSatelliteStrikeSelfHit(Collider hitCollider)
-    {
-        if (hitCollider == null)
-        {
-            return false;
-        }
-
-        var targetPlayer = ResolveSatelliteStrikeTargetPlayer(hitCollider);
-        if (targetPlayer == this)
-        {
-            return true;
-        }
-
-        if (hitCollider.transform.IsChildOf(transform))
-        {
-            return true;
-        }
-
-        if (rigidbody3D != null && hitCollider.attachedRigidbody == rigidbody3D)
-        {
-            return true;
-        }
-
-        if (hitCollider.attachedRigidbody != null && hitCollider.attachedRigidbody.transform.root == transform.root)
-        {
-            return true;
-        }
-
-        return false;
-    }
 
     private Vector3 ResolveSatelliteGroundCenter(Vector3 requestedCenter)
     {
