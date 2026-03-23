@@ -21,10 +21,10 @@ public struct PlayerNetworkInput : INetworkInput
     // Drop held item.
     public NetworkBool Drop;
 
-    // Short right click: throw / interact.
+    // Short right click: throw while physically holding a target.
     public NetworkBool Throw;
 
-    // Hold left click past threshold: keep left-hand grab active.
+    // Hold left click past threshold: keep grab intent active.
     public NetworkBool LeftGrabHold;
 
     // Sprint.
