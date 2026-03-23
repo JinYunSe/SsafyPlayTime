@@ -23,7 +23,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private const string BlackholeVisualAssetPath = "Assets/_Project/Prefabs/Items/BlackholeBomb.prefab";
         private const string BlackholeVisualResourcePath = "_Project/Prefabs/Items/BlackholeBomb";
-        private const string FlamethrowerEffectAssetPath = "Assets/Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky.prefab";
+        private const string FlamethrowerEffectAssetPath = "Assets/Resources/Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky.prefab";
         private const string FlamethrowerEffectResourcePath = "Polygon Arsenal/Prefabs/Misc/FlamethrowerBlocky";
         private const string SatelliteProjectileAssetPath =
             "Assets/Polygon Arsenal/Prefabs/Combat/Missiles/Sci-Fi/Antimatter/AntimatterMissileBlue.prefab";
@@ -267,8 +267,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                     _visualRoot.transform.localScale = Vector3.one * Mathf.Max(1f, Radius * 0.3f);
                     break;
                 case NetworkedItemEffectKind.Flamethrower:
-                    _visualRoot.transform.localScale = Vector3.one * 2f;
-                    _visualRoot.transform.localRotation = Quaternion.identity;
+                    RefreshFlamethrowerVisualState();
                     break;
             }
         }
@@ -299,6 +298,30 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
         }
 
+        private void RefreshFlamethrowerVisualState()
+        {
+            if (_visualRoot == null)
+            {
+                return;
+            }
+
+            _visualRoot.transform.localScale = Vector3.one * 2f;
+            _visualRoot.transform.localRotation = Quaternion.identity;
+
+            if (_lastActivatedState != Activated)
+            {
+                _lastActivatedState = Activated;
+                if (Activated)
+                {
+                    PlayAllParticles(_visualRoot);
+                }
+                else
+                {
+                    StopAllParticles(_visualRoot);
+                }
+            }
+        }
+
         private GameObject BuildVisual()
         {
             switch (EffectKind)
@@ -312,7 +335,16 @@ namespace SSAFYPlayTime.Gameplay.Items
                 case NetworkedItemEffectKind.SatelliteBeam:
                     return BuildSatelliteBeamVisual();
                 case NetworkedItemEffectKind.Flamethrower:
-                    return InstantiateVisual(TryLoadAsset(FlamethrowerEffectAssetPath, FlamethrowerEffectResourcePath), "FlamethrowerVisual");
+                    var flamethrowerPrefab = TryLoadAsset(FlamethrowerEffectAssetPath, FlamethrowerEffectResourcePath);
+                    if (flamethrowerPrefab == null)
+                    {
+                        var fallback = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                        fallback.transform.localScale = Vector3.one * 0.5f;
+                        var renderer = fallback.GetComponent<Renderer>();
+                        if (renderer != null) renderer.material.color = Color.red;
+                        return fallback;
+                    }
+                    return InstantiateVisual(flamethrowerPrefab, "FlamethrowerVisual");
                 default:
                     return null;
             }
@@ -463,6 +495,26 @@ namespace SSAFYPlayTime.Gameplay.Items
                 }
 
                 particle.Play(true);
+            }
+        }
+
+        private static void StopAllParticles(GameObject root)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            var particles = root.GetComponentsInChildren<ParticleSystem>(true);
+            for (var i = 0; i < particles.Length; i++)
+            {
+                var particle = particles[i];
+                if (particle == null)
+                {
+                    continue;
+                }
+
+                particle.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
             }
         }
 
