@@ -328,6 +328,9 @@ namespace SSAFYPlayTime
         // 게임 종료 후 LauncherScene 진입 시 백그라운드에서 실행되는 방 자동 입장 Task.
         // 버튼 클릭 시 이 Task를 await해 완료 여부를 확인한다.
         private Task<bool> _gameEndAutoRoomJoinTask;
+        // GameResultData.Clear() 전에 캡처한 로컬 플레이어 순위.
+        // StartAutoRoomJoinFromGameEndAsync()에서 순위 기반 딜레이 계산에 사용한다.
+        private int _localPlayerRankForAutoJoin;
         private AudioSource _launcherBackgroundMusicSource;
         private GameAudioSource _launcherBackgroundMusicCategory;
 
@@ -1273,6 +1276,8 @@ namespace SSAFYPlayTime
             _gameEndReturnTransitionStarted = false;
 
             DisplayRankings();
+            // Clear() 전에 순위를 캡처해 StartAutoRoomJoinFromGameEndAsync의 딜레이 계산에 사용한다.
+            _localPlayerRankForAutoJoin = GameResultData.LocalPlayerRank;
             // 표시 완료 후 데이터를 클리어해 이후 OnSceneLoadDone 재발생 시 패널이 중복 표시되지 않도록 한다.
             GameResultData.Clear();
 
@@ -1318,6 +1323,9 @@ namespace SSAFYPlayTime
                 while (!IsActiveSceneNamed(launcherSceneName))
                     yield return null;
                 Debug.Log("[HostExit] LauncherScene 로드 완료");
+                // SceneManager.LoadScene은 Fusion 경로가 아니므로 OnSceneLoadDone이 발동하지 않는다.
+                // 캐릭터 슬롯 재초기화를 허용하도록 수동으로 리셋한다.
+                ResetCharacterSlotState();
             }
 
             _currentRoomName = string.Empty;
@@ -1327,6 +1335,10 @@ namespace SSAFYPlayTime
             _currentRoomPassword = string.Empty;
             _localSelectedCharacterIndex = -1;
             _localIsReady = false;
+            _localPlayerRankForAutoJoin = 0;
+            // OnHostMigration이 저장한 준비 상태를 클리어해 재입장 시 Ready 복원을 방지한다.
+            _migrationReadyStateByClientId.Clear();
+            _isMigrating = false;
 
             Debug.Log("[HostExit] ShowLobbyPanel 호출");
             ShowLobbyPanel();
@@ -1436,7 +1448,7 @@ namespace SSAFYPlayTime
             //   3등: 300ms → CLIENT로 입장
             //   4등: 450ms → CLIENT로 입장
             const int RankDelayMs = 150;
-            var localRank = GameResultData.LocalPlayerRank;
+            var localRank = _localPlayerRankForAutoJoin;
             var delaySteps = localRank > 0 ? (localRank - 1) : MaxPlayers;
             if (delaySteps > 0)
                 await Task.Delay(delaySteps * RankDelayMs);
