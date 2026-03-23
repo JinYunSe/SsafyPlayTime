@@ -419,18 +419,8 @@ namespace SSAFYPlayTime
 
         private void EnsureGameSettingModal()
         {
-            if (gameSettingModal == null)
-            {
-                return;
-            }
-
-            var modalController = gameSettingModal.GetComponent<LobbyAudioSettingsModal>();
-            if (modalController == null)
-            {
-                modalController = gameSettingModal.AddComponent<LobbyAudioSettingsModal>();
-            }
-
-            modalController.InitializeIfNeeded();
+            // LobbyAudioSettingsModal은 Hierarchy에서 컴포넌트로 미리 부착되어 있어야 합니다.
+            // Awake에서 슬라이더 바인딩, OnEnable에서 값 갱신이 자동으로 수행됩니다.
         }
 
         private void EnsureLauncherBackgroundMusic()

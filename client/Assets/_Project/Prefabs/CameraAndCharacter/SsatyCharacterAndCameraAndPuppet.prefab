@@ -527,7 +527,10 @@ MonoBehaviour:
   breakForce: 2000
   breakTorque: 2000
   dualGrabBreakMultiplier: 3
+  debugLog: 1
   maxGrabDistance: 2.5
+  maxGrabDistanceStunned: 4
+  grabDistanceGracePeriod: 0.8
   palmAnchorOffset: {x: 0, y: -0.02, z: 0.06}
   grabbedPinWeight: 0.3
   grabbedMuscleWeight: 0.3
@@ -2490,6 +2493,8 @@ MonoBehaviour:
   useAnimatedVisualOnly: 1
   disablePhysicsAnimationSync: 1
   holdPoint: {fileID: 0}
+  carryRig: {fileID: 0}
+  carryPhysicsProfile: {fileID: 0}
   cameraAnchorPresentationLocalOffset: {x: 0, y: 1.35, z: 0}
   cameraAnchorFallbackRootLocalOffset: {x: 0, y: 1.25, z: 0}
   cameraAnchorStableFollowSpeed: 25
@@ -2527,10 +2532,17 @@ MonoBehaviour:
     _value: 0
   _RightGrabConfirmed:
     _value: 0
+  _LeftGrabAnchorId: 0
+  _RightGrabAnchorId: 0
   _NetworkedIsBeingGrabbed:
     _value: 0
   _NetworkedIsDragged:
     _value: 0
+  debugGrabLog: 1
+  enableProxyAnimationDiagnostics: 1
+  enableStartupLaunchDiagnostics: 1
+  startupLaunchDiagnosticsSampleInterval: 0.15
+  startupLaunchDiagnosticsWindow: 4
   itemWorldEffectMask:
     serializedVersion: 2
     m_Bits: 119
@@ -2559,7 +2571,13 @@ MonoBehaviour:
   flamethrowerMuzzleLocalOffset: {x: 0, y: 0, z: 0.5}
   flamethrowerMuzzleLocalEulerOffset: {x: 0, y: 0, z: 0}
   enableItemWorldEffectLog: 0
-  enableProxyAnimationDiagnostics: 1
+  enableMoveSyncDiagnostics: 0
+  moveSyncDiagnosticsLogToConsole: 0
+  moveSyncDiagnosticsIncludeAuthority: 1
+  moveSyncDiagnosticsIncludeOwnerProxy: 1
+  moveSyncDiagnosticsIncludeRemoteProxy: 1
+  moveSyncDiagnosticsInputSampleInterval: 0.12
+  moveSyncDiagnosticsStateSampleInterval: 0.12
   enableStunForceDiagnostics: 0
   stunForceDiagnosticsIncludeProxies: 1
   stunForceDiagnosticsWindow: 1.5
@@ -2583,7 +2601,8 @@ MonoBehaviour:
   attackLockDuration: 0.08
   attackVisualDuration: 0.3
   throwLockDuration: 0.85
-  enableAnimationDriverDiagnostics: 1
+  recoverySupineClip: {fileID: 0}
+  recoveryProneClip: {fileID: 0}
 --- !u!54 &5945320000664910996
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -2772,6 +2791,7 @@ MonoBehaviour:
   reachDistance: 0.6
   handReachForce: 115
   handDamping: 8
+  holdForceScale: 0.15
   holdIKRotationWeight: 0.5
   anchorBlend: 0.6
   holdForwardOffset: 0.45
@@ -2790,6 +2810,7 @@ MonoBehaviour:
   carryingTurnAssistMultiplier: 1.1
   dualCarryTurnAssistMultiplier: 1.25
   carryPoseProfile: {fileID: 11400000, guid: 1d3a4c4bf11833b45871d1178b5a5909, type: 2}
+  debugLog: 1
 --- !u!114 &7711887360206274305
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3600,7 +3621,10 @@ MonoBehaviour:
   breakForce: 2000
   breakTorque: 2000
   dualGrabBreakMultiplier: 3
+  debugLog: 1
   maxGrabDistance: 2.5
+  maxGrabDistanceStunned: 4
+  grabDistanceGracePeriod: 0.8
   palmAnchorOffset: {x: 0, y: -0.02, z: 0.06}
   grabbedPinWeight: 0.3
   grabbedMuscleWeight: 0.3
