@@ -9,6 +9,7 @@ public sealed partial class NetworkPlayer
     private Quaternion _lastSafeRotation = Quaternion.identity;
     private bool _hasLastSafeTransform;
     private float _nextOutOfBoundsRecoverAt;
+    private SpawnPointGroup _cachedSpawnPointGroup;
 
     private float ResolveCameraYaw()
     {
@@ -88,7 +89,7 @@ public sealed partial class NetworkPlayer
         // This keeps PartyMonsterAnimationDriver.SyncGrabAnimation() in sync.
         if (Runner != null && HasInputAuthority && !HasStateAuthority)
         {
-            var unifiedGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab;
+            var unifiedGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab && !HasHeldRuntimeItem();
             _isLeftGrabActive = unifiedGrabHold;
             _isRightGrabActive = unifiedGrabHold;
             _isGrabActive = unifiedGrabHold;
@@ -141,7 +142,7 @@ public sealed partial class NetworkPlayer
             PrimaryUseHold = _leftMouseDown,
             Drop = _dropTriggered,
             Throw = _throwTriggered,
-            LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab,
+            LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab && !HasHeldRuntimeItem(),
             RightGrabHold = false,
             Headbutt = Input.GetMouseButtonDown(2),
             Sprint = Input.GetKey(KeyCode.LeftShift)
@@ -352,7 +353,8 @@ public sealed partial class NetworkPlayer
             return true;
         }
 
-        var spawnGroup = FindObjectOfType<SpawnPointGroup>();
+        _cachedSpawnPointGroup ??= FindObjectOfType<SpawnPointGroup>();
+        var spawnGroup = _cachedSpawnPointGroup;
         if (spawnGroup != null && spawnGroup.transform.childCount > 0)
         {
             var index = Random.Range(0, spawnGroup.transform.childCount);
@@ -418,13 +420,16 @@ public sealed partial class NetworkPlayer
         if (!TryResolveRecoveryTransform(out var recoveryPosition, out var recoveryRotation))
             recoveryRotation = transform.rotation;
 
-        rigidbody3D.position = recoveryPosition;
-        rigidbody3D.rotation = recoveryRotation;
         transform.SetPositionAndRotation(recoveryPosition, recoveryRotation);
-        if (rigidbody3D != null && !rigidbody3D.isKinematic)
+        if (rigidbody3D != null)
         {
-            rigidbody3D.velocity = Vector3.zero;
-            rigidbody3D.angularVelocity = Vector3.zero;
+            rigidbody3D.position = recoveryPosition;
+            rigidbody3D.rotation = recoveryRotation;
+            if (!rigidbody3D.isKinematic)
+            {
+                rigidbody3D.velocity = Vector3.zero;
+                rigidbody3D.angularVelocity = Vector3.zero;
+            }
         }
         RememberSafeTransform(recoveryPosition, recoveryRotation);
         ForceRecover();

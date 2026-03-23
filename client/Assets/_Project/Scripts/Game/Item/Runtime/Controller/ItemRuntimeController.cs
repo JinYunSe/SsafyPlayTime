@@ -28,6 +28,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private bool _isFlamethrowerActive;
         private float _equipmentEndAt;
         private float _nextFlamethrowerTickAt;
+        private float _remainingFlamethrowerUseSec = -1f;
 
         private ItemBuffMask _activeBuffMask = ItemBuffMask.None;
         private float _growthEndAt;
@@ -145,6 +146,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
+            _remainingFlamethrowerUseSec = -1f; // 아이템 교체 시 남은 사용 시간 초기화
             _heldItemId = itemId ?? string.Empty;
             _bridge.OnHeldItemChanged(_heldItemId);
         }
