@@ -274,9 +274,7 @@ public sealed class CharacterGrabController : MonoBehaviour
         jointTargetBody = originalTargetBody;
         jointAnchorWorld = originalAnchorWorld;
 
-        if (attachedAnchorPoint != null &&
-            targetType != SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.StunnedPlayer &&
-            attachedAnchorPoint.ParentBoneRigidbody != null)
+        if (attachedAnchorPoint != null && attachedAnchorPoint.ParentBoneRigidbody != null)
         {
             jointTargetBody = attachedAnchorPoint.ParentBoneRigidbody;
             jointAnchorWorld = attachedAnchorPoint.GetGripWorldPosition();
@@ -285,14 +283,6 @@ public sealed class CharacterGrabController : MonoBehaviour
 
         if (targetType != SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.StunnedPlayer || targetPlayer == null)
             return;
-
-        var targetCarryRig = targetPlayer.GetCarryRig();
-        if (targetCarryRig != null)
-        {
-            targetCarryRig.UpdateVictimAnchor();
-            if (targetCarryRig.TryGetVictimSupportFrameWorld(out var carryAnchorPos, out _))
-                jointAnchorWorld = carryAnchorPos;
-        }
 
         var puppet = targetPlayer.GetComponentInChildren<PuppetMaster>(true);
         if (puppet == null || puppet.muscles == null || puppet.muscles.Length == 0)
@@ -307,9 +297,7 @@ public sealed class CharacterGrabController : MonoBehaviour
             return;
 
         jointTargetBody = hipsBody;
-
-        if (targetCarryRig == null)
-            jointAnchorWorld = hipsBody.worldCenterOfMass;
+        jointAnchorWorld = hipsBody.worldCenterOfMass;
     }
 
     public void RefreshNow()
@@ -426,9 +414,7 @@ public sealed class CharacterGrabController : MonoBehaviour
     {
         return carryMode switch
         {
-            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry => IsOverheadCarryPoseActive()
-                ? HoldVariant.OverheadCarry
-                : HoldVariant.FrontCarry,
+            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry => HoldVariant.OverheadCarry,
             SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry => HoldVariant.DualCarry,
             SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim => HoldVariant.CarriedVictim,
             _ => ResolveDirectHoldVariant()
@@ -476,9 +462,7 @@ public sealed class CharacterGrabController : MonoBehaviour
         switch (carryMode)
         {
             case SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry:
-                return IsOverheadCarryPoseActive()
-                    ? GrabActionState.OverheadCarry
-                    : GrabActionState.FrontCarry;
+                return GrabActionState.OverheadCarry;
             case SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry:
                 return GrabActionState.DualCarry;
         }

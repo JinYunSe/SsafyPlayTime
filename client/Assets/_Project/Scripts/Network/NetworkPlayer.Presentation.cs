@@ -26,7 +26,7 @@ public sealed partial class NetworkPlayer
     private const float OwnerCarryBoneRotationLerpScale = 1.1f;
     private const float CarryHipsImmediateSnapDistance = 0.85f;
     private const float CarryPresentationTraceGapThreshold = 0.3f;
-    private const float CarryResidualRootGapThreshold = 0.90f;
+    private const float CarryResidualRootGapThreshold = 0.50f;
     private const float CarryRootDebugGapThreshold = 1.35f;
     private const float CarryProxyHipsSoftAlignDistance = 0.35f;
     private const float CarryReleaseSettleHipsSoftAlignDistance = 0.55f;
@@ -444,12 +444,14 @@ public sealed partial class NetworkPlayer
         out bool didSnap,
         bool isSettling = false)
     {
+        var phase = GetPhysicalPhase();
         rootBefore = transform.position;
         rootAfter = rootBefore;
         var correctionTarget = carryRootTarget;
         gapBefore = Vector3.Distance(rootBefore, correctionTarget);
         gapAfter = gapBefore;
         didSnap = false;
+        var usedResidualTarget = false;
 
         if (!HasStateAuthority &&
             gapBefore <= 0.0001f &&
@@ -458,10 +460,27 @@ public sealed partial class NetworkPlayer
             correctionTarget = residualRootTarget;
             gapBefore = Vector3.Distance(rootBefore, correctionTarget);
             gapAfter = gapBefore;
+            usedResidualTarget = true;
         }
 
+        var forceCarryCallLog = !HasStateAuthority && phase == PhysicalPhase.BeingCarriedStunned;
+        TraceCarryDebugSample(
+            "TryApplyCarryProxyRootCorrection.Call",
+            $"called=true phaseFromGetPhysicalPhase={phase} carryMode={carryMode} isSettling={isSettling} " +
+            $"rootBefore={FormatCarryDebugVector(rootBefore)} correctionTarget={FormatCarryDebugVector(correctionTarget)} " +
+            $"residualRootTarget={FormatCarryDebugVector(residualRootTarget)} gapBefore={gapBefore:F2} " +
+            $"residualGapHint={residualGapHint:F2} usedResidualTarget={usedResidualTarget}",
+            forceSample: forceCarryCallLog);
+
         if (HasStateAuthority || gapBefore <= 0.0001f)
+        {
+            TraceCarryDebugSample(
+                "TryApplyCarryProxyRootCorrection.Skip",
+                $"phaseFromGetPhysicalPhase={phase} carryMode={carryMode} gapBefore={gapBefore:F2} " +
+                $"residualGapHint={residualGapHint:F2} reason={(HasStateAuthority ? "StateAuthority" : "NoGap")}",
+                forceSample: forceCarryCallLog);
             return false;
+        }
 
         // CarrySolveFrame: CarryPhysicsProfile에서 proxy 설정값 가져오기
         var settings = ResolveCarryModeSettings(carryMode);
@@ -490,7 +509,13 @@ public sealed partial class NetworkPlayer
 
         ApplyProxyCarryRootPosition(rootAfter, isSettling);
         gapAfter = Vector3.Distance(rootAfter, correctionTarget);
-        return (rootAfter - rootBefore).sqrMagnitude > 0.000001f;
+        var moved = (rootAfter - rootBefore).sqrMagnitude > 0.000001f;
+        TraceCarryDebugSample(
+            "TryApplyCarryProxyRootCorrection.Result",
+            $"phaseFromGetPhysicalPhase={phase} carryMode={carryMode} moved={moved} didSnap={didSnap} " +
+            $"rootAfter={FormatCarryDebugVector(rootAfter)} gapBefore={gapBefore:F2} gapAfter={gapAfter:F2}",
+            forceSample: forceCarryCallLog);
+        return moved;
     }
 
     private void CacheProxyCarryTargets(PhysicalPhase phase, Vector3 carryAnchorTarget, Vector3 carryRootTarget)
@@ -615,7 +640,10 @@ public sealed partial class NetworkPlayer
 
         if (phase == PhysicalPhase.BeingCarriedStunned)
         {
-            if (!(bool)NetworkedVictimAnchorValid)
+            var hasVictimAnchor = (bool)NetworkedVictimAnchorValid;
+            var hasVictimCarryRoot = (bool)NetworkedVictimCarryRootValid;
+
+            if (!hasVictimAnchor && !hasVictimCarryRoot)
             {
                 if (TryGetCachedProxyCarryTargets(phase, out carryAnchorTarget, out carryRootTarget))
                     return true;
@@ -623,15 +651,34 @@ public sealed partial class NetworkPlayer
                 TraceCarryDebugSample(
                     "TryResolveProxyCarryTargets",
                     $"missingVictimAnchor desiredHips={FormatCarryDebugVector(desiredHipsPosition)} " +
-                    $"rootOffsetValid={(bool)NetworkedVictimRootOffsetValid}",
+                    $"rootOffsetValid={(bool)NetworkedVictimRootOffsetValid} " +
+                    $"victimCarryRootValid={hasVictimCarryRoot}",
                     forceSample: false);
                 return false;
             }
 
-            carryAnchorTarget = NetworkedVictimAnchorPosition;
-            carryRootTarget = carryAnchorTarget;
-            if ((bool)NetworkedVictimRootOffsetValid)
-                carryRootTarget += NetworkedVictimRootOffset;
+            if (hasVictimAnchor)
+                carryAnchorTarget = NetworkedVictimAnchorPosition;
+
+            if (hasVictimCarryRoot)
+            {
+                carryRootTarget = NetworkedVictimCarryRootPosition;
+            }
+            else
+            {
+                carryRootTarget = carryAnchorTarget;
+                if ((bool)NetworkedVictimRootOffsetValid)
+                    carryRootTarget += NetworkedVictimRootOffset;
+            }
+
+            if (!hasVictimAnchor && hasVictimCarryRoot)
+            {
+                TraceCarryDebugSample(
+                    "TryResolveProxyCarryTargets",
+                    $"usingVictimCarryRootFallback desiredHips={FormatCarryDebugVector(desiredHipsPosition)} " +
+                    $"victimCarryRoot={FormatCarryDebugVector(NetworkedVictimCarryRootPosition)}",
+                    forceSample: false);
+            }
 
             CacheProxyCarryTargets(phase, carryAnchorTarget, carryRootTarget);
             return true;
@@ -765,6 +812,19 @@ public sealed partial class NetworkPlayer
             System.Array.Copy(_boneSnapshotTo, _boneSnapshotFrom, boneCount);
             for (int i = 0; i < boneCount; i++)
                 _boneSnapshotTo[i] = BoneRotations.Get(i);
+        }
+
+        if (!HasStateAuthority &&
+            phase == PhysicalPhase.BeingCarriedStunned &&
+            changed)
+        {
+            TraceCarryDebugSample(
+                "ProxyCarryFrame",
+                $"phaseFromGetPhysicalPhase={phase} hipsUpdated=true " +
+                $"hipsFrom={FormatCarryDebugVector(_hipsSnapshotFrom)} hipsTo={FormatCarryDebugVector(_hipsSnapshotTo)} " +
+                $"latestHips={FormatCarryDebugVector(latestHips)} " +
+                $"victimAnchorValid={(bool)NetworkedVictimAnchorValid}",
+                forceSample: true);
         }
 
         // ── CarrySolveFrame: carry 진입/종료 시 snapshot 재시드 ──

@@ -34,6 +34,16 @@ namespace SSAFYPlayTime.Character
         [SerializeField] private float hipsWeight = 0.65f;
         [SerializeField] private float chestWeight = 0.35f;
 
+        [Header("Victim Root Offsets")]
+        [SerializeField] private Vector3 frontCarryVictimRootLocalOffset = new Vector3(0f, -0.95f, 0.18f);
+        [SerializeField] private Vector3 overheadCarryVictimRootLocalOffset = new Vector3(0f, -1.05f, 0.02f);
+        [SerializeField] private Vector3 dualCarryVictimRootLocalOffset = new Vector3(0f, -1.00f, 0.05f);
+
+        private static readonly Vector3 StunnedSingleCarrierAnchorLift = new Vector3(0f, 0.70f, 0.18f);
+        private static readonly Vector3 StunnedDualCarrierAnchorLift = new Vector3(0f, 0.60f, 0.12f);
+        private static readonly Vector3 StunnedSingleVictimRootLift = new Vector3(0f, 0.42f, -0.08f);
+        private static readonly Vector3 StunnedDualVictimRootLift = new Vector3(0f, 0.34f, -0.05f);
+
         // 캐시
         private Transform _hipsTransform;
         private Transform _chestTransform;
@@ -56,7 +66,6 @@ namespace SSAFYPlayTime.Character
 
             if (puppetMaster == null)
                 puppetMaster = GetComponentInParent<PuppetMaster>();
-
             if (puppetMaster != null && puppetMaster.muscles != null && puppetMaster.muscles.Length > 0)
             {
                 // muscles[0] = Hips
@@ -75,7 +84,8 @@ namespace SSAFYPlayTime.Character
                 }
             }
 
-            _resolved = true;
+            // muscles가 아직 초기화되지 않았으면 다음 호출에서 재시도
+            _resolved = _hipsTransform != null;
         }
 
         /// <summary>
@@ -143,6 +153,7 @@ namespace SSAFYPlayTime.Character
             {
                 position = anchor.position;
                 forward = anchor.forward;
+                ApplyCarrierAnchorLift(mode, holdVariant, ref position, ref forward);
                 return true;
             }
 
@@ -205,6 +216,31 @@ namespace SSAFYPlayTime.Character
             position = transform.position;
             forward = transform.forward;
             return false;
+        }
+
+        public bool TryGetCarriedVictimRootTargetWorld(
+            CarryPhysicsProfile.CarryMode mode,
+            CharacterGrabController.HoldVariant holdVariant,
+            out Vector3 position,
+            out Vector3 forward)
+        {
+            if (!TryGetCarrierAnchorWorld(mode, holdVariant, out var anchorPosition, out var anchorForward))
+            {
+                position = default;
+                forward = transform.forward;
+                return false;
+            }
+
+            var planarForward = Vector3.ProjectOnPlane(anchorForward, Vector3.up);
+            if (planarForward.sqrMagnitude <= 0.0001f)
+                planarForward = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+            if (planarForward.sqrMagnitude <= 0.0001f)
+                planarForward = Vector3.forward;
+
+            var carryRotation = Quaternion.LookRotation(planarForward.normalized, Vector3.up);
+            position = anchorPosition + carryRotation * ResolveVictimRootLocalOffset(mode, holdVariant);
+            forward = carryRotation * Vector3.forward;
+            return true;
         }
 
         /// <summary>
@@ -298,7 +334,7 @@ namespace SSAFYPlayTime.Character
             return mode switch
             {
                 CarryPhysicsProfile.CarryMode.StunnedDualCarry => SelectFirstAvailable(carryDualAnchor, carryOverheadAnchor, carryFrontAnchor),
-                CarryPhysicsProfile.CarryMode.StunnedSingleCarry => SelectFirstAvailable(carryFrontAnchor, carryOverheadAnchor, carryDualAnchor),
+                CarryPhysicsProfile.CarryMode.StunnedSingleCarry => SelectFirstAvailable(carryOverheadAnchor, carryDualAnchor, carryFrontAnchor),
                 _ => SelectFirstAvailable(carryFrontAnchor, carryOverheadAnchor, carryDualAnchor)
             };
         }
@@ -311,6 +347,62 @@ namespace SSAFYPlayTime.Character
                 CharacterGrabController.HoldVariant.OverheadCarry => SelectFirstAvailable(carryOverheadAnchor, carryFrontAnchor, carryDualAnchor),
                 CharacterGrabController.HoldVariant.DualCarry => SelectFirstAvailable(carryDualAnchor, carryOverheadAnchor, carryFrontAnchor),
                 _ => null
+            };
+        }
+
+        private Vector3 ResolveVictimRootLocalOffset(
+            CarryPhysicsProfile.CarryMode mode,
+            CharacterGrabController.HoldVariant holdVariant)
+        {
+            return holdVariant switch
+            {
+                CharacterGrabController.HoldVariant.FrontCarry => frontCarryVictimRootLocalOffset,
+                CharacterGrabController.HoldVariant.OverheadCarry => overheadCarryVictimRootLocalOffset + StunnedSingleVictimRootLift,
+                CharacterGrabController.HoldVariant.DualCarry => dualCarryVictimRootLocalOffset + StunnedDualVictimRootLift,
+                _ => mode switch
+                {
+                    CarryPhysicsProfile.CarryMode.StunnedDualCarry => dualCarryVictimRootLocalOffset + StunnedDualVictimRootLift,
+                    CarryPhysicsProfile.CarryMode.StunnedSingleCarry => overheadCarryVictimRootLocalOffset + StunnedSingleVictimRootLift,
+                    _ => frontCarryVictimRootLocalOffset
+                }
+            };
+        }
+
+        private void ApplyCarrierAnchorLift(
+            CarryPhysicsProfile.CarryMode mode,
+            CharacterGrabController.HoldVariant holdVariant,
+            ref Vector3 position,
+            ref Vector3 forward)
+        {
+            var localLift = ResolveCarrierAnchorLift(mode, holdVariant);
+            if (localLift.sqrMagnitude <= 0.0001f)
+                return;
+
+            var planarForward = Vector3.ProjectOnPlane(forward, Vector3.up);
+            if (planarForward.sqrMagnitude <= 0.0001f)
+                planarForward = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+            if (planarForward.sqrMagnitude <= 0.0001f)
+                planarForward = Vector3.forward;
+
+            var carryRotation = Quaternion.LookRotation(planarForward.normalized, Vector3.up);
+            position += carryRotation * localLift;
+            forward = carryRotation * Vector3.forward;
+        }
+
+        private static Vector3 ResolveCarrierAnchorLift(
+            CarryPhysicsProfile.CarryMode mode,
+            CharacterGrabController.HoldVariant holdVariant)
+        {
+            return holdVariant switch
+            {
+                CharacterGrabController.HoldVariant.OverheadCarry => StunnedSingleCarrierAnchorLift,
+                CharacterGrabController.HoldVariant.DualCarry => StunnedDualCarrierAnchorLift,
+                _ => mode switch
+                {
+                    CarryPhysicsProfile.CarryMode.StunnedSingleCarry => StunnedSingleCarrierAnchorLift,
+                    CarryPhysicsProfile.CarryMode.StunnedDualCarry => StunnedDualCarrierAnchorLift,
+                    _ => Vector3.zero
+                }
             };
         }
 

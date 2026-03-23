@@ -1,3 +1,4 @@
+using Fusion;
 using RootMotion.Dynamics;
 using UnityEngine;
 
@@ -1241,8 +1242,103 @@ public sealed partial class NetworkPlayer
     /// CarryRig의 victim anchor를 기준으로 carry target 위치를 해석.
     /// victim 쪽: hips-chest 가중 평균 anchor
     /// </summary>
+    private int CountCarryHandsTargetingSelf(NetworkPlayer candidateHolder, NetworkId selfId)
+    {
+        if (candidateHolder == null)
+            return 0;
+
+        var count = 0;
+        if (candidateHolder.TryGetNetworkHeldAnchorData(HandGrabHandler.HandSide.Left, out var leftTargetId, out _, out _) &&
+            leftTargetId == selfId)
+        {
+            count++;
+        }
+
+        if (candidateHolder.TryGetNetworkHeldAnchorData(HandGrabHandler.HandSide.Right, out var rightTargetId, out _, out _) &&
+            rightTargetId == selfId)
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    private bool TryResolveCarrierOwnedVictimRootTarget(out Vector3 targetPos, out Vector3 targetFwd)
+    {
+        targetPos = default;
+        targetFwd = transform.forward;
+
+        if (_localCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim ||
+            !IsNetworkReady ||
+            !Object.IsValid)
+        {
+            return false;
+        }
+
+        var selfId = Object.Id;
+        NetworkPlayer bestHolder = null;
+        var bestCarryMode = SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None;
+        var bestHoldVariant = CharacterGrabController.HoldVariant.None;
+        var bestHandCount = 0;
+        var bestDistanceSqr = float.PositiveInfinity;
+
+        foreach (var candidate in RegisteredPlayers)
+        {
+            if (candidate == null || candidate == this || !candidate.IsNetworkReady || !candidate.Object.IsValid)
+                continue;
+
+            var candidateCarryMode = candidate.GetLocalCarryMode();
+            if (candidateCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry &&
+                candidateCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry)
+            {
+                continue;
+            }
+
+            var handCount = CountCarryHandsTargetingSelf(candidate, selfId);
+            if (handCount <= 0)
+                continue;
+
+            var candidateDistanceSqr = (candidate.transform.position - transform.position).sqrMagnitude;
+            if (handCount < bestHandCount ||
+                (handCount == bestHandCount && candidateDistanceSqr >= bestDistanceSqr))
+            {
+                continue;
+            }
+
+            var candidateHoldVariant = candidate.ResolveCurrentOrReplicatedHoldVariant();
+            if (candidateHoldVariant != CharacterGrabController.HoldVariant.FrontCarry &&
+                candidateHoldVariant != CharacterGrabController.HoldVariant.OverheadCarry &&
+                candidateHoldVariant != CharacterGrabController.HoldVariant.DualCarry)
+            {
+                candidateHoldVariant = candidateCarryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry
+                    ? CharacterGrabController.HoldVariant.DualCarry
+                    : CharacterGrabController.HoldVariant.OverheadCarry;
+            }
+
+            bestHolder = candidate;
+            bestCarryMode = candidateCarryMode;
+            bestHoldVariant = candidateHoldVariant;
+            bestHandCount = handCount;
+            bestDistanceSqr = candidateDistanceSqr;
+        }
+
+        if (bestHolder == null)
+            return false;
+
+        var holderCarryRig = bestHolder.GetCarryRig();
+        return holderCarryRig != null &&
+               holderCarryRig.TryGetCarriedVictimRootTargetWorld(bestCarryMode, bestHoldVariant, out targetPos, out targetFwd);
+    }
+
     private bool TryResolveCarryAnchorTargetPosition(out Vector3 targetPos)
     {
+        if (_localCarryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim &&
+            TryResolveCarrierOwnedVictimRootTarget(out targetPos, out var carrierTargetForward))
+        {
+            _lastCarryAnchorForward = carrierTargetForward;
+            return true;
+        }
+
         if (TryResolveCarryAnchorBasePosition(out var anchorPos, out var anchorFwd))
         {
             _lastCarryAnchorForward = anchorFwd;
@@ -1283,6 +1379,13 @@ public sealed partial class NetworkPlayer
 
     private void CaptureCarriedVictimRootOffset()
     {
+        if (TryResolveCarrierOwnedVictimRootTarget(out _, out _))
+        {
+            _hasCarriedVictimRootOffset = false;
+            _carriedVictimRootOffset = Vector3.zero;
+            return;
+        }
+
         if (!TryResolveCarryAnchorBasePosition(out var anchorPos, out _))
         {
             _hasCarriedVictimRootOffset = false;
