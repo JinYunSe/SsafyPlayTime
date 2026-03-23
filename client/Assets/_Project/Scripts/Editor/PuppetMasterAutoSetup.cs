@@ -62,7 +62,7 @@ public class PuppetMasterAutoSetup : EditorWindow
 
             // Set solver settings
             var bodyWeight = so.FindProperty("solver").FindPropertyRelative("bodyWeight");
-            if (bodyWeight != null) bodyWeight.floatValue = 0.3f;
+            if (bodyWeight != null) bodyWeight.floatValue = 0.2f;
 
             var headWeight = so.FindProperty("solver").FindPropertyRelative("headWeight");
             if (headWeight != null) headWeight.floatValue = 0.8f;
