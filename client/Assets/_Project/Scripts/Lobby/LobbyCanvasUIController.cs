@@ -2364,6 +2364,19 @@ namespace SSAFYPlayTime
                 }
             }
 
+            // sceneRoomSlots(Hierarchy 직접 배치) 방식의 캐릭터도 모두 숨긴다.
+            if (sceneRoomSlots != null)
+            {
+                foreach (var slot in sceneRoomSlots)
+                {
+                    if (slot == null) continue;
+                    if (slot.questionMark != null) slot.questionMark.SetActive(false);
+                    if (slot.characterModels != null)
+                        foreach (var model in slot.characterModels)
+                            if (model != null) model.SetActive(false);
+                }
+            }
+
             characterPreview?.ClearAllSlots();
         }
 
