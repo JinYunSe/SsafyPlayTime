@@ -1532,6 +1532,10 @@ namespace SSAFYPlayTime
             _characterBaseLocalScales.Clear();
             _characterBaseLocalRotations.Clear();
             _characterOptionIndexByTransform.Clear();
+
+            // CharacterPreviewController도 동일하게 리셋 — GameScene 전환 시 파괴된
+            // 슬롯 오브젝트 참조를 제거하고 재초기화를 허용한다.
+            characterPreview?.ResetSlots();
         }
 
         // 현재 방 이름·공개 여부·플레이어 슬롯·게임 시작 버튼 활성 상태를 갱신한다.

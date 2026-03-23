@@ -127,6 +127,20 @@ namespace SSAFYPlayTime
             ApplySelectedCharacterForSlot(slotIndex, hasPlayer);
         }
 
+        public void ResetSlots()
+        {
+            _characterSlotsInitialized = false;
+            for (var slot = 0; slot < PlayerSlotCount; slot++)
+                for (var option = 0; option < CharacterOptionCount; option++)
+                    _slotCharacterRoots[slot, option] = null;
+            _characterPrePlacedWorldY.Clear();
+            _characterBaseBoundsHeights.Clear();
+            _characterBaseLocalScales.Clear();
+            _characterBaseLocalRotations.Clear();
+            _characterOptionIndexByTransform.Clear();
+            _characterVisualChildBaseLocalRotations.Clear();
+        }
+
         public void ClearAllSlots()
         {
             for (var i = 0; i < PlayerSlotCount; i++)
