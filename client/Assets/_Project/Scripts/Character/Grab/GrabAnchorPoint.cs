@@ -52,6 +52,22 @@ namespace SSAFYPlayTime.Character
         public Vector3 LocalGripOffset => localGripOffset;
         public Quaternion LocalGripRotation => localGripRotation;
 
+        public void ConfigureRuntime(
+            AnchorId id,
+            float radius,
+            float priority,
+            Vector3 gripOffset,
+            Quaternion gripRotation)
+        {
+            anchorId = id;
+            grabRadius = radius;
+            grabPriority = priority;
+            localGripOffset = gripOffset;
+            localGripRotation = gripRotation;
+            _resolved = false;
+            ResolveReferences();
+        }
+
         /// <summary>이 앵커가 붙어있는 래그돌 본의 Rigidbody</summary>
         public Rigidbody ParentBoneRigidbody
         {

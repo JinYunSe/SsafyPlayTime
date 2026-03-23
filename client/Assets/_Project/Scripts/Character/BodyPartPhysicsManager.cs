@@ -10,8 +10,8 @@ namespace SSAFYPlayTime.Character
         private const float DefaultSpeedForMaxWobble = 4f;
         private const float DefaultTurnRateForMaxWobble = 220f;
         private const float DefaultAirborneWobbleBonus = 0.08f;
-        private const float DefaultHeadPinMultiplier = 0.48f;
-        private const float DefaultHeadMuscleMultiplier = 0.38f;
+        private const float DefaultHeadPinMultiplier = 0.40f;
+        private const float DefaultHeadMuscleMultiplier = 0.30f;
         private const float DefaultArmPinMultiplier = 0.64f;
         private const float DefaultArmMuscleMultiplier = 0.52f;
         private const float DefaultHandPinMultiplier = 0.82f;
@@ -36,8 +36,8 @@ namespace SSAFYPlayTime.Character
         [SerializeField] private float speedForMaxWobble = 4f;
         [SerializeField] private float turnRateForMaxWobble = 220f;
         [SerializeField, Range(0f, 0.5f)] private float airborneWobbleBonus = 0.08f;
-        [SerializeField, Range(0.25f, 1f)] private float headPinMultiplier = 0.48f;
-        [SerializeField, Range(0.25f, 1f)] private float headMuscleMultiplier = 0.38f;
+        [SerializeField, Range(0.25f, 1f)] private float headPinMultiplier = 0.40f;
+        [SerializeField, Range(0.25f, 1f)] private float headMuscleMultiplier = 0.30f;
         [SerializeField, Range(0.25f, 1f)] private float armPinMultiplier = 0.64f;
         [SerializeField, Range(0.25f, 1f)] private float armMuscleMultiplier = 0.52f;
         [SerializeField, Range(0.25f, 1f)] private float handPinMultiplier = 0.82f;
@@ -403,6 +403,7 @@ namespace SSAFYPlayTime.Character
         {
             return state == BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed ||
                    state == BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.CarryingStunned ||
                    state == BodyPartPhysicsProfile.CharacterPhysicsState.Recovering;
         }
 
@@ -778,7 +779,7 @@ namespace SSAFYPlayTime.Character
                 NetworkPlayer.PhysicalPhase.Stunned => BodyPartPhysicsProfile.CharacterPhysicsState.Stunned,
                 NetworkPlayer.PhysicalPhase.BeingCarriedStunned => BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned,
                 NetworkPlayer.PhysicalPhase.Recovering => BodyPartPhysicsProfile.CharacterPhysicsState.Recovering,
-                NetworkPlayer.PhysicalPhase.CarryingStunned => BodyPartPhysicsProfile.CharacterPhysicsState.Normal,
+                NetworkPlayer.PhysicalPhase.CarryingStunned => BodyPartPhysicsProfile.CharacterPhysicsState.CarryingStunned,
                 _ => BodyPartPhysicsProfile.CharacterPhysicsState.Normal
             };
         }
