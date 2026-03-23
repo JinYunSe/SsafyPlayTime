@@ -1196,9 +1196,6 @@ public class HandGrabHandler : MonoBehaviour
     {
         var details = BuildGrabDiagnosticsSummary();
 
-        if (debugLog)
-            Debug.Log($"[GrabDiag] {source} {details}", this);
-
         networkPlayer?.TraceCarryDebugSample($"Hand{handSide}-{source}", details, forceSample);
     }
 

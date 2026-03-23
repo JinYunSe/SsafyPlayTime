@@ -153,11 +153,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [Networked] private float StunTimeRemaining { get; set; }
 
     [Header("Grab Debug")]
-    [SerializeField] bool debugGrabLog = true;
-    [SerializeField] bool enableProxyAnimationDiagnostics = true;
+    [SerializeField] bool debugGrabLog = false;
+    [SerializeField] bool enableProxyAnimationDiagnostics = false;
 
     [Header("Startup Launch Diagnostics")]
-    [SerializeField] private bool enableStartupLaunchDiagnostics = true;
+    [SerializeField] private bool enableStartupLaunchDiagnostics = false;
     [SerializeField, Range(0.05f, 0.5f)] private float startupLaunchDiagnosticsSampleInterval = 0.15f;
     [SerializeField, Range(1f, 8f)] private float startupLaunchDiagnosticsWindow = 4f;
 
@@ -343,25 +343,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     private void ArmStartupLaunchDiagnostics(string source, string note = null)
     {
-        if (!ShouldEmitStartupLaunchDiagnostics(allowOutsideWindow: true))
-            return;
-
-        _startupLaunchDiagnosticsUntilTime = Mathf.Max(
-            _startupLaunchDiagnosticsUntilTime,
-            Time.unscaledTime + startupLaunchDiagnosticsWindow);
-        _startupLaunchDiagnosticsLastSampleTime = float.NegativeInfinity;
-        TraceStartupLaunchDiagnostics(source, force: true, note: note);
     }
 
     private bool ShouldEmitStartupLaunchDiagnostics(bool allowOutsideWindow = false)
     {
-        if (!enableStartupLaunchDiagnostics || !Application.isPlaying)
-            return false;
-
-        if (!HasStateAuthority || !HasInputAuthority)
-            return false;
-
-        return allowOutsideWindow || Time.unscaledTime <= _startupLaunchDiagnosticsUntilTime;
+        return false;
     }
 
     private void TraceStartupLaunchDiagnostics(
@@ -370,60 +356,6 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         bool force = false,
         string note = null)
     {
-        if (!ShouldEmitStartupLaunchDiagnostics(force))
-            return;
-
-        var now = Time.unscaledTime;
-        if (!force && now - _startupLaunchDiagnosticsLastSampleTime < startupLaunchDiagnosticsSampleInterval)
-            return;
-
-        _startupLaunchDiagnosticsLastSampleTime = now;
-
-        var rootPosition = transform.position;
-        var bodyPosition = rigidbody3D != null ? rigidbody3D.position : rootPosition;
-        var bodyVelocity = rigidbody3D != null && !rigidbody3D.isKinematic
-            ? rigidbody3D.velocity
-            : Vector3.zero;
-        var pelvisPosition = ResolveStartupLaunchPelvisPosition(out var pelvisVelocity);
-        var phase = GetPhysicalPhase();
-        var carryMode = GetLocalCarryMode();
-        var rootBodyGap = (rootPosition - bodyPosition).magnitude;
-        var rootPelvisGap = (rootPosition - pelvisPosition).magnitude;
-        var hasTarget = targetPosition.HasValue;
-        var targetGap = hasTarget ? Vector3.Distance(rootPosition, targetPosition.Value) : 0f;
-
-        if (!force &&
-            phase == PhysicalPhase.Stable &&
-            carryMode == CarryPhysicsProfile.CarryMode.None &&
-            _beingGrabbedRefCount == 0 &&
-            _grabbedByCount == 0 &&
-            !IsAnyHandHoldingObject() &&
-            !IsAnyHandHoldingStunnedPlayer &&
-            rootBodyGap < 0.12f &&
-            rootPelvisGap < 0.85f &&
-            Mathf.Abs(bodyVelocity.y) < 2f &&
-            Mathf.Abs(pelvisVelocity.y) < 2f &&
-            (!hasTarget || targetGap < 0.2f))
-        {
-            return;
-        }
-
-        var tick = Runner != null ? Runner.Tick.Raw : -1;
-        var noteSuffix = string.IsNullOrWhiteSpace(note) ? string.Empty : $" note={note}";
-        var targetSuffix = hasTarget
-            ? $" target={FormatStartupLaunchVector(targetPosition.Value)} targetGap={targetGap:F3}"
-            : string.Empty;
-
-        Debug.Log(
-            $"[StartupLaunchDiag] tick={tick} name={name} source={source} " +
-            $"phase={phase} carry={carryMode} active={_isActiveRagdoll} grounded={_isGrounded} " +
-            $"grabbedRef={_beingGrabbedRefCount} grabbedBy={_grabbedByCount} " +
-            $"holding={IsAnyHandHoldingObject()} anyStunned={IsAnyHandHoldingStunnedPlayer} dual={IsDualGrabbingStunnedPlayer} " +
-            $"root={FormatStartupLaunchVector(rootPosition)} body={FormatStartupLaunchVector(bodyPosition)} " +
-            $"pelvis={FormatStartupLaunchVector(pelvisPosition)} bodyVel={FormatStartupLaunchVector(bodyVelocity)} " +
-            $"pelvisVel={FormatStartupLaunchVector(pelvisVelocity)} rootBodyGap={rootBodyGap:F3} " +
-            $"rootPelvisGap={rootPelvisGap:F3}{targetSuffix}{noteSuffix}",
-            this);
     }
 
     private Vector3 ResolveStartupLaunchPelvisPosition(out Vector3 pelvisVelocity)
@@ -546,12 +478,6 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (IsNetworkReady && HasStateAuthority)
             NetworkedIsBeingGrabbed = _beingGrabbedRefCount > 0;
 
-        if (debugGrabLog && previousRefCount != _beingGrabbedRefCount)
-        {
-            Debug.Log($"[GrabState] {name} SetGrabbedByOther({grabbed}) ref={previousRefCount}->{_beingGrabbedRefCount} " +
-                $"netGrabbed={(IsNetworkReady ? NetworkedIsBeingGrabbed.ToString() : "N/A")}", this);
-        }
-
         TraceCarryDebugSample(
             "SetGrabbedByOther",
             $"grabbed={grabbed} ref={previousRefCount}->{_beingGrabbedRefCount}",
@@ -580,12 +506,6 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             RightGrabAnchorId = anchorId;
         }
 
-        if (debugGrabLog)
-        {
-            Debug.Log($"[GrabState] {name} ReportGrabAttached side={side} targetId={targetId} anchorLocal={anchorLocal} " +
-                $"anchorId={anchorId} L_confirmed={LeftGrabConfirmed} R_confirmed={RightGrabConfirmed}", this);
-        }
-
         TraceCarryDebugSample(
             "ReportGrabAttached",
             $"side={side} targetId={targetId} anchorLocal={FormatStunForceDiagnosticsVector(anchorLocal)} anchorId={anchorId}",
@@ -611,12 +531,6 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             RightGrabAnchorLocal = Vector3.zero;
             RightGrabConfirmed = false;
             RightGrabAnchorId = 0;
-        }
-
-        if (debugGrabLog)
-        {
-            Debug.Log($"[GrabState] {name} ReportGrabDetached side={side} " +
-                $"L_confirmed={LeftGrabConfirmed} R_confirmed={RightGrabConfirmed}", this);
         }
 
         TraceCarryDebugSample(
@@ -2177,48 +2091,6 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     internal void TraceCameraDeltaDiagnostics()
     {
-        if (!enableProxyAnimationDiagnostics || !Application.isPlaying)
-            return;
-        if (!(Debug.isDebugBuild || Application.isEditor))
-            return;
-        if (Runner == null || Object == null || !Object.IsValid || !HasInputAuthority)
-            return;
-
-        var rootPos = transform.position;
-        var anchorPos = _cameraFollowAnchor != null ? _cameraFollowAnchor.position : rootPos;
-        var presentationRoot = GetPresentationRootTransform();
-        var presentationPos = presentationRoot != null ? presentationRoot.position : rootPos;
-
-        if (!_diagCameraDeltaInitialized)
-        {
-            _diagPrevRootPos = rootPos;
-            _diagPrevAnchorPos = anchorPos;
-            _diagPrevPresentationPos = presentationPos;
-            _diagCameraDeltaInitialized = true;
-            return;
-        }
-
-        var rootDelta = (rootPos - _diagPrevRootPos).magnitude;
-        var anchorDelta = (anchorPos - _diagPrevAnchorPos).magnitude;
-        var presentationDelta = (presentationPos - _diagPrevPresentationPos).magnitude;
-
-        _diagPrevRootPos = rootPos;
-        _diagPrevAnchorPos = anchorPos;
-        _diagPrevPresentationPos = presentationPos;
-
-        if (rootDelta < 0.01f && anchorDelta < 0.01f && presentationDelta < 0.01f)
-            return;
-
-        var rootAnchorGap = (rootPos - anchorPos).magnitude;
-        var presentationAnchorGap = (presentationPos - anchorPos).magnitude;
-        var anchorSource = ResolveCameraAnchorSource();
-        var anchorSourceName = anchorSource != null ? $"{anchorSource.name}/{_cameraAnchorSourceMode}" : "PresentationOffset";
-        Debug.Log(
-            $"[CamDeltaDiag] name={name} auth={HasStateAuthority} " +
-            $"rootDelta={rootDelta:F4} anchorDelta={anchorDelta:F4} presentationDelta={presentationDelta:F4} " +
-            $"rootToAnchor={rootAnchorGap:F4} presentationToAnchor={presentationAnchorGap:F4} " +
-            $"anchorSource={anchorSourceName} phase={GetPhysicalPhase()} dt={Time.deltaTime:F4}",
-            this);
     }
 
 }
