@@ -1195,14 +1195,53 @@ namespace SSAFYPlayTime
             if (_isProcessing) return;
             _isProcessing = true;
 
-            bool joined = _gameEndAutoRoomJoinTask != null && await _gameEndAutoRoomJoinTask;
+            bool joined = false;
+            try
+            {
+                if (_gameEndAutoRoomJoinTask != null)
+                {
+                    // 최대 10초 대기 후 미완료 시 실패로 처리 (PlayMode/오프라인 환경 대응)
+                    var timeout = Task.Delay(10000);
+                    var completed = await Task.WhenAny(_gameEndAutoRoomJoinTask, timeout);
+                    if (completed == _gameEndAutoRoomJoinTask && !_gameEndAutoRoomJoinTask.IsFaulted)
+                        joined = _gameEndAutoRoomJoinTask.Result;
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Lobby] ExecuteReturnFromGameEndAsync: 자동 방 입장 태스크 오류. {e.Message}");
+                joined = false;
+            }
 
             if (!joined)
             {
-                // 방 자동 입장 실패 → 로비 메인으로 fallback
+                // 방 자동 입장 실패 → goToLobby 여부에 따라 분기하되 gameEndPanel은 무조건 닫는다.
                 _isProcessing = false;
+                _isShowingGameEndPanel = false;
+                _localIsReady = false;
+                _localSelectedCharacterIndex = -1;
+
+                foreach (var obj in _spawnedGameEndCharacters)
+                { if (obj != null) Destroy(obj); }
+                _spawnedGameEndCharacters.Clear();
+
+                if (gameEndPanel != null) gameEndPanel.SetActive(false);
+                if (podiumParent != null) podiumParent.SetActive(false);
+                HideAllCharacterSlots();
                 ResetGameEndReturnState();
-                ShowLobbyPanel();
+
+                if (goToLobby)
+                    ShowLobbyPanel();
+                else
+                {
+                    for (int s = 0; s < _playerIdBySlot.Length; s++)
+                    {
+                        _playerIdBySlot[s] = -1;
+                        _selectedCharacterIndexBySlot[s] = -1;
+                    }
+                    ShowRoomPanel();
+                    UpdateRoomPanel();
+                }
                 return;
             }
 
