@@ -93,7 +93,6 @@ public sealed partial class NetworkPlayer
         TickKickHitDetectionWindow();
         TickAerialKickHitDetectionWindow();
         SyncHeldItemNetworkState();
-        TraceStartupLaunchDiagnostics("DoPhysicsStep");
     }
 
     public void ApplyStunDamage(
@@ -2065,14 +2064,6 @@ public sealed partial class NetworkPlayer
     private void SetLocalPhysicalPhase(PhysicalPhase phase, float instability, bool dragged)
     {
         var previousPhase = _localPhysicalPhase;
-        if (debugGrabLog && phase != _localPhysicalPhase)
-        {
-            Debug.Log($"[Phase] {name}: {_localPhysicalPhase} → {phase} " +
-                $"(anyHolding={IsAnyHandHoldingObject()}, beingGrabbed={_beingGrabbedRefCount > 0}, " +
-                $"isAnyStunned={IsAnyHandHoldingStunnedPlayer}, isDual={IsDualGrabbingStunnedPlayer}, " +
-                $"instability={instability:F2})", this);
-        }
-
         _localPhysicalPhase = phase;
         _localInstability = Mathf.Clamp01(instability);
         _localIsDragged = dragged;
@@ -3611,7 +3602,6 @@ public sealed partial class NetworkPlayer
         _stunSlowMotionHoldEnd = now + STUN_SLOWMO_HOLD_DURATION;
         _stunSlowMotionRampEnd = now + STUN_SLOWMO_HOLD_DURATION + STUN_SLOWMO_RAMP_DURATION;
 
-        Debug.Log($"[StunSlowMo] 시작: timeScale={STUN_SLOWMO_SCALE}");
     }
 
     /// <summary>
@@ -3675,7 +3665,6 @@ public sealed partial class NetworkPlayer
             Time.timeScale = 1f;
             Time.fixedDeltaTime = 0.02f;
             _stunSlowMotionActive = false;
-            Debug.Log("[StunSlowMo] 복원 완료");
             return;
         }
 

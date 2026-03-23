@@ -278,12 +278,6 @@ public class ProceduralGrabArm : MonoBehaviour
             if (_debugLogTimer <= 0f)
             {
                 _debugLogTimer = 1f;
-                Debug.Log($"[Arm] phase={phase}, grabActive={grabActive}, " +
-                    $"L_hold={leftHolding}, R_hold={rightHolding}, " +
-                    $"L_blend={_leftBlend:F2}, R_blend={_rightBlend:F2}, " +
-                    $"overheadBlend={_overheadBlend:F2}, carryProfile={(carryPoseProfile != null ? "OK" : "NULL")}, " +
-                    $"isDual={IsDualStunnedHoldActive()}, " +
-                    $"isAnyStunned={IsAnyStunnedHoldActive()}", this);
             }
         }
 
@@ -530,11 +524,6 @@ public class ProceduralGrabArm : MonoBehaviour
                 if (_debugPhysicsLogTimer <= 0f)
                 {
                     _debugPhysicsLogTimer = 0.5f;
-                    Debug.Log($"[Arm] {(isLeft ? "L" : "R")} hold force: scale={scale:F2}, " +
-                        $"targetDist={targetDistance:F3}, appliedForce={appliedForceMag:F1}, " +
-                        $"anchorDist={toAnchor.magnitude:F3}, vel={handRb.velocity.magnitude:F2}, " +
-                        $"handPos={handRb.position}, targetPos={targetWorld}" +
-                        $"{(isCarryingStunned ? " [stun-carry]" : "")}", this);
                 }
             }
 
@@ -623,9 +612,6 @@ public class ProceduralGrabArm : MonoBehaviour
             $"rightNet={_networkPlayer.IsHandHoldingNetworked(HandGrabHandler.HandSide.Right)} " +
             $"anyStunned={IsAnyStunnedHoldActive()} dual={IsDualStunnedHoldActive()} " +
             $"left={DescribeHandState(_leftHandler)} right={DescribeHandState(_rightHandler)}";
-
-        if (debugLog)
-            Debug.Log($"[ArmDiag] phase={phase} {details}", this);
 
         _networkPlayer.TraceCarryDebugSample("ProceduralGrabArm", $"phase={phase} {details}", forceSample);
     }
