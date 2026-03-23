@@ -1,4 +1,4 @@
-﻿vfxId,assetKey,pooling,prewarmCount,lifetimeSec,attachType,scale,enabled,note
+vfxId,assetKey,pooling,prewarmCount,lifetimeSec,attachType,scale,enabled,note
 VFX_ITEM_GROWTH,Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile 13 star.prefab,true,2,1.5,Self,1.0,true,커짐 버프 이펙트
 VFX_ITEM_SHRINK,Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile 8 triangle.prefab,true,2,1.5,Self,1.0,true,작아짐 버프 이펙트
 VFX_ITEM_SUPERARMOR,Assets/Hovl Studio/Toon projectiles/Prefabs/Projectile 9 thunder.prefab,true,2,3.0,Self,1.0,true,슈퍼아머 이펙트

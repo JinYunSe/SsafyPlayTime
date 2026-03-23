@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemCharacterHeldItemPresenter 스크립트가 들어 있는 파일이다.
  * - Character 계층에서 캐릭터와 아이템 시스템의 결합 지점을 담당한다.
@@ -461,21 +461,23 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
+            // NetworkedItemFieldDrop은 [RequireComponent(typeof(NetworkTransform))]를 선언하므로
+            // NetworkBehaviour 루프보다 먼저 즉시 제거해야 의존성 에러가 발생하지 않는다.
+            var networkedDrops = visualRoot.GetComponentsInChildren<NetworkedItemFieldDrop>(true);
+            for (var i = 0; i < networkedDrops.Length; i++)
+            {
+                if (networkedDrops[i] != null)
+                {
+                    DestroyImmediate(networkedDrops[i]);
+                }
+            }
+
             var networkBehaviours = visualRoot.GetComponentsInChildren<NetworkBehaviour>(true);
             for (var i = 0; i < networkBehaviours.Length; i++)
             {
                 if (networkBehaviours[i] != null)
                 {
                     Destroy(networkBehaviours[i]);
-                }
-            }
-
-            var networkedDrops = visualRoot.GetComponentsInChildren<NetworkedItemFieldDrop>(true);
-            for (var i = 0; i < networkedDrops.Length; i++)
-            {
-                if (networkedDrops[i] != null)
-                {
-                    Destroy(networkedDrops[i]);
                 }
             }
 

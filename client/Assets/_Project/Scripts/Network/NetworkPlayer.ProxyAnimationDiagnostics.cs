@@ -4,8 +4,6 @@ using UnityEngine;
 
 public sealed partial class NetworkPlayer
 {
-    [Header("Diagnostics")]
-    [SerializeField] private bool enableProxyAnimationDiagnostics = true;
     [Header("Stun Force Diagnostics")]
     [SerializeField] private bool enableStunForceDiagnostics = false;
     [SerializeField] private bool stunForceDiagnosticsIncludeProxies = true;
@@ -17,19 +15,11 @@ public sealed partial class NetworkPlayer
     private static string s_runtimeStunForceDiagnosticsPath;
     private static StreamWriter s_runtimeStunForceDiagnosticsWriter;
 
-    private bool _proxyAnimationDiagInitialized;
-    private PhysicalPhase _proxyAnimationDiagLastPhase;
-    private bool _proxyAnimationDiagLastPhysicalPresentation;
-    private bool _proxyAnimationDiagLastHardPresentation;
-    private bool _proxyAnimationDiagLastAnimatorEnabled;
-    private bool _proxyAnimationDiagLastNetworkedRagdoll;
-    private PresentationLocomotionState _proxyAnimationDiagLastLocomotion;
-    private float _proxyAnimationDiagLastMoveSpeed = float.NaN;
-    private float _proxyAnimationDiagLastVisualYaw = float.NaN;
-    private byte _proxyAnimationDiagLastResetVersion;
     private float _stunForceDiagnosticsUntilTime;
     private float _stunForceDiagnosticsLastAuthoritySampleTime = float.NegativeInfinity;
     private float _stunForceDiagnosticsLastProxySampleTime = float.NegativeInfinity;
+    private float _stunForceDiagnosticsLastCollapseSampleTime = float.NegativeInfinity;
+    private float _stunForceDiagnosticsLastCarrySampleTime = float.NegativeInfinity;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStunForceDiagnosticsRuntimeState()
@@ -39,67 +29,6 @@ public sealed partial class NetworkPlayer
         s_runtimeStunForceDiagnosticsPath = null;
         s_runtimeStunForceDiagnosticsWriter?.Dispose();
         s_runtimeStunForceDiagnosticsWriter = null;
-    }
-
-    private bool ShouldEmitProxyAnimationDiagnostics()
-    {
-        if (!enableProxyAnimationDiagnostics || !Application.isPlaying)
-            return false;
-
-        if (!(Debug.isDebugBuild || Application.isEditor))
-            return false;
-
-        return Runner != null && Object != null && Object.IsValid && !HasStateAuthority;
-    }
-
-    private void TraceProxyAnimationDiagnostics(string source)
-    {
-        if (!ShouldEmitProxyAnimationDiagnostics())
-            return;
-
-        var phase = GetPhysicalPhase();
-        var usesPhysicalPresentation = ShouldUsePhysicalPhasePresentation();
-        var usesHardPresentation = ShouldUseHardPhysicsPresentation();
-        var animatorEnabled = animator != null && animator.enabled;
-        var networkedRagdoll = NetworkedIsActiveRagdoll;
-        var locomotionState = GetNetworkedLocomotionState();
-        var moveSpeed = GetNetworkedMoveSpeed();
-        var visualYaw = GetNetworkedVisualYaw();
-        var resetVersion = NetworkedPhysicsPresentationResetVersion;
-
-        var changed = !_proxyAnimationDiagInitialized
-                      || _proxyAnimationDiagLastPhase != phase
-                      || _proxyAnimationDiagLastPhysicalPresentation != usesPhysicalPresentation
-                      || _proxyAnimationDiagLastHardPresentation != usesHardPresentation
-                      || _proxyAnimationDiagLastAnimatorEnabled != animatorEnabled
-                      || _proxyAnimationDiagLastNetworkedRagdoll != networkedRagdoll
-                      || _proxyAnimationDiagLastLocomotion != locomotionState
-                      || Mathf.Abs(_proxyAnimationDiagLastMoveSpeed - moveSpeed) > 0.2f
-                      || Mathf.Abs(Mathf.DeltaAngle(_proxyAnimationDiagLastVisualYaw, visualYaw)) > 10f
-                      || _proxyAnimationDiagLastResetVersion != resetVersion;
-
-        if (!changed)
-            return;
-
-        _proxyAnimationDiagInitialized = true;
-        _proxyAnimationDiagLastPhase = phase;
-        _proxyAnimationDiagLastPhysicalPresentation = usesPhysicalPresentation;
-        _proxyAnimationDiagLastHardPresentation = usesHardPresentation;
-        _proxyAnimationDiagLastAnimatorEnabled = animatorEnabled;
-        _proxyAnimationDiagLastNetworkedRagdoll = networkedRagdoll;
-        _proxyAnimationDiagLastLocomotion = locomotionState;
-        _proxyAnimationDiagLastMoveSpeed = moveSpeed;
-        _proxyAnimationDiagLastVisualYaw = visualYaw;
-        _proxyAnimationDiagLastResetVersion = resetVersion;
-
-        var presentationYaw = ResolvePresentationYawFromTransform();
-        Debug.Log(
-            $"[ProxyAnimDiag:{source}] name={name} inputAuth={HasInputAuthority} stateAuth={HasStateAuthority} " +
-            $"phase={phase} phys={usesPhysicalPresentation} hard={usesHardPresentation} netRagdoll={networkedRagdoll} " +
-            $"animEnabled={animatorEnabled} loco={locomotionState} moveSpeed={moveSpeed:F2} " +
-            $"visualYaw={visualYaw:F1} presentationYaw={presentationYaw:F1} resetVer={resetVersion} " +
-            $"eventSeq={NetworkedAnimationEventSequence}",
-            this);
     }
 
     internal void UpdateStunForceDiagnosticsHotkey()
@@ -268,6 +197,30 @@ public sealed partial class NetworkPlayer
             $"stunRemaining={GetStunTimeRemaining():F2}{suffix}");
     }
 
+    internal void TraceCarryDebugSample(string source, string details = null, bool forceSample = false)
+    {
+        if (!ShouldEmitStunForceDiagnostics(true))
+            return;
+
+        if (!forceSample && !IsStunForceDiagnosticsInteresting())
+            return;
+
+        if (!forceSample && Time.time - _stunForceDiagnosticsLastCarrySampleTime < stunForceDiagnosticsSampleInterval)
+            return;
+
+        _stunForceDiagnosticsLastCarrySampleTime = Time.time;
+        ExtendStunForceDiagnosticsWindow();
+
+        var suffix = string.IsNullOrWhiteSpace(details) ? string.Empty : $" details={details}";
+        var networkGrabbed = IsNetworkReady ? NetworkedIsBeingGrabbed.ToString() : "N/A";
+        EmitStunForceDiagnostics(
+            $"[StunDiag:Carry] role={ResolveStunForceDiagnosticsRole()} name={name} source={source} " +
+            $"phase={GetPhysicalPhase()} activeRagdoll={_isActiveRagdoll} recovering={_isRecovering} " +
+            $"stunRemaining={GetStunTimeRemaining():F2} beingGrabbed={_beingGrabbedRefCount} grabbedBy={_grabbedByCount} " +
+            $"netGrabbed={networkGrabbed} localHolding={IsAnyHandHolding} anyStunned={IsAnyHandHoldingStunnedPlayer} " +
+            $"dual={IsDualGrabbingStunnedPlayer} leftConfirmed={LeftGrabConfirmed} rightConfirmed={RightGrabConfirmed}{suffix}");
+    }
+
     internal void TraceStunCollisionImpact(string source, float impactMagnitude, Vector3 impulse, Vector3 normal)
     {
         if (!ShouldEmitStunForceDiagnostics(false))
@@ -314,7 +267,8 @@ public sealed partial class NetworkPlayer
         float focusedScale,
         float spreadScale,
         float twistTorqueScale,
-        string targetMuscleName)
+        string targetMuscleName,
+        string note = null)
     {
         if (!ShouldEmitStunForceDiagnostics(false))
             return;
@@ -323,10 +277,11 @@ public sealed partial class NetworkPlayer
             return;
 
         ExtendStunForceDiagnosticsWindow();
+        var suffix = string.IsNullOrWhiteSpace(note) ? string.Empty : $" note={note}";
         EmitStunForceDiagnostics(
             $"[StunDiag:ImpulseSummary] role={ResolveStunForceDiagnosticsRole()} name={name} source={source} " +
             $"phase={GetPhysicalPhase()} rootForce={rootForce:F2} focusedScale={focusedScale:F3} " +
-            $"spreadScale={spreadScale:F3} twistScale={twistTorqueScale:F3} targetMuscle={targetMuscleName}");
+            $"spreadScale={spreadScale:F3} twistScale={twistTorqueScale:F3} targetMuscle={targetMuscleName}{suffix}");
     }
 
     internal void TraceStunVelocityClamp(
@@ -352,6 +307,80 @@ public sealed partial class NetworkPlayer
             $"rootAngBefore={FormatStunForceDiagnosticsVector(rootAngularBefore)} " +
             $"rootAngAfter={FormatStunForceDiagnosticsVector(rootAngularAfter)} " +
             $"maxMusclePlanarBefore={maxMusclePlanarBefore:F2} maxMusclePlanarAfter={maxMusclePlanarAfter:F2}");
+    }
+
+    internal void TraceStunCollapsePose(string source, bool forceSample = false)
+    {
+        if (!ShouldEmitStunForceDiagnostics(false))
+            return;
+
+        if (!forceSample && GetPhysicalPhase() != PhysicalPhase.StunnedCollapse)
+            return;
+
+        if (!forceSample && !IsStunForceDiagnosticsInteresting())
+            return;
+
+        if (!forceSample && Time.time - _stunForceDiagnosticsLastCollapseSampleTime < stunForceDiagnosticsSampleInterval)
+            return;
+
+        _stunForceDiagnosticsLastCollapseSampleTime = Time.time;
+
+        var rootPosition = transform.position;
+        var rootVelocity = rigidbody3D != null ? rigidbody3D.velocity : Vector3.zero;
+        var rootAngular = rigidbody3D != null ? rigidbody3D.angularVelocity : Vector3.zero;
+        var pelvisPosition = rootPosition;
+        var pelvisVelocity = Vector3.zero;
+        var headPosition = rootPosition + Vector3.up * 1.25f;
+
+        if (_puppetMaster != null &&
+            _puppetMaster.muscles != null &&
+            _puppetMaster.muscles.Length > 0 &&
+            _puppetMaster.muscles[0].joint != null)
+        {
+            var pelvisJoint = _puppetMaster.muscles[0].joint;
+            pelvisPosition = pelvisJoint.transform.position;
+            var pelvisBody = pelvisJoint.GetComponent<Rigidbody>();
+            if (pelvisBody != null)
+                pelvisVelocity = pelvisBody.velocity;
+        }
+
+        EnsureRecoveryPoseReferences();
+        if (_recoveryPoseHead != null)
+        {
+            headPosition = _recoveryPoseHead.position;
+        }
+        else if (animator != null && animator.isHuman)
+        {
+            var headBone = animator.GetBoneTransform(HumanBodyBones.Head)
+                           ?? animator.GetBoneTransform(HumanBodyBones.UpperChest)
+                           ?? animator.GetBoneTransform(HumanBodyBones.Chest);
+            if (headBone != null)
+                headPosition = headBone.position;
+        }
+
+        var anchorPosition = _hasRecoverAnchorPose ? _recoverAnchorPosition : rootPosition;
+        var anchorDelta = rootPosition - anchorPosition;
+        var rootToPelvis = pelvisPosition - rootPosition;
+        var pelvisToHead = headPosition - pelvisPosition;
+        var spineLength = pelvisToHead.magnitude;
+        var mainSpring = mainJoint != null ? mainJoint.slerpDrive.positionSpring : 0f;
+        var bodyUpDot = spineLength > 0.0001f
+            ? Vector3.Dot(pelvisToHead / spineLength, Vector3.up)
+            : 0f;
+
+        EmitStunForceDiagnostics(
+            $"[StunDiag:CollapsePose] role={ResolveStunForceDiagnosticsRole()} name={name} source={source} " +
+            $"phase={GetPhysicalPhase()} collapseTimer={_stunCollapseTimer:F2} stunRemaining={GetStunTimeRemaining():F2} " +
+            $"grabbed={_beingGrabbedRefCount} collapseEarly={IsEarlyCollapsePhaseActive()} mainSpring={mainSpring:F1} " +
+            $"anchorYaw={_recoverAnchorRotation.eulerAngles.y:F1} " +
+            $"rootYaw={transform.eulerAngles.y:F1} anchor={FormatStunForceDiagnosticsVector(anchorPosition)} " +
+            $"anchorDelta={FormatStunForceDiagnosticsVector(anchorDelta)} root={FormatStunForceDiagnosticsVector(rootPosition)} " +
+            $"pelvis={FormatStunForceDiagnosticsVector(pelvisPosition)} head={FormatStunForceDiagnosticsVector(headPosition)} " +
+            $"rootToPelvis={FormatStunForceDiagnosticsVector(rootToPelvis)} " +
+            $"pelvisToHead={FormatStunForceDiagnosticsVector(pelvisToHead)} spineLen={spineLength:F2} " +
+            $"bodyUpDot={bodyUpDot:F3} rootVel={FormatStunForceDiagnosticsVector(rootVelocity)} " +
+            $"pelvisVel={FormatStunForceDiagnosticsVector(pelvisVelocity)} " +
+            $"rootAng={FormatStunForceDiagnosticsVector(rootAngular)}");
     }
 
     internal void TraceStunnedMotionSample(string source)

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemFieldSystemBootstrap 스크립트가 들어 있는 파일이다.
  * - Dev/Bootstraps 계층에서 ItemScene 전용 자동 결합과 테스트 시작 구성을 담당한다.

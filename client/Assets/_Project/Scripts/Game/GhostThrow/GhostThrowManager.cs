@@ -233,9 +233,11 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
             lastThrowTime = Time.time;
 
-            // 스폰 위치: 고정 스폰 포인트가 있으면 그것을, 없으면 카메라→타겟 방향으로
-            // spawnLaunchOffset(또는 타겟까지 거리의 절반) 앞 지점에서 발사.
-            // 이렇게 하면 포물선 시작점과 도착점 모두 카메라 시야에 잡힘.
+            // 스폰 위치: 고정 스폰 포인트가 있으면 그것을, 없으면 타겟 위 고정 높이에서 발사.
+            // 관전 카메라(공전 고도)를 기준으로 스폰하면 카메라→타겟 거리가 수십 미터가 되어
+            // 포물선 계산 오차가 커지고 목표 지점에 정확히 도달하지 못한다.
+            // 타겟 위 spawnHeight + 카메라 방향으로 spawnForwardOffset 오프셋을 사용하면
+            // 어떤 카메라 위치에서도 스폰-타겟 간 거리가 짧아 정확도가 보장된다.
             Vector3 spawnPos;
             if (ghostThrowSpawnPoint != null)
             {
@@ -243,15 +245,8 @@ namespace SSAFYPlayTime.Game.GhostThrow
             }
             else
             {
-                var camPos = Camera.main.transform.position;
-                var camToTarget = targetPoint - camPos;
-                var distToTarget = camToTarget.magnitude;
-                var dirToTarget = distToTarget > 0.001f
-                    ? camToTarget / distToTarget
-                    : Camera.main.transform.forward;
-                // 타겟까지 거리의 절반을 넘지 않도록 clamp → 스폰이 타겟을 넘어가지 않음
-                var spawnDist = Mathf.Min(spawnLaunchOffset, distToTarget * 0.5f);
-                spawnPos = camPos + dirToTarget * spawnDist;
+                var camDir = (Camera.main.transform.position - targetPoint).normalized;
+                spawnPos = targetPoint + Vector3.up * spawnHeight + camDir * spawnForwardOffset;
             }
             var initialVelocity = CalculateParabolicVelocity(spawnPos, targetPoint);
 
@@ -409,7 +404,6 @@ namespace SSAFYPlayTime.Game.GhostThrow
                     return false;
                 }
 
-                NotifySpectatorCameraToTrack(spawnedObj.transform);
                 Debug.Log($"GhostThrow [Online/prefabRef]: threw {label} at {spawnPos}");
                 return true;
             }
@@ -428,7 +422,6 @@ namespace SSAFYPlayTime.Game.GhostThrow
                     return false;
                 }
 
-                NotifySpectatorCameraToTrack(spawnedByObject.transform);
                 Debug.Log($"GhostThrow [Online/prefabObject]: threw {label} at {spawnPos}");
                 return true;
             }
@@ -452,19 +445,7 @@ namespace SSAFYPlayTime.Game.GhostThrow
             var spawnRot = velocity.sqrMagnitude > 0.001f ? Quaternion.LookRotation(velocity) : Quaternion.identity;
             var spawnedObj = Instantiate(prefab, spawnPos, spawnRot);
             ApplyThrowVelocity(spawnedObj, velocity);
-            NotifySpectatorCameraToTrack(spawnedObj.transform);
             Debug.Log($"GhostThrow [Offline]: threw {label} at {spawnPos}");
-        }
-
-        private void NotifySpectatorCameraToTrack(Transform projectile)
-        {
-            // GhostThrowManager와 같은 오브젝트에 붙은 카메라 우선 탐색,
-            // 없으면 씬 전체에서 찾음
-            var spectatorCam = GetComponent<GhostSpectatorCamera>();
-            if (spectatorCam == null)
-                spectatorCam = FindAnyObjectByType<GhostSpectatorCamera>();
-
-            spectatorCam?.TrackProjectile(projectile);
         }
 
         private static void ApplyThrowVelocity(GameObject obj, Vector3 velocity)
