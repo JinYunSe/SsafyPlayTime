@@ -971,6 +971,9 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             characterGrabController.RefreshNow();
             if (characterGrabController.ShouldPreserveGrabPose)
                 return true;
+
+            // OwnerProxy keeps a brief local grab prediction until host confirmation arrives.
+            return isLocalWithoutAuthority && networkPlayer.IsGrabActive;
         }
 
         var phase = networkPlayer.GetPhysicalPhase();

@@ -184,6 +184,9 @@ public sealed partial class NetworkPlayer
 
         _isActiveRagdoll = networkedActive;
 
+        if (isRecovering && !HasStateAuthority)
+            ResetProxyCarryPresentationState(resetCarryTracking: true);
+
         // SyncPhysicsObject 관절 스프링 전환 (원격 프록시도 관절 상태를 맞춰야 뼈 회전 보간이 자연스럽다)
         if (syncPhysicsObjects != null)
         {
@@ -257,7 +260,6 @@ public sealed partial class NetworkPlayer
     {
         return phase == PhysicalPhase.Holding ||
                phase == PhysicalPhase.GrabIntent ||
-               phase == PhysicalPhase.Recovering ||
                phase == PhysicalPhase.CarryingStunned ||
                UsesPhysicsPosePresentation(phase);
     }
@@ -280,7 +282,7 @@ public sealed partial class NetworkPlayer
         if (!HasInputAuthority)
             return true;
 
-        return UsesBufferedProxyPosePhase(GetPhysicalPhase());
+        return ShouldUseBufferedProxyPoseInterpolation();
     }
 
     private float ResolveProxyPresentationRootFollowSpeed()
@@ -595,7 +597,8 @@ public sealed partial class NetworkPlayer
     private void ApplyProxyCarryRootPosition(Vector3 nextRootPosition, bool isSettling = false)
     {
         // settle 중에는 rigidbody position을 건드리지 않음 — 물리 velocity 기반 이동 보존
-        if (!isSettling && !HasStateAuthority && rigidbody3D != null && !rigidbody3D.isKinematic)
+        // Keep the proxy root transform and root Rigidbody aligned during carry correction.
+        if (!HasStateAuthority && rigidbody3D != null)
             rigidbody3D.position = nextRootPosition;
 
         transform.position = nextRootPosition;
@@ -673,6 +676,41 @@ public sealed partial class NetworkPlayer
     {
         _proxyCarrySupportRootOffset = Vector3.zero;
         _hasProxyCarrySupportRootOffset = false;
+    }
+
+    private void ResetProxyCarryPresentationState(bool resetCarryTracking)
+    {
+        if (HasStateAuthority)
+            return;
+
+        _carryExitSnapshotAnchor = Vector3.zero;
+        _carryReleaseSettleRemaining = 0f;
+        _lastCarryAnchorPosition = Vector3.zero;
+        ClearProxyCarrySupportRootOffset();
+        ClearCachedProxyCarryTargets();
+
+        var snapshotSeed = transform.position;
+        if (syncPhysicsObjects != null && syncPhysicsObjects.Length > 0 && syncPhysicsObjects[0] != null)
+            snapshotSeed = syncPhysicsObjects[0].transform.position;
+
+        _hipsSnapshotFrom = snapshotSeed;
+        _hipsSnapshotTo = snapshotSeed;
+
+        if (_boneSnapshotFrom != null && _boneSnapshotTo != null && syncPhysicsObjects != null)
+        {
+            var count = Mathf.Min(syncPhysicsObjects.Length, Mathf.Min(_boneSnapshotFrom.Length, _boneSnapshotTo.Length));
+            for (int i = 0; i < count; i++)
+            {
+                var currentRotation = syncPhysicsObjects[i] != null
+                    ? syncPhysicsObjects[i].transform.localRotation
+                    : Quaternion.identity;
+                _boneSnapshotFrom[i] = currentRotation;
+                _boneSnapshotTo[i] = currentRotation;
+            }
+        }
+
+        if (resetCarryTracking)
+            _wasCarryPhaseLastFrame = false;
     }
 
     private void InterpolateRemoteBoneRotations()
@@ -777,25 +815,32 @@ public sealed partial class NetworkPlayer
             }
             else if (!isCarryNow && _wasCarryPhaseLastFrame)
             {
-                _carryExitSnapshotAnchor = _lastCarryAnchorPosition != Vector3.zero
-                    ? _lastCarryAnchorPosition
-                    : transform.position;
-                ClearProxyCarrySupportRootOffset();
-                ClearCachedProxyCarryTargets();
-                _hipsSnapshotFrom = syncPhysicsObjects[0] != null
-                    ? syncPhysicsObjects[0].transform.position
-                    : latestHips;
-                _hipsSnapshotTo = latestHips;
-
-                if (!HasStateAuthority)
+                if (!HasStateAuthority && phase == PhysicalPhase.Recovering)
                 {
-                    var settleMode = _lastObservedCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None
-                        ? _lastObservedCarryMode
-                        : SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry;
-                    var settleProfile = carryPhysicsProfile != null
-                        ? carryPhysicsProfile.GetSettings(settleMode)
-                        : SSAFYPlayTime.Character.CarryPhysicsProfile.GetDefaultSettings(settleMode);
-                    _carryReleaseSettleRemaining = settleProfile.carryReleaseSettleDuration;
+                    ResetProxyCarryPresentationState(resetCarryTracking: true);
+                }
+                else
+                {
+                    _carryExitSnapshotAnchor = _lastCarryAnchorPosition != Vector3.zero
+                        ? _lastCarryAnchorPosition
+                        : transform.position;
+                    ClearProxyCarrySupportRootOffset();
+                    ClearCachedProxyCarryTargets();
+                    _hipsSnapshotFrom = syncPhysicsObjects[0] != null
+                        ? syncPhysicsObjects[0].transform.position
+                        : latestHips;
+                    _hipsSnapshotTo = latestHips;
+
+                    if (!HasStateAuthority)
+                    {
+                        var settleMode = _lastObservedCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None
+                            ? _lastObservedCarryMode
+                            : SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry;
+                        var settleProfile = carryPhysicsProfile != null
+                            ? carryPhysicsProfile.GetSettings(settleMode)
+                            : SSAFYPlayTime.Character.CarryPhysicsProfile.GetDefaultSettings(settleMode);
+                        _carryReleaseSettleRemaining = settleProfile.carryReleaseSettleDuration;
+                    }
                 }
             }
             _wasCarryPhaseLastFrame = isCarryNow;

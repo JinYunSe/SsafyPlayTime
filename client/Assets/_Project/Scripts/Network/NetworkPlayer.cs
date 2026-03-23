@@ -275,8 +275,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         leftMode = CharacterGrabController.HandHoldMode.None;
         rightMode = CharacterGrabController.HandHoldMode.None;
 
-        // Owner proxies should keep their locally resolved grab state for presentation.
-        if (!IsNetworkReady || HasStateAuthority || HasInputAuthority)
+        // Any proxy should read the authority-published grab controller state.
+        // OwnerProxy keeps short-lived local prediction elsewhere, but confirmed presentation
+        // must come from the same replicated source as RemoteProxy.
+        if (!IsNetworkReady || HasStateAuthority)
             return false;
 
         actionState = (CharacterGrabController.GrabActionState)NetworkedGrabActionState;
@@ -985,8 +987,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (characterGrabController != null)
         {
             characterGrabController.RefreshNow();
-            return (phase == PhysicalPhase.Holding || phase == PhysicalPhase.CarryingStunned) &&
-                   characterGrabController.ShouldLockFacingToHoldTarget;
+            return characterGrabController.ShouldLockFacingToHoldTarget;
         }
 
         if (HasStateAuthority)
