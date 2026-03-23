@@ -256,6 +256,33 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(visualRoot, true);
             }
+
+            RestartVisualEffects(visualRoot);
+        }
+
+        private static void RestartVisualEffects(GameObject visualRoot)
+        {
+            var particles = visualRoot.GetComponentsInChildren<ParticleSystem>(true);
+            for (var i = 0; i < particles.Length; i++)
+            {
+                var particle = particles[i];
+                if (particle == null)
+                {
+                    continue;
+                }
+
+                particle.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                particle.Play(true);
+            }
+
+            var trails = visualRoot.GetComponentsInChildren<TrailRenderer>(true);
+            for (var i = 0; i < trails.Length; i++)
+            {
+                if (trails[i] != null)
+                {
+                    trails[i].Clear();
+                }
+            }
         }
 
         private static void StripNetworkComponents(GameObject root)
