@@ -949,8 +949,12 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
     bool CanDriveAnimation()
     {
-        // 기절 중이면 애니메이션 구동 불가 (래그돌이 대신 보임)
-        if (networkPlayer != null && networkPlayer.ShouldUseHardPhysicsVisualMode())
+        // 완전 기절(Stunned) 중에는 애니메이션 구동 불가 (래그돌이 대신 보임)
+        // RecoverStabilizing은 안정화 구간으로 물리 스켈레톤이 표시되지만
+        // Animator를 끄면 이후 기립 애니메이션 State Machine이 초기화되어 불안정해지므로 제외
+        if (networkPlayer != null &&
+            networkPlayer.ShouldUseHardPhysicsVisualMode() &&
+            networkPlayer.GetStunPresentationPhase() != NetworkPlayer.StunPresentationPhase.RecoverStabilizing)
             return false;
 
         // 원격 프록시는 로컬 BehaviourPuppet 상태와 무관하게 항상 애니메이션 구동

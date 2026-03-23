@@ -94,17 +94,6 @@ public class PuppetStateSync : MonoBehaviour
             // 호스트는 항상 Active인데 비호스트에서 그대로 동기화하면
             // frozen kinematic muscle의 Map()이 Animator 출력을 덮어쓰는 문제가 발생한다.
 
-            // IsActiveRagdoll 상태 반영 — 원격에서도 기절/회복 상태를 알 수 있도록
-            if (_networkPlayer.NetworkedIsActiveRagdoll != _networkPlayer.IsActiveRagdoll)
-            {
-                // NetworkPlayer 내부 _isActiveRagdoll은 private이므로
-                // BehaviourPuppet 상태로 간접 제어
-                if (!_networkPlayer.NetworkedIsActiveRagdoll && behaviourPuppet != null)
-                {
-                    // 기절 상태: puppet 모드에서 빠져나감
-                    // pinWeight/muscleWeight가 0으로 내려가면 자연스럽게 넘어짐
-                }
-            }
         }
     }
 

@@ -49,6 +49,10 @@ public sealed partial class NetworkPlayer
     private const float CarriedStunnedMuscleAngularSpeedCap = 4.0f;
     private const float CarriedStunnedMaxUpwardSpeed = 3.0f;
     private const float StunRootUpwardSyncStep = 0.08f;
+    private const float CarriedRootPlanarSyncSpeed = 18f;
+    private const float CarriedRootVerticalSyncSpeed = 22f;
+    private const float CarriedRootSnapDistance = 0.8f;
+    private const float CarriedRootSnapVerticalGap = 0.45f;
     private const float CarriedRootTraceGapThreshold = 0.3f;
     private const float HitInstabilityBoostMin = 0.08f;
     private const float HitInstabilityBoostMax = 0.22f;
