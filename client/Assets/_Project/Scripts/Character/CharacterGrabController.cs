@@ -375,7 +375,6 @@ public sealed class CharacterGrabController : MonoBehaviour
 
         if (networkPlayer.IsNetworkReady &&
             !networkPlayer.HasStateAuthority &&
-            !networkPlayer.HasInputAuthority &&
             networkPlayer.TryGetReplicatedGrabControllerState(
                 out var replicatedActionState,
                 out var replicatedHoldVariant,
@@ -560,7 +559,7 @@ public sealed class CharacterGrabController : MonoBehaviour
         rightMode = HandHoldMode.None;
 
         ResolveReferences();
-        if (networkPlayer == null || !networkPlayer.IsNetworkReady || networkPlayer.HasInputAuthority)
+        if (networkPlayer == null || !networkPlayer.IsNetworkReady || networkPlayer.HasStateAuthority)
             return false;
 
         return networkPlayer.TryGetReplicatedGrabControllerState(
