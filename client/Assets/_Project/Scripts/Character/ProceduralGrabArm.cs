@@ -52,7 +52,7 @@ public class ProceduralGrabArm : MonoBehaviour
     [SerializeField] CarryPoseProfile carryPoseProfile;
 
     [Header("Debug")]
-    [SerializeField] bool debugLog = true;
+    [SerializeField] bool debugLog = false;
     float _debugLogTimer;
     float _debugPhysicsLogTimer;
     float _debugCarryLogTimer;
@@ -91,7 +91,6 @@ public class ProceduralGrabArm : MonoBehaviour
 
     void Awake()
     {
-        debugLog = true; // 디버그 진단용 강제 활성화
         _networkPlayer = GetComponent<NetworkPlayer>();
 
         if (puppetMaster == null)
@@ -247,8 +246,8 @@ public class ProceduralGrabArm : MonoBehaviour
         bool leftHolding = IsHandHolding(_leftHandler);
         bool rightHolding = IsHandHolding(_rightHandler);
 
-        bool leftShouldReach = (grabActive || leftHolding || weaponEquipped) && !suppressReach;
-        bool rightShouldReach = (grabActive || rightHolding || weaponEquipped) && !suppressReach;
+        bool leftShouldReach = (grabActive && !weaponEquipped || leftHolding) && !suppressReach;
+        bool rightShouldReach = (grabActive && !weaponEquipped || rightHolding) && !suppressReach;
 
         float dt = Time.deltaTime * blendSpeed;
         _leftBlend = Mathf.MoveTowards(_leftBlend, leftShouldReach ? 1f : 0f, dt);
@@ -310,6 +309,7 @@ public class ProceduralGrabArm : MonoBehaviour
             var rightTarget = ResolveWeaponPoseTarget(false);
             _leftIKTarget.position = leftTarget;
             _rightIKTarget.position = rightTarget;
+            _rightIKTarget.rotation = puppetMaster.targetRoot.rotation;
             _leftReachDir = (leftTarget - puppetMaster.targetRoot.position).normalized;
             _rightReachDir = (rightTarget - puppetMaster.targetRoot.position).normalized;
         }
@@ -432,7 +432,9 @@ public class ProceduralGrabArm : MonoBehaviour
         {
             EnsureSolverReady(rightArmIK);
             rightArmIK.solver.SetIKPositionWeight(_rightBlend);
-            rightArmIK.solver.SetIKRotationWeight(rightHolding ? _rightBlend * holdIKRotationWeight : 0f);
+            var phase = _networkPlayer != null ? _networkPlayer.GetPhysicalPhase() : NetworkPlayer.PhysicalPhase.Stable;
+            bool weaponEquipped = phase == NetworkPlayer.PhysicalPhase.WeaponEquipped;
+            rightArmIK.solver.SetIKRotationWeight((rightHolding || weaponEquipped) ? _rightBlend * holdIKRotationWeight : 0f);
             rightArmIK.solver.Update();
         }
     }
@@ -603,20 +605,10 @@ public class ProceduralGrabArm : MonoBehaviour
         Transform bodyRoot = ResolveBodyReference();
         float side = isLeft ? -1f : 1f;
 
-        float useSide, useForward, useHeight;
-        if (carryPoseProfile != null)
-        {
-            var pose = carryPoseProfile.twoHandWeapon;
-            useSide = pose.sideOffset;
-            useForward = pose.forwardOffset;
-            useHeight = pose.heightOffset;
-        }
-        else
-        {
-            useSide = holdSideOffset;
-            useForward = holdForwardOffset;
-            useHeight = holdHeightOffset;
-        }
+        // 1-handed (right) low-hip carry pose for flamethrower
+        float useHeight = -0.55f; 
+        float useForward = 0.45f;
+        float useSide = 0.65f;
 
         return bodyRoot.TransformPoint(new Vector3(side * useSide, useHeight, useForward));
     }

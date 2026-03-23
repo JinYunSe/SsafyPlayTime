@@ -173,7 +173,10 @@ public sealed partial class NetworkPlayer
         if (!ShouldUseHardPhysicsPresentation())
             return false;
 
-        // Carry keeps the animated visual rig visible and blends only key bones toward physics.
+        // BeingCarriedStunned는 제외: carry 중 PuppetMaster를 Active로 유지해야
+        // Map()이 실행되어 targetRoot가 운반 위치로 업데이트된다.
+        // Disabled로 전환하면 grab joint가 kinematic 근육에 힘을 줄 수 없어
+        // 운반 자체가 동작하지 않고 놓을 때 구 위치로 스냅백이 발생한다.
         return GetPhysicalPhase() != PhysicalPhase.BeingCarriedStunned;
     }
 
