@@ -111,6 +111,10 @@ namespace SSAFYPlayTime
         [Header("Game End Panel")]
         [Tooltip("게임 종료 후 순위를 표시하는 패널 (LauncherScene 캔버스 하위)")]
         [SerializeField] private GameObject gameEndPanel;
+        [Tooltip("방장 비정상 종료 시 표시할 안내 모달 (LobbyCanvas/HostExitNoticeModal)")]
+        [SerializeField] private GameObject hostExitNoticeModal;
+        [Tooltip("HostExitNoticeModal의 확인 버튼")]
+        [SerializeField] private Button hostExitNoticeCloseButton;
         [Tooltip("순위 항목 RankingItemUI들이 배치된 부모 Transform")]
         [SerializeField] private Transform rankingContainer;
         [Tooltip("같은 방으로 버튼")]
@@ -350,6 +354,9 @@ namespace SSAFYPlayTime
         // 게임 종료 후 LauncherScene 진입 시 백그라운드에서 실행되는 방 자동 입장 Task.
         // 버튼 클릭 시 이 Task를 await해 완료 여부를 확인한다.
         private Task<bool> _gameEndAutoRoomJoinTask;
+        // GameResultData.Clear() 전에 캡처한 로컬 플레이어 순위.
+        // StartAutoRoomJoinFromGameEndAsync()에서 순위 기반 딜레이 계산에 사용한다.
+        private int _localPlayerRankForAutoJoin;
         private AudioSource _launcherBackgroundMusicSource;
         private GameAudioSource _launcherBackgroundMusicCategory;
 
@@ -366,6 +373,8 @@ namespace SSAFYPlayTime
                 {
                     persistent.podiumParent = this.podiumParent;
                     persistent.podiumSlots = this.podiumSlots;
+                    persistent.sceneRoomSlots = this.sceneRoomSlots;
+                    persistent.sceneDirectSlots = this.sceneDirectSlots;
                     persistent.characterRuntimeRoot = this.characterRuntimeRoot;
                     persistent.characterPlacementCamera = this.characterPlacementCamera;
                     persistent.ssatyCharacterRoot = this.ssatyCharacterRoot;
@@ -1335,6 +1344,8 @@ namespace SSAFYPlayTime
             _gameEndReturnTransitionStarted = false;
 
             DisplayRankings();
+            // Clear() 전에 순위를 캡처해 StartAutoRoomJoinFromGameEndAsync의 딜레이 계산에 사용한다.
+            _localPlayerRankForAutoJoin = GameResultData.LocalPlayerRank;
             // 표시 완료 후 데이터를 클리어해 이후 OnSceneLoadDone 재발생 시 패널이 중복 표시되지 않도록 한다.
             GameResultData.Clear();
 
@@ -1351,6 +1362,106 @@ namespace SSAFYPlayTime
             }
 
             _gameEndAutoRoomJoinTask = StartAutoRoomJoinFromGameEndAsync();
+        }
+
+        // ─── 방장 비정상 종료 → 로비 복귀 ────────────────────────────────────
+
+        // DebugGameEndTransition.PlayerLeft 및 OnShutdown/OnDisconnectedFromServer/OnHostMigration에서 호출.
+        // _isShowingGameEndPanel 플래그를 먼저 세워 중복 진입을 방지하고 코루틴을 시작한다.
+        public void TriggerHostExitAndReturnToLobby()
+        {
+            if (_isShowingGameEndPanel)
+            {
+                Debug.LogWarning("[HostExit] TriggerHostExitAndReturnToLobby 차단됨: _isShowingGameEndPanel=true");
+                return;
+            }
+            Debug.Log("[HostExit] TriggerHostExitAndReturnToLobby 진입");
+            _isShowingGameEndPanel = true;
+            _pendingGameEndPanel = false;
+            StartCoroutine(CoReturnToLobbyOnHostExit());
+        }
+
+        private IEnumerator CoReturnToLobbyOnHostExit()
+        {
+            Debug.Log($"[HostExit] 코루틴 시작. 현재 씬={SceneManager.GetActiveScene().name}");
+            if (!IsActiveSceneNamed(launcherSceneName))
+            {
+                Debug.Log($"[HostExit] LauncherScene 로드 시작 (launcherSceneName={launcherSceneName})");
+                SceneManager.LoadScene(launcherSceneName);
+                while (!IsActiveSceneNamed(launcherSceneName))
+                    yield return null;
+                Debug.Log("[HostExit] LauncherScene 로드 완료");
+                // SceneManager.LoadScene은 Fusion 경로가 아니므로 OnSceneLoadDone이 발동하지 않는다.
+                // 캐릭터 슬롯 재초기화를 허용하도록 수동으로 리셋한다.
+                ResetCharacterSlotState();
+            }
+
+            _currentRoomName = string.Empty;
+            _currentRoomOwner = "-";
+            _currentOwnerPlayerId = -1;
+            _currentRoomIsPrivate = false;
+            _currentRoomPassword = string.Empty;
+            _localSelectedCharacterIndex = -1;
+            _localIsReady = false;
+            _localPlayerRankForAutoJoin = 0;
+            // OnHostMigration이 저장한 준비 상태를 클리어해 재입장 시 Ready 복원을 방지한다.
+            _migrationReadyStateByClientId.Clear();
+            _isMigrating = false;
+
+            Debug.Log("[HostExit] ShowLobbyPanel 호출");
+            ShowLobbyPanel();
+
+            yield return null;
+            Debug.Log("[HostExit] ShowHostExitNoticeModal 호출");
+            ShowHostExitNoticeModal();
+        }
+
+        private void ShowHostExitNoticeModal()
+        {
+            // Inspector 미연결 시 이름으로 자동 탐색 (빌드 환경 포함)
+            if (hostExitNoticeModal == null)
+            {
+                foreach (var t in FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (t.name == "HostExitNoticeModal") { hostExitNoticeModal = t.gameObject; break; }
+                }
+            }
+
+            if (hostExitNoticeModal == null)
+            {
+                Debug.LogWarning("[HostExit] HostExitNoticeModal을 찾을 수 없습니다.");
+                _isShowingGameEndPanel = false;
+                return;
+            }
+
+            // 버튼도 미연결 시 자식에서 자동 탐색
+            if (hostExitNoticeCloseButton == null)
+            {
+                foreach (var btn in hostExitNoticeModal.GetComponentsInChildren<Button>(true))
+                {
+                    if (btn.name == "ConfirmButton") { hostExitNoticeCloseButton = btn; break; }
+                }
+            }
+
+            Debug.Log($"[HostExit] 모달 표시. modal={hostExitNoticeModal.name}, btn={hostExitNoticeCloseButton?.name}");
+
+            if (hostExitNoticeCloseButton != null)
+            {
+                hostExitNoticeCloseButton.onClick.RemoveAllListeners();
+                hostExitNoticeCloseButton.onClick.AddListener(() =>
+                {
+                    hostExitNoticeModal.SetActive(false);
+                    _isShowingGameEndPanel = false;
+                });
+            }
+            else
+            {
+                Debug.LogWarning("[HostExit] ConfirmButton을 찾을 수 없습니다.");
+                _isShowingGameEndPanel = false;
+            }
+
+            hostExitNoticeModal.SetActive(true);
+            Debug.Log($"[HostExit] 모달 SetActive(true) 완료.");
         }
 
         private void DisplayRankings()
@@ -1483,7 +1594,7 @@ namespace SSAFYPlayTime
             //   3등: 300ms → CLIENT로 입장
             //   4등: 450ms → CLIENT로 입장
             const int RankDelayMs = 150;
-            var localRank = GameResultData.LocalPlayerRank;
+            var localRank = _localPlayerRankForAutoJoin;
             var delaySteps = localRank > 0 ? (localRank - 1) : MaxPlayers;
             if (delaySteps > 0)
                 await Task.Delay(delaySteps * RankDelayMs);
@@ -1579,6 +1690,10 @@ namespace SSAFYPlayTime
             _characterBaseLocalScales.Clear();
             _characterBaseLocalRotations.Clear();
             _characterOptionIndexByTransform.Clear();
+
+            // CharacterPreviewController도 동일하게 리셋 — GameScene 전환 시 파괴된
+            // 슬롯 오브젝트 참조를 제거하고 재초기화를 허용한다.
+            characterPreview?.ResetSlots();
         }
 
         // 현재 방 이름·공개 여부·플레이어 슬롯·게임 시작 버튼 활성 상태를 갱신한다.
@@ -2651,9 +2766,14 @@ namespace SSAFYPlayTime
             lobbyPanel.SetActive(true);
             roomPanel.SetActive(false);
             passwordModal.SetActive(false);
+            if (hostExitNoticeModal != null) hostExitNoticeModal.SetActive(false);
             lobbyHeaderText.text = string.Format(nicknameHeaderFormat, _nickname);
             HideAllCharacterSlots();
             RefreshCharacterSelectionUiState();
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            // 모달 미닫힘 등 예외 케이스 방어: 로비 패널 진입 시 플래그 해제
+            _isShowingGameEndPanel = false;
 
             if (_isNicknameConfirmed)
             {
@@ -2672,6 +2792,11 @@ namespace SSAFYPlayTime
             lobbyPanel.SetActive(false);
             if (mainPanel != null) mainPanel.SetActive(false);
             roomPanel.SetActive(true);
+            if (hostExitNoticeModal != null) hostExitNoticeModal.SetActive(false);
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            // 모달 미닫힘 등 예외 케이스 방어: 방 패널 진입 시 플래그 해제
+            _isShowingGameEndPanel = false;
             RefreshRoomActionButtonState();
 
             // 방 입장 시 캐릭터 선택이 없으면 ? (Random)을 기본값으로 설정한다.

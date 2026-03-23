@@ -11,7 +11,7 @@ using UnityEngine.SceneManagement;
 /// - Host automatically finishes the match when one real player remains.
 /// - When debugEnabled is true, F9 can still force a debug transition.
 /// </summary>
-public class DebugGameEndTransition : NetworkBehaviour
+public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
 {
     [Header("Debug")]
     [Tooltip("When enabled, pressing F9 forces an immediate game-end transition.")]
@@ -26,6 +26,11 @@ public class DebugGameEndTransition : NetworkBehaviour
     [Networked]
     private int NetworkedPlayerCount { get; set; }
 
+    // 방장 PlayerId: 모든 클라이언트에서 방장 퇴장을 감지하기 위해 Networked로 관리
+    [Networked]
+    private int NetworkedHostPlayerId { get; set; }
+
+    // StateAuthority 전용: 사망 순서 기록 (인덱스 0 = 가장 먼저 사망)
     private readonly List<int> _deathOrder = new();
     private readonly HashSet<NetworkPlayer> _subscribedPlayers = new();
 
@@ -35,10 +40,50 @@ public class DebugGameEndTransition : NetworkBehaviour
 
     public override void Spawned()
     {
-        if (!HasStateAuthority)
-            return;
+        // 방장 PlayerId 저장 (모든 클라이언트에 복제됨)
+        if (HasStateAuthority && Runner != null && Runner.IsServer && Runner.LocalPlayer.IsRealPlayer)
+            NetworkedHostPlayerId = Runner.LocalPlayer.PlayerId;
 
+        if (!HasStateAuthority) return;
         SubscribeToPlayers();
+    }
+
+    // ─── IPlayerLeft: 방장 퇴장 감지 ──────────────────────────────
+
+    public void PlayerLeft(PlayerRef player)
+    {
+        if (_triggered) return;
+
+        // 방장 퇴장 → 로비로 복귀
+        if (NetworkedHostPlayerId > 0 && player.PlayerId == NetworkedHostPlayerId)
+        {
+            _triggered = true;
+            Debug.Log($"[GameEnd] 방장(Player{NetworkedHostPlayerId}) 퇴장 → 로비로 복귀");
+
+            // _isShowingGameEndPanel 플래그를 먼저 세워 이후
+            // OnShutdown/OnDisconnectedFromServer에서 중복 처리를 방지한다.
+            var lobby = FindAnyObjectByType<LobbyCanvasUIController>();
+            if (lobby != null)
+                lobby.TriggerHostExitAndReturnToLobby();
+            else
+                SceneManager.LoadScene(gameEndSceneName);
+            return;
+        }
+
+        // 비방장 퇴장 → 생존자 수 재체크 (StateAuthority만)
+        if (!HasStateAuthority) return;
+
+        var aliveCount = _subscribedPlayers.Count(
+            np => np != null &&
+                  np.Object != null &&
+                  np.Object.InputAuthority.IsRealPlayer &&
+                  np.Object.InputAuthority.PlayerId != player.PlayerId &&
+                  !np.IsDeadState);
+
+        Debug.Log($"[GameEnd] 비방장(Player{player.PlayerId}) 퇴장 → 생존자 수: {aliveCount}명");
+
+        if (aliveCount <= 1)
+            TriggerGameEnd();
     }
 
     public override void Despawned(NetworkRunner runner, bool hasState)
