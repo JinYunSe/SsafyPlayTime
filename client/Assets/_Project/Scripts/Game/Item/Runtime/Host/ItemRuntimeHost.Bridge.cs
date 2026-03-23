@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemRuntimeHost.Bridge 스크립트가 들어 있는 파일이다.
  * - Runtime/Host 계층에서 MonoBehaviour 기반 진입점과 외부 시스템 이벤트 연결을 담당한다.

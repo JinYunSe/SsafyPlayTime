@@ -165,10 +165,8 @@ namespace S14P21D104.Character
             }
             else
             {
-                if (Input.GetMouseButtonDown(1))
-                {
-                    TryPickupWeapon();
-                }
+                // Right click is intentionally reserved for a future kick input.
+                // Leave weapon pickup unbound here so the core player control scheme stays consistent.
             }
         }
 

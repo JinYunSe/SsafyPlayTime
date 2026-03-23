@@ -49,11 +49,16 @@ public sealed partial class NetworkPlayer
             return;
 
         if (GetInput(out PlayerNetworkInput input))
+        {
+            TraceMoveAuthorityInput("FixedUpdateNetwork.Input", input);
             DoPhysicsStep(input, Runner.DeltaTime);
+        }
 
         UpdateGrabHandlers();
         UpdatePhysicalPhaseState(Runner.DeltaTime);
         SynchronizeNetworkSimulationState();
+        TraceMoveAuthorityState("FixedUpdateNetwork.AfterPhase");
+        TraceMovePublish("FixedUpdateNetwork.Publish");
         ClampOutOfBoundsCharacter();
     }
 
@@ -83,9 +88,10 @@ public sealed partial class NetworkPlayer
         // This keeps PartyMonsterAnimationDriver.SyncGrabAnimation() in sync.
         if (Runner != null && HasInputAuthority && !HasStateAuthority)
         {
-            _isLeftGrabActive = _leftMouseDown && _leftMouseConsumedAsGrab;
-            _isRightGrabActive = _rightMouseDown && _rightMouseConsumedAsGrab;
-            _isGrabActive = _isLeftGrabActive || _isRightGrabActive;
+            var unifiedGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab;
+            _isLeftGrabActive = unifiedGrabHold;
+            _isRightGrabActive = unifiedGrabHold;
+            _isGrabActive = unifiedGrabHold;
         }
     }
 
@@ -115,26 +121,13 @@ public sealed partial class NetworkPlayer
 
     private void UpdateSecondaryClickState()
     {
+        // 우클릭 = 던지기 (잡고 있을 때)
         if (Input.GetMouseButtonDown(1))
-        {
-            _rightMouseDown = true;
-            _rightMouseDownTime = Time.time;
-            _rightMouseConsumedAsGrab = false;
-        }
-
-        if (Input.GetMouseButton(1) && _rightMouseDown)
-        {
-            if (Time.time - _rightMouseDownTime >= GRAB_HOLD_THRESHOLD && !_rightMouseConsumedAsGrab)
-                _rightMouseConsumedAsGrab = true;
-        }
-
-        if (!Input.GetMouseButtonUp(1))
-            return;
-
-        if (!_rightMouseConsumedAsGrab && Time.time - _rightMouseDownTime < GRAB_HOLD_THRESHOLD)
             _throwTriggered = true;
 
         _rightMouseDown = false;
+        _rightMouseDownTime = 0f;
+        _rightMouseConsumedAsGrab = false;
     }
 
     private PlayerNetworkInput BuildSandboxInput()
@@ -149,7 +142,7 @@ public sealed partial class NetworkPlayer
             Drop = _dropTriggered,
             Throw = _throwTriggered,
             LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab,
-            RightGrabHold = _rightMouseDown && _rightMouseConsumedAsGrab,
+            RightGrabHold = false,
             Headbutt = Input.GetMouseButtonDown(2),
             Sprint = Input.GetKey(KeyCode.LeftShift)
         };
@@ -159,6 +152,7 @@ public sealed partial class NetworkPlayer
     {
         _sandboxJump = false;
         _leftClickUseTriggered = false;
+        _throwTriggered = false;
     }
 
     private void ResetAllLocalInputState()
@@ -200,6 +194,63 @@ public sealed partial class NetworkPlayer
         NetworkedPhysicalPhase = (byte)_localPhysicalPhase;
         NetworkedInstability = _localInstability;
         NetworkedIsDragged = _localIsDragged;
+
+        // ── CarrySolveFrame: carry anchor 네트워크 동기화 (carrier/victim 분리) ──
+        NetworkedCarryMode = (byte)_localCarryMode;
+        if (_localCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None && carryRig != null)
+        {
+            if (_localCarryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim)
+            {
+                // victim: 자신의 hips-chest 가중 평균 anchor 전송
+                carryRig.UpdateVictimAnchor();
+                if (carryRig.TryGetVictimAnchorWorld(out var vPos, out var vFwd))
+                {
+                    NetworkedVictimAnchorPosition = vPos;
+                    NetworkedVictimAnchorForward = vFwd;
+                    NetworkedVictimAnchorValid = true;
+                }
+                else
+                {
+                    NetworkedVictimAnchorValid = false;
+                }
+
+                if (_hasCarriedVictimRootOffset)
+                {
+                    NetworkedVictimRootOffset = _carriedVictimRootOffset;
+                    NetworkedVictimRootOffsetValid = true;
+                }
+                else
+                {
+                    NetworkedVictimRootOffsetValid = false;
+                }
+
+                NetworkedCarrierAnchorValid = false;
+            }
+            else
+            {
+                // carrier: 자신의 carry rig anchor 전송
+                if (carryRig.TryGetCarrierAnchorWorld(_localCarryMode, out var cPos, out var cFwd))
+                {
+                    NetworkedCarrierAnchorPosition = cPos;
+                    NetworkedCarrierAnchorForward = cFwd;
+                    NetworkedCarrierAnchorValid = true;
+                }
+                else
+                {
+                    NetworkedCarrierAnchorValid = false;
+                }
+
+                NetworkedVictimAnchorValid = false;
+                NetworkedVictimRootOffsetValid = false;
+            }
+        }
+        else
+        {
+            NetworkedVictimAnchorValid = false;
+            NetworkedVictimRootOffsetValid = false;
+            NetworkedCarrierAnchorValid = false;
+        }
+
         SynchronizeStunPresentationPhase();
     }
 

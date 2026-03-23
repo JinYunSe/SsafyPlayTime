@@ -89,7 +89,7 @@ namespace SSAFYPlayTime
         [Header("Panels")]
         [SerializeField] private GameObject nicknamePanel;
         [SerializeField] private GameObject lobbyPanel;
-        [SerializeField] private GameObject roomPanel;
+        [SerializeField] private GameObject roomPanel;  
         [SerializeField] private GameObject createRoomModal;
         [SerializeField] private GameObject passwordModal;
         [SerializeField] private GameObject mainPanel;
@@ -220,6 +220,7 @@ namespace SSAFYPlayTime
         [SerializeField] private TMP_Text readyButtonText;
         [SerializeField] private string gameplaySceneName = string.Empty;
         [SerializeField] private string launcherSceneName = "LauncherScene";
+        [SerializeField] private AudioClip launcherBackgroundMusicClip;
         [Header("In-Game Panel (GameScene)")]
         [SerializeField] private GameObject gamePanel;
         [SerializeField] private Button leaveGameButton;
@@ -287,6 +288,9 @@ namespace SSAFYPlayTime
         private bool _isProcessing;
         private bool _isInLobby;
         private bool _isShuttingDownRunner;
+        // 처리 중(_isProcessing)에 수신된 migration token을 보관한다.
+        // finally에서 _isProcessing = false 직후 재처리한다.
+        private HostMigrationToken _pendingMigrationToken;
         private DateTime _lastSessionListUpdatedAtUtc = DateTime.MinValue;
         // async 메서드 간 NetworkRunner 생성/종료 순서를 보장하는 뮤텍스.
         // SemaphoreSlim(1, 1) : 최대 1개의 코루틴만 동시에 러너를 조작할 수 있도록 제한한다.
@@ -320,6 +324,8 @@ namespace SSAFYPlayTime
         // 게임 종료 후 LauncherScene 진입 시 백그라운드에서 실행되는 방 자동 입장 Task.
         // 버튼 클릭 시 이 Task를 await해 완료 여부를 확인한다.
         private Task<bool> _gameEndAutoRoomJoinTask;
+        private AudioSource _launcherBackgroundMusicSource;
+        private GameAudioSource _launcherBackgroundMusicCategory;
 
         // MonoBehaviour 초기화. 패널·이벤트·캐릭터 슬롯을 순서대로 준비하고 닉네임 입력 화면을 표시한다.
         // 모든 UI 참조는 Inspector에서 SerializeField로 직접 할당해야 한다.
@@ -344,7 +350,10 @@ namespace SSAFYPlayTime
             EnsurePersistentAcrossScenes();
             EnsureLocalClientId();
             RuntimeLogOverlay.EnsureInstance();
+            GameAudioSettingsService.EnsureInstance();
             EnsureCharacterSelectionUi();
+            EnsureGameSettingModal();
+            EnsureLauncherBackgroundMusic();
             NormalizeCanvasRoot();
             NormalizeRoomListBindings();
             BindEvents();
@@ -353,6 +362,7 @@ namespace SSAFYPlayTime
             {
                 characterPreview.Initialize(GetNameSlots());
             }
+            SceneManager.sceneLoaded += OnManagedSceneLoaded;
             ShowNicknamePanel();
         }
 
@@ -362,6 +372,82 @@ namespace SSAFYPlayTime
             playerTwoReadyBadge ??= FindReadyBadge(playerTwoText);
             playerThreeReadyBadge ??= FindReadyBadge(playerThreeText);
             playerFourReadyBadge ??= FindReadyBadge(playerFourText);
+        }
+
+        private void EnsureGameSettingModal()
+        {
+            if (gameSettingModal == null)
+            {
+                return;
+            }
+
+            var modalController = gameSettingModal.GetComponent<LobbyAudioSettingsModal>();
+            if (modalController == null)
+            {
+                modalController = gameSettingModal.AddComponent<LobbyAudioSettingsModal>();
+            }
+
+            modalController.InitializeIfNeeded();
+        }
+
+        private void EnsureLauncherBackgroundMusic()
+        {
+            if (_launcherBackgroundMusicSource == null)
+            {
+                var sourceRoot = new GameObject("LauncherBackgroundMusic");
+                sourceRoot.transform.SetParent(transform, false);
+
+                _launcherBackgroundMusicSource = sourceRoot.AddComponent<AudioSource>();
+                _launcherBackgroundMusicSource.playOnAwake = false;
+                _launcherBackgroundMusicSource.loop = true;
+                _launcherBackgroundMusicSource.spatialBlend = 0f;
+                _launcherBackgroundMusicSource.volume = 1f;
+
+                _launcherBackgroundMusicCategory = sourceRoot.AddComponent<GameAudioSource>();
+                _launcherBackgroundMusicCategory.SetCategory(GameAudioCategory.BackgroundSound);
+                _launcherBackgroundMusicCategory.RefreshBaseVolumeFromCurrentSource();
+            }
+
+            _launcherBackgroundMusicSource.clip = launcherBackgroundMusicClip;
+            RefreshLauncherBackgroundMusicState();
+        }
+
+        private void OnManagedSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            RefreshLauncherBackgroundMusicState();
+        }
+
+        private void RefreshLauncherBackgroundMusicState()
+        {
+            if (_launcherBackgroundMusicSource == null)
+            {
+                return;
+            }
+
+            var isLauncherSceneActive = string.Equals(
+                SceneManager.GetActiveScene().name,
+                launcherSceneName,
+                StringComparison.Ordinal);
+
+            if (!isLauncherSceneActive || launcherBackgroundMusicClip == null)
+            {
+                if (_launcherBackgroundMusicSource.isPlaying)
+                {
+                    _launcherBackgroundMusicSource.Stop();
+                }
+
+                return;
+            }
+
+            if (_launcherBackgroundMusicSource.clip != launcherBackgroundMusicClip)
+            {
+                _launcherBackgroundMusicSource.clip = launcherBackgroundMusicClip;
+            }
+
+            if (!_launcherBackgroundMusicSource.isPlaying)
+            {
+                _launcherBackgroundMusicSource.Play();
+            }
         }
 
         private static GameObject FindReadyBadge(TMP_Text slotText)
@@ -465,6 +551,7 @@ namespace SSAFYPlayTime
         // 오브젝트 파괴 시 NetworkRunner를 안전하게 종료한다.
         private async void OnDestroy()
         {
+            SceneManager.sceneLoaded -= OnManagedSceneLoaded;
             await ShutdownRunnerAsync();
         }
 
@@ -754,13 +841,28 @@ namespace SSAFYPlayTime
                 var row = Instantiate(roomItemTemplate, roomListContent);
                 row.SetActive(true);
 
-                var text = row.GetComponentInChildren<TMP_Text>(true);
-                if (text != null)
+                var nameText = row.transform.Find("RoomNameText")?.GetComponent<TMP_Text>();
+                var countText = row.transform.Find("PlayerCountText")?.GetComponent<TMP_Text>();
+                var lockedIcon = row.transform.Find("LockedYN/LockedIcon")?.gameObject;
+                var unlockedIcon = row.transform.Find("LockedYN/UnlockedIcon")?.gameObject;
+
+                if(nameText != null)
                 {
-                    var joinable = room.IsOpen && room.PlayerCount < room.MaxPlayers;
-                    var accessState = room.IsPrivate ? accessPrivate : accessPublic;
-                    var roomState = joinable ? roomStateJoinable : roomStateFull;
-                    text.text = $"{accessState}/{roomState}  {room.Name}  ({room.PlayerCount}/{room.MaxPlayers})";
+                    nameText.text = room.Name;
+                }
+
+                if (countText != null)
+                {
+                    countText.text = $"{room.PlayerCount}/{room.MaxPlayers} In Game";
+                }
+
+                if (lockedIcon != null)
+                {
+                    lockedIcon.SetActive(room.IsPrivate); // 비밀방이면 켜짐
+                }
+                if (unlockedIcon != null)
+                {
+                    unlockedIcon.SetActive(!room.IsPrivate); // 공개방이면 켜짐
                 }
 
                 var button = row.GetComponent<Button>();
@@ -1167,6 +1269,7 @@ namespace SSAFYPlayTime
             if (passwordModal != null) passwordModal.SetActive(false);
             if (mainPanel != null) mainPanel.SetActive(false);
             if (gamePanel != null) gamePanel.SetActive(false);
+            HideAllCharacterSlots();
             gameEndPanel.SetActive(true);
 
             Cursor.lockState = CursorLockMode.None;
@@ -1214,7 +1317,7 @@ namespace SSAFYPlayTime
                     var nickname = !string.IsNullOrWhiteSpace(entry.Nickname)
                         ? entry.Nickname
                         : $"Player{entry.PlayerId}";
-                    rankingItems[i].SetData(entry.Rank, nickname);
+                    rankingItems[i].SetData(entry.Rank, nickname, entry.CharacterTypeIndex);
                 }
             }
         }
@@ -1370,6 +1473,8 @@ namespace SSAFYPlayTime
         // 참가자 목록을 PlayerId 오름차순으로 정렬해 플레이어 슬롯 텍스트와 캐릭터 표시를 갱신한다.
         private void UpdatePlayerSlots()
         {
+            // GameEndPanel 표시 중에는 캐릭터 슬롯을 갱신하지 않는다.
+            if (_isShowingGameEndPanel) return;
             var slotTexts = new[] { playerOneText, playerTwoText, playerThreeText, playerFourText };
             var readyBadges = new[] { playerOneReadyBadge, playerTwoReadyBadge, playerThreeReadyBadge, playerFourReadyBadge };
             var orderedParticipants = _roomParticipantsByPlayerId.Values
@@ -2538,7 +2643,11 @@ namespace SSAFYPlayTime
             _spawnedGameplayNetworkCharacters.Clear();
             _spawnedCharacterIndexByPlayerId.Clear();
             _currentOwnerPlayerId = -1;
-            ResetGameEndReturnState();
+            // GameEndPanel 표시 중에는 리셋하지 않는다.
+            // StartAutoRoomJoinFromGameEndAsync에서 호출될 때 _isShowingGameEndPanel이 true이면
+            // 리셋하면 Network.cs의 가드가 뚫려 ShowRoomPanel이 잘못 호출될 수 있다.
+            if (!_isShowingGameEndPanel)
+                ResetGameEndReturnState();
         }
 
         // 새 GameObject에 NetworkRunner를 추가하고 콜백을 등록한다. 성공 시 true를 반환한다.
@@ -2831,6 +2940,9 @@ namespace SSAFYPlayTime
                     _localIsReady = localReady;
                 }
             }
+
+            UpdatePlayerSlots();
+            RefreshCharacterSelectionUiState();
         }
 
         // 서버에서 모든 플레이어에게 최신 참가자 Roster를 ReliableData로 전송한다.
@@ -2855,6 +2967,9 @@ namespace SSAFYPlayTime
                     Debug.LogWarning($"[Lobby] Failed to send roster to {player}: {e.Message}");
                 }
             }
+
+            UpdatePlayerSlots();
+            RefreshCharacterSelectionUiState();
         }
 
         // _currentOwnerPlayerId 기준으로 _currentRoomOwner 닉네임을 참가자 목록과 동기화한다.
@@ -3147,6 +3262,9 @@ namespace SSAFYPlayTime
             try
             {
                 target.interactable = interactable;
+
+                target.enabled = false;
+                target.enabled = true;
             }
             catch (MissingReferenceException)
             {

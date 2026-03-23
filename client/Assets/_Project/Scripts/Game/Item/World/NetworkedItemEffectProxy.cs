@@ -384,10 +384,12 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
+            // NetworkedItemFieldDrop은 [RequireComponent(typeof(NetworkTransform))]를 선언하므로
+            // NetworkTransform보다 먼저 즉시 제거해야 의존성 에러가 발생하지 않는다.
             var networkedDrop = instance.GetComponent<NetworkedItemFieldDrop>();
             if (networkedDrop != null)
             {
-                Destroy(networkedDrop);
+                DestroyImmediate(networkedDrop);
             }
 
             var itemDrop = instance.GetComponent<ItemFieldDrop>();

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemFieldDrop 스크립트가 들어 있는 파일이다.
  * - World 계층에서 필드 드랍, 획득, 스폰, 배치, 프리팹 해석처럼 월드 오브젝트와 연결되는 책임을 맡는다.
@@ -23,6 +23,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField, HideInInspector] private bool runtimeInitialized;
 
         private bool _pickedUp;
+        private bool _visualReleased;
 
         public string ItemId => itemId;
         public string InstanceId => ResolveRuntimeInstanceId();
@@ -36,6 +37,16 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 EnsureRuntimeSetup();
             }
+        }
+
+        private void OnDestroy()
+        {
+            if (!ShouldReleaseVisualOnDestroy())
+            {
+                return;
+            }
+
+            ReleaseVisualToPool();
         }
 
         public void SetItemId(string value)
@@ -60,6 +71,37 @@ namespace SSAFYPlayTime.Gameplay.Items
         public bool CanBePickedUp()
         {
             return !_pickedUp && !string.IsNullOrWhiteSpace(itemId);
+        }
+
+        public void ResetForSpawn(string newItemId, string newInstanceId)
+        {
+            _pickedUp = false;
+            _visualReleased = false;
+            runtimeInitialized = false;
+            itemId = newItemId ?? string.Empty;
+            instanceId = string.IsNullOrWhiteSpace(newInstanceId)
+                ? BuildDeterministicInstanceId()
+                : newInstanceId;
+            PickedUp = null;
+
+            var colliders = GetComponentsInChildren<Collider>(true);
+            for (var i = 0; i < colliders.Length; i++)
+            {
+                if (colliders[i] != null)
+                {
+                    colliders[i].enabled = true;
+                }
+            }
+
+            gameObject.SetActive(true);
+        }
+
+        public void ResetForDespawn()
+        {
+            _pickedUp = false;
+            runtimeInitialized = false;
+            PickedUp = null;
+            ReleaseVisualToPool();
         }
 
         internal void EnsureRuntimeSetup()
@@ -127,6 +169,39 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             gameObject.SetActive(false);
+        }
+
+        private void ReleaseVisualToPool()
+        {
+            if (_visualReleased)
+            {
+                return;
+            }
+
+            _visualReleased = true;
+            ItemFieldDropFactory.ReleaseFieldVisual(gameObject, itemId);
+        }
+
+        private bool ShouldReleaseVisualOnDestroy()
+        {
+            if (string.Equals(name, "Visual", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (transform.Find("Visual") != null)
+            {
+                return true;
+            }
+
+            if (transform.parent == null &&
+                (name.StartsWith("FieldItem_", StringComparison.Ordinal) ||
+                 name.StartsWith("NetworkedFieldItemDrop", StringComparison.Ordinal)))
+            {
+                return true;
+            }
+
+            return GetComponent<NetworkedItemFieldDrop>() != null;
         }
 
         private void EnsureInstanceId()
