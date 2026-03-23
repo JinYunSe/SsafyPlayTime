@@ -161,6 +161,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 if (_particles[i] != null)
                 {
                     _particles[i].Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                    _particles[i].Play(true);
                 }
             }
         }

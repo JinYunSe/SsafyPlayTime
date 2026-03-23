@@ -103,7 +103,7 @@ public sealed partial class NetworkPlayer
         // This keeps PartyMonsterAnimationDriver.SyncGrabAnimation() in sync.
         if (Runner != null && HasInputAuthority && !HasStateAuthority)
         {
-            var unifiedGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab;
+            var unifiedGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab && !HasHeldRuntimeItem();
             _isLeftGrabActive = unifiedGrabHold;
             _isRightGrabActive = unifiedGrabHold;
             _isGrabActive = unifiedGrabHold;
@@ -153,7 +153,7 @@ public sealed partial class NetworkPlayer
             PrimaryUseHold = _leftMouseDown,
             Drop = _dropTriggered,
             Throw = _throwTriggered,
-            LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab,
+            LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab && !HasHeldRuntimeItem(),
             Sprint = Input.GetKey(KeyCode.LeftShift)
         };
     }

@@ -31,7 +31,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private Transform handAnchorOverride;
 
         [Header("장착 위치")]
-        [SerializeField] private Vector3 localPositionOffset = new Vector3(0f, 0.03f, 0.07f);
+        [SerializeField] private Vector3 localPositionOffset = new Vector3(0.003f, -0.002f, 0.012f);
         [SerializeField] private Vector3 localEulerOffset = new Vector3(0f, 90f, 90f);
         [SerializeField] private Vector3 localScale = Vector3.one * 0.25f;
 
@@ -246,7 +246,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             _spawnedHeldVisual.name = $"HeldItem_{heldItemId}";
             var isWatermelonSword = string.Equals(heldItemId, ItemIds.WaterMelonSword, StringComparison.Ordinal);
             var isBlackhole = string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal);
-            if (!isBlackhole)
+            if (!isBlackhole && !ShouldSkipHeldFallback(heldItemId))
             {
                 // 수박칼은 조건과 무관하게 Lit 셰이더로 강제 교체해 마젠타를 방지한다.
                 ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_spawnedHeldVisual, isWatermelonSword);
@@ -344,6 +344,12 @@ namespace SSAFYPlayTime.Gameplay.Items
                 scale = flamethrowerLocalScale;
                 _muzzleRotationOffset = Vector3.zero;
             }
+            else if (ShouldUseFullScaleHeldPose(heldItemId))
+            {
+                position = localPositionOffset;
+                euler = localEulerOffset;
+                scale = Vector3.one;
+            }
             else
             {
                 _muzzleRotationOffset = Vector3.zero;
@@ -386,6 +392,23 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             return false;
+        }
+
+        private static bool ShouldUseFullScaleHeldPose(string heldItemId)
+        {
+            return string.Equals(heldItemId, ItemIds.Americano, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.Growth, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.Shrink, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.Invisibility, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.SatelliteStrike, StringComparison.Ordinal);
+        }
+
+        private static bool ShouldSkipHeldFallback(string heldItemId)
+        {
+            return string.Equals(heldItemId, ItemIds.Growth, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.Shrink, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.Invisibility, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.SatelliteStrike, StringComparison.Ordinal);
         }
 
         private bool TryApplyWatermelonSwordGripCompensation(
@@ -624,28 +647,6 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (!isSatellite)
             {
                 return;
-            }
-
-            var particles = visualRoot.GetComponentsInChildren<ParticleSystem>(true);
-            for (var i = 0; i < particles.Length; i++)
-            {
-                var particle = particles[i];
-                if (particle == null)
-                {
-                    continue;
-                }
-
-                particle.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-                particle.gameObject.SetActive(false);
-            }
-
-            var lights = visualRoot.GetComponentsInChildren<Light>(true);
-            for (var i = 0; i < lights.Length; i++)
-            {
-                if (lights[i] != null)
-                {
-                    lights[i].enabled = false;
-                }
             }
         }
 
