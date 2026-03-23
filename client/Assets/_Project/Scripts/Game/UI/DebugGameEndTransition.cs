@@ -12,7 +12,7 @@ using UnityEngine.SceneManagement;
 /// StateAuthority(호스트)에서만 종료 판정·순위 배정을 수행하고,
 /// RPC_BroadcastRankings로 모든 클라이언트에 순위를 전달한 뒤 씬을 전환한다.
 /// </summary>
-public class DebugGameEndTransition : NetworkBehaviour
+public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
 {
     [SerializeField] private string gameEndSceneName = "LauncherScene";
 
@@ -22,6 +22,10 @@ public class DebugGameEndTransition : NetworkBehaviour
 
     [Networked]
     private int NetworkedPlayerCount { get; set; }
+
+    // 방장 PlayerId: 모든 클라이언트에서 방장 퇴장을 감지하기 위해 Networked로 관리
+    [Networked]
+    private int NetworkedHostPlayerId { get; set; }
 
     // StateAuthority 전용: 사망 순서 기록 (인덱스 0 = 가장 먼저 사망)
     private readonly List<int> _deathOrder = new();
@@ -35,8 +39,32 @@ public class DebugGameEndTransition : NetworkBehaviour
 
     public override void Spawned()
     {
+        // 방장 PlayerId 저장 (모든 클라이언트에 복제됨)
+        if (HasStateAuthority && Runner != null && Runner.IsServer && Runner.LocalPlayer.IsRealPlayer)
+            NetworkedHostPlayerId = Runner.LocalPlayer.PlayerId;
+
         if (!HasStateAuthority) return;
         SubscribeToPlayers();
+    }
+
+    // ─── IPlayerLeft: 방장 퇴장 감지 ──────────────────────────────
+
+    public void PlayerLeft(PlayerRef player)
+    {
+        if (_triggered) return;
+        if (NetworkedHostPlayerId <= 0) return;
+        if (player.PlayerId != NetworkedHostPlayerId) return;
+
+        _triggered = true;
+        Debug.Log($"[GameEnd] 방장(Player{NetworkedHostPlayerId}) 퇴장 → 로비로 복귀");
+
+        // _isShowingGameEndPanel 플래그를 먼저 세워 이후
+        // OnShutdown/OnDisconnectedFromServer에서 중복 처리를 방지한다.
+        var lobby = FindAnyObjectByType<LobbyCanvasUIController>();
+        if (lobby != null)
+            lobby.TriggerHostExitAndReturnToLobby();
+        else
+            SceneManager.LoadScene(gameEndSceneName);
     }
 
     public override void Despawned(NetworkRunner runner, bool hasState)
