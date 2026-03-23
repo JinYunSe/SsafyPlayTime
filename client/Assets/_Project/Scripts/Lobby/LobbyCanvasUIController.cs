@@ -18,6 +18,18 @@ namespace SSAFYPlayTime
 {
     public sealed partial class LobbyCanvasUIController : MonoBehaviour, INetworkRunnerCallbacks
     {
+        [System.Serializable]
+        public class SceneRoomSlot
+        {
+            public GameObject questionMark;
+            public GameObject[] characterModels;
+        }
+
+        [Header("Scene Room Slots")]
+        [SerializeField] private List<SceneRoomSlot> sceneRoomSlots;
+
+        [Header("Scene Direct Slots (Podium Game End)")]
+        [SerializeField] private List<SceneRoomSlot> sceneDirectSlots;
 
         private sealed class RoomSnapshot
         {
@@ -161,6 +173,14 @@ namespace SSAFYPlayTime
         [SerializeField] private Button selectFitCharacterButton;
         [SerializeField] private Button selectWiseCharacterButton;
         [SerializeField] private Button selectRandomCharacterButton;
+
+        [Header("Character Selection Animators")]
+        [SerializeField] private Animator selectSsatyAnimator;
+        [SerializeField] private Animator selectAlGAnimator;
+        [SerializeField] private Animator selectFitAnimator;
+        [SerializeField] private Animator selectWiseAnimator;
+        [SerializeField] private Animator selectRandomAnimator;
+
         [SerializeField] private bool lockPlayerSlotLayoutToViewport = true;
         [SerializeField] private float playerSlotViewportY = 0.36f;
         [SerializeField] private float playerSlotVerticalPixelOffset = 0f;
@@ -1384,6 +1404,38 @@ namespace SSAFYPlayTime
                 // 캐릭터 번호
                 int charIndex = entry.CharacterTypeIndex;
 
+                // sceneDirectSlots가 설정되어 있다면 수동 배치된 모델을 활용
+                if (sceneDirectSlots != null && rankIndex < sceneDirectSlots.Count)
+                {
+                    var slot = sceneDirectSlots[rankIndex];
+                    if (slot != null && slot.characterModels != null)
+                    {
+                        if (slot.questionMark != null)
+                            slot.questionMark.SetActive(charIndex == (int)CharacterKind.Random);
+
+                        for (int option = 0; option < slot.characterModels.Length; option++)
+                        {
+                            var model = slot.characterModels[option];
+                            if (model != null)
+                            {
+                                bool isSelectedModel = (option == charIndex && charIndex != (int)CharacterKind.Random);
+                                model.SetActive(isSelectedModel);
+                                if (isSelectedModel)
+                                {
+                                    Animator anim = model.GetComponentInChildren<Animator>();
+                                    if (anim != null)
+                                    {
+                                        int actualRank = rankIndex + 1;
+                                        anim.SetInteger("Rank", actualRank);
+                                    }
+                                }
+                            }
+                        }
+                        continue; // 새 로직 탔으면 Instantiate 생략
+                    }
+                }
+
+                // 구형 로직 (동적 소환 패턴 폴백)
                 // 캐릭터 템플릿 가져오기
                 GameObject template = GetCharacterTemplateByIndex(charIndex);
                 if (template != null && podiumSlots[rankIndex] != null)
@@ -1580,9 +1632,25 @@ namespace SSAFYPlayTime
                     var isReady = !isOwner && _readyStateByPlayerId.TryGetValue(participant.PlayerId, out var ready) && ready;
                     slot.text = participant.Nickname;
                     UpdateReadyBadge(readyBadges[i], isReady);
-                    _playerIdBySlot[i] = participant.PlayerId;
-                    _selectedCharacterIndexBySlot[i] = SanitizeCharacterIndexOrNone(participant.CharacterIndex);
-                    ApplySelectedCharacterForSlot(i, true);
+
+                    // 변경 감지 로직
+                    int lastPlayerId = _playerIdBySlot[i];
+                    int newPlayerId = participant.PlayerId;
+                    int lastCharIdx = _selectedCharacterIndexBySlot[i];
+                    int newCharIdx = SanitizeCharacterIndexOrNone(participant.CharacterIndex);
+
+                    // 애니메이션 재생 조건:
+                    // 1. 같은 플레이어가 슬롯에 계속 머물러 있어야 함 (새로 들어온 사람은 기뻐하지 않음)
+                    // 2. 캐릭터 인덱스가 실제로 바뀌어야 함
+                    // 3. 바뀐 캐릭터가 랜덤(?)이 아니어야 함
+                    bool isSamePlayer = (lastPlayerId != -1 && lastPlayerId == newPlayerId);
+                    bool charChanged = (lastCharIdx != newCharIdx);
+                    bool shouldPlayAnim = isSamePlayer && charChanged && (newCharIdx != (int)CharacterKind.Random) && (newCharIdx != -1);
+
+                    _playerIdBySlot[i] = newPlayerId;
+                    _selectedCharacterIndexBySlot[i] = newCharIdx;
+
+                    ApplySelectedCharacterForSlot(i, true, shouldPlayAnim);
                     characterPreview?.UpdateSlot(i, participant.PlayerId, participant.CharacterIndex, true);
                 }
                 else
@@ -1591,7 +1659,7 @@ namespace SSAFYPlayTime
                     UpdateReadyBadge(readyBadges[i], false);
                     _playerIdBySlot[i] = -1;
                     _selectedCharacterIndexBySlot[i] = -1;
-                    ApplySelectedCharacterForSlot(i, false);
+                    ApplySelectedCharacterForSlot(i, false, false);
                     characterPreview?.UpdateSlot(i, -1, -1, false);
                 }
             }
@@ -2438,18 +2506,51 @@ namespace SSAFYPlayTime
         }
 
         // 슬롯의 선택 캐릭터에 해당하는 오브젝트만 활성화하고 나머지는 비활성화한다.
-        private void ApplySelectedCharacterForSlot(int slotIndex, bool slotHasPlayer)
+        private void ApplySelectedCharacterForSlot(int slotIndex, bool slotHasPlayer, bool playAnimation = false)
         {
+            var selectedIndex = _selectedCharacterIndexBySlot[slotIndex];
+            var displayIndex = selectedIndex >= 0 ? selectedIndex : (int)CharacterKind.Random;
+            var shouldShow = slotHasPlayer;
+
+            // 1. Scene Room Slots (수동 배치) 로직
+            if (sceneRoomSlots != null && slotIndex < sceneRoomSlots.Count)
+            {
+                var slot = sceneRoomSlots[slotIndex];
+                if (slot != null && slot.characterModels != null)
+                {
+                    if (slot.questionMark != null)
+                    {
+                        bool showQM = (shouldShow && displayIndex == (int)CharacterKind.Random);
+                        // 현재 켜짐/꺼짐 상태가 다를 때만 조작
+                        if (slot.questionMark.activeSelf != showQM)
+                            slot.questionMark.SetActive(showQM);
+                    }
+
+                    for (int option = 0; option < slot.characterModels.Length; option++)
+                    {
+                        var model = slot.characterModels[option];
+                        if (model != null)
+                        {
+                            bool isSelectedModel = (shouldShow && option == displayIndex && displayIndex != (int)CharacterKind.Random);
+
+                            // 이미 켜져있는 내 캐릭터는 건드리지 않기
+                            if (model.activeSelf != isSelectedModel)
+                            {
+                                model.SetActive(isSelectedModel);
+                            }
+                        }
+                    }
+                }
+                return; // 새 로직을 탔으면 여기서 종료
+            }
+
+            // 2. 구형 로직 (동적 스폰)
             InitializeCharacterSlotsIfNeeded();
             if (!_characterSlotsInitialized || slotIndex < 0 || slotIndex >= PlayerSlotCount)
             {
                 return;
             }
 
-            var selectedIndex = _selectedCharacterIndexBySlot[slotIndex];
-            // 선택하지 않은 경우(selectedIndex < 0)에는 ?（Random）를 기본 표시한다.
-            var displayIndex = selectedIndex >= 0 ? selectedIndex : (int)CharacterKind.Random;
-            var shouldShow = slotHasPlayer;
             for (var option = 0; option < CharacterOptionCount; option++)
             {
                 var rect = _slotCharacterRoots[slotIndex, option];
@@ -2458,7 +2559,13 @@ namespace SSAFYPlayTime
                     continue;
                 }
 
-                rect.gameObject.SetActive(shouldShow && option == displayIndex);
+                bool isSelectedModel = (shouldShow && option == displayIndex);
+
+                // 상태가 바뀌어야 할 때만 SetActive를 불러서 애니메이터 재시작을 막음
+                if (rect.gameObject.activeSelf != isSelectedModel)
+                {
+                    rect.gameObject.SetActive(isSelectedModel);
+                }
             }
         }
 
