@@ -41,17 +41,21 @@ public sealed partial class NetworkPlayer
     private const float CollapseEarlyMusclePlanarSpeedCap = 0.70f;
     private const float CollapseEarlyRootAngularSpeedCap = 1.45f;
     private const float CollapseEarlyMuscleAngularSpeedCap = 1.75f;
-    // BeingCarriedStunned: 운반 중 피해자는 위로 끌려야 하므로 클램프 완화
-    private const float CarriedStunnedRootPlanarSpeedCap = 2.50f;
-    private const float CarriedStunnedMusclePlanarSpeedCap = 2.00f;
-    private const float CarriedStunnedRootAngularSpeedCap = 3.8f;
-    private const float CarriedStunnedMuscleAngularSpeedCap = 4.0f;
-    private const float CarriedStunnedMaxUpwardSpeed = 3.0f;
+    // BeingCarriedStunned: 운반 중 피해자는 캐리어 이동 속도를 따라가야 하므로 클램프 대폭 완화.
+    // maxSpeed(5) * sprintMultiplier(1.8) = 9 m/s + 여유분 → 12 m/s 이상으로 설정.
+    // 기존 2.5f 상한은 빠른 캐리에서 joint가 속도를 못 따라가 victim 위치 괴리의 원인이었음.
+    private const float CarriedStunnedRootPlanarSpeedCap = 12.0f;
+    private const float CarriedStunnedMusclePlanarSpeedCap = 10.0f;
+    private const float CarriedStunnedRootAngularSpeedCap = 6.0f;
+    private const float CarriedStunnedMuscleAngularSpeedCap = 6.5f;
+    private const float CarriedStunnedMaxUpwardSpeed = 8.0f;
     private const float StunRootUpwardSyncStep = 0.08f;
-    private const float CarriedRootPlanarSyncSpeed = 7.5f;
-    private const float CarriedRootVerticalSyncSpeed = 14f;
-    private const float CarriedRootSnapDistance = 1.15f;
-    private const float CarriedRootSnapVerticalGap = 0.65f;
+    // root → hips 추적 속도: 캐리어 스프린트 최대(9 m/s) 초과 보장.
+    // 기존 7.5f는 스프린트(9 m/s) 상황에서 root가 매 틱 뒤처져 Fusion sync 값이 항상 지연됐음.
+    private const float CarriedRootPlanarSyncSpeed = 18f;
+    private const float CarriedRootVerticalSyncSpeed = 22f;
+    private const float CarriedRootSnapDistance = 0.8f;
+    private const float CarriedRootSnapVerticalGap = 0.45f;
     private const float CarriedRootTraceGapThreshold = 0.3f;
     private const float HitInstabilityBoostMin = 0.08f;
     private const float HitInstabilityBoostMax = 0.22f;
@@ -66,32 +70,18 @@ public sealed partial class NetworkPlayer
         if (config == null || rigidbody3D == null || mainJoint == null)
             return;
 
-        // Single-button grab: left-hold enables grab attempts on both hands.
-        // Each hand still decides attachment independently from its own reach/target distance.
-        var unifiedGrabHold = input.LeftGrabHold || input.RightGrabHold;
+        var unifiedGrabHold = (bool)input.LeftGrabHold;
         _isLeftGrabActive = unifiedGrabHold;
         _isRightGrabActive = unifiedGrabHold;
         _isGrabActive = unifiedGrabHold;
-
-        // TickHitStopRecovery(); // 히트스탑 제거
-        TickHitRecoil(dt);
-        TickHitFlinch(dt);
-        TickHitInstabilityBoost(dt);
-        TickVitalState(dt);
-        UpdateStunDecay(dt);
-        UpdateRecoveringWindow(dt);
-
-        if (TryTickDeadState(dt))
-            return;
-
-        if (TryTickStunnedState(dt))
-            return;
 
         SimulateLocomotion(input, dt);
         SynchronizeMotorPresentation();
         UpdateActiveRagdollJoints();
         ProcessInteractions(input);
-        UpdatePhysicalPhaseState(dt);
+        // UpdatePhysicalPhaseState는 FixedUpdateNetwork()에서 UpdateGrabHandlers() 이후
+        // 한 번만 호출한다. 여기서도 호출하면 TickCarryReleaseSettle() 등이 이중 실행되어
+        // settle 타이머가 설정값의 절반 속도로 감소하는 버그 발생.
         TickPunchHitDetectionWindow();
         SyncHeldItemNetworkState();
         TraceStartupLaunchDiagnostics("DoPhysicsStep");
@@ -160,6 +150,8 @@ public sealed partial class NetworkPlayer
     private float _recoverMinColliderY = float.NegativeInfinity;
     private bool _hasRecoverAnchorPose;
     private Vector3 _recoverAnchorPosition;
+    private bool _wasBeingCarriedLastStunnedTick;
+    private float _savedCarryPinWeight = 1f;
     private Quaternion _recoverAnchorRotation = Quaternion.identity;
     private bool _hasPendingRecoveryStandUpHandoff;
     private Vector3 _pendingRecoveryStandUpPosition;
@@ -628,32 +620,81 @@ public sealed partial class NetworkPlayer
         SetLocalPhysicalPhase(stunnedPhase, 1f, false);
         ApplyStunCollapseSpringState(collapsePhase);
 
+        // FixedUpdateNetwork()는 HasStateAuthority에서만 실행되므로 항상 host.
+        bool beingCarried = _beingGrabbedRefCount > 0;
+
+        // _wasBeingCarriedLastStunnedTick은 이전 틱의 값을 먼저 읽은 뒤 갱신해야 한다.
+        // 이 시점에서 읽으면 "지난 틱에 운반 중이었는가"를 정확히 판단할 수 있다.
+        bool carryJustEnded = _wasBeingCarriedLastStunnedTick && !beingCarried;
+        bool carryJustStarted = !_wasBeingCarriedLastStunnedTick && beingCarried;
+
+        // 운반 중이면 ForceRecover()보다 먼저 처리해야 한다.
+        // ForceRecover()가 _lastSafePosition을 읽을 때 carry 위치가 이미 저장돼 있어야
+        // TeleportToSafeStandUpPosition이 올바른 위치(carry 위치)로 텔레포트한다.
+        // 순서를 바꾸지 않으면 ForceRecover()가 기절 전 위치를 사용해 원위치로 돌아가는 버그 발생.
+        if (beingCarried)
+        {
+            // carry 중 _hasRecoverAnchorPose 클리어: 종료 후 SyncRootToPhysicsBody()가
+            // 기절 전 위치(_recoverAnchorPosition)로 X,Z를 덮어쓰는 것을 방지.
+            _hasRecoverAnchorPose = false;
+
+            // carry 진입 첫 틱: PuppetMaster pinWeight = 0으로 설정.
+            // pinWeight > 0이면 target skeleton의 월드 위치(기절 진입 위치)로 근육을 끌어당기는
+            // 스프링 힘이 carry joint와 줄다리기를 일으켜 캐릭터가 원래 위치로 돌아가는 버그 발생.
+            if (carryJustStarted && _puppetMaster != null)
+            {
+                _savedCarryPinWeight = _puppetMaster.pinWeight;
+                _puppetMaster.pinWeight = 0f;
+            }
+
+            SyncCarriedRootToPhysicsBody();
+
+            // 운반 위치를 안전 위치로 저장 (ForceRecover 전에 반드시 수행).
+            RememberSafeTransform(transform.position, transform.rotation);
+        }
+        else if (carryJustEnded && _puppetMaster != null)
+        {
+            // carry 종료 직후: pinWeight 복원.
+            _puppetMaster.pinWeight = _savedCarryPinWeight;
+        }
+
+        _wasBeingCarriedLastStunnedTick = beingCarried;
+
         // 잡혀서 운반 중이면 기절 타이머 정지 (운반 중 자동 회복 방지)
-        bool pauseStunTimer = _beingGrabbedRefCount > 0;
+        bool pauseStunTimer = beingCarried;
         var remaining = GetStunTimeRemaining() - (pauseStunTimer ? 0f : dt);
         SetStunTimeRemaining(remaining);
 
         if (remaining <= 0f && !pauseStunTimer)
         {
-            ForceRecover();
+            ForceRecover();  // 이 시점에 _lastSafePosition = carry 위치 (위에서 업데이트됨)
             if (_isActiveRagdoll)
                 return true;
         }
 
-        bool beingCarried = _beingGrabbedRefCount > 0;
         ClampStunnedMotion(collapsePhase, beingCarried);
         if (collapsePhase)
             TraceStunCollapsePose("TryTickStunnedState");
         else
             TraceStunnedMotionSample("TryTickStunnedState");
 
-        // 기절 중 물리 뼈(메인 리지드바디)가 잡기 조인트 등에 의해 끌려갈 수 있으므로
-        // 루트 트랜스폼을 메인 리지드바디 위치에 맞춘다.
-        // 이렇게 해야 NetworkTransform이 원격 클라이언트에 올바른 위치를 전달한다.
-        if (beingCarried)
-            SyncCarriedRootToPhysicsBody();
-        else
-            SyncRootToPhysicsBody();
+        if (!beingCarried)
+        {
+            // carry 종료 직후 첫 틱: 즉시 hips 위치로 스냅 (lerp 없이).
+            // carryJustEnded는 이전 틱 값으로 판단하므로 올바르게 첫 틱을 감지한다.
+            if (carryJustEnded)
+            {
+                if (TryResolveRootSyncTargetPosition(out var snapPos))
+                {
+                    transform.position = snapPos;
+                    RememberSafeTransform(transform.position, transform.rotation);
+                }
+            }
+            else
+            {
+                SyncRootToPhysicsBody();
+            }
+        }
 
         return true;
     }
@@ -936,6 +977,10 @@ public sealed partial class NetworkPlayer
         if (previousMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim &&
             newMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim)
         {
+            // 새 carry 시작 시 이전 release settle 취소.
+            // settle이 남아 있으면 _lastCarryAnchorPosition(이전 carry anchor)으로 root가
+            // 당겨져 새 carry 위치와 충돌하는 버그 발생.
+            _carryReleaseSettleRemaining = 0f;
             CaptureCarriedVictimRootOffset();
         }
         else if (previousMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim &&
@@ -998,6 +1043,42 @@ public sealed partial class NetworkPlayer
         }
 
         transform.position = nextRootPosition;
+    }
+
+    /// <summary>
+    /// GetInput() 성공 여부와 무관하게 매 FixedUpdateNetwork 틱마다 실행.
+    /// 기절/회복/피격 타이머가 패킷 손실의 영향을 받지 않도록 DoPhysicsStep에서 분리.
+    ///
+    /// 분리 이유: DoPhysicsStep은 GetInput() 성공 시에만 실행되므로
+    /// 패킷 손실 틱에 기절 지속시간·회복 타이머·HP 무적 타이머가 멈추는 문제가 있었음.
+    /// </summary>
+    internal void TickAlwaysStates(float dt)
+    {
+        TickHitRecoil(dt);
+        TickHitFlinch(dt);
+        TickHitInstabilityBoost(dt);
+        TickVitalState(dt);
+        UpdateStunDecay(dt);
+        UpdateRecoveringWindow(dt);
+        TryTickStunnedState(dt);
+    }
+
+    /// <summary>
+    /// 의식 있는 플레이어가 BeingGrabbed / Dragged 상태일 때
+    /// 잡기 조인트가 hips 뼈만 끌고 가고 root는 locomotion이 구동하므로
+    /// transform.position을 hips 위치로 즉시 스냅하여 NetworkTransform이
+    /// 올바른 위치를 모든 클라이언트에 전달하도록 한다.
+    ///
+    /// GetInput() 결과와 무관하게 FixedUpdateNetwork()에서 항상 호출되어야 한다.
+    /// </summary>
+    private void SyncInteractionRootPosition()
+    {
+        if (_localPhysicalPhase != PhysicalPhase.BeingGrabbed &&
+            _localPhysicalPhase != PhysicalPhase.Dragged)
+            return;
+
+        if (TryResolveRootSyncTargetPosition(out var syncPos))
+            transform.position = syncPos;
     }
 
     private void SyncRootToPhysicsBody()
@@ -1086,8 +1167,10 @@ public sealed partial class NetworkPlayer
         else
         {
             _coyoteTimeRemaining -= dt;
+            // 하강 중(vy < 0)일 때 추가 중력 배율 적용 → 점프 어감 개선 (떠다니는 느낌 제거)
+            var fallMult = rigidbody3D.velocity.y < 0f ? config.fallGravityMultiplier : 1f;
             rigidbody3D.AddForce(
-                Vector3.down * config.extraGravity * Mathf.Max(0.05f, gravityMultiplier),
+                Vector3.down * config.extraGravity * fallMult * Mathf.Max(0.05f, gravityMultiplier),
                 ForceMode.Acceleration);
         }
 
@@ -1108,6 +1191,8 @@ public sealed partial class NetworkPlayer
 
         var planarVelocity = rigidbody3D.velocity;
         planarVelocity.y = 0f;
+        // 0.4f 계수: PartyMonsterAnimationDriver의 PM_LocomotionThreshold(0.1f)와
+        // 걷기 시작 속도(0.25 m/s) 사이의 보정값. 변경 시 임계값도 함께 조정 필요.
         var normalizedMoveSpeed = planarVelocity.magnitude * 0.4f;
         var locomotionState = ResolveLocomotionState(normalizedMoveSpeed, input.Sprint);
         SetMotorPresentationState(normalizedMoveSpeed, (int)_stateMachine.CurrentState, locomotionState);

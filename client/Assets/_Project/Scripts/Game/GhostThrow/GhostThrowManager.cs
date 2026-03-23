@@ -12,14 +12,14 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
         [Header("Settings")]
         public float cooldown = 1f;
-        public float throwForce = 15f;
+        public float throwForce = 20f;
         public float spawnForwardOffset = 2f;
         [Tooltip("스폰 위치의 타겟 기준 높이 (m) — 너무 높으면 카메라 위로 올라감")]
         public float spawnHeight = 3f;
         [Tooltip("스폰 위치에서 포물선 정점까지 추가 높이 (m) — 클수록 체공 시간이 길어져 느리게 날아감")]
-        public float arcHeight = 20f;
+        public float arcHeight = 17f;
         [Tooltip("수평 최대 속도 (m/s) — 거리가 멀어도 이 속도를 넘지 않도록 arcHeight를 자동으로 높임")]
-        public float maxHorizontalSpeed = 25f;
+        public float maxHorizontalSpeed = 20f;
         [Tooltip("타겟에서 카메라 방향으로 스폰 위치를 얼마나 오프셋할지 (m)")]
         public float spawnLaunchOffset = 8f;
 
