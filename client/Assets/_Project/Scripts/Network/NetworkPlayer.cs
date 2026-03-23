@@ -1476,6 +1476,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private void Awake()
     {
         RegisteredPlayers.Add(this);
+        debugGrabLog = true; // 디버그 진단용 강제 활성화
         InitializeInternal();
     }
 

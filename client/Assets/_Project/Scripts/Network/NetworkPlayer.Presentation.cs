@@ -310,15 +310,6 @@ public sealed partial class NetworkPlayer
         if (hasIncomingHeldVictimPresentation && incomingHeldRootOffset.sqrMagnitude > 0.0001f)
             targetPosition += incomingHeldRootOffset;
 
-        if (!HasStateAuthority &&
-            GetPhysicalPhase() == PhysicalPhase.BeingCarriedStunned &&
-            !hasIncomingHeldVictimPresentation)
-        {
-            presentationRoot.position = targetPosition;
-            _proxyPresentationRootSmoothingActive = false;
-            return;
-        }
-
         var shouldSmoothPresentationRoot =
             ShouldSmoothProxyPresentationRoot(presentationRoot) ||
             hasIncomingHeldVictimPresentation;
