@@ -54,9 +54,12 @@ public class HandGrabHandler : MonoBehaviour
     ConfigurableJoint _configurableJoint;
     Rigidbody rigidbody3D;
     NetworkPlayer networkPlayer;
+    CharacterGrabController _characterGrabController;
     ItemRuntimeHost itemRuntimeHost;
     Transform _holdPoint;
     NetworkPlayer _grabbedPlayer;
+    bool _isRecoveringGrabTarget;
+    bool _useNearPlayerJointProfile;
 
     // GrabAnchor 시스템
     GrabSensor _grabSensor;
@@ -78,6 +81,8 @@ public class HandGrabHandler : MonoBehaviour
     // Reach intent — TryGrab에서 타겟을 찾으면 저장, 근접/접촉 시 실제 attach
     Rigidbody _pendingReachTarget;
     float _reachIntentTime;
+    const float NearConsciousProfileDistance = 0.58f;
+    const float RecoveringProfileDistance = 0.8f;
     const float ReachAttachRadius = 0.18f;  // 손바닥 근접 판정 거리
     const float ReachAttachRadiusStunned = 0.45f;  // 기절자는 넓은 판정 (손이 아래로 뻗으므로)
     const float ReachTimeout = 0.6f;        // reach intent 자동 만료
@@ -98,11 +103,16 @@ public class HandGrabHandler : MonoBehaviour
     public bool IsHolding => ActiveJoint != null;
     public bool IsHoldingStunnedPlayer => _grabbedPlayer != null && !_grabbedPlayer.IsActiveRagdoll;
     public bool IsHoldingConsciousPlayer => IsHolding && _grabbedPlayer != null && _grabbedPlayer.IsActiveRagdoll;
+    public bool IsHoldingRecoveringPlayer => IsHolding && _grabbedPlayer != null && IsRecoveringTarget(_grabbedPlayer);
+    public bool IsHoldingConsciousLikePlayer => IsHoldingConsciousPlayer || IsHoldingRecoveringPlayer;
+    public bool UsesRecoveringGrabProfile => _isRecoveringGrabTarget;
+    public bool UsesNearPlayerGrabProfile => _useNearPlayerJointProfile;
     public bool IsHoldingThrowableTarget => IsHolding && (_grabbedPlayer == null || !_grabbedPlayer.IsActiveRagdoll);
     public PuppetMaster GrabbedPuppet => _grabbedPuppet;
 
     /// <summary>reach intent 중인 타겟 (아직 attach 전)</summary>
     public Rigidbody PendingReachTarget => _pendingReachTarget;
+    public GrabAnchorPoint PendingReachAnchor => _pendingReachAnchor;
     public bool IsReaching => _pendingReachTarget != null && !IsHolding;
 
     /// <summary>현재 잡고 있는 대상의 종류 (로컬 파생값 — 네트워크 동기화 불필요)</summary>
@@ -135,6 +145,11 @@ public class HandGrabHandler : MonoBehaviour
         return joint.connectedBody.transform.TransformPoint(joint.connectedAnchor);
     }
 
+    public GrabAnchorPoint ResolveBestReachAnchor(NetworkPlayer targetPlayer)
+    {
+        return ResolveBestAnchorForPlayer(targetPlayer, transform.position);
+    }
+
     public string BuildGrabDiagnosticsSummary()
     {
         var joint = ActiveJoint;
@@ -163,13 +178,99 @@ public class HandGrabHandler : MonoBehaviour
                $"joint={jointKind} dist={handDistance:F3}/{effectiveMaxDistance:F1} hold={holdDuration:F2} grace={inGracePeriod} " +
                $"handPos={FormatVector(transform.position)} anchorPos={FormatVector(anchorWorld)} " +
                $"handVel={FormatVector(handVelocity)} targetVel={FormatVector(targetVelocity)} rootGap={rootGap:F2} " +
-               $"targetPhase={targetPhase} targetGrabbed={(_grabbedPlayer != null ? _grabbedPlayer.IsGrabbedByOther.ToString() : "N/A")} " +
+               $"targetPhase={targetPhase} recoveringProfile={_isRecoveringGrabTarget} nearPlayerProfile={_useNearPlayerJointProfile} " +
+               $"targetGrabbed={(_grabbedPlayer != null ? _grabbedPlayer.IsGrabbedByOther.ToString() : "N/A")} " +
                $"{jointTuning}";
+    }
+
+    public string BuildHoldResistanceDiagnosticsSummary()
+    {
+        var joint = ActiveJoint;
+        if (joint == null)
+            return $"hand={handSide} holding=0 reaching={(IsReaching ? 1 : 0)}";
+
+        var connectedBody = joint.connectedBody;
+        var anchorWorld = connectedBody != null
+            ? connectedBody.transform.TransformPoint(joint.connectedAnchor)
+            : transform.position;
+        var handToAnchor = Vector3.Distance(transform.position, anchorWorld);
+        var handVelocity = rigidbody3D != null ? rigidbody3D.velocity.magnitude : 0f;
+        var targetVelocity = connectedBody != null ? connectedBody.velocity.magnitude : 0f;
+        var jointKind = _configurableJoint != null ? "Configurable" : _fixedJoint != null ? "Fixed" : "None";
+        var jointSummary = _configurableJoint != null
+            ? $"spring={_configurableJoint.xDrive.positionSpring:F0},damper={_configurableJoint.xDrive.positionDamper:F0}," +
+              $"limit={_configurableJoint.linearLimit.limit:F2},break={_configurableJoint.breakForce:F0}"
+            : _fixedJoint != null
+                ? $"break={_fixedJoint.breakForce:F0}"
+                : "joint=none";
+
+        return $"hand={handSide} holding=1 targetType={_currentGrabTargetType} joint={jointKind} " +
+               $"recoveringProfile={(_isRecoveringGrabTarget ? 1 : 0)} nearPlayerProfile={(_useNearPlayerJointProfile ? 1 : 0)} " +
+               $"handToAnchor={handToAnchor:F2} handVel={handVelocity:F2} targetVel={targetVelocity:F2} " +
+               $"{jointSummary}";
+    }
+
+    GrabAnchorPoint ResolveBestAnchorForPlayer(NetworkPlayer targetPlayer, Vector3 referencePosition)
+    {
+        if (targetPlayer == null)
+            return null;
+
+        var anchors = targetPlayer.GetComponentsInChildren<GrabAnchorPoint>(true);
+        GrabAnchorPoint bestAnchor = null;
+        float bestScore = float.MinValue;
+        const float maxUsefulDistance = 1.5f;
+
+        foreach (var anchor in anchors)
+        {
+            if (anchor == null)
+                continue;
+
+            var gripPos = anchor.GetGripWorldPosition();
+            var distance = Vector3.Distance(referencePosition, gripPos);
+            var distanceScore = 1f - Mathf.Clamp01(distance / maxUsefulDistance);
+            var score = anchor.GrabPriority * 0.5f + distanceScore;
+
+            if (score <= bestScore)
+                continue;
+
+            bestScore = score;
+            bestAnchor = anchor;
+        }
+
+        return bestAnchor;
+    }
+
+    bool IsRecoveringTarget(NetworkPlayer targetPlayer)
+    {
+        if (targetPlayer == null)
+            return false;
+
+        if (_characterGrabController != null)
+            return _characterGrabController.IsRecoveringTarget(targetPlayer);
+
+        return targetPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.Recovering;
+    }
+
+    void CapturePlayerGrabProfileState(NetworkPlayer targetPlayer, Vector3 jointAnchorWorld)
+    {
+        _isRecoveringGrabTarget = IsRecoveringTarget(targetPlayer);
+        if (targetPlayer == null || !targetPlayer.IsActiveRagdoll)
+        {
+            _useNearPlayerJointProfile = false;
+            return;
+        }
+
+        var maxNearDistance = _isRecoveringGrabTarget ? RecoveringProfileDistance : NearConsciousProfileDistance;
+        var handAnchorDistance = Vector3.Distance(transform.position, jointAnchorWorld);
+        _useNearPlayerJointProfile = handAnchorDistance <= maxNearDistance;
     }
 
     void Awake()
     {
         networkPlayer = transform.root.GetComponent<NetworkPlayer>();
+        _characterGrabController = networkPlayer != null
+            ? networkPlayer.GetCharacterGrabController()
+            : GetComponentInParent<CharacterGrabController>();
         rigidbody3D = GetComponent<Rigidbody>();
 
         // 손 Rigidbody solver budget: 프로젝트 기본 10 기반, 그랩 안정성을 위해 약간 상향.
@@ -181,6 +282,8 @@ public class HandGrabHandler : MonoBehaviour
             animator = GetComponentInParent<Animator>();
 
         // GrabSensor 캐시 (자식에 붙어있는 센서)
+        GrabRigRuntimeBootstrap.EnsureCharacterRig(transform.root, null, null);
+        GrabRigRuntimeBootstrap.EnsureHandSensor(gameObject);
         _grabSensor = GetComponentInChildren<GrabSensor>(true);
 
         // GrabHurtbox 레이어 마스크 캐시
@@ -253,15 +356,12 @@ public class HandGrabHandler : MonoBehaviour
             float holdDuration = Time.time - _grabStartTime;
             bool inGracePeriod = holdDuration < grabDistanceGracePeriod;
 
-            if (debugLog && handDist > effectiveMaxDist * 0.7f)
+            if (debugLog && handDist > effectiveMaxDist * 0.7f && Time.time >= _nextHoldDiagnosticsTime)
+            {
+                _nextHoldDiagnosticsTime = Time.time + (isStunnedGrab ? 0.50f : 0.35f);
                 Debug.LogWarning($"[Grab] {handSide} STRETCH WARNING: dist={handDist:F3}/{effectiveMaxDist:F1} " +
                     $"({handDist / effectiveMaxDist * 100f:F0}%), handPos={transform.position}, anchorPos={anchorWorld}" +
                     $"{(inGracePeriod ? $" (grace {holdDuration:F2}/{grabDistanceGracePeriod:F1})" : "")}", this);
-
-            if ((isStunnedGrab || handDist > effectiveMaxDist * 0.7f) && Time.time >= _nextHoldDiagnosticsTime)
-            {
-                _nextHoldDiagnosticsTime = Time.time + (isStunnedGrab ? 0.35f : 0.25f);
-                EmitGrabDiagnostics(isStunnedGrab ? "CarrySample" : "StretchSample");
             }
 
             if (handDist > effectiveMaxDist && !inGracePeriod)
@@ -291,7 +391,12 @@ public class HandGrabHandler : MonoBehaviour
             float timeout = GetReachTimeout(isReachStunned);
             float attachRadius = GetReachAttachRadius(isReachStunned);
 
-            if (_pendingReachTarget == null || (Time.time - _reachIntentTime) > timeout)
+            if (ShouldSuppressSecondaryConsciousGrab(_pendingReachTarget, reachTargetNp))
+            {
+                _pendingReachTarget = null;
+                _pendingReachAnchor = null;
+            }
+            else if (_pendingReachTarget == null || (Time.time - _reachIntentTime) > timeout)
             {
                 if (debugLog && _pendingReachTarget != null)
                     Debug.Log($"[Grab] {handSide} reach TIMEOUT (stunned={isReachStunned}, elapsed={Time.time - _reachIntentTime:F2}s)", this);
@@ -300,6 +405,16 @@ public class HandGrabHandler : MonoBehaviour
             else
             {
                 // 앵커 기반 접근 판정 (GrabSensor 오버랩 또는 앵커 거리)
+                if (_pendingReachAnchor == null && reachTargetNp != null)
+                {
+                    _pendingReachAnchor = _grabSensor != null
+                        ? _grabSensor.GetBestOverlappingAnchorForPlayer(reachTargetNp)
+                        : null;
+
+                    if (_pendingReachAnchor == null)
+                        _pendingReachAnchor = ResolveBestAnchorForPlayer(reachTargetNp, transform.position);
+                }
+
                 if (_pendingReachAnchor != null)
                 {
                     bool sensorOverlap = _grabSensor != null
@@ -378,6 +493,7 @@ public class HandGrabHandler : MonoBehaviour
 
         // 반대 손이 기절자를 잡고 있으면 같은 캐릭터의 다른 부위에 보너스 부여
         Transform otherHandStunnedRoot = GetOtherHandStunnedTargetRoot();
+        var otherHandStunnedAnchorId = GetOtherHandStunnedAnchorId();
 
         // --- GrabHurtbox 레이어 우선 스캔 (앵커 기반 정밀 잡기) ---
         if (_grabHurtboxLayerMask != 0)
@@ -400,6 +516,8 @@ public class HandGrabHandler : MonoBehaviour
 
                 var rb = anchor.ParentBoneRigidbody;
                 if (rb == null) continue;
+                if (ShouldSuppressSecondaryConsciousGrab(rb, ownerNp))
+                    continue;
 
                 var toTarget = anchor.GetGripWorldPosition() - handPos;
                 float dist = toTarget.magnitude;
@@ -417,7 +535,17 @@ public class HandGrabHandler : MonoBehaviour
                 // 앵커 우선순위 가중치
                 score += anchor.GrabPriority * 0.15f;
                 if (isStunnedTarget) score += 0.3f;
-                if (otherHandStunnedRoot != null && rb.transform.root == otherHandStunnedRoot) score += 0.5f;
+                if (otherHandStunnedRoot != null && rb.transform.root == otherHandStunnedRoot)
+                {
+                    score += 0.5f;
+                    if (otherHandStunnedAnchorId != GrabAnchorPoint.AnchorId.None)
+                    {
+                        if (anchor.Id == otherHandStunnedAnchorId)
+                            score -= 0.85f;
+                        else if (anchor.Id != GrabAnchorPoint.AnchorId.Head)
+                            score += 0.12f;
+                    }
+                }
 
                 if (score > bestScore)
                 {
@@ -453,6 +581,8 @@ public class HandGrabHandler : MonoBehaviour
                 if (dist < 0.001f) dist = 0.001f;
 
                 var targetNp = rb.transform.root.GetComponent<NetworkPlayer>();
+                if (ShouldSuppressSecondaryConsciousGrab(rb, targetNp))
+                    continue;
                 bool isStunnedTarget = targetNp != null && !targetNp.IsActiveRagdoll;
                 if (!isStunnedTarget && dist > grabRadius) continue;
                 float effectiveRadius = isStunnedTarget ? stunnedGrabRadius : grabRadius;
@@ -484,6 +614,15 @@ public class HandGrabHandler : MonoBehaviour
 
             var foundNp = bestTarget.transform.root.GetComponent<NetworkPlayer>();
             bool foundStunned = foundNp != null && !foundNp.IsActiveRagdoll;
+            if (bestAnchor == null && foundNp != null)
+            {
+                bestAnchor = _grabSensor != null
+                    ? _grabSensor.GetBestOverlappingAnchorForPlayer(foundNp) ?? _grabSensor.GetBestOverlappingAnchor()
+                    : null;
+
+                if (bestAnchor == null)
+                    bestAnchor = ResolveBestAnchorForPlayer(foundNp, transform.position);
+            }
 
             if (debugLog)
                 Debug.Log($"[Grab] {handSide} TryGrab → found target={bestTarget.name}, root={bestTarget.transform.root.name}, " +
@@ -590,6 +729,10 @@ public class HandGrabHandler : MonoBehaviour
         if (!collision.collider.TryGetComponent(out Rigidbody otherRb))
             return false;
         if (ShouldIgnoreGrabTarget(otherRb))
+            return false;
+
+        var otherPlayer = otherRb.transform.root.GetComponent<NetworkPlayer>();
+        if (ShouldSuppressSecondaryConsciousGrab(otherRb, otherPlayer))
             return false;
 
         if (IsFieldItemRigidbody(otherRb))
@@ -757,6 +900,36 @@ public class HandGrabHandler : MonoBehaviour
         return owner == characterRoot || owner.root == characterRoot;
     }
 
+    private Transform GetOtherHandConsciousLikeTargetRoot()
+    {
+        if (networkPlayer == null) return null;
+
+        var handlers = networkPlayer.GetComponentsInChildren<HandGrabHandler>(true);
+        foreach (var h in handlers)
+        {
+            if (h == null || h == this)
+                continue;
+
+            if (h.IsHoldingConsciousLikePlayer)
+                return h.GrabTargetRoot;
+        }
+
+        return null;
+    }
+
+    private bool ShouldSuppressSecondaryConsciousGrab(Rigidbody targetRb, NetworkPlayer targetPlayer)
+    {
+        if (targetRb == null || targetPlayer == null)
+            return false;
+
+        var isConsciousLikeTarget = targetPlayer.IsActiveRagdoll || IsRecoveringTarget(targetPlayer);
+        if (!isConsciousLikeTarget)
+            return false;
+
+        var otherHandRoot = GetOtherHandConsciousLikeTargetRoot();
+        return otherHandRoot != null && targetRb.transform.root == otherHandRoot;
+    }
+
     // =========================================================
     // 조인트 생성 — 프로파일에 따라 FixedJoint / ConfigurableJoint
     // =========================================================
@@ -770,6 +943,14 @@ public class HandGrabHandler : MonoBehaviour
         if (ShouldIgnoreGrabTarget(targetRb))
             return;
 
+        var targetPlayer = targetRb.transform.root.GetComponent<NetworkPlayer>();
+        if (ShouldSuppressSecondaryConsciousGrab(targetRb, targetPlayer))
+        {
+            _pendingReachTarget = null;
+            _pendingReachAnchor = null;
+            return;
+        }
+
         Vector3 localAnchor = targetRb.transform.InverseTransformPoint(worldAnchorPoint);
 
         // GrabAnchorPoint 기반 정밀 부착
@@ -780,13 +961,13 @@ public class HandGrabHandler : MonoBehaviour
         _pendingReachAnchor = null;
 
         // 타겟 유형 판별: 기절자 / 정상 캐릭터 / 오브젝트
-        var targetPlayer = targetRb.transform.root.GetComponent<NetworkPlayer>();
-        if (targetPlayer != null && !targetPlayer.IsActiveRagdoll)
-            _currentGrabTargetType = SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.StunnedPlayer;
-        else if (targetPlayer != null)
-            _currentGrabTargetType = SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.Player;
-        else
-            _currentGrabTargetType = SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.Object;
+        _currentGrabTargetType = _characterGrabController != null
+            ? _characterGrabController.ResolveGrabTargetType(targetPlayer, targetRb)
+            : targetPlayer != null && !targetPlayer.IsActiveRagdoll
+                ? SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.StunnedPlayer
+                : targetPlayer != null
+                    ? SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.Player
+                    : SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.Object;
         _grabStartTime = Time.time;
 
         if (debugLog)
@@ -797,18 +978,33 @@ public class HandGrabHandler : MonoBehaviour
         var jointTargetRb = targetRb;
         var jointAnchorWorld = worldAnchorPoint;
 
-        // 앵커 기반: 비기절 타겟은 앵커의 부모 본 Rigidbody를 조인트 타겟으로 사용
-        if (_attachedAnchorPoint != null
-            && _currentGrabTargetType != SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.StunnedPlayer
-            && _attachedAnchorPoint.ParentBoneRigidbody != null)
+        if (_characterGrabController != null)
         {
-            jointTargetRb = _attachedAnchorPoint.ParentBoneRigidbody;
-            jointAnchorWorld = _attachedAnchorPoint.GetGripWorldPosition();
+            _characterGrabController.ResolveAttachTarget(
+                targetRb,
+                worldAnchorPoint,
+                _attachedAnchorPoint,
+                _currentGrabTargetType,
+                targetPlayer,
+                out jointTargetRb,
+                out jointAnchorWorld);
         }
+        else
+        {
+            // 앵커 기반: 비기절 타겟은 앵커의 부모 본 Rigidbody를 조인트 타겟으로 사용
+            if (_attachedAnchorPoint != null
+                && _currentGrabTargetType != SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.StunnedPlayer
+                && _attachedAnchorPoint.ParentBoneRigidbody != null)
+            {
+                jointTargetRb = _attachedAnchorPoint.ParentBoneRigidbody;
+                jointAnchorWorld = _attachedAnchorPoint.GetGripWorldPosition();
+            }
 
-        if (_currentGrabTargetType == SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.StunnedPlayer)
-            ResolveStunnedCarryJointTarget(targetPlayer, targetRb, ref jointTargetRb, ref jointAnchorWorld);
+            if (_currentGrabTargetType == SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.StunnedPlayer)
+                ResolveStunnedCarryJointTarget(targetPlayer, targetRb, ref jointTargetRb, ref jointAnchorWorld);
+        }
         localAnchor = jointTargetRb.transform.InverseTransformPoint(jointAnchorWorld);
+        CapturePlayerGrabProfileState(targetPlayer, jointAnchorWorld);
 
         if (UseConfigurableJoint)
             AttachConfigurableJoint(jointTargetRb, localAnchor, _currentGrabTargetType);
@@ -816,7 +1012,10 @@ public class HandGrabHandler : MonoBehaviour
             AttachFixedJoint(jointTargetRb, localAnchor);
 
         _grabbedPlayer = targetPlayer;
-        if (ShouldApplyVictimGrabState(_currentGrabTargetType))
+        var applyVictimGrabState = _characterGrabController != null
+            ? _characterGrabController.ShouldApplyVictimGrabState(_currentGrabTargetType)
+            : ShouldApplyVictimGrabState(_currentGrabTargetType);
+        if (applyVictimGrabState)
             WeakenGrabbedPuppet(targetRb);
         else
             _grabbedPuppet = null;
@@ -832,7 +1031,7 @@ public class HandGrabHandler : MonoBehaviour
         }
 
         // 잡힌 상대에게 알림 (OwnerProxy 뼈 보간 전환용)
-        if (_grabbedPlayer != null && ShouldApplyVictimGrabState(_currentGrabTargetType))
+        if (_grabbedPlayer != null && applyVictimGrabState)
         {
             _grabbedPlayer.SetGrabbedByOther(true);
             _grabbedPlayer.OnGrabbed();
@@ -867,12 +1066,11 @@ public class HandGrabHandler : MonoBehaviour
         if (targetPlayer == null)
             return;
 
-        var carryRig = targetPlayer.GetCarryRig();
-        if (carryRig != null)
+        if (_attachedAnchorPoint != null && _attachedAnchorPoint.ParentBoneRigidbody != null)
         {
-            carryRig.UpdateVictimAnchor();
-            if (carryRig.TryGetVictimAnchorWorld(out var carryAnchorPos, out _))
-                jointAnchorWorld = carryAnchorPos;
+            jointTargetRb = _attachedAnchorPoint.ParentBoneRigidbody;
+            jointAnchorWorld = _attachedAnchorPoint.GetGripWorldPosition();
+            return;
         }
 
         var puppet = targetPlayer.GetComponentInChildren<PuppetMaster>(true);
@@ -888,9 +1086,7 @@ public class HandGrabHandler : MonoBehaviour
             return;
 
         jointTargetRb = hipsBody;
-
-        if (carryRig == null)
-            jointAnchorWorld = hipsBody.worldCenterOfMass;
+        jointAnchorWorld = hipsBody.worldCenterOfMass;
 
         if (debugLog)
         {
@@ -922,10 +1118,20 @@ public class HandGrabHandler : MonoBehaviour
         cj.anchor = palmAnchorOffset;
         cj.connectedAnchor = localAnchor;
 
-        // 모든 타겟: 선형 Limited + 각도 Free (기절자도 Limited로 약간의 여유를 줌)
-        cj.xMotion = ConfigurableJointMotion.Limited;
-        cj.yMotion = ConfigurableJointMotion.Limited;
-        cj.zMotion = ConfigurableJointMotion.Limited;
+        // 기절자: 강체 연결 (운반 시 반드시 따라와야 함)
+        // 일반 플레이어/오브젝트: 탄성 연결 (이동 속도 저하 방지)
+        if (targetType == GrabDriveProfile.GrabTargetType.StunnedPlayer)
+        {
+            cj.xMotion = ConfigurableJointMotion.Limited;
+            cj.yMotion = ConfigurableJointMotion.Limited;
+            cj.zMotion = ConfigurableJointMotion.Limited;
+        }
+        else
+        {
+            cj.xMotion = ConfigurableJointMotion.Limited;
+            cj.yMotion = ConfigurableJointMotion.Limited;
+            cj.zMotion = ConfigurableJointMotion.Limited;
+        }
         cj.angularXMotion = ConfigurableJointMotion.Free;
         cj.angularYMotion = ConfigurableJointMotion.Free;
         cj.angularZMotion = ConfigurableJointMotion.Free;
@@ -933,7 +1139,13 @@ public class HandGrabHandler : MonoBehaviour
         // 타겟 유형별 스프링 드라이브
         var drive = grabProfile.CreateGrabDrive(false, targetType);
         if (targetType == GrabDriveProfile.GrabTargetType.Player)
-            drive = RelaxConsciousPlayerDrive(drive);
+        {
+            drive = _isRecoveringGrabTarget
+                ? TightenRecoveringPlayerDrive(drive)
+                : _useNearPlayerJointProfile
+                    ? TightenNearConsciousPlayerDrive(drive)
+                    : RelaxConsciousPlayerDrive(drive);
+        }
         cj.xDrive = drive;
         cj.yDrive = drive;
         cj.zDrive = drive;
@@ -942,12 +1154,33 @@ public class HandGrabHandler : MonoBehaviour
         var linearLimit = grabProfile.CreateLinearLimit(targetType);
         if (targetType == GrabDriveProfile.GrabTargetType.Player)
         {
-            linearLimit.limit = Mathf.Max(linearLimit.limit, 0.55f);
-            cj.linearLimitSpring = new SoftJointLimitSpring
+            if (_isRecoveringGrabTarget)
             {
-                spring = 120f,
-                damper = 14f
-            };
+                linearLimit.limit = Mathf.Max(linearLimit.limit, 0.24f);
+                cj.linearLimitSpring = new SoftJointLimitSpring
+                {
+                    spring = 180f,
+                    damper = 18f
+                };
+            }
+            else if (_useNearPlayerJointProfile)
+            {
+                linearLimit.limit = Mathf.Max(linearLimit.limit, 0.28f);
+                cj.linearLimitSpring = new SoftJointLimitSpring
+                {
+                    spring = 140f,
+                    damper = 14f
+                };
+            }
+            else
+            {
+                linearLimit.limit = Mathf.Max(linearLimit.limit, 0.55f);
+                cj.linearLimitSpring = new SoftJointLimitSpring
+                {
+                    spring = 120f,
+                    damper = 14f
+                };
+            }
         }
         else
         {
@@ -959,7 +1192,13 @@ public class HandGrabHandler : MonoBehaviour
         // 타겟 유형별 breakForce
         var bf = grabProfile.EvaluateWeakenedBreakForce(targetType, 0f);
         if (targetType == GrabDriveProfile.GrabTargetType.Player)
-            bf = Mathf.Min(bf, 650f);
+        {
+            bf = _isRecoveringGrabTarget
+                ? Mathf.Min(bf, 760f)
+                : _useNearPlayerJointProfile
+                    ? Mathf.Min(bf, 620f)
+                    : Mathf.Min(bf, 650f);
+        }
         cj.breakForce = bf;
         cj.breakTorque = bf;
 
@@ -967,7 +1206,7 @@ public class HandGrabHandler : MonoBehaviour
 
         if (debugLog)
             Debug.Log($"[Grab] {handSide} Joint created: spring={drive.positionSpring:F0}, damper={drive.positionDamper:F0}, " +
-                $"limit={cj.linearLimit.limit:F3}, breakForce={cj.breakForce:F0}, " +
+                $"limit={cj.linearLimit.limit:F3}, breakForce={cj.breakForce:F0}, recovering={_isRecoveringGrabTarget}, nearPlayer={_useNearPlayerJointProfile}, " +
                 $"anchor={cj.anchor}, connAnchor={cj.connectedAnchor}", this);
     }
 
@@ -1000,9 +1239,6 @@ public class HandGrabHandler : MonoBehaviour
     private void EmitGrabDiagnostics(string source, bool forceSample = false)
     {
         var details = BuildGrabDiagnosticsSummary();
-
-        if (debugLog)
-            Debug.Log($"[GrabDiag] {source} {details}", this);
 
         networkPlayer?.TraceCarryDebugSample($"Hand{handSide}-{source}", details, forceSample);
     }
@@ -1143,7 +1379,10 @@ public class HandGrabHandler : MonoBehaviour
     {
         if (networkPlayer != null)
             networkPlayer.ReportGrabDetached(handSide);
-        if (_grabbedPlayer != null && ShouldApplyVictimGrabState(_currentGrabTargetType))
+        var applyVictimGrabState = _characterGrabController != null
+            ? _characterGrabController.ShouldApplyVictimGrabState(_currentGrabTargetType)
+            : ShouldApplyVictimGrabState(_currentGrabTargetType);
+        if (_grabbedPlayer != null && applyVictimGrabState)
         {
             _grabbedPlayer.SetGrabbedByOther(false);
             _grabbedPlayer.OnReleased();
@@ -1160,6 +1399,22 @@ public class HandGrabHandler : MonoBehaviour
         drive.positionSpring = Mathf.Min(drive.positionSpring, 220f);
         drive.positionDamper = Mathf.Min(drive.positionDamper, 36f);
         drive.maximumForce = Mathf.Min(drive.maximumForce, 650f);
+        return drive;
+    }
+
+    private static JointDrive TightenNearConsciousPlayerDrive(JointDrive drive)
+    {
+        drive.positionSpring = Mathf.Min(drive.positionSpring, 260f);
+        drive.positionDamper = Mathf.Min(drive.positionDamper, 34f);
+        drive.maximumForce = Mathf.Min(drive.maximumForce, 620f);
+        return drive;
+    }
+
+    private static JointDrive TightenRecoveringPlayerDrive(JointDrive drive)
+    {
+        drive.positionSpring = Mathf.Min(drive.positionSpring, 300f);
+        drive.positionDamper = Mathf.Min(drive.positionDamper, 40f);
+        drive.maximumForce = Mathf.Min(drive.maximumForce, 760f);
         return drive;
     }
 
@@ -1191,6 +1446,25 @@ public class HandGrabHandler : MonoBehaviour
         return null;
     }
 
+    private GrabAnchorPoint.AnchorId GetOtherHandStunnedAnchorId()
+    {
+        if (networkPlayer == null)
+            return GrabAnchorPoint.AnchorId.None;
+
+        var handlers = networkPlayer.GetComponentsInChildren<HandGrabHandler>(true);
+        foreach (var h in handlers)
+        {
+            if (h == null || h == this || !h.IsHoldingStunnedPlayer)
+                continue;
+
+            return h.AttachedAnchorPoint != null
+                ? h.AttachedAnchorPoint.Id
+                : GrabAnchorPoint.AnchorId.None;
+        }
+
+        return GrabAnchorPoint.AnchorId.None;
+    }
+
     // =========================================================
     // GrabAnchorPoint 충돌 무시 관리
     // =========================================================
@@ -1220,6 +1494,8 @@ public class HandGrabHandler : MonoBehaviour
 
         _attachedAnchorPoint = null;
         _pendingReachAnchor = null;
+        _isRecoveringGrabTarget = false;
+        _useNearPlayerJointProfile = false;
     }
 
     /// <summary>

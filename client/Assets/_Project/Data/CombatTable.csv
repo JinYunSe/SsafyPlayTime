@@ -1,8 +1,9 @@
 combatStatId,combatStatName,baseDamage,stunDamage,knockbackForce,cooldownSec,stunDurationBase,stunDurationRandMin,stunDurationRandMax,selfStunDuration,selfStunChance,hitCountToStun,groggyVulnerabilityMultiplier,airborneVulnerabilityMultiplier,velocityDamageMultiplier,animationClip,inputDescription,enabled
-PUNCH,일반 펀치,3,12,10,0.35,0,0,0,0,0,3,1.0,1.0,0,Attack01,Left Click (tap),true
+KICK,일반 발차기,4,14,12,0.45,0,0,0,0,0,2,1.0,1.0,0,ProceduralKick,Right Click (tap, empty-hand),true
+PUNCH,일반 펀치,3,12,10,0.38,0,0,0,0,0,3,1.0,1.0,0,Attack01,Left Click (tap),true
 HEAVY_PUNCH,강펀치,8,35,10,0.8,2.5,2.0,4.0,0,0,1,1.0,1.0,0.5,Attack02,Run + Left Click,true
 UPPERCUT,어퍼컷(발차기 대체),6,28,12,1.0,2.0,1.5,3.5,0,0,1,1.0,1.0,0,Attack03,Right Click (while stopped),true
-JET_KICK,제트킥(드롭킥),15,50,18,1.5,3.5,3.0,5.0,1.5,0,1,1.0,1.5,1.0,Slide,Jump + Right Click,true
+JET_KICK,날라차기,13,36,20,1.25,0,0,0,0.38,0,1,1.0,1.45,1.35,Attack02,Airborne + Right Click,true
 HEADBUTT,박치기,5,20,6,0.6,0,0,0,0,0.15,2,1.0,1.0,0,Push,Wheel Click,true
 GRAB,잡기,0,0,0,0,0,0,0,0,0,0,1.0,1.0,0,Grab,Left Click (hold),true
 THROW,던지기,4,15,14,0.5,1.5,1.0,2.5,0,0,1,1.0,1.0,0.3,Throw,Grab + Right Hold + Release,true
