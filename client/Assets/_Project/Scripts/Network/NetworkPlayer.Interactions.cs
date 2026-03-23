@@ -255,15 +255,15 @@ public sealed partial class NetworkPlayer
 
     /// <summary>
     /// Returns whether the requested hand is holding something.
-    /// StateAuthority uses local hand state and proxies use replicated confirmation flags.
+    /// StateAuthority uses local hand state, while proxies read the authoritative
+    /// LeftGrabConfirmed / RightGrabConfirmed checkpoints directly.
     /// </summary>
     internal bool IsHandHoldingNetworked(HandGrabHandler.HandSide side)
     {
-        if (characterGrabController != null)
-        {
-            characterGrabController.RefreshNow();
-            return characterGrabController.IsHandHolding(side);
-        }
+        if (IsNetworkReady && !HasStateAuthority)
+            return side == HandGrabHandler.HandSide.Left
+                ? (bool)LeftGrabConfirmed
+                : (bool)RightGrabConfirmed;
 
         if (HasStateAuthority)
         {
@@ -277,9 +277,13 @@ public sealed partial class NetworkPlayer
             return false;
         }
 
-        return side == HandGrabHandler.HandSide.Left
-            ? (bool)LeftGrabConfirmed
-            : (bool)RightGrabConfirmed;
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            return characterGrabController.IsHandHolding(side);
+        }
+
+        return false;
     }
 
     /// <summary>
