@@ -27,6 +27,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         [Header("참조")]
         [SerializeField] private ItemRuntimeHost itemRuntimeHost;
+        [SerializeField] private ItemCharacterBuffApplier buffApplier;
         [SerializeField] private Transform characterRoot;
         [SerializeField] private Transform handAnchorOverride;
 
@@ -198,23 +199,41 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private void BindEvents()
         {
-            if (itemRuntimeHost == null)
+            if (itemRuntimeHost != null)
             {
-                return;
+                itemRuntimeHost.HeldItemChanged -= RefreshHeldVisual;
+                itemRuntimeHost.HeldItemChanged += RefreshHeldVisual;
             }
 
-            itemRuntimeHost.HeldItemChanged -= RefreshHeldVisual;
-            itemRuntimeHost.HeldItemChanged += RefreshHeldVisual;
+            if (buffApplier != null)
+            {
+                buffApplier.BuffApplied -= HandleBuffApplied;
+                buffApplier.BuffApplied += HandleBuffApplied;
+            }
         }
 
         private void UnbindEvents()
         {
-            if (itemRuntimeHost == null)
+            if (itemRuntimeHost != null)
+            {
+                itemRuntimeHost.HeldItemChanged -= RefreshHeldVisual;
+            }
+
+            if (buffApplier != null)
+            {
+                buffApplier.BuffApplied -= HandleBuffApplied;
+            }
+        }
+
+        private void HandleBuffApplied()
+        {
+            var heldItemId = ResolveCurrentHeldItemId();
+            if (string.IsNullOrWhiteSpace(heldItemId))
             {
                 return;
             }
 
-            itemRuntimeHost.HeldItemChanged -= RefreshHeldVisual;
+            RefreshHeldVisual(heldItemId);
         }
 
         private void RefreshHeldVisual(string heldItemId)
@@ -251,12 +270,12 @@ namespace SSAFYPlayTime.Gameplay.Items
                 // 수박칼은 조건과 무관하게 Lit 셰이더로 강제 교체해 마젠타를 방지한다.
                 ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_spawnedHeldVisual, isWatermelonSword);
             }
-            RefreshBlackholeHeldVisualIfNeeded(heldItemId, _spawnedHeldVisual);
             StripNetworkComponentsForHeldVisual(_spawnedHeldVisual);
-            DisableNonHeldVisualEffects(heldItemId, _spawnedHeldVisual);
             ApplyPose(heldItemId, _spawnedHeldVisual.transform);
             DisablePhysicsForHeldVisual(_spawnedHeldVisual);
             EnsureHeldVisualRenderersEnabled(_spawnedHeldVisual);
+            RefreshBlackholeHeldVisualIfNeeded(heldItemId, _spawnedHeldVisual);
+            DisableNonHeldVisualEffects(heldItemId, _spawnedHeldVisual);
             DebugLog($"Held visual attached: {heldItemId}");
             ItemRuntimeLog.Info(heldItemId, $"손 장착 비주얼 생성: prefab={definition.Master.PrefabPath}, anchor={handAnchor.name}", this);
         }
@@ -620,8 +639,26 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            var isSatellite = string.Equals(heldItemId, ItemIds.SatelliteStrike, StringComparison.Ordinal);
-            if (!isSatellite)
+            if (string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal))
+            {
+                DisableBlackholeHeldArtifacts(visualRoot);
+                return;
+            }
+
+            var keepHeldParticles =
+                string.Equals(heldItemId, ItemIds.Flamethrower, StringComparison.Ordinal) ||
+                string.Equals(heldItemId, ItemIds.Americano, StringComparison.Ordinal);
+            if (keepHeldParticles)
+            {
+                return;
+            }
+
+            DisableHeldParticleArtifacts(visualRoot);
+        }
+
+        private static void DisableHeldParticleArtifacts(GameObject visualRoot)
+        {
+            if (visualRoot == null)
             {
                 return;
             }
@@ -639,12 +676,148 @@ namespace SSAFYPlayTime.Gameplay.Items
                 particle.gameObject.SetActive(false);
             }
 
+            var trails = visualRoot.GetComponentsInChildren<TrailRenderer>(true);
+            for (var i = 0; i < trails.Length; i++)
+            {
+                if (trails[i] != null)
+                {
+                    trails[i].enabled = false;
+                    trails[i].gameObject.SetActive(false);
+                }
+            }
+
+            var lines = visualRoot.GetComponentsInChildren<LineRenderer>(true);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (lines[i] != null)
+                {
+                    lines[i].enabled = false;
+                    lines[i].gameObject.SetActive(false);
+                }
+            }
+
             var lights = visualRoot.GetComponentsInChildren<Light>(true);
             for (var i = 0; i < lights.Length; i++)
             {
                 if (lights[i] != null)
                 {
                     lights[i].enabled = false;
+                }
+            }
+
+            var renderers = visualRoot.GetComponentsInChildren<Renderer>(true);
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                var renderer = renderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                var objectName = renderer.gameObject.name ?? string.Empty;
+                if (objectName.IndexOf("Glow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    objectName.IndexOf("Particles", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    objectName.IndexOf("Trail", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    objectName.IndexOf("FX", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    objectName.IndexOf("Effect", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    objectName.IndexOf("OuterLayer", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    renderer.enabled = false;
+                    continue;
+                }
+
+                var materials = renderer.sharedMaterials;
+                for (var m = 0; m < materials.Length; m++)
+                {
+                    var material = materials[m];
+                    var materialName = material != null ? material.name ?? string.Empty : string.Empty;
+                    if (materialName.IndexOf("Sprite", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        materialName.IndexOf("Glow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        materialName.IndexOf("Particle", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        renderer.enabled = false;
+                        break;
+                    }
+                }
+            }
+        }
+
+        private static void DisableBlackholeHeldArtifacts(GameObject visualRoot)
+        {
+            var effectRoot = visualRoot.transform.Find("Item_BlackholeFx");
+            if (effectRoot != null)
+            {
+                effectRoot.gameObject.SetActive(false);
+            }
+
+            var rootRenderer = visualRoot.GetComponent<Renderer>();
+            if (rootRenderer != null)
+            {
+                rootRenderer.enabled = true;
+                TintBlackholeHeldShell(rootRenderer);
+            }
+
+            var renderers = visualRoot.GetComponentsInChildren<Renderer>(true);
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                var renderer = renderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                if (effectRoot != null && renderer.transform.IsChildOf(effectRoot))
+                {
+                    renderer.enabled = false;
+                    continue;
+                }
+
+                var objectName = renderer.gameObject.name ?? string.Empty;
+                if (objectName.IndexOf("OuterLayer", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    renderer.enabled = false;
+                    continue;
+                }
+
+                var materials = renderer.sharedMaterials;
+                for (var m = 0; m < materials.Length; m++)
+                {
+                    var material = materials[m];
+                    var materialName = material != null ? material.name ?? string.Empty : string.Empty;
+                    if (materialName.IndexOf("BlackholeFx_Sprite", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        renderer.enabled = false;
+                        break;
+                    }
+                }
+            }
+        }
+
+        private static void TintBlackholeHeldShell(Renderer renderer)
+        {
+            if (renderer == null)
+            {
+                return;
+            }
+
+            var materials = renderer.materials;
+            for (var i = 0; i < materials.Length; i++)
+            {
+                var material = materials[i];
+                if (material == null)
+                {
+                    continue;
+                }
+
+                var shellColor = new Color(0.16f, 0.04f, 0.24f, 0.55f);
+                if (material.HasProperty("_BaseColor"))
+                {
+                    material.SetColor("_BaseColor", shellColor);
+                }
+
+                if (material.HasProperty("_Color"))
+                {
+                    material.SetColor("_Color", shellColor);
                 }
             }
         }
@@ -683,6 +856,11 @@ namespace SSAFYPlayTime.Gameplay.Items
             if (itemRuntimeHost == null)
             {
                 itemRuntimeHost = GetComponent<ItemRuntimeHost>();
+            }
+
+            if (buffApplier == null)
+            {
+                buffApplier = GetComponent<ItemCharacterBuffApplier>();
             }
 
             if (characterRoot == null)
