@@ -31,7 +31,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private Transform handAnchorOverride;
 
         [Header("장착 위치")]
-        [SerializeField] private Vector3 localPositionOffset = new Vector3(0f, 0.03f, 0.07f);
+        [SerializeField] private Vector3 localPositionOffset = new Vector3(0.003f, -0.002f, 0.012f);
         [SerializeField] private Vector3 localEulerOffset = new Vector3(0f, 90f, 90f);
         [SerializeField] private Vector3 localScale = Vector3.one * 0.25f;
 
@@ -217,7 +217,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                     ? itemRuntimeHost.OwnerTransform
                     : transform;
 
-            // 한국어: hyekang 원본 WeaponEquipper의 강제 전방 정렬 방식을 그대로 적용해 총구가 캐릭터 전방을 보게 맞춘다.
+            // 한국어: 원래 화염방사기 장착 연출은 손 기준 위치와 캐릭터 전방을 함께 맞춘다.
             _spawnedHeldVisual.transform.position = handAnchor.TransformPoint(flamethrowerLocalPositionOffset);
             _spawnedHeldVisual.transform.rotation =
                 Quaternion.LookRotation(-searchRoot.forward, Vector3.up) *
@@ -268,6 +268,12 @@ namespace SSAFYPlayTime.Gameplay.Items
                 euler = flamethrowerLocalEulerOffset;
                 scale = flamethrowerLocalScale;
             }
+            else if (ShouldUseFullScaleHeldPose(heldItemId))
+            {
+                position = localPositionOffset;
+                euler = localEulerOffset;
+                scale = Vector3.one;
+            }
 
             if (watermelonSwordAutoGripSnap &&
                 string.Equals(heldItemId, ItemIds.WaterMelonSword, StringComparison.Ordinal) &&
@@ -302,6 +308,15 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             return false;
+        }
+
+        private static bool ShouldUseFullScaleHeldPose(string heldItemId)
+        {
+            return string.Equals(heldItemId, ItemIds.Americano, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.Growth, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.Shrink, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.Invisibility, StringComparison.Ordinal) ||
+                   string.Equals(heldItemId, ItemIds.SatelliteStrike, StringComparison.Ordinal);
         }
 
         private bool TryApplyWatermelonSwordGripCompensation(
