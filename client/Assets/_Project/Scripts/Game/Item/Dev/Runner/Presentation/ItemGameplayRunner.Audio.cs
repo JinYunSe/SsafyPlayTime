@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemGameplayRunner.Audio 스크립트가 들어 있는 파일이다.
  * - Dev/Runner/Presentation 계층에서 오디오, 시각화, 데미지 표시 같은 테스트 연출 연결을 담당한다.

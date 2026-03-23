@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemGameplayRunner.Presentation 스크립트가 들어 있는 파일이다.
  * - Dev/Runner/Presentation 계층에서 오디오, 시각화, 데미지 표시 같은 테스트 연출 연결을 담당한다.
@@ -136,6 +136,9 @@ namespace SSAFYPlayTime.Gameplay.Items
             source.playOnAwake = false;
             source.volume = Mathf.Clamp01(volume);
             source.spatialBlend = spatial ? 1f : 0f;
+            var categorizedSource = go.AddComponent<global::SSAFYPlayTime.GameAudioSource>();
+            categorizedSource.SetCategory(global::SSAFYPlayTime.GameAudioCategory.EffectSound);
+            categorizedSource.RefreshBaseVolumeFromCurrentSource();
             source.Play();
             _loopingSfxSources[sfxId] = source;
         }
@@ -155,6 +158,9 @@ namespace SSAFYPlayTime.Gameplay.Items
             source.playOnAwake = false;
             source.volume = Mathf.Clamp01(volume);
             source.spatialBlend = spatial ? 1f : 0f;
+            var categorizedSource = go.AddComponent<global::SSAFYPlayTime.GameAudioSource>();
+            categorizedSource.SetCategory(global::SSAFYPlayTime.GameAudioCategory.EffectSound);
+            categorizedSource.RefreshBaseVolumeFromCurrentSource();
             source.Play();
             Destroy(go, clip.length + 0.1f);
         }

@@ -2531,9 +2531,6 @@ MonoBehaviour:
     _value: 0
   _NetworkedIsDragged:
     _value: 0
-  _NetworkedHp: 0
-  _IsDeadNetworked:
-    _value: 0
   itemWorldEffectMask:
     serializedVersion: 2
     m_Bits: 119
@@ -2613,7 +2610,7 @@ Rigidbody:
   m_IsKinematic: 0
   m_Interpolate: 0
   m_Constraints: 0
-  m_CollisionDetection: 0
+  m_CollisionDetection: 3
 --- !u!135 &8554732968465362057
 SphereCollider:
   m_ObjectHideFlags: 0
@@ -2787,7 +2784,12 @@ MonoBehaviour:
   behindBackThreshold: -0.08
   behindBackForce: 90
   behindBackTurnTorque: 20
-  carryPoseProfile: {fileID: 0}
+  chestReactionShare: 0.4
+  carryingTorsoReactionMultiplier: 1.15
+  dualCarryTorsoReactionMultiplier: 1.35
+  carryingTurnAssistMultiplier: 1.1
+  dualCarryTurnAssistMultiplier: 1.25
+  carryPoseProfile: {fileID: 11400000, guid: 1d3a4c4bf11833b45871d1178b5a5909, type: 2}
 --- !u!114 &7711887360206274305
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4132,6 +4134,7 @@ GameObject:
   - component: {fileID: 211526354761765914}
   - component: {fileID: 269728185528081540}
   - component: {fileID: 3346762877811306364}
+  - component: {fileID: 3394771122197898868}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -4228,6 +4231,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   target: {fileID: 0}
   autoFindPlayerTag: Player
+  autoFindTargetName: Test
   autoFindTargetWhenNull: 1
   pivotOffset: {x: 0, y: 1.2, z: 0}
   distance: 8
@@ -4240,6 +4244,10 @@ MonoBehaviour:
   invertY: 0
   lockCursor: 1
   lookDeadZone: 0.01
+  yawClampBlendInSpeed: 18
+  yawClampBlendOutSpeed: 8
+  followSmooth: 14
+  rotateSmooth: 18
   obstructionMask:
     serializedVersion: 2
     m_Bits: 887
@@ -4259,8 +4267,8 @@ MonoBehaviour:
   m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 999abe0970d285b48acfe988bc41410e, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   mapCenter: {x: 0, y: 0, z: 0}
   orbitRadius: 40
   orbitHeight: 15
@@ -4276,8 +4284,8 @@ MonoBehaviour:
   m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 225aa0b6136b5ef4cb50de0fe4fa2dbc, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   enableOnlyAfterDeath: 1
   localPlayerTag: Player
   manualLocalTarget: {fileID: 0}
@@ -4312,8 +4320,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a79441f348de89743a2939f4d699eac1, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   m_RenderShadows: 1
   m_RequiresDepthTextureOption: 2
   m_RequiresOpaqueTextureOption: 2
@@ -4346,6 +4354,19 @@ MonoBehaviour:
     m_MipBias: 0
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
+--- !u!114 &3394771122197898868
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6880996099506700613}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fcd2e1ec062a7a84dbab757e2700ea43, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  mapLayerName: Map
 --- !u!1 &6912120063350518393
 GameObject:
   m_ObjectHideFlags: 0

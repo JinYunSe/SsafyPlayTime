@@ -40,6 +40,11 @@ public sealed partial class NetworkPlayer
     private GhostSpectatorCamera _localGhostSpectatorCamera;
     private GhostThrowManager _localGhostThrowManager;
 
+    // 호스트 마이그레이션 직전 고스트 카메라 위치를 보관하는 클라이언트 전용 static 필드.
+    // LobbyCanvasUIController.CaptureCharacterStatesForMigration()이 설정하고
+    // ActivateLocalGhostMode()에서 소비(1회)한다.
+    internal static Vector3? PendingGhostCameraRestorePosition;
+
     public bool IsDeadState => GetIsDeadState();
     public int CurrentHealth => GetCurrentHealth();
     public int MaxHealth => GetMaxHealth();
@@ -127,7 +132,7 @@ public sealed partial class NetworkPlayer
 
     public bool ApplyCombinedDamage(float healthDamage, float stunDamage, string source)
     {
-        return ApplyCombinedDamage(healthDamage, stunDamage, source, 0f, 0f, 1f, false);
+        return ApplyCombinedDamage(healthDamage, stunDamage, source, 0f, 0f, 1f, false, null);
     }
 
     public bool ApplyCombinedDamage(
@@ -137,7 +142,8 @@ public sealed partial class NetworkPlayer
         float attackerVelocity,
         float impulseMagnitude,
         float bodyPartMultiplier = 1f,
-        bool deferStunEntryDamping = false)
+        bool deferStunEntryDamping = false,
+        NetworkPlayer instigator = null)
     {
         var applied = false;
         if (healthDamage > 0f)
@@ -145,7 +151,7 @@ public sealed partial class NetworkPlayer
 
         if (stunDamage > 0f)
         {
-            ApplyStunDamage(stunDamage, bodyPartMultiplier, attackerVelocity, impulseMagnitude, deferStunEntryDamping);
+            ApplyStunDamage(stunDamage, bodyPartMultiplier, attackerVelocity, impulseMagnitude, deferStunEntryDamping, instigator);
             applied = true;
         }
 
@@ -374,9 +380,6 @@ public sealed partial class NetworkPlayer
 
     private IEnumerator CoRunLocalDeathTransition()
     {
-        var hud = GameHUD.FindOrCreate();
-        hud?.PlayDeathOverlay();
-
         yield return new WaitForSecondsRealtime(LocalDeathCameraHoldDuration);
 
         ActivateLocalGhostMode();
@@ -451,12 +454,17 @@ public sealed partial class NetworkPlayer
             ghostCamera.tag = "MainCamera";
             spectatorCam.enabled = true;
 
+            // 호스트 마이그레이션 후 카메라 위치 복원 (방장 퇴장 직전 위치 유지)
+            if (PendingGhostCameraRestorePosition.HasValue)
+            {
+                spectatorCam.RestoreOrbitPosition(PendingGhostCameraRestorePosition.Value);
+                PendingGhostCameraRestorePosition = null;
+            }
+
             if (throwManager != null)
             {
                 throwManager.enabled = true;
                 throwManager.ForceEnableGhostThrow($"{name} death");
-                // 캐릭터가 0,0,0에 고정됐으므로 스폰 포인트를 null로 → 카메라 기반 발사 위치 사용
-                throwManager.SetGhostThrowSpawnPoint(null);
             }
 
             // 프리팹 카메라를 재사용하므로 Destroy하지 않도록 _localGhostCamera는 null 유지
@@ -496,14 +504,19 @@ public sealed partial class NetworkPlayer
             _localGhostRoot.AddComponent<AudioListener>();
 
             _localGhostSpectatorCamera = _localGhostRoot.AddComponent<GhostSpectatorCamera>();
+
+            // 호스트 마이그레이션 후 카메라 위치 복원
+            if (PendingGhostCameraRestorePosition.HasValue)
+            {
+                _localGhostSpectatorCamera.RestoreOrbitPosition(PendingGhostCameraRestorePosition.Value);
+                PendingGhostCameraRestorePosition = null;
+            }
+
             _localGhostThrowManager = _localGhostRoot.AddComponent<GhostThrowManager>();
             _localGhostThrowManager.SetGhostControlEnabled(true);
             _localGhostThrowManager.SetEnableOutOfBoundsKillCheck(false);
             _localGhostThrowManager.ForceEnableGhostThrow($"{name} death fallback");
         }
-
-        // 회색 오버레이 제거 → 고스트 카메라 뷰가 가려지지 않도록
-        GameHUD.FindOrCreate()?.HideDeathOverlayImmediate();
 
         // 고스트 모드: 마우스 커서를 표시해 투척 목적지를 화면에서 직접 지정할 수 있게 한다.
         // TryThrow()는 Camera.main.ScreenPointToRay(Input.mousePosition)로 커서 위치를 타겟으로 삼는다.

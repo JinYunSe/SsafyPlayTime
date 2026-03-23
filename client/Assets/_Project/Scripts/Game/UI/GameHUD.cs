@@ -15,14 +15,20 @@ public class GameHUD : MonoBehaviour
     [SerializeField] private Image deathOverlay;
     [SerializeField] private Color deathOverlayColor = new(0.42f, 0.42f, 0.42f, 0.82f);
 
+    [Header("Water")]
+    [SerializeField] private Image waterOverlay;
+    [SerializeField] private Color waterOverlayColor = new(0.0f, 0.25f, 0.75f, 0.38f);
+
     private const float FadeOutDuration = 0.5f;
     private const float PulseDuration = 0.25f;
     private const float DeathOverlayFadeDuration = 0.45f;
+    private const float WaterOverlayFadeDuration = 0.35f;
 
     private static GameHUD _instance;
 
     private Coroutine _pulseCoroutine;
     private Coroutine _deathOverlayCoroutine;
+    private Coroutine _waterOverlayCoroutine;
 
     public static GameHUD FindOrCreate()
     {
@@ -96,6 +102,22 @@ public class GameHUD : MonoBehaviour
         _deathOverlayCoroutine = StartCoroutine(FadeDeathOverlay());
     }
 
+    public void ShowWaterOverlay()
+    {
+        EnsureRuntimeReferences();
+        if (waterOverlay == null) return;
+        if (_waterOverlayCoroutine != null) StopCoroutine(_waterOverlayCoroutine);
+        _waterOverlayCoroutine = StartCoroutine(FadeWaterOverlay(show: true));
+    }
+
+    public void HideWaterOverlay()
+    {
+        EnsureRuntimeReferences();
+        if (waterOverlay == null) return;
+        if (_waterOverlayCoroutine != null) StopCoroutine(_waterOverlayCoroutine);
+        _waterOverlayCoroutine = StartCoroutine(FadeWaterOverlay(show: false));
+    }
+
     public void HideDeathOverlayImmediate()
     {
         EnsureRuntimeReferences();
@@ -147,6 +169,25 @@ public class GameHUD : MonoBehaviour
         _pulseCoroutine = null;
     }
 
+    private IEnumerator FadeWaterOverlay(bool show)
+    {
+        waterOverlay.gameObject.SetActive(true);
+        var startColor = waterOverlay.color;
+        var targetColor = WithAlpha(waterOverlayColor, show ? waterOverlayColor.a : 0f);
+
+        float elapsed = 0f;
+        while (elapsed < WaterOverlayFadeDuration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            waterOverlay.color = Color.Lerp(startColor, targetColor, Mathf.Clamp01(elapsed / WaterOverlayFadeDuration));
+            yield return null;
+        }
+
+        waterOverlay.color = targetColor;
+        if (!show) waterOverlay.gameObject.SetActive(false);
+        _waterOverlayCoroutine = null;
+    }
+
     private IEnumerator FadeDeathOverlay()
     {
         deathOverlay.gameObject.SetActive(true);
@@ -189,6 +230,9 @@ public class GameHUD : MonoBehaviour
 
         if (deathOverlay == null)
             deathOverlay = CreateFullscreenImage("DeathOverlay", WithAlpha(deathOverlayColor, 0f), siblingIndex: 1);
+
+        if (waterOverlay == null)
+            waterOverlay = CreateFullscreenImage("WaterOverlay", WithAlpha(waterOverlayColor, 0f), siblingIndex: 2);
     }
 
     private void EnsureCanvas()

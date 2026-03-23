@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 파일 개요:
  * - ItemGameplayRunner.Events 스크립트가 들어 있는 파일이다.
  * - Dev/Runner/Core 계층에서 ItemGameplayRunner의 생명주기, 입력, 이벤트 연결 같은 중심 흐름을 관리한다.

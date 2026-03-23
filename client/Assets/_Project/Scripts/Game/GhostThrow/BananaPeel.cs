@@ -51,18 +51,27 @@ namespace SSAFYPlayTime.Game.GhostThrow
         {
             _rb  = GetComponent<Rigidbody>();
             _col = GetComponent<Collider>();
-            // 충분히 긴 최대 수명 (착지 후 LifeTimer 재설정)
+
             if (HasStateAuthority)
+            {
+                // 충분히 긴 최대 수명 (착지 후 LifeTimer 재설정)
                 LifeTimer = TickTimer.CreateFromSeconds(Runner, lifeAfterLanding + 30f);
 
-            // 모든 클라이언트: 호스트가 onBeforeSpawned에서 저장한 초기 속도를 적용.
-            // NetworkRigidbody 없이 탄도를 동기화하는 핵심 처리.
-            if (NetworkedInitialVelocity.sqrMagnitude > 0.001f && _rb != null)
+                // StateAuthority(호스트)만 Rigidbody 초기 속도를 적용해 물리 시뮬레이션을 실행.
+                // NetworkTransform이 매 틱마다 위치를 클라이언트에 동기화한다.
+                if (NetworkedInitialVelocity.sqrMagnitude > 0.001f && _rb != null)
+                {
+                    _rb.drag = 0f;
+                    _rb.angularDrag = 0.05f;
+                    _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                    _rb.velocity = NetworkedInitialVelocity;
+                }
+            }
+            else
             {
-                _rb.drag = 0f;
-                _rb.angularDrag = 0.05f;
-                _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-                _rb.velocity = NetworkedInitialVelocity;
+                // 비-StateAuthority 클라이언트: Rigidbody를 kinematic으로 설정해
+                // 로컬 물리 시뮬레이션을 비활성화. NetworkTransform이 호스트의 위치를 복제한다.
+                if (_rb != null) _rb.isKinematic = true;
             }
         }
 
