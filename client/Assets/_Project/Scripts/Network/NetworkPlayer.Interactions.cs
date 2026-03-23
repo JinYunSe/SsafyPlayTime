@@ -446,6 +446,7 @@ public sealed partial class NetworkPlayer
         if (!_itemFieldInteractionService.TryUseHeldItem(out _, out _, out _))
             return false;
 
+        RefreshHeldItemPresentationImmediate();
         BroadcastItemUsed(itemIdBeforeUse);
         return true;
     }
@@ -501,7 +502,11 @@ public sealed partial class NetworkPlayer
         if (!_itemFieldInteractionService.TryDropHeldItem(out var droppedItemId, out var dropSpawnPosition, out _))
             return false;
 
-        return TrySpawnNetworkedFieldDrop(droppedItemId, dropSpawnPosition, runtimeHost, false, out _);
+        if (!TrySpawnNetworkedFieldDrop(droppedItemId, dropSpawnPosition, runtimeHost, false, out _))
+            return false;
+
+        RefreshHeldItemPresentationImmediate();
+        return true;
     }
 
     /// <summary>
@@ -528,5 +533,11 @@ public sealed partial class NetworkPlayer
         _itemFieldInteractionService.SetRuntimeHost(runtimeHost);
         _itemFieldInteractionService.SetOwnerTransform(transform);
         return true;
+    }
+
+    internal void RefreshHeldItemPresentationImmediate()
+    {
+        SyncHeldItemNetworkState();
+        ApplyReplicatedHeldItemPresentation();
     }
 }
