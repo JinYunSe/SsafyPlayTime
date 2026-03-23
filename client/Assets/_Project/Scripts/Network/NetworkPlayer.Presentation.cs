@@ -444,78 +444,12 @@ public sealed partial class NetworkPlayer
         out bool didSnap,
         bool isSettling = false)
     {
-        var phase = GetPhysicalPhase();
         rootBefore = transform.position;
         rootAfter = rootBefore;
-        var correctionTarget = carryRootTarget;
-        gapBefore = Vector3.Distance(rootBefore, correctionTarget);
+        gapBefore = Vector3.Distance(rootBefore, carryRootTarget);
         gapAfter = gapBefore;
         didSnap = false;
-        var usedResidualTarget = false;
-
-        if (!HasStateAuthority &&
-            gapBefore <= 0.0001f &&
-            residualGapHint > CarryResidualRootGapThreshold)
-        {
-            correctionTarget = residualRootTarget;
-            gapBefore = Vector3.Distance(rootBefore, correctionTarget);
-            gapAfter = gapBefore;
-            usedResidualTarget = true;
-        }
-
-        var forceCarryCallLog = !HasStateAuthority && phase == PhysicalPhase.BeingCarriedStunned;
-        TraceCarryDebugSample(
-            "TryApplyCarryProxyRootCorrection.Call",
-            $"called=true phaseFromGetPhysicalPhase={phase} carryMode={carryMode} isSettling={isSettling} " +
-            $"rootBefore={FormatCarryDebugVector(rootBefore)} correctionTarget={FormatCarryDebugVector(correctionTarget)} " +
-            $"residualRootTarget={FormatCarryDebugVector(residualRootTarget)} gapBefore={gapBefore:F2} " +
-            $"residualGapHint={residualGapHint:F2} usedResidualTarget={usedResidualTarget}",
-            forceSample: forceCarryCallLog);
-
-        if (HasStateAuthority || gapBefore <= 0.0001f)
-        {
-            TraceCarryDebugSample(
-                "TryApplyCarryProxyRootCorrection.Skip",
-                $"phaseFromGetPhysicalPhase={phase} carryMode={carryMode} gapBefore={gapBefore:F2} " +
-                $"residualGapHint={residualGapHint:F2} reason={(HasStateAuthority ? "StateAuthority" : "NoGap")}",
-                forceSample: forceCarryCallLog);
-            return false;
-        }
-
-        // CarrySolveFrame: CarryPhysicsProfile에서 proxy 설정값 가져오기
-        var settings = ResolveCarryModeSettings(carryMode);
-        var proxyFollowSpeed = settings.proxyRootFollowSpeed;
-        var proxySnapDistance = settings.proxyRootSnapDistance;
-        var effectiveGap = Mathf.Max(gapBefore, residualGapHint);
-        var emergencySnapDistance = isSettling
-            ? Mathf.Max(CarryReleaseSettleEmergencySnapDistance, proxySnapDistance * 1.15f)
-            : ResolveCarryEmergencySnapDistance(proxySnapDistance);
-        var shouldEmergencySnap = effectiveGap >= emergencySnapDistance;
-
-        if (shouldEmergencySnap)
-        {
-            rootAfter = correctionTarget;
-            didSnap = true;
-        }
-        else
-        {
-            var step = Mathf.Max(
-                0.10f,
-                ResolveCarryCorrectionFollowSpeed(proxyFollowSpeed, effectiveGap >= proxySnapDistance) *
-                Time.deltaTime *
-                Mathf.Max(slowMoAlphaScale, 0.35f));
-            rootAfter = Vector3.MoveTowards(rootBefore, correctionTarget, step);
-        }
-
-        ApplyProxyCarryRootPosition(rootAfter, isSettling);
-        gapAfter = Vector3.Distance(rootAfter, correctionTarget);
-        var moved = (rootAfter - rootBefore).sqrMagnitude > 0.000001f;
-        TraceCarryDebugSample(
-            "TryApplyCarryProxyRootCorrection.Result",
-            $"phaseFromGetPhysicalPhase={phase} carryMode={carryMode} moved={moved} didSnap={didSnap} " +
-            $"rootAfter={FormatCarryDebugVector(rootAfter)} gapBefore={gapBefore:F2} gapAfter={gapAfter:F2}",
-            forceSample: forceCarryCallLog);
-        return moved;
+        return false;
     }
 
     private void CacheProxyCarryTargets(PhysicalPhase phase, Vector3 carryAnchorTarget, Vector3 carryRootTarget)
@@ -881,26 +815,14 @@ public sealed partial class NetworkPlayer
                 }
                 else
                 {
-                    _carryExitSnapshotAnchor = _lastCarryAnchorPosition != Vector3.zero
-                        ? _lastCarryAnchorPosition
-                        : transform.position;
+                    _carryExitSnapshotAnchor = Vector3.zero;
                     ClearProxyCarrySupportRootOffset();
                     ClearCachedProxyCarryTargets();
                     _hipsSnapshotFrom = syncPhysicsObjects[0] != null
                         ? syncPhysicsObjects[0].transform.position
                         : latestHips;
                     _hipsSnapshotTo = latestHips;
-
-                    if (!HasStateAuthority)
-                    {
-                        var settleMode = _lastObservedCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None
-                            ? _lastObservedCarryMode
-                            : SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry;
-                        var settleProfile = carryPhysicsProfile != null
-                            ? carryPhysicsProfile.GetSettings(settleMode)
-                            : SSAFYPlayTime.Character.CarryPhysicsProfile.GetDefaultSettings(settleMode);
-                        _carryReleaseSettleRemaining = settleProfile.carryReleaseSettleDuration;
-                    }
+                    _carryReleaseSettleRemaining = 0f;
                 }
             }
             _wasCarryPhaseLastFrame = isCarryNow;
