@@ -373,6 +373,8 @@ namespace SSAFYPlayTime
                 {
                     persistent.podiumParent = this.podiumParent;
                     persistent.podiumSlots = this.podiumSlots;
+                    persistent.sceneRoomSlots = this.sceneRoomSlots;
+                    persistent.sceneDirectSlots = this.sceneDirectSlots;
                     persistent.characterRuntimeRoot = this.characterRuntimeRoot;
                     persistent.characterPlacementCamera = this.characterPlacementCamera;
                     persistent.ssatyCharacterRoot = this.ssatyCharacterRoot;
