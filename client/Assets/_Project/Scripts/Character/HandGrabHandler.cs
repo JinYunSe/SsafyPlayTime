@@ -476,7 +476,7 @@ public class HandGrabHandler : MonoBehaviour
 
         if (bestTarget != null)
         {
-            if (IsFieldItemRigidbody(bestTarget))
+            if (IsFieldItemHierarchy(bestTarget))
             {
                 TryPickupFieldItem(bestTarget);
                 return;
@@ -612,7 +612,7 @@ public class HandGrabHandler : MonoBehaviour
         if (targetRb == null)
             return false;
 
-        var fieldDrop = targetRb.GetComponentInParent<ItemFieldDrop>();
+        var fieldDrop = ResolveFieldDropFromGrabTarget(targetRb);
         if (fieldDrop == null || !fieldDrop.CanBePickedUp())
             return false;
 
@@ -655,17 +655,61 @@ public class HandGrabHandler : MonoBehaviour
 
         // 키 기반 픽업과 동일하게 네트워크 브로드캐스트 — 원격 클라이언트에서도 드롭 제거
         if (networkPlayer != null)
+        {
+            networkPlayer.RefreshHeldItemPresentationImmediate();
             networkPlayer.NotifyHandGrabPickedFieldDrop(pickedItemId, dropInstanceId ?? string.Empty, pickupOrigin);
+        }
 
         return true;
     }
 
     private static bool IsFieldItemRigidbody(Rigidbody targetRb)
     {
+        return ResolveFieldDropFromGrabTarget(targetRb) != null;
+    }
+
+    private static bool IsFieldItemHierarchy(Rigidbody targetRb)
+    {
         if (targetRb == null)
             return false;
 
-        return targetRb.GetComponentInParent<ItemFieldDrop>() != null;
+        var current = targetRb.transform;
+        while (current != null)
+        {
+            if (current.GetComponent<ItemFieldDrop>() != null || current.GetComponent<NetworkedItemFieldDrop>() != null)
+                return true;
+
+            current = current.parent;
+        }
+
+        return false;
+    }
+
+    private static ItemFieldDrop ResolveFieldDropFromGrabTarget(Rigidbody targetRb)
+    {
+        if (targetRb == null)
+            return null;
+
+        ItemFieldDrop fallback = null;
+        var current = targetRb.transform;
+        while (current != null)
+        {
+            var fieldDrop = current.GetComponent<ItemFieldDrop>();
+            if (fieldDrop != null)
+            {
+                if (!string.IsNullOrWhiteSpace(fieldDrop.ItemId))
+                    return fieldDrop;
+
+                if (current.GetComponent<NetworkedItemFieldDrop>() != null || current.Find("Visual") != null)
+                    return fieldDrop;
+
+                fallback ??= fieldDrop;
+            }
+
+            current = current.parent;
+        }
+
+        return fallback;
     }
 
     private ItemRuntimeHost ResolveItemRuntimeHostForCharacter()
