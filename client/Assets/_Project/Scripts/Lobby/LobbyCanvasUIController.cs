@@ -329,12 +329,18 @@ namespace SSAFYPlayTime
                 var persistent = existing.FirstOrDefault(x => x != this);
                 if (persistent != null)
                 {
-                    persistent.podiumParent = this.podiumParent;
-                    persistent.podiumSlots = this.podiumSlots;
-                    // sceneRoomSlots, sceneDirectSlots는 이전하지 않는다.
+                    // podiumParent, podiumSlots, sceneRoomSlots, sceneDirectSlots는 이전하지 않는다.
                     // persistent 인스턴스의 자식(DontDestroyOnLoad)이 이미 유효한 참조를 갖고 있으므로
-                    // 새 씬의 참조로 교체하면 Destroy(gameObject) 시 파괴되어 캐릭터가 미표시된다.
+                    // 새 씬의 참조로 교체하면 Destroy(gameObject) 시 파괴되어 MissingReferenceException 발생.
                     persistent.characterPlacementCamera = this.characterPlacementCamera;
+
+                    // Screen Space - Camera Canvas는 씬 재로드 시 worldCamera 참조가 파괴된다.
+                    // DontDestroyOnLoad Canvas의 worldCamera를 새 씬의 카메라로 갱신해야
+                    // CharacterGroup의 SpriteRenderer가 정상 렌더링된다.
+                    var persistentCanvas = persistent.GetComponentInParent<Canvas>(true);
+                    var thisCanvas = GetComponentInParent<Canvas>(true);
+                    if (persistentCanvas != null && thisCanvas != null && thisCanvas.worldCamera != null)
+                        persistentCanvas.worldCamera = thisCanvas.worldCamera;
                     persistent.ssatyCharacterRoot = this.ssatyCharacterRoot;
                     persistent.alGCharacterRoot = this.alGCharacterRoot;
                     persistent.fitCharacterRoot = this.fitCharacterRoot;
@@ -1250,9 +1256,16 @@ namespace SSAFYPlayTime
         // Fusion runner.LoadScene() 호출 전에 세워두는 플래그.
         // Despawned()가 OnSceneLoadDone보다 늦게 실행될 수 있으므로
         // GameResultData.Entries가 비어 있어도 패널을 표시하도록 보장한다.
+        // RPC가 OnSceneLoadDone보다 늦게 도착하는 경우(타이밍 경쟁)를 대비해
+        // 이미 LauncherScene에 있으면 즉시 ShowGameEndPanel()을 호출한다.
         public void NotifyGameEndTransition()
         {
             _pendingGameEndPanel = true;
+            if (IsActiveSceneNamed(launcherSceneName) && !_isShowingGameEndPanel)
+            {
+                _pendingGameEndPanel = false;
+                ShowGameEndPanel();
+            }
         }
 
         // 게임 종료 후 LauncherScene 진입 시 OnSceneLoadDone에서 호출.
@@ -1458,13 +1471,17 @@ namespace SSAFYPlayTime
                 var entry = entries[i];
                 int rankIndex = i; // 0=1등, 1=2등, 2=3등, 3=4등
 
-                // 닉네임 3D Text
-                var nickText3D = podiumSlots[rankIndex].GetComponentInChildren<TMPro.TextMeshPro>();
-                if (nickText3D != null)
+                // 닉네임 3D Text: "NicknameText" 이름의 TextMeshPro를 우선 탐색, 없으면 첫 번째로 fallback
+                var nickname = !string.IsNullOrWhiteSpace(entry.Nickname) ? entry.Nickname : $"Player{entry.PlayerId}";
+                var allTexts3D = podiumSlots[rankIndex].GetComponentsInChildren<TMPro.TextMeshPro>(true);
+                TMPro.TextMeshPro nickText3D = null;
+                foreach (var t in allTexts3D)
                 {
-                    var nickname = !string.IsNullOrWhiteSpace(entry.Nickname) ? entry.Nickname : $"Player{entry.PlayerId}";
-                    nickText3D.text = nickname;
+                    if (t.gameObject.name.Contains("Nickname") || t.gameObject.name.Contains("nickname"))
+                    { nickText3D = t; break; }
                 }
+                if (nickText3D == null && allTexts3D.Length > 0) nickText3D = allTexts3D[0];
+                if (nickText3D != null) nickText3D.text = nickname;
 
                 // 캐릭터 번호
                 int charIndex = entry.CharacterTypeIndex;
@@ -1500,24 +1517,10 @@ namespace SSAFYPlayTime
                     }
                 }
 
-                // 구형 로직 (동적 소환 패턴 폴백)
-                // 캐릭터 템플릿 가져오기
-                GameObject template = GetCharacterTemplateByIndex(charIndex);
-                if (template != null && podiumSlots[rankIndex] != null)
-                {
-                    // 단상 위치(podiumSlots)에 캐릭터 복사해서 소환!
-                    GameObject clone = Instantiate(template, podiumSlots[rankIndex].position, podiumSlots[rankIndex].rotation);
-                    clone.SetActive(true);
-                    _spawnedGameEndCharacters.Add(clone);
-
-                    // 애니메이터 꺼내서 등수별로 춤추게 만들기
-                    Animator anim = clone.GetComponentInChildren<Animator>();
-                    if (anim != null)
-                    {
-                        int actualRank = rankIndex + 1; 
-                        anim.SetInteger("Rank", actualRank);
-                    }
-                }
+                // sceneDirectSlots가 없으면 캐릭터를 표시하지 않는다.
+                // Inspector에서 LobbyCanvasUIController > Scene Direct Slots 항목에
+                // 각 단상(1~4등) 위치의 캐릭터 모델을 연결해야 합니다.
+                Debug.LogWarning($"[Lobby] DisplayRankings: sceneDirectSlots[{rankIndex}]가 설정되지 않았습니다. Inspector에서 Scene Direct Slots를 연결하세요.");
             }
         }
 
