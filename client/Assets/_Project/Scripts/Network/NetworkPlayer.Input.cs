@@ -174,6 +174,8 @@ public sealed partial class NetworkPlayer
 
     private void SynchronizeNetworkSimulationState()
     {
+        var previousNetworkedHipsPosition = NetworkedHipsPosition;
+
         if (syncPhysicsObjects != null)
         {
             for (int i = 0; i < syncPhysicsObjects.Length; i++)
@@ -190,6 +192,8 @@ public sealed partial class NetworkPlayer
             if (hipsMuscle.joint != null)
                 NetworkedHipsPosition = hipsMuscle.joint.transform.position;
         }
+
+        var hipsUpdatedThisFrame = previousNetworkedHipsPosition != NetworkedHipsPosition;
 
         NetworkedIsActiveRagdoll = _isActiveRagdoll;
         NetworkedPhysicalPhase = (byte)_localPhysicalPhase;
@@ -237,6 +241,12 @@ public sealed partial class NetworkPlayer
                     NetworkedVictimRootOffsetValid = false;
                 }
 
+                var victimCarryRootPosition = transform.position;
+                if (TryResolveCarrierOwnedVictimRootTarget(out var carrierOwnedVictimRootPosition, out _))
+                    victimCarryRootPosition = carrierOwnedVictimRootPosition;
+
+                NetworkedVictimCarryRootPosition = victimCarryRootPosition;
+                NetworkedVictimCarryRootValid = true;
                 NetworkedCarrierAnchorValid = false;
             }
             else
@@ -255,12 +265,14 @@ public sealed partial class NetworkPlayer
 
                 NetworkedVictimAnchorValid = false;
                 NetworkedVictimRootOffsetValid = false;
+                NetworkedVictimCarryRootValid = false;
             }
         }
         else
         {
             NetworkedVictimAnchorValid = false;
             NetworkedVictimRootOffsetValid = false;
+            NetworkedVictimCarryRootValid = false;
             NetworkedCarrierAnchorValid = false;
         }
 
@@ -272,19 +284,25 @@ public sealed partial class NetworkPlayer
             var victimRootOffsetDetails = (bool)NetworkedVictimRootOffsetValid
                 ? $" victimRootOffset={FormatCarryDebugVector(NetworkedVictimRootOffset)}"
                 : string.Empty;
+            var victimCarryRootDetails = (bool)NetworkedVictimCarryRootValid
+                ? $" victimCarryRoot={FormatCarryDebugVector(NetworkedVictimCarryRootPosition)}"
+                : string.Empty;
             var carrierAnchorDetails = (bool)NetworkedCarrierAnchorValid
                 ? $" carrierAnchor={FormatCarryDebugVector(NetworkedCarrierAnchorPosition)}"
                 : string.Empty;
             TraceCarryDebugSample(
                 "PublishCarryState",
+                $"phase={GetPhysicalPhase()} hipsNet={FormatCarryDebugVector(NetworkedHipsPosition)} hipsUpdated={hipsUpdatedThisFrame} " +
                 $"holdVariant={currentHoldVariant} " +
                 $"victimAnchorValid={(bool)NetworkedVictimAnchorValid} " +
                 $"victimRootOffsetValid={(bool)NetworkedVictimRootOffsetValid} " +
+                $"victimCarryRootValid={(bool)NetworkedVictimCarryRootValid} " +
                 $"carrierAnchorValid={(bool)NetworkedCarrierAnchorValid}" +
                 victimAnchorDetails +
                 victimRootOffsetDetails +
+                victimCarryRootDetails +
                 carrierAnchorDetails,
-                forceSample: false);
+                forceSample: _localCarryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim);
         }
 
         if (characterGrabController != null)

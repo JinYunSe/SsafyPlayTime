@@ -493,6 +493,7 @@ public class HandGrabHandler : MonoBehaviour
 
         // 반대 손이 기절자를 잡고 있으면 같은 캐릭터의 다른 부위에 보너스 부여
         Transform otherHandStunnedRoot = GetOtherHandStunnedTargetRoot();
+        var otherHandStunnedAnchorId = GetOtherHandStunnedAnchorId();
 
         // --- GrabHurtbox 레이어 우선 스캔 (앵커 기반 정밀 잡기) ---
         if (_grabHurtboxLayerMask != 0)
@@ -534,7 +535,17 @@ public class HandGrabHandler : MonoBehaviour
                 // 앵커 우선순위 가중치
                 score += anchor.GrabPriority * 0.15f;
                 if (isStunnedTarget) score += 0.3f;
-                if (otherHandStunnedRoot != null && rb.transform.root == otherHandStunnedRoot) score += 0.5f;
+                if (otherHandStunnedRoot != null && rb.transform.root == otherHandStunnedRoot)
+                {
+                    score += 0.5f;
+                    if (otherHandStunnedAnchorId != GrabAnchorPoint.AnchorId.None)
+                    {
+                        if (anchor.Id == otherHandStunnedAnchorId)
+                            score -= 0.85f;
+                        else if (anchor.Id != GrabAnchorPoint.AnchorId.Head)
+                            score += 0.12f;
+                    }
+                }
 
                 if (score > bestScore)
                 {
@@ -1011,12 +1022,11 @@ public class HandGrabHandler : MonoBehaviour
         if (targetPlayer == null)
             return;
 
-        var carryRig = targetPlayer.GetCarryRig();
-        if (carryRig != null)
+        if (_attachedAnchorPoint != null && _attachedAnchorPoint.ParentBoneRigidbody != null)
         {
-            carryRig.UpdateVictimAnchor();
-            if (carryRig.TryGetVictimSupportFrameWorld(out var carryAnchorPos, out _))
-                jointAnchorWorld = carryAnchorPos;
+            jointTargetRb = _attachedAnchorPoint.ParentBoneRigidbody;
+            jointAnchorWorld = _attachedAnchorPoint.GetGripWorldPosition();
+            return;
         }
 
         var puppet = targetPlayer.GetComponentInChildren<PuppetMaster>(true);
@@ -1032,9 +1042,7 @@ public class HandGrabHandler : MonoBehaviour
             return;
 
         jointTargetRb = hipsBody;
-
-        if (carryRig == null)
-            jointAnchorWorld = hipsBody.worldCenterOfMass;
+        jointAnchorWorld = hipsBody.worldCenterOfMass;
 
         if (debugLog)
         {
@@ -1395,6 +1403,25 @@ public class HandGrabHandler : MonoBehaviour
                 return h.GrabTargetRoot;
         }
         return null;
+    }
+
+    private GrabAnchorPoint.AnchorId GetOtherHandStunnedAnchorId()
+    {
+        if (networkPlayer == null)
+            return GrabAnchorPoint.AnchorId.None;
+
+        var handlers = networkPlayer.GetComponentsInChildren<HandGrabHandler>(true);
+        foreach (var h in handlers)
+        {
+            if (h == null || h == this || !h.IsHoldingStunnedPlayer)
+                continue;
+
+            return h.AttachedAnchorPoint != null
+                ? h.AttachedAnchorPoint.Id
+                : GrabAnchorPoint.AnchorId.None;
+        }
+
+        return GrabAnchorPoint.AnchorId.None;
     }
 
     // =========================================================
