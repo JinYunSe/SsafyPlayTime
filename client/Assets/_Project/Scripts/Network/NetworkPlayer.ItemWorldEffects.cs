@@ -1526,7 +1526,6 @@ public sealed partial class NetworkPlayer
             _replicatedFlamethrowerFxRoot.transform.localScale = Vector3.one * Mathf.Max(0.01f, flamethrowerVisualScale);
             DisableColliders(_replicatedFlamethrowerFxRoot);
             DisableBehaviours(_replicatedFlamethrowerFxRoot);
-            ItemVisualCompatibilityUtility.ApplyUrpMaterialFallback(_replicatedFlamethrowerFxRoot);
             _replicatedFlamethrowerParticles = _replicatedFlamethrowerFxRoot.GetComponentsInChildren<ParticleSystem>(true);
             ConfigureReplicatedFlamethrowerParticles();
             ItemRuntimeLog.Info(ItemIds.Flamethrower, $"Replicated flamethrower effect prefab used: {prefab.name}", this);
