@@ -53,6 +53,10 @@ public sealed partial class NetworkPlayer
         if (!TryPrepareItemInteractionService(out var runtimeHost) || runtimeHost == null)
             return;
 
+        if (isHoldingPrimaryUse)
+        {
+            Debug.Log($"[Flamethrower] Firing state sent to host: {isHoldingPrimaryUse}");
+        }
         runtimeHost.TrySetFlamethrowerActive(isHoldingPrimaryUse, out _);
     }
 
@@ -381,7 +385,7 @@ public sealed partial class NetworkPlayer
 
         // OwnerProxy prediction: reflect local grab instantly, then roll back if not confirmed.
         bool localPredicting = HasInputAuthority && !HasStateAuthority
-            && ((_leftMouseDown && _leftMouseConsumedAsGrab) || (_rightMouseDown && _rightMouseConsumedAsGrab));
+            && (_leftMouseDown && _leftMouseConsumedAsGrab);
 
         bool showGrab;
         if (localPredicting && !confirmedHolding)
