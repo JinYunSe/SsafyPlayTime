@@ -1400,6 +1400,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         }
         _heldItemPresenter.SetRuntimeHost(runtimeHost);
         _heldItemPresenter.SetCharacterRoot(transform);
+        _heldItemPresenter.SetHandAnchor(ResolveHeldItemHandAnchor());
 
         var buffApplier = GetComponent<ItemCharacterBuffApplier>();
         if (buffApplier == null)
@@ -1429,6 +1430,31 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         // 플레이어 아이템 상태는 캐릭터별로 분리되어야 하므로 공용 루트 host를 fallback으로 쓰지 않는다.
         return null;
+    }
+
+    private Transform ResolveHeldItemHandAnchor()
+    {
+        if (animator != null)
+        {
+            var rightHandBone = animator.GetBoneTransform(HumanBodyBones.RightHand);
+            if (rightHandBone != null)
+                return rightHandBone;
+        }
+
+        if (_handGrabHandlers != null)
+        {
+            for (var i = 0; i < _handGrabHandlers.Length; i++)
+            {
+                var handler = _handGrabHandlers[i];
+                if (handler != null && handler.Side == HandGrabHandler.HandSide.Right)
+                    return handler.transform;
+            }
+        }
+
+        if (holdPoint != null)
+            return holdPoint;
+
+        return transform;
     }
 
     private void RefreshRuntimeIntegrationIfNeeded()
