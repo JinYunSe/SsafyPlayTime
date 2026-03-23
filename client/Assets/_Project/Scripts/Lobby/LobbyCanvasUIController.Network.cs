@@ -761,7 +761,7 @@ namespace SSAFYPlayTime
                 CameraYaw = _netCameraYaw,
                 Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
                 Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
-                PrimaryUseHold = _netLeftMouseDown,
+                PrimaryUseHold = _netLeftMouseDown, // 화염방사기 등 연속 사용 아이템용
                 Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
                 Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
                 LeftGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab,
