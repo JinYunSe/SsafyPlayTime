@@ -16,6 +16,7 @@ public sealed partial class NetworkPlayer
         var dropRequested = input.Drop || _dropTriggered;
         var throwRequested = input.Throw || _throwTriggered;
         var anyHolding = IsAnyHandHoldingObject();
+        var hasHeldRuntimeItem = HasHeldRuntimeItem();
         var isHoldingFlamethrower = IsHoldingRuntimeItem(ItemIds.Flamethrower);
 
         if (isHoldingFlamethrower)
@@ -28,10 +29,17 @@ public sealed partial class NetworkPlayer
             }
         }
 
-        if (!isHoldingFlamethrower && input.Punch && (HasHeldRuntimeItem() || !_isGrabActive))
+        if (hasHeldRuntimeItem)
+        {
+            _isLeftGrabActive = false;
+            _isRightGrabActive = false;
+            _isGrabActive = false;
+        }
+
+        if (!isHoldingFlamethrower && input.Punch && (hasHeldRuntimeItem || !_isGrabActive))
             TryProcessPrimaryAction(anyHolding);
 
-        if (!isHoldingFlamethrower && _isGrabActive)
+        if (!isHoldingFlamethrower && !hasHeldRuntimeItem && _isGrabActive)
             TryProcessGrab();
 
         if (dropRequested)
@@ -148,10 +156,7 @@ public sealed partial class NetworkPlayer
         if (anyHolding)
         {
             TryProcessThrow();
-            return;
         }
-
-        TryPickupNearestFieldItemByKey();
     }
 
     private void ResetInteractionTriggers()
@@ -358,6 +363,7 @@ public sealed partial class NetworkPlayer
         if (!_itemFieldInteractionService.TryUseHeldItem(out _, out _, out _))
             return false;
 
+        RefreshHeldItemPresentationImmediate();
         BroadcastItemUsed(itemIdBeforeUse);
         return true;
     }
@@ -413,7 +419,11 @@ public sealed partial class NetworkPlayer
         if (!_itemFieldInteractionService.TryDropHeldItem(out var droppedItemId, out var dropSpawnPosition, out _))
             return false;
 
-        return TrySpawnNetworkedFieldDrop(droppedItemId, dropSpawnPosition, runtimeHost, false, out _);
+        if (!TrySpawnNetworkedFieldDrop(droppedItemId, dropSpawnPosition, runtimeHost, false, out _))
+            return false;
+
+        RefreshHeldItemPresentationImmediate();
+        return true;
     }
 
     /// <summary>
@@ -440,5 +450,11 @@ public sealed partial class NetworkPlayer
         _itemFieldInteractionService.SetRuntimeHost(runtimeHost);
         _itemFieldInteractionService.SetOwnerTransform(transform);
         return true;
+    }
+
+    internal void RefreshHeldItemPresentationImmediate()
+    {
+        SyncHeldItemNetworkState();
+        ApplyReplicatedHeldItemPresentation();
     }
 }
