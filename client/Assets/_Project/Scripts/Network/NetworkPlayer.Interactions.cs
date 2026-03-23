@@ -18,6 +18,7 @@ public sealed partial class NetworkPlayer
         var dropRequested = input.Drop || _dropTriggered;
         var throwRequested = input.Throw || _throwTriggered;
         var anyHolding = IsAnyHandHoldingObject();
+        var hasHeldRuntimeItem = HasHeldRuntimeItem();
         var isHoldingFlamethrower = IsHoldingRuntimeItem(ItemIds.Flamethrower);
 
         if (isHoldingFlamethrower)
@@ -30,7 +31,14 @@ public sealed partial class NetworkPlayer
             }
         }
 
-        if (!isHoldingFlamethrower && input.Punch && (HasHeldRuntimeItem() || !_isGrabActive))
+        if (hasHeldRuntimeItem)
+        {
+            _isLeftGrabActive = false;
+            _isRightGrabActive = false;
+            _isGrabActive = false;
+        }
+
+        if (!isHoldingFlamethrower && input.Punch && (hasHeldRuntimeItem || !_isGrabActive))
             TryProcessPrimaryAction(anyHolding);
 
         var shouldProcessGrab = !isHoldingFlamethrower &&
@@ -164,7 +172,6 @@ public sealed partial class NetworkPlayer
         if (anyHolding)
         {
             TryProcessThrow();
-            return;
         }
 
         if (TryProcessAerialKick())
