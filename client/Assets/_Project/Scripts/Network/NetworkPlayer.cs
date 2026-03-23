@@ -1355,7 +1355,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     {
         return GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing ||
                UsesPhysicsPosePresentation(GetPhysicalPhase()) ||
-               IsRemotePhysicsPresentationResetLocked();
+               (IsRemotePhysicsPresentationResetLocked() && !ShouldSuppressRemoteRecoveryPresentationReset());
     }
 
     internal bool ShouldUseHardPhysicsPresentation()
@@ -1363,7 +1363,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (!ShouldUsePhysicalPhasePresentation())
             return false;
 
-        if (IsRemotePhysicsPresentationResetLocked())
+        if (IsRemotePhysicsPresentationResetLocked() && !ShouldSuppressRemoteRecoveryPresentationReset())
             return true;
 
         if (GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing)
@@ -1388,6 +1388,22 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
                phase == PhysicalPhase.StunnedCollapse ||
                phase == PhysicalPhase.Stunned ||
                phase == PhysicalPhase.BeingCarriedStunned;
+    }
+
+    internal bool IsRemoteRecoveryPresentationResetWindowActive()
+    {
+        return !HasStateAuthority &&
+               IsRemotePhysicsPresentationResetLocked() &&
+               ShouldSuppressRemoteRecoveryPresentationReset();
+    }
+
+    private bool ShouldSuppressRemoteRecoveryPresentationReset()
+    {
+        if (HasStateAuthority || !IsRemotePhysicsPresentationResetLocked())
+            return false;
+
+        return GetPhysicalPhase() == PhysicalPhase.Stable &&
+               GetStunPresentationPhase() == StunPresentationPhase.Active;
     }
 
     internal bool ShouldUsePhysicsPosePresentation()
