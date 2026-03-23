@@ -100,8 +100,8 @@ public sealed partial class NetworkPlayer
             }
         }
 
-        TryAddUpperBodySwayBinding(HumanBodyBones.Neck, 0.38f, physicsByName);
-        TryAddUpperBodySwayBinding(HumanBodyBones.Head, 0.46f, physicsByName);
+        TryAddUpperBodySwayBinding(HumanBodyBones.Neck, 0.58f, physicsByName, "Neck", "Head", "Spine1");
+        TryAddUpperBodySwayBinding(HumanBodyBones.Head, 0.68f, physicsByName, "Head");
         TryAddUpperBodySwayBinding(HumanBodyBones.Chest, 0.12f, physicsByName);
         TryAddUpperBodySwayBinding(HumanBodyBones.LeftUpperArm, 0.42f, physicsByName);
         TryAddUpperBodySwayBinding(HumanBodyBones.LeftLowerArm, 0.52f, physicsByName);
@@ -114,7 +114,8 @@ public sealed partial class NetworkPlayer
     private void TryAddUpperBodySwayBinding(
         HumanBodyBones bone,
         float blendWeight,
-        Dictionary<string, Transform> physicsByName)
+        Dictionary<string, Transform> physicsByName,
+        params string[] physicsCandidates)
     {
         if (animator == null || !animator.isHuman)
             return;
@@ -123,7 +124,26 @@ public sealed partial class NetworkPlayer
         if (visual == null)
             return;
 
-        if (!physicsByName.TryGetValue(visual.name, out var physics) || physics == null || physics == visual)
+        Transform physics = null;
+
+        if (physicsCandidates != null && physicsCandidates.Length > 0)
+        {
+            for (var i = 0; i < physicsCandidates.Length; i++)
+            {
+                var candidate = physicsCandidates[i];
+                if (string.IsNullOrWhiteSpace(candidate))
+                    continue;
+
+                if (physicsByName.TryGetValue(candidate, out physics) && physics != null)
+                    break;
+            }
+        }
+        else
+        {
+            physicsByName.TryGetValue(visual.name, out physics);
+        }
+
+        if (physics == null || physics == visual)
             return;
 
         _upperBodySwayBindings.Add(new UpperBodySwayBinding

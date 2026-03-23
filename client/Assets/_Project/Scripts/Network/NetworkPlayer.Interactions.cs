@@ -9,6 +9,8 @@ public sealed partial class NetworkPlayer
         if (_handGrabHandlers == null || !_isActiveRagdoll)
             return;
 
+        characterGrabController?.RefreshNow();
+
         // Block combat actions while the recovery gate is active.
         if (_isRecovering)
             return;
@@ -39,7 +41,9 @@ public sealed partial class NetworkPlayer
         if (!isHoldingFlamethrower && input.Punch && (hasHeldRuntimeItem || !_isGrabActive))
             TryProcessPrimaryAction(anyHolding);
 
-        if (!isHoldingFlamethrower && !hasHeldRuntimeItem && _isGrabActive)
+        var shouldProcessGrab = !isHoldingFlamethrower &&
+            (characterGrabController != null ? characterGrabController.ShouldProcessGrabLoop() : _isGrabActive);
+        if (shouldProcessGrab)
             TryProcessGrab();
 
         if (dropRequested)
@@ -57,10 +61,6 @@ public sealed partial class NetworkPlayer
         if (!TryPrepareItemInteractionService(out var runtimeHost) || runtimeHost == null)
             return;
 
-        if (isHoldingPrimaryUse)
-        {
-            Debug.Log($"[Flamethrower] Firing state sent to host: {isHoldingPrimaryUse}");
-        }
         runtimeHost.TrySetFlamethrowerActive(isHoldingPrimaryUse, out _);
     }
 
@@ -72,6 +72,12 @@ public sealed partial class NetworkPlayer
     {
         get
         {
+            if (characterGrabController != null)
+            {
+                characterGrabController.RefreshNow();
+                return characterGrabController.HasAnyHold();
+            }
+
             if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
                 return NetworkedLeftGrabHolding || NetworkedRightGrabHolding;
             return IsAnyHandHoldingObject();
@@ -80,6 +86,12 @@ public sealed partial class NetworkPlayer
 
     private bool IsAnyHandHoldingObject()
     {
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            return characterGrabController.HasAnyHold();
+        }
+
         foreach (var handler in _handGrabHandlers)
         {
             if (handler.IsHolding)
@@ -112,10 +124,10 @@ public sealed partial class NetworkPlayer
     {
         foreach (var handler in _handGrabHandlers)
         {
-            if (handler.IsHolding)
-                continue;
-
-            if (!IsHandGrabActive(handler.Side))
+            var shouldAttemptGrab = characterGrabController != null
+                ? characterGrabController.ShouldAttemptGrab(handler)
+                : !handler.IsHolding && IsHandGrabActive(handler.Side);
+            if (!shouldAttemptGrab)
                 continue;
 
             handler.TryGrab();
@@ -161,6 +173,37 @@ public sealed partial class NetworkPlayer
         {
             TryProcessThrow();
         }
+
+        if (TryProcessAerialKick())
+            return;
+
+        if (TryPickupNearestFieldItemByKey())
+            return;
+
+        TryProcessKick();
+    }
+
+    private void TryProcessKick()
+    {
+        var isLeft = _hostNextKickLeft;
+        if (!TryBeginKickHitDetection(isLeft))
+            return;
+
+        _hostNextKickLeft = !_hostNextKickLeft;
+        var kickEvent = isLeft ? AnimationEventType.KickLeft : AnimationEventType.KickRight;
+        RaiseAnimationEvent(kickEvent, H_Punch);
+    }
+
+    private bool TryProcessAerialKick()
+    {
+        if (_isGrounded)
+            return false;
+
+        if (!TryBeginAerialKickHitDetection())
+            return false;
+
+        RaiseAnimationEvent(AnimationEventType.AerialKick, H_Punch);
+        return true;
     }
 
     private void ResetInteractionTriggers()
@@ -171,6 +214,12 @@ public sealed partial class NetworkPlayer
 
     private bool IsAnyHandHoldingThrowableTarget()
     {
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            return characterGrabController.HasThrowableHold();
+        }
+
         foreach (var handler in _handGrabHandlers)
         {
             if (handler != null && handler.IsHoldingThrowableTarget)
@@ -188,6 +237,12 @@ public sealed partial class NetworkPlayer
     {
         get
         {
+            if (characterGrabController != null)
+            {
+                characterGrabController.RefreshNow();
+                return characterGrabController.HasAnyStunnedHold();
+            }
+
             if (_handGrabHandlers != null)
             {
                 foreach (var h in _handGrabHandlers)
@@ -207,10 +262,16 @@ public sealed partial class NetworkPlayer
 
     /// <summary>
     /// Returns whether the requested hand is holding something.
-    /// StateAuthority uses local hand state and proxies use replicated confirmation flags.
+    /// StateAuthority uses local hand state, while proxies read the authoritative
+    /// LeftGrabConfirmed / RightGrabConfirmed checkpoints directly.
     /// </summary>
     internal bool IsHandHoldingNetworked(HandGrabHandler.HandSide side)
     {
+        if (IsNetworkReady && !HasStateAuthority)
+            return side == HandGrabHandler.HandSide.Left
+                ? (bool)LeftGrabConfirmed
+                : (bool)RightGrabConfirmed;
+
         if (HasStateAuthority)
         {
             if (_handGrabHandlers == null) return false;
@@ -223,9 +284,13 @@ public sealed partial class NetworkPlayer
             return false;
         }
 
-        return side == HandGrabHandler.HandSide.Left
-            ? (bool)LeftGrabConfirmed
-            : (bool)RightGrabConfirmed;
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            return characterGrabController.IsHandHolding(side);
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -236,6 +301,12 @@ public sealed partial class NetworkPlayer
     {
         get
         {
+            if (characterGrabController != null)
+            {
+                characterGrabController.RefreshNow();
+                return characterGrabController.IsDualHandHoldingSameStunnedTarget();
+            }
+
             if (HasStateAuthority)
             {
                 if (_handGrabHandlers == null || _handGrabHandlers.Length < 2)
@@ -271,8 +342,16 @@ public sealed partial class NetworkPlayer
         var phase = GetPhysicalPhase();
         var isCarrying = (phase == PhysicalPhase.Holding && IsAnyHandHoldingThrowableTarget())
             || phase == PhysicalPhase.CarryingStunned;
-        var isWeaponEquipped = phase == PhysicalPhase.WeaponEquipped;
         var isGrabbing = (phase == PhysicalPhase.GrabIntent || phase == PhysicalPhase.Holding || phase == PhysicalPhase.CarryingStunned) && !isCarrying;
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            isCarrying = characterGrabController.ShouldUseCarryPresentation;
+            isGrabbing = characterGrabController.ShouldUseGrabPresentation &&
+                         !UsesPhysicsPosePresentation(phase);
+        }
+
+        var isWeaponEquipped = phase == PhysicalPhase.WeaponEquipped;
 
         animator.SetBool(H_IsGrabbing, isGrabbing || isWeaponEquipped);
         animator.SetBool("isCarrying", isCarrying);
@@ -296,11 +375,20 @@ public sealed partial class NetworkPlayer
         if (animator == null) return;
 
         var phase = GetPhysicalPhase();
-        bool confirmedHolding = phase == PhysicalPhase.Holding;
+        var confirmedHolding = phase == PhysicalPhase.Holding;
+        var showGrabFromState = phase == PhysicalPhase.GrabIntent || confirmedHolding;
+        var isCarrying = confirmedHolding && IsConfirmedGrabTargetStunned();
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            confirmedHolding = characterGrabController.ShouldLockFacingToHoldTarget;
+            showGrabFromState = characterGrabController.ShouldPreserveGrabPose;
+            isCarrying = characterGrabController.ShouldUseCarryPresentation;
+        }
 
         // OwnerProxy prediction: reflect local grab instantly, then roll back if not confirmed.
         bool localPredicting = HasInputAuthority && !HasStateAuthority
-            && (_leftMouseDown && _leftMouseConsumedAsGrab);
+            && ((_leftMouseDown && _leftMouseConsumedAsGrab) || (_rightMouseDown && _rightMouseConsumedAsGrab));
 
         bool showGrab;
         if (localPredicting && !confirmedHolding)
@@ -313,11 +401,9 @@ public sealed partial class NetworkPlayer
         else
         {
             _grabPredictionStart = -1f;
-            showGrab = phase == PhysicalPhase.GrabIntent || confirmedHolding || localPredicting;
+            showGrab = showGrabFromState || localPredicting;
         }
 
-        // Carry if the confirmed grab target is stunned.
-        bool isCarrying = confirmedHolding && IsConfirmedGrabTargetStunned();
         bool isGrabbing = showGrab && !isCarrying && !UsesPhysicsPosePresentation(phase);
 
         animator.SetBool(H_IsGrabbing, isGrabbing);
