@@ -1,4 +1,5 @@
 using Fusion;
+using RootMotion.Dynamics;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Game.GhostThrow
@@ -56,6 +57,9 @@ namespace SSAFYPlayTime.Game.GhostThrow
             {
                 // 충분히 긴 최대 수명 (착지 후 LifeTimer 재설정)
                 LifeTimer = TickTimer.CreateFromSeconds(Runner, lifeAfterLanding + 30f);
+
+                if (_rb != null)
+                    _rb.interpolation = RigidbodyInterpolation.Interpolate;
 
                 // StateAuthority(호스트)만 Rigidbody 초기 속도를 적용해 물리 시뮬레이션을 실행.
                 // NetworkTransform이 매 틱마다 위치를 클라이언트에 동기화한다.
@@ -173,9 +177,20 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
             _isConsumed = true;
 
-            Rigidbody playerRb = networkPlayer != null
-                ? networkPlayer.transform.root.GetComponent<Rigidbody>()
-                : playerObj.GetComponentInParent<Rigidbody>();
+            // root rigidbody가 kinematic일 수 있으므로(회복 구간 등) PuppetMaster hips muscle을 우선 타겟으로 사용
+            Rigidbody playerRb = null;
+            if (networkPlayer != null)
+            {
+                var puppet = networkPlayer.GetComponentInChildren<RootMotion.Dynamics.PuppetMaster>(true);
+                if (puppet != null && puppet.muscles != null && puppet.muscles.Length > 0 &&
+                    puppet.muscles[0].joint != null)
+                    playerRb = puppet.muscles[0].joint.GetComponent<Rigidbody>();
+                playerRb ??= networkPlayer.transform.root.GetComponent<Rigidbody>();
+            }
+            else
+            {
+                playerRb = playerObj.GetComponentInParent<Rigidbody>();
+            }
             if (playerRb != null && !playerRb.isKinematic)
             {
                 Vector3 randomHorizontal = new Vector3(

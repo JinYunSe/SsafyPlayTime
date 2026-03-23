@@ -138,11 +138,15 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
 
             var now = _bridge.Now;
-            var maxUseSec = def.Master.MaxActiveUseSec > 0f ? def.Master.MaxActiveUseSec : 5f;
-            _equipmentEndAt = now + maxUseSec;
+            if (_remainingFlamethrowerUseSec < 0f)
+            {
+                _remainingFlamethrowerUseSec = def.Master.MaxActiveUseSec > 0f ? def.Master.MaxActiveUseSec : 5f;
+            }
+
+            _equipmentEndAt = now + _remainingFlamethrowerUseSec;
             _nextFlamethrowerTickAt = now;
             _isFlamethrowerActive = true;
-            ItemRuntimeLog.Info(def.Master.ItemId, $"화염방사기 시작: now={now:0.00}, endAt={_equipmentEndAt:0.00}");
+            ItemRuntimeLog.Info(def.Master.ItemId, $"화염방사기 시작: now={now:0.00}, endAt={_equipmentEndAt:0.00}, remaining={_remainingFlamethrowerUseSec:0.00}");
             _bridge.OnFlamethrowerStart(def.Master.ItemId, _equipmentEndAt);
         }
 
@@ -170,15 +174,17 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
-            if (now >= _equipmentEndAt)
+            if (!_catalog.TryGetDefinition(ItemIds.Flamethrower, out var flameDef))
             {
                 StopFlamethrowerIfNeeded();
                 return;
             }
 
-            if (!_catalog.TryGetDefinition(ItemIds.Flamethrower, out var flameDef))
+            if (now >= _equipmentEndAt)
             {
                 StopFlamethrowerIfNeeded();
+                _remainingFlamethrowerUseSec = 0f;
+                ConsumeHeldItem(flameDef);
                 return;
             }
 
@@ -210,10 +216,11 @@ namespace SSAFYPlayTime.Gameplay.Items
                 return;
             }
 
+            _remainingFlamethrowerUseSec = Mathf.Max(0f, _equipmentEndAt - _bridge.Now);
             _isFlamethrowerActive = false;
             _equipmentEndAt = 0f;
             _nextFlamethrowerTickAt = 0f;
-            ItemRuntimeLog.Info(ItemIds.Flamethrower, "화염방사기 종료 확정");
+            ItemRuntimeLog.Info(ItemIds.Flamethrower, $"화염방사기 종료 확정 (남은 시간: {_remainingFlamethrowerUseSec:0.00}s)");
             _bridge.OnFlamethrowerStop(ItemIds.Flamethrower);
         }
 
