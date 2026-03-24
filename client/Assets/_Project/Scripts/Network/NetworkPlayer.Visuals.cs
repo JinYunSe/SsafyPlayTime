@@ -173,11 +173,18 @@ public sealed partial class NetworkPlayer
         if (!ShouldUseHardPhysicsPresentation())
             return false;
 
-        // BeingCarriedStunned는 제외: carry 중 PuppetMaster를 Active로 유지해야
-        // Map()이 실행되어 targetRoot가 운반 위치로 업데이트된다.
-        // Disabled로 전환하면 grab joint가 kinematic 근육에 힘을 줄 수 없어
-        // 운반 자체가 동작하지 않고 놓을 때 구 위치로 스냅백이 발생한다.
-        return GetPhysicalPhase() != PhysicalPhase.BeingCarriedStunned;
+        // Carry keeps the animated visual rig visible and blends only key bones toward physics.
+        if (GetPhysicalPhase() == PhysicalPhase.BeingCarriedStunned)
+            return false;
+
+        // 비호스트 RecoverStabilizing: SetStunVisualMode(false)가 이미 애니메이션 메시를
+        // 복원했으므로 하드 물리 본 복사를 끄지 않으면 래그돌 포즈가 일어서기 애니메이션을 덮어쓴다.
+        // 호스트는 stabilization 완료까지 물리 비주얼을 유지해야 하므로 호스트만 true.
+        if (!HasStateAuthority &&
+            GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing)
+            return false;
+
+        return true;
     }
 
     private void TickVisualPoseBlendWeights()
@@ -512,6 +519,13 @@ public sealed partial class NetworkPlayer
     /// </summary>
     public void SetAnchorGrabBoneBlend(SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId anchorId, float weight = 0.75f)
     {
+        if (_physicsPoseBindings.Count == 0)
+        {
+            var presentationRoot = GetPresentationRootTransform();
+            if (presentationRoot != null)
+                EnsurePhysicsPoseBindings(presentationRoot);
+        }
+
         if (_physicsPoseBindings.Count == 0) return;
 
         var boneNames = ResolveAnchorBoneNames(anchorId);
@@ -546,6 +560,13 @@ public sealed partial class NetworkPlayer
     /// </summary>
     public void ClearAnchorGrabBoneBlend(SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId anchorId)
     {
+        if (_physicsPoseBindings.Count == 0)
+        {
+            var presentationRoot = GetPresentationRootTransform();
+            if (presentationRoot != null)
+                EnsurePhysicsPoseBindings(presentationRoot);
+        }
+
         if (_physicsPoseBindings.Count == 0) return;
 
         var boneNames = ResolveAnchorBoneNames(anchorId);

@@ -233,6 +233,8 @@ public sealed partial class NetworkPlayer
         SetStunTimeRemaining(0f);
         SetAccumulatedStun(0f);
         ClearPunchHitDetectionWindow();
+        ClearKickHitDetectionWindow();
+        ClearAerialKickHitDetectionWindow();
         _localMoveSpeed = 0f;
         _localPresentationLocomotionState = PresentationLocomotionState.Idle;
 

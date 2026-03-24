@@ -27,10 +27,10 @@ MonoBehaviour:
     lateralClamp: 0.3
     anchorBlend: 0.5
   overheadCarry:
-    sideOffset: 0.08
-    forwardOffset: 0.1
-    heightOffset: 1.25
-    verticalClamp: 0.3
+    sideOffset: 0.1
+    forwardOffset: 0.22
+    heightOffset: 1.08
+    verticalClamp: 0.26
     lateralClamp: 0.2
     anchorBlend: 0.3
   twoHandWeapon:
@@ -40,5 +40,5 @@ MonoBehaviour:
     verticalClamp: 0.4
     lateralClamp: 0.3
     anchorBlend: 0.5
-  overheadLiftForce: 60
+  overheadLiftForce: 38
   overheadBlendSpeed: 4
