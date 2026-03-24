@@ -9,6 +9,7 @@ public sealed partial class NetworkPlayer
         if (_handGrabHandlers == null || !_isActiveRagdoll)
             return;
 
+        var runtimeHost = ResolveCurrentRuntimeHost();
         characterGrabController?.RefreshNow();
 
         // Block combat actions while the recovery gate is active.
@@ -18,8 +19,34 @@ public sealed partial class NetworkPlayer
         var dropRequested = input.Drop || _dropTriggered;
         var throwRequested = input.Throw || _throwTriggered;
         var anyHolding = IsAnyHandHoldingObject();
-        var hasHeldRuntimeItem = HasHeldRuntimeItem();
-        var isHoldingFlamethrower = IsHoldingRuntimeItem(ItemIds.Flamethrower);
+        var hasHeldRuntimeItem = HasHeldRuntimeItem(runtimeHost);
+        var isHoldingFlamethrower = IsHoldingRuntimeItem(ItemIds.Flamethrower, runtimeHost);
+        var isGrabTemporarilyDisabled = Time.time < _grabDisabledUntilTime;
+
+        if (hasHeldRuntimeItem)
+        {
+            _isLeftGrabActive = false;
+            _isRightGrabActive = false;
+            _isGrabActive = false;
+
+            if (input.PrimaryUseHold && throwRequested)
+                TryThrowHeldItem();
+            else if (dropRequested)
+                TryProcessDrop();
+
+            if (isHoldingFlamethrower)
+            {
+                ProcessFlamethrowerPrimaryHold(input.PrimaryUseHold);
+            }
+            else if (input.Punch)
+            {
+                TryUseHeldItemByPrimaryClick();
+            }
+
+            ResetInteractionTriggers();
+            UpdateGrabbingAnimatorFlag();
+            return;
+        }
 
         if (isHoldingFlamethrower)
         {
@@ -31,17 +58,11 @@ public sealed partial class NetworkPlayer
             }
         }
 
-        if (hasHeldRuntimeItem)
-        {
-            _isLeftGrabActive = false;
-            _isRightGrabActive = false;
-            _isGrabActive = false;
-        }
-
-        if (!isHoldingFlamethrower && input.Punch && (hasHeldRuntimeItem || !_isGrabActive))
+        if (!isHoldingFlamethrower && input.Punch && !_isGrabActive)
             TryProcessPrimaryAction(anyHolding);
 
-        var shouldProcessGrab = !isHoldingFlamethrower &&
+        var shouldProcessGrab = !isGrabTemporarilyDisabled &&
+            !isHoldingFlamethrower &&
             (characterGrabController != null ? characterGrabController.ShouldProcessGrabLoop() : _isGrabActive);
         if (shouldProcessGrab)
             TryProcessGrab();
@@ -58,7 +79,8 @@ public sealed partial class NetworkPlayer
 
     private void ProcessFlamethrowerPrimaryHold(bool isHoldingPrimaryUse)
     {
-        if (!TryPrepareItemInteractionService(out var runtimeHost) || runtimeHost == null)
+        var runtimeHost = ResolveCurrentRuntimeHost();
+        if (runtimeHost == null)
             return;
 
         runtimeHost.TrySetFlamethrowerActive(isHoldingPrimaryUse, out _);
@@ -103,6 +125,12 @@ public sealed partial class NetworkPlayer
 
     private void TryProcessPrimaryAction(bool anyHolding)
     {
+        if (HasHeldRuntimeItem())
+        {
+            TryUseHeldItemByPrimaryClick();
+            return;
+        }
+
         if (!TryUseHeldItemByPrimaryClick() && !anyHolding)
         {
             // The host decides left/right punch order and records the replicated event.
@@ -151,6 +179,47 @@ public sealed partial class NetworkPlayer
             TryDropHeldItemByKey();
     }
 
+    private bool TryThrowHeldItem()
+    {
+        if (!TryPrepareItemInteractionService(out var runtimeHost))
+            return false;
+
+        if (!_itemFieldInteractionService.TryDropHeldItem(out var droppedItemId, out _, out _))
+            return false;
+
+        var handAnchor = ResolveHeldItemHandAnchor();
+        var anchorTransform = handAnchor != null ? handAnchor : transform;
+        var throwForward = anchorTransform.forward;
+        if (throwForward.sqrMagnitude < 0.0001f)
+            throwForward = transform.forward;
+
+        throwForward.y = Mathf.Max(0.1f, throwForward.y);
+        throwForward.Normalize();
+
+        var spawnPosition = anchorTransform.position + throwForward * 0.22f + Vector3.up * 0.08f;
+        if (!TrySpawnNetworkedFieldDrop(droppedItemId, spawnPosition, runtimeHost, false, out var spawnedDrop))
+            return false;
+
+        var spawnedBody = spawnedDrop != null ? spawnedDrop.GetComponent<Rigidbody>() : null;
+        if (spawnedBody != null)
+        {
+            if (spawnedBody.isKinematic)
+            {
+                spawnedBody.isKinematic = false;
+                spawnedBody.useGravity = true;
+            }
+
+            var throwVelocity = throwForward * 5.2f + Vector3.up * 1.6f;
+            spawnedBody.velocity = throwVelocity;
+            spawnedBody.angularVelocity = Vector3.zero;
+        }
+
+        BeginGrabDisableWindow();
+        RefreshHeldItemPresentationImmediate();
+        RaiseAnimationEvent(AnimationEventType.Throw, H_Throw);
+        return true;
+    }
+
     private bool TryProcessThrow()
     {
         var didThrow = false;
@@ -173,9 +242,17 @@ public sealed partial class NetworkPlayer
         }
 
         if (didThrow)
+        {
+            BeginGrabDisableWindow();
             RaiseAnimationEvent(AnimationEventType.Throw, H_Throw);
+        }
 
         return didThrow;
+    }
+
+    private void BeginGrabDisableWindow()
+    {
+        _grabDisabledUntilTime = Mathf.Max(_grabDisabledUntilTime, Time.time + 1f);
     }
 
     private static bool ShouldAllowKickFallback(bool anyHolding, bool hasHeldRuntimeItem)
@@ -197,9 +274,6 @@ public sealed partial class NetworkPlayer
             return;
 
         if (TryProcessAerialKick())
-            return;
-
-        if (TryPickupNearestFieldItemByKey())
             return;
 
         if (ShouldAllowKickFallback(anyHolding, hasHeldRuntimeItem))
@@ -469,10 +543,10 @@ public sealed partial class NetworkPlayer
 
     private bool TryUseHeldItemByPrimaryClick()
     {
-        if (!TryPrepareItemInteractionService(out _))
+        if (!TryPrepareItemInteractionService(out var runtimeHost))
             return false;
 
-        var itemIdBeforeUse = _itemRuntimeHost?.HeldItemId ?? string.Empty;
+        var itemIdBeforeUse = runtimeHost?.HeldItemId ?? string.Empty;
         if (!_itemFieldInteractionService.TryUseHeldItem(out _, out _, out _))
             return false;
 
@@ -503,14 +577,35 @@ public sealed partial class NetworkPlayer
 
     private bool HasHeldRuntimeItem()
     {
-        return _itemRuntimeHost != null && !string.IsNullOrWhiteSpace(_itemRuntimeHost.HeldItemId);
+        return HasHeldRuntimeItem(ResolveCurrentRuntimeHost());
+    }
+
+    private bool HasHeldRuntimeItem(ItemRuntimeHost runtimeHost)
+    {
+        if (runtimeHost != null && !string.IsNullOrWhiteSpace(runtimeHost.HeldItemId))
+            return true;
+
+        return !string.IsNullOrWhiteSpace(NetworkedHeldItemId.ToString()) ||
+               !string.IsNullOrWhiteSpace(_lastReplicatedHeldItemId);
     }
 
     private bool IsHoldingRuntimeItem(string itemId)
     {
-        return _itemRuntimeHost != null &&
-               !string.IsNullOrWhiteSpace(itemId) &&
-               string.Equals(_itemRuntimeHost.HeldItemId, itemId, System.StringComparison.Ordinal);
+        return IsHoldingRuntimeItem(itemId, ResolveCurrentRuntimeHost());
+    }
+
+    private bool IsHoldingRuntimeItem(string itemId, ItemRuntimeHost runtimeHost)
+    {
+        if (string.IsNullOrWhiteSpace(itemId))
+            return false;
+
+        if (runtimeHost != null &&
+            string.Equals(runtimeHost.HeldItemId, itemId, System.StringComparison.Ordinal))
+            return true;
+
+        var replicatedHeldItemId = NetworkedHeldItemId.ToString();
+        return string.Equals(replicatedHeldItemId, itemId, System.StringComparison.Ordinal) ||
+               string.Equals(_lastReplicatedHeldItemId, itemId, System.StringComparison.Ordinal);
     }
 
     private bool TryPickupNearestFieldItemByKey()
@@ -550,7 +645,13 @@ public sealed partial class NetworkPlayer
 
     private bool TryPrepareItemInteractionService(out ItemRuntimeHost runtimeHost)
     {
-        runtimeHost = ResolveItemRuntimeHostForCharacter();
+        runtimeHost = ResolveCurrentRuntimeHost();
+        if (runtimeHost == null)
+        {
+            EnsureItemRuntimeIntegration();
+            runtimeHost = ResolveCurrentRuntimeHost();
+        }
+
         if (_itemFieldInteractionService == null)
             _itemFieldInteractionService = GetComponent<ItemFieldInteractionService>();
 
@@ -563,6 +664,17 @@ public sealed partial class NetworkPlayer
         _itemFieldInteractionService.SetRuntimeHost(runtimeHost);
         _itemFieldInteractionService.SetOwnerTransform(transform);
         return true;
+    }
+
+    private ItemRuntimeHost ResolveCurrentRuntimeHost()
+    {
+        var runtimeHost = ResolveItemRuntimeHostForCharacter();
+        if (runtimeHost != null)
+        {
+            _itemRuntimeHost = runtimeHost;
+        }
+
+        return _itemRuntimeHost;
     }
 
     internal void RefreshHeldItemPresentationImmediate()

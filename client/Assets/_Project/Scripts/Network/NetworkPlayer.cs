@@ -1,4 +1,4 @@
-﻿using Fusion;
+using Fusion;
 using RootMotion.Dynamics;
 using SSAFYPlayTime.Character;
 using SSAFYPlayTime.Gameplay.Items;
@@ -1538,7 +1538,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     // 로컬 트리거
     private bool _dropTriggered;
     private bool _throwTriggered;
+    private float _grabDisabledUntilTime;
     private float _nextRuntimeIntegrationRefreshTime;
+
+    internal bool IsGrabTemporarilyDisabled => Time.time < _grabDisabledUntilTime;
 
     // 기절 애니메이션 해시
     private static readonly int H_MovementSpeed = Animator.StringToHash("movementSpeed");
