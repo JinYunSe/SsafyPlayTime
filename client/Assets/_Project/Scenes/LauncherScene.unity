@@ -3403,8 +3403,7 @@ MonoBehaviour:
   launcherSceneName: LauncherScene
   launcherBackgroundMusicClip: {fileID: 8300000, guid: d33f9694b4f88434eba4074e4f01acb7,
     type: 3}
-  gameplayBackgroundMusicClip: {fileID: 8300000, guid: 33545ad9c84e399438e9919fb694dc5b,
-    type: 3}
+  gameplayBackgroundMusicClip: {fileID: 0}
   launcherBackgroundMusicResourcePath: _Project/Sounds/title
   gameplayBackgroundMusicResourcePath: _Project/Sounds/battle
   gamePanel: {fileID: 0}
@@ -5571,7 +5570,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 0, y: 1}
-  m_AnchoredPosition: {x: 233.0445, y: -30}
+  m_AnchoredPosition: {x: 154.44449, y: -30}
   m_SizeDelta: {x: 45.089, y: 45.089}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &155310570
@@ -14829,7 +14828,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &860748353
 RectTransform:
   m_ObjectHideFlags: 0
@@ -17908,8 +17907,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 0, y: 1}
-  m_AnchoredPosition: {x: 97.75, y: -30}
-  m_SizeDelta: {x: 195.5, y: 50}
+  m_AnchoredPosition: {x: 58.449997, y: -30}
+  m_SizeDelta: {x: 116.9, y: 50}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1055428661
 MonoBehaviour:
@@ -29926,7 +29925,7 @@ RectTransform:
   m_AnchorMin: {x: 1, y: 1}
   m_AnchorMax: {x: 1, y: 1}
   m_AnchoredPosition: {x: -50, y: -50}
-  m_SizeDelta: {x: 255.58899, y: 60}
+  m_SizeDelta: {x: 176.989, y: 60}
   m_Pivot: {x: 1, y: 1}
 --- !u!114 &2071026821
 MonoBehaviour:
