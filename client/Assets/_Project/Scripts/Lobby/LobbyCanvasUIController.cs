@@ -28,6 +28,8 @@ namespace SSAFYPlayTime
         [Header("Scene Room Slots")]
         [SerializeField] private List<SceneRoomSlot> sceneRoomSlots;
 
+        [Header("Scene Direct Slots (Podium Game End)")]
+        [SerializeField] private List<SceneRoomSlot> sceneDirectSlots;
 
         private sealed class RoomSnapshot
         {
@@ -113,12 +115,18 @@ namespace SSAFYPlayTime
         [SerializeField] private GameObject hostExitNoticeModal;
         [Tooltip("HostExitNoticeModal의 확인 버튼")]
         [SerializeField] private Button hostExitNoticeCloseButton;
+        [Tooltip("순위 항목 RankingItemUI들이 배치된 부모 Transform")]
+        [SerializeField] private Transform rankingContainer;
         [Tooltip("같은 방으로 버튼")]
         [SerializeField] private Button returnToRoomButton;
         [Tooltip("처음으로 버튼")]
         [SerializeField] private Button returnToLobbyButton;
 
+        [Header("Game End 3D Podium")]
+        [SerializeField] private Transform[] podiumSlots; // 1, 2, 3, 4등이 설 자리
         private readonly List<GameObject> _spawnedGameEndCharacters = new(); // 소환된 캐릭터 기억해둘 리스트
+        [Header("3D Podium")]
+        [SerializeField] private GameObject podiumParent;
 
         [Header("Nickname")]
         [SerializeField] private TMP_InputField nicknameInput;
@@ -209,6 +217,9 @@ namespace SSAFYPlayTime
         [SerializeField] private string gameplaySceneName = string.Empty;
         [SerializeField] private string launcherSceneName = "LauncherScene";
         [SerializeField] private AudioClip launcherBackgroundMusicClip;
+        [SerializeField] private AudioClip gameplayBackgroundMusicClip;
+        [SerializeField] private string launcherBackgroundMusicResourcePath = "_Project/Sounds/title";
+        [SerializeField] private string gameplayBackgroundMusicResourcePath = "_Project/Sounds/battle";
         [Header("In-Game Panel (GameScene)")]
         [SerializeField] private GameObject gamePanel;
         [SerializeField] private Button leaveGameButton;
@@ -309,6 +320,8 @@ namespace SSAFYPlayTime
         private int _localPlayerRankForAutoJoin;
         private AudioSource _launcherBackgroundMusicSource;
         private GameAudioSource _launcherBackgroundMusicCategory;
+        private AudioClip _cachedLauncherBackgroundMusicResourceClip;
+        private AudioClip _cachedGameplayBackgroundMusicResourceClip;
 
         // MonoBehaviour 초기화. 패널·이벤트·캐릭터 슬롯을 순서대로 준비하고 닉네임 입력 화면을 표시한다.
         // 모든 UI 참조는 Inspector에서 SerializeField로 직접 할당해야 한다.
@@ -321,7 +334,7 @@ namespace SSAFYPlayTime
                 var persistent = existing.FirstOrDefault(x => x != this);
                 if (persistent != null)
                 {
-                    // podiumSlots, sceneRoomSlots는 이전하지 않는다.
+                    // podiumParent, podiumSlots, sceneRoomSlots, sceneDirectSlots는 이전하지 않는다.
                     // persistent 인스턴스의 자식(DontDestroyOnLoad)이 이미 유효한 참조를 갖고 있으므로
                     // 새 씬의 참조로 교체하면 Destroy(gameObject) 시 파괴되어 MissingReferenceException 발생.
                     persistent.characterPlacementCamera = this.characterPlacementCamera;
@@ -339,6 +352,12 @@ namespace SSAFYPlayTime
                     persistent.wiseCharacterRoot = this.wiseCharacterRoot;
                     persistent.randomCharacterRoot = this.randomCharacterRoot;
                     persistent.fallbackSpawnPoints = this.fallbackSpawnPoints;
+                    persistent.gameplaySceneName = this.gameplaySceneName;
+                    persistent.launcherSceneName = this.launcherSceneName;
+                    persistent.launcherBackgroundMusicClip = this.launcherBackgroundMusicClip;
+                    persistent.gameplayBackgroundMusicClip = this.gameplayBackgroundMusicClip;
+                    persistent.EnsureLauncherBackgroundMusic();
+                    persistent.RefreshLauncherBackgroundMusicState();
                 }
                 Destroy(gameObject);
                 return;
@@ -367,6 +386,8 @@ namespace SSAFYPlayTime
                 characterPreview.Initialize(GetNameSlots());
             }
             
+            if (podiumParent != null) podiumParent.SetActive(false);
+
             SceneManager.sceneLoaded += OnManagedSceneLoaded;
             ShowNicknamePanel();
         }
@@ -409,12 +430,80 @@ namespace SSAFYPlayTime
                 _launcherBackgroundMusicSource.volume = 1f;
 
                 _launcherBackgroundMusicCategory = sourceRoot.AddComponent<GameAudioSource>();
-                _launcherBackgroundMusicCategory.SetCategory(GameAudioCategory.BackgroundSound);
-                _launcherBackgroundMusicCategory.RefreshBaseVolumeFromCurrentSource();
+                  _launcherBackgroundMusicCategory.SetCategory(GameAudioCategory.BackgroundSound);
+                  _launcherBackgroundMusicCategory.RefreshBaseVolumeFromCurrentSource();
+              }
+
+            _launcherBackgroundMusicSource.clip = GetLauncherBackgroundMusicClip();
+            RefreshLauncherBackgroundMusicState();
+        }
+
+        private AudioClip GetLauncherBackgroundMusicClip()
+        {
+            return launcherBackgroundMusicClip != null
+                ? launcherBackgroundMusicClip
+                : LoadBackgroundMusicClipFromResources(
+                    launcherBackgroundMusicResourcePath,
+                    ref _cachedLauncherBackgroundMusicResourceClip);
+        }
+
+        private AudioClip GetGameplayBackgroundMusicClip()
+        {
+            return gameplayBackgroundMusicClip != null
+                ? gameplayBackgroundMusicClip
+                : LoadBackgroundMusicClipFromResources(
+                    gameplayBackgroundMusicResourcePath,
+                    ref _cachedGameplayBackgroundMusicResourceClip);
+        }
+
+        private static AudioClip LoadBackgroundMusicClipFromResources(string resourcePath, ref AudioClip cache)
+        {
+            if (cache != null)
+            {
+                return cache;
             }
 
-            _launcherBackgroundMusicSource.clip = launcherBackgroundMusicClip;
-            RefreshLauncherBackgroundMusicState();
+            if (string.IsNullOrWhiteSpace(resourcePath))
+            {
+                return null;
+            }
+
+            cache = Resources.Load<AudioClip>(resourcePath);
+            return cache;
+        }
+
+        private void PlayBackgroundMusicClip(AudioClip clip)
+        {
+            if (_launcherBackgroundMusicSource == null)
+            {
+                EnsureLauncherBackgroundMusic();
+                if (_launcherBackgroundMusicSource == null)
+                {
+                    return;
+                }
+            }
+
+            if (clip == null)
+            {
+                if (_launcherBackgroundMusicSource.isPlaying)
+                {
+                    _launcherBackgroundMusicSource.Stop();
+                }
+
+                _launcherBackgroundMusicSource.clip = null;
+                return;
+            }
+
+            var clipChanged = _launcherBackgroundMusicSource.clip != clip;
+            if (clipChanged)
+            {
+                _launcherBackgroundMusicSource.clip = clip;
+            }
+
+            if (clipChanged || !_launcherBackgroundMusicSource.isPlaying)
+            {
+                _launcherBackgroundMusicSource.Play();
+            }
         }
 
         private void OnManagedSceneLoaded(Scene scene, LoadSceneMode mode)
@@ -429,30 +518,15 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            var isLauncherSceneActive = string.Equals(
-                SceneManager.GetActiveScene().name,
-                launcherSceneName,
-                StringComparison.Ordinal);
+            var isGameplaySceneActive = IsActiveGameplayScene();
+            var isLauncherSceneActive = IsActiveSceneNamed(launcherSceneName);
 
-            if (!isLauncherSceneActive || launcherBackgroundMusicClip == null)
-            {
-                if (_launcherBackgroundMusicSource.isPlaying)
-                {
-                    _launcherBackgroundMusicSource.Stop();
-                }
-
-                return;
-            }
-
-            if (_launcherBackgroundMusicSource.clip != launcherBackgroundMusicClip)
-            {
-                _launcherBackgroundMusicSource.clip = launcherBackgroundMusicClip;
-            }
-
-            if (!_launcherBackgroundMusicSource.isPlaying)
-            {
-                _launcherBackgroundMusicSource.Play();
-            }
+            var targetClip = _isShowingGameEndPanel
+                ? null
+                : isGameplaySceneActive
+                ? GetGameplayBackgroundMusicClip()
+                : (isLauncherSceneActive ? GetLauncherBackgroundMusicClip() : null);
+            PlayBackgroundMusicClip(targetClip);
         }
 
         private static GameObject FindReadyBadge(TMP_Text slotText)
@@ -1137,6 +1211,47 @@ namespace SSAFYPlayTime
             _spawnedCharacterIndexByPlayerId.Clear();
         }
 
+        // GameScene에서 플레이어가 자발적으로 로비로 이동할 때 호출합니다.
+        // 로컬 캐릭터를 즉사 처리해 사망 순서를 기록한 뒤 방을 나갑니다.
+        public void LeaveGameVoluntarily()
+        {
+            // _isProcessing을 미리 세워 SceneManager.LoadScene 이후 OnShutdown/OnDisconnectedFromServer가
+            // TriggerHostExitAndReturnToLobby를 잘못 호출하는 race condition을 방지한다.
+            if (_isProcessing) return;
+            _isProcessing = true;
+
+            if (_runner != null && _runner.IsRunning)
+            {
+                foreach (var np in FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None))
+                {
+                    if (np == null || np.Object == null) continue;
+                    if (!np.HasInputAuthority) continue;
+                    np.KillImmediately("LeaveGameVoluntarily");
+                    break;
+                }
+            }
+
+            if (IsActiveGameplayScene())
+                StartCoroutine(CoLeaveGameVoluntarily());
+            else
+            {
+                _isProcessing = false;
+                OnLeaveRoomClicked();
+            }
+        }
+
+        private IEnumerator CoLeaveGameVoluntarily()
+        {
+            SceneManager.LoadScene(launcherSceneName);
+            while (!IsActiveSceneNamed(launcherSceneName))
+                yield return null;
+            ResetCharacterSlotState();
+            // 씬 전환이 완료된 시점에서는 IsActiveSceneNamed(gameplaySceneName)=false이므로
+            // OnShutdown이 TriggerHostExitAndReturnToLobby를 호출할 위험이 없다.
+            _isProcessing = false;
+            OnLeaveRoomClicked();
+        }
+
         // 방 나가기 버튼 클릭 처리. 러너를 종료하고 로비 패널로 복귀해 방 목록을 다시 불러온다.
         private async void OnLeaveRoomClicked()
         {
@@ -1216,7 +1331,9 @@ namespace SSAFYPlayTime
                 _spawnedGameEndCharacters.Clear();
 
                 if (gameEndPanel != null) gameEndPanel.SetActive(false);
+                if (podiumParent != null) podiumParent.SetActive(false);
                 HideAllCharacterSlots();
+                RefreshLauncherBackgroundMusicState();
                 ResetGameEndReturnState();
 
                 if (goToLobby)
@@ -1245,6 +1362,8 @@ namespace SSAFYPlayTime
                 _spawnedGameEndCharacters.Clear();
 
                 if (gameEndPanel != null) gameEndPanel.SetActive(false);
+                if (podiumParent != null) podiumParent.SetActive(false);
+                RefreshLauncherBackgroundMusicState();
                 _currentRoomName = string.Empty;
                 _currentRoomOwner = "-";
                 _currentOwnerPlayerId = -1;
@@ -1276,8 +1395,21 @@ namespace SSAFYPlayTime
                 _spawnedGameEndCharacters.Clear();
 
                 if (gameEndPanel != null) gameEndPanel.SetActive(false);
+                if (podiumParent != null) podiumParent.SetActive(false);
+                RefreshLauncherBackgroundMusicState();
 
-               
+                // sceneDirectSlots 캐릭터를 모두 숨긴다 (podiumParent 하위가 아닐 경우 대비).
+                if (sceneDirectSlots != null)
+                {
+                    foreach (var slot in sceneDirectSlots)
+                    {
+                        if (slot == null) continue;
+                        if (slot.questionMark != null) slot.questionMark.SetActive(false);
+                        if (slot.characterModels != null)
+                            foreach (var model in slot.characterModels)
+                                if (model != null) model.SetActive(false);
+                    }
+                }
 
                 // stale _playerIdBySlot 초기화 → UpdatePlayerSlots에서 isSamePlayer 판정 오류 방지.
                 for (int s = 0; s < _playerIdBySlot.Length; s++)
@@ -1361,6 +1493,7 @@ namespace SSAFYPlayTime
             Cursor.visible = true;
 
             _isShowingGameEndPanel = true;
+            PlayBackgroundMusicClip(null);
             _gameEndReturnTransitionStarted = false;
 
             DisplayRankings();
@@ -1428,6 +1561,12 @@ namespace SSAFYPlayTime
             _migrationReadyStateByClientId.Clear();
             _isMigrating = false;
 
+            // OnShutdown/OnDisconnectedFromServer 경로에서는 Runner가 이미 종료 중이지만,
+            // PlayerLeft 경로에서는 Runner가 아직 살아있을 수 있다.
+            // fire-and-forget으로 종료 요청을 보내 orphan 상태를 방지한다.
+            // _runner==null이거나 이미 Shutdown 중이면 ShutdownRunnerInternalAsync 내부에서 무시된다.
+            _ = ShutdownRunnerAsync();
+
             Debug.Log("[HostExit] ShowLobbyPanel 호출");
             ShowLobbyPanel();
 
@@ -1486,60 +1625,94 @@ namespace SSAFYPlayTime
 
         private void DisplayRankings()
         {
-            if (gameEndPanel == null)
-                return;
+            if (rankingContainer == null) return;
 
-            // 큐브 켜기
-            Transform cube = gameEndPanel.transform.Find("Cube");
-            if (cube != null)
-                cube.gameObject.SetActive(true);
-
-            // 실제 게임을 한 유저들의 순위 데이터 가져오기
-            var entries = GameResultData.Entries.OrderBy(e => e.Rank).ToList();
-
-            // Player1 ~ Player4 찾아서 세팅하기
-            for (int i = 1; i <= 4; i++)
+            if (podiumParent != null)
             {
-                Transform playerTransform = gameEndPanel.transform.Find($"Player{i}");
-                if (playerTransform == null)
-                    continue;
+                podiumParent.SetActive(true);
+            }
 
-                // 참가한 인원수보다 숫자가 크면 (예: 2명 참가했는데 3, 4번 자리면) 꺼버림
-                if (i > entries.Count)
+            var entries = GameResultData.Entries.OrderBy(e => e.Rank).ToList();
+            var rankingItems = rankingContainer.GetComponentsInChildren<RankingItemUI>(true).ToList();
+
+            // 기존 UI(글자) 리스트 업데이트
+            for (int i = 0; i < rankingItems.Count; i++)
+            {
+                bool shouldShow = i < entries.Count;
+                rankingItems[i].gameObject.SetActive(shouldShow);
+                if (shouldShow)
                 {
-                    playerTransform.gameObject.SetActive(false);
-                    continue;
+                    var entry = entries[i];
+                    var nickname = !string.IsNullOrWhiteSpace(entry.Nickname) ? entry.Nickname : $"Player{entry.PlayerId}";
+                    // 캐릭터 인덱스 파라미터
+                    rankingItems[i].SetData(entry.Rank, nickname, entry.CharacterTypeIndex);
                 }
+            }
 
-                // 참가자가 있는 자리면 켜기
-                playerTransform.gameObject.SetActive(true);
+            // 3D 캐릭터 단상 소환 (이전에 소환된 애들이 있으면 청소)
+            foreach (var obj in _spawnedGameEndCharacters) { if (obj != null) Destroy(obj); }
+            _spawnedGameEndCharacters.Clear();
 
-                // 데이터 뽑기
-                var entry = entries[i - 1];
+            // 단상 자리를 안 만들어뒀으면 그냥 종료 (에러 방지)
+            if (podiumSlots == null || podiumSlots.Length == 0) return;
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                if (i >= podiumSlots.Length) break; // 단상 개수보다 사람이 많으면 패스
+                
+                var entry = entries[i];
+                int rankIndex = i; // 0=1등, 1=2등, 2=3등, 3=4등
+
+                // 닉네임 3D Text: "NicknameText" 이름의 TextMeshPro를 우선 탐색, 없으면 첫 번째로 fallback
                 var nickname = !string.IsNullOrWhiteSpace(entry.Nickname) ? entry.Nickname : $"Player{entry.PlayerId}";
+                var allTexts3D = podiumSlots[rankIndex].GetComponentsInChildren<TMPro.TextMeshPro>(true);
+                TMPro.TextMeshPro nickText3D = null;
+                foreach (var t in allTexts3D)
+                {
+                    if (t.gameObject.name.Contains("Nickname") || t.gameObject.name.Contains("nickname"))
+                    { nickText3D = t; break; }
+                }
+                if (nickText3D == null && allTexts3D.Length > 0) nickText3D = allTexts3D[0];
+                if (nickText3D != null) nickText3D.text = nickname;
+
+                // 캐릭터 번호
                 int charIndex = entry.CharacterTypeIndex;
 
-                // 닉네임 텍스트 내 이름으로 바꾸기
-                Transform nickTransform = playerTransform.Find($"Nickname{i}");
-                if (nickTransform != null)
+                // sceneDirectSlots가 설정되어 있다면 수동 배치된 모델을 활용
+                if (sceneDirectSlots != null && rankIndex < sceneDirectSlots.Count)
                 {
-                    TMPro.TMP_Text nickText = nickTransform.GetComponent<TMPro.TMP_Text>();
-                    if (nickText != null)
-                        nickText.text = nickname;
-                }
-
-                // 캐릭터 모델 알맞게 켜고 끄기
-                Transform charGroup = playerTransform.Find($"CharacterGroup{i}");
-                if (charGroup != null)
-                {
-                    for (int c = 0; c < charGroup.childCount; c++)
+                    var slot = sceneDirectSlots[rankIndex];
+                    if (slot != null && slot.characterModels != null)
                     {
-                        Transform modelTransform = charGroup.GetChild(c);
-                        // 내 캐릭터 인덱스랑 순서가 맞으면 켜고(true), 아니면 끕니다(false)
-                        bool isSelected = (c == charIndex && charIndex != (int)CharacterKind.Random);
-                        modelTransform.gameObject.SetActive(isSelected);
+                        if (slot.questionMark != null)
+                            slot.questionMark.SetActive(charIndex == (int)CharacterKind.Random);
+
+                        for (int option = 0; option < slot.characterModels.Length; option++)
+                        {
+                            var model = slot.characterModels[option];
+                            if (model != null)
+                            {
+                                bool isSelectedModel = (option == charIndex && charIndex != (int)CharacterKind.Random);
+                                model.SetActive(isSelectedModel);
+                                if (isSelectedModel)
+                                {
+                                    Animator anim = model.GetComponentInChildren<Animator>();
+                                    if (anim != null)
+                                    {
+                                        int actualRank = rankIndex + 1;
+                                        anim.SetInteger("Rank", actualRank);
+                                    }
+                                }
+                            }
+                        }
+                        continue; // 새 로직 탔으면 Instantiate 생략
                     }
                 }
+
+                // sceneDirectSlots가 없으면 캐릭터를 표시하지 않는다.
+                // Inspector에서 LobbyCanvasUIController > Scene Direct Slots 항목에
+                // 각 단상(1~4등) 위치의 캐릭터 모델을 연결해야 합니다.
+                Debug.LogWarning($"[Lobby] DisplayRankings: sceneDirectSlots[{rankIndex}]가 설정되지 않았습니다. Inspector에서 Scene Direct Slots를 연결하세요.");
             }
         }
 
@@ -1650,6 +1823,7 @@ namespace SSAFYPlayTime
         {
             _gameEndReturnTransitionStarted = false;
             _isShowingGameEndPanel = false;
+            RefreshLauncherBackgroundMusicState();
         }
 
         // GameScene 전환 시 파괴된 캐릭터 오브젝트 참조를 초기화한다.
@@ -2209,6 +2383,10 @@ namespace SSAFYPlayTime
             passwordModal.SetActive(false);
             HideAllCharacterSlots();
             RefreshCharacterSelectionUiState();
+            if (!IsActiveGameplayScene())
+            {
+                PlayBackgroundMusicClip(GetLauncherBackgroundMusicClip());
+            }
         }
 
         public void ShowMainPanel()
@@ -2245,6 +2423,10 @@ namespace SSAFYPlayTime
             Cursor.visible = true;
             // 모달 미닫힘 등 예외 케이스 방어: 로비 패널 진입 시 플래그 해제
             _isShowingGameEndPanel = false;
+            if (!IsActiveGameplayScene())
+            {
+                PlayBackgroundMusicClip(GetLauncherBackgroundMusicClip());
+            }
 
             if (_isNicknameConfirmed)
             {
@@ -2268,6 +2450,10 @@ namespace SSAFYPlayTime
             Cursor.visible = true;
             // 모달 미닫힘 등 예외 케이스 방어: 방 패널 진입 시 플래그 해제
             _isShowingGameEndPanel = false;
+            if (!IsActiveGameplayScene())
+            {
+                PlayBackgroundMusicClip(GetLauncherBackgroundMusicClip());
+            }
             RefreshRoomActionButtonState();
 
             // 방 입장 시 캐릭터 선택이 없으면 ? (Random)을 기본값으로 설정한다.
