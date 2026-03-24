@@ -54,6 +54,12 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private Vector3 flamethrowerAimEulerOffset = new Vector3(0f, 0f, 180f);
         [SerializeField] private Vector3 flamethrowerLocalScale = Vector3.one * 0.7f;
         [SerializeField] private Vector3 blackholeHeldLocalScale = Vector3.one * 0.008f;
+        [SerializeField] private Vector3 blackholeHeldEffectLocalScale = Vector3.one * 0.35f;
+        [SerializeField] private Vector3 blackholeHeldOuterLayerLocalScale = Vector3.one * 0.2f;
+        [SerializeField] private Vector3 blackholeHeldGlowLocalScale = Vector3.one * 0.2f;
+        [SerializeField] private Vector3 blackholeHeldParticlesLocalScale = Vector3.one * 0.2f;
+        [SerializeField] private Vector3 blackholeHeldCirclingLocalScale = Vector3.one * 0.2f;
+        [SerializeField] private Vector3 blackholeHeldTrailsLocalScale = Vector3.one * 0.2f;
 
         [Header("디버그")]
         [SerializeField] private bool enableDebugLog;
@@ -694,7 +700,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             }
         }
 
-        private static void RefreshBlackholeHeldVisualIfNeeded(string heldItemId, GameObject visualRoot)
+        private void RefreshBlackholeHeldVisualIfNeeded(string heldItemId, GameObject visualRoot)
         {
             if (!string.Equals(heldItemId, ItemIds.BlackholeBomb, StringComparison.Ordinal) || visualRoot == null)
             {
@@ -704,7 +710,38 @@ namespace SSAFYPlayTime.Gameplay.Items
             var authoring = visualRoot.GetComponent<ItemBlackholeVisualAuthoring>();
             if (authoring != null)
             {
+                authoring.SetEffectLocalScaleOverride(blackholeHeldEffectLocalScale);
                 authoring.RefreshVisual();
+            }
+
+            var outerLayer = visualRoot.transform.Find("Item_BlackholeFx/OuterLayer");
+            if (outerLayer != null)
+            {
+                outerLayer.localScale = blackholeHeldOuterLayerLocalScale;
+            }
+
+            var glow = visualRoot.transform.Find("Item_BlackholeFx/Glow");
+            if (glow != null)
+            {
+                glow.localScale = blackholeHeldGlowLocalScale;
+            }
+
+            var particles = visualRoot.transform.Find("Item_BlackholeFx/Particles");
+            if (particles != null)
+            {
+                particles.localScale = blackholeHeldParticlesLocalScale;
+            }
+
+            var circling = visualRoot.transform.Find("Item_BlackholeFx/Circling");
+            if (circling != null)
+            {
+                circling.localScale = blackholeHeldCirclingLocalScale;
+            }
+
+            var trails = visualRoot.transform.Find("Item_BlackholeFx/Trails");
+            if (trails != null)
+            {
+                trails.localScale = blackholeHeldTrailsLocalScale;
             }
         }
 
