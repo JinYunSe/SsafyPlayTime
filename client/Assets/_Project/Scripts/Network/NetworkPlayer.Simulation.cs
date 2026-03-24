@@ -1,3 +1,4 @@
+using Fusion;
 using RootMotion.Dynamics;
 using UnityEngine;
 
@@ -41,21 +42,13 @@ public sealed partial class NetworkPlayer
     private const float CollapseEarlyMusclePlanarSpeedCap = 0.70f;
     private const float CollapseEarlyRootAngularSpeedCap = 1.45f;
     private const float CollapseEarlyMuscleAngularSpeedCap = 1.75f;
-    // BeingCarriedStunned: 운반 중 피해자는 캐리어 이동 속도를 따라가야 하므로 클램프 대폭 완화.
-    // maxSpeed(5) * sprintMultiplier(1.8) = 9 m/s + 여유분 → 12 m/s 이상으로 설정.
-    // 기존 2.5f 상한은 빠른 캐리에서 joint가 속도를 못 따라가 victim 위치 괴리의 원인이었음.
-    private const float CarriedStunnedRootPlanarSpeedCap = 12.0f;
-    private const float CarriedStunnedMusclePlanarSpeedCap = 10.0f;
-    private const float CarriedStunnedRootAngularSpeedCap = 6.0f;
-    private const float CarriedStunnedMuscleAngularSpeedCap = 6.5f;
-    private const float CarriedStunnedMaxUpwardSpeed = 8.0f;
+    // BeingCarriedStunned: 운반 중 피해자는 위로 끌려야 하므로 클램프 완화
+    private const float CarriedStunnedRootPlanarSpeedCap = 2.50f;
+    private const float CarriedStunnedMusclePlanarSpeedCap = 2.00f;
+    private const float CarriedStunnedRootAngularSpeedCap = 3.8f;
+    private const float CarriedStunnedMuscleAngularSpeedCap = 4.0f;
+    private const float CarriedStunnedMaxUpwardSpeed = 3.0f;
     private const float StunRootUpwardSyncStep = 0.08f;
-    // root → hips 추적 속도: 캐리어 스프린트 최대(9 m/s) 초과 보장.
-    // 기존 7.5f는 스프린트(9 m/s) 상황에서 root가 매 틱 뒤처져 Fusion sync 값이 항상 지연됐음.
-    private const float CarriedRootPlanarSyncSpeed = 18f;
-    private const float CarriedRootVerticalSyncSpeed = 22f;
-    private const float CarriedRootSnapDistance = 0.8f;
-    private const float CarriedRootSnapVerticalGap = 0.45f;
     private const float CarriedRootTraceGapThreshold = 0.3f;
     private const float HitInstabilityBoostMin = 0.08f;
     private const float HitInstabilityBoostMax = 0.22f;
@@ -70,21 +63,36 @@ public sealed partial class NetworkPlayer
         if (config == null || rigidbody3D == null || mainJoint == null)
             return;
 
-        var unifiedGrabHold = (bool)input.LeftGrabHold;
+        // Single-button grab: left-hold enables grab attempts on both hands.
+        // Each hand still decides attachment independently from its own reach/target distance.
+        var unifiedGrabHold = input.LeftGrabHold || input.RightGrabHold;
         _isLeftGrabActive = unifiedGrabHold;
         _isRightGrabActive = unifiedGrabHold;
         _isGrabActive = unifiedGrabHold;
+
+        // TickHitStopRecovery(); // 히트스탑 제거
+        TickHitRecoil(dt);
+        TickHitFlinch(dt);
+        TickHitInstabilityBoost(dt);
+        TickVitalState(dt);
+        UpdateStunDecay(dt);
+        UpdateRecoveringWindow(dt);
+
+        if (TryTickDeadState(dt))
+            return;
+
+        if (TryTickStunnedState(dt))
+            return;
 
         SimulateLocomotion(input, dt);
         SynchronizeMotorPresentation();
         UpdateActiveRagdollJoints();
         ProcessInteractions(input);
-        // UpdatePhysicalPhaseState는 FixedUpdateNetwork()에서 UpdateGrabHandlers() 이후
-        // 한 번만 호출한다. 여기서도 호출하면 TickCarryReleaseSettle() 등이 이중 실행되어
-        // settle 타이머가 설정값의 절반 속도로 감소하는 버그 발생.
+        UpdatePhysicalPhaseState(dt);
         TickPunchHitDetectionWindow();
+        TickKickHitDetectionWindow();
+        TickAerialKickHitDetectionWindow();
         SyncHeldItemNetworkState();
-        TraceStartupLaunchDiagnostics("DoPhysicsStep");
     }
 
     public void ApplyStunDamage(
@@ -150,8 +158,6 @@ public sealed partial class NetworkPlayer
     private float _recoverMinColliderY = float.NegativeInfinity;
     private bool _hasRecoverAnchorPose;
     private Vector3 _recoverAnchorPosition;
-    private bool _wasBeingCarriedLastStunnedTick;
-    private float _savedCarryPinWeight = 1f;
     private Quaternion _recoverAnchorRotation = Quaternion.identity;
     private bool _hasPendingRecoveryStandUpHandoff;
     private Vector3 _pendingRecoveryStandUpPosition;
@@ -266,6 +272,84 @@ public sealed partial class NetworkPlayer
         ClearPunchHitDetectionWindow();
     }
 
+    private void TickKickHitDetectionWindow()
+    {
+        if (_activeKickWindowEndTick < 0)
+            return;
+
+        if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
+        {
+            ClearKickHitDetectionWindow();
+            return;
+        }
+
+        var currentTick = ResolveCurrentSimulationTick();
+        if (currentTick > _activeKickWindowEndTick || !_isActiveRagdoll)
+        {
+            ClearKickHitDetectionWindow();
+            return;
+        }
+
+        var currentSamplePosition = ResolveKickHitSamplePosition(_activeKickIsLeft);
+        var previousSamplePosition = _activeKickHasPreviousSample
+            ? _activeKickPreviousSamplePosition
+            : currentSamplePosition;
+
+        _activeKickPreviousSamplePosition = currentSamplePosition;
+        _activeKickHasPreviousSample = true;
+
+        if (!TryResolveKickVictim(previousSamplePosition, currentSamplePosition, out var victimPlayer, out var hitPoint))
+            return;
+
+        ApplyKickHit(victimPlayer, hitPoint);
+        ClearKickHitDetectionWindow();
+    }
+
+    private void TickAerialKickHitDetectionWindow()
+    {
+        if (_activeAerialKickWindowEndTick < 0)
+            return;
+
+        if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
+        {
+            ClearAerialKickHitDetectionWindow();
+            return;
+        }
+
+        if (!_isActiveRagdoll || GetIsDeadState())
+        {
+            ClearAerialKickHitDetectionWindow();
+            return;
+        }
+
+        var currentTick = ResolveCurrentSimulationTick();
+        if ((_activeAerialKickHasPreviousSample && _isGrounded) || currentTick > _activeAerialKickWindowEndTick)
+        {
+            ApplyAerialKickMissPenalty();
+            ClearAerialKickHitDetectionWindow();
+            return;
+        }
+
+        var currentSamplePosition = ResolveAerialKickHitSamplePosition();
+        var previousSamplePosition = _activeAerialKickHasPreviousSample
+            ? _activeAerialKickPreviousSamplePosition
+            : currentSamplePosition;
+
+        _activeAerialKickPreviousSamplePosition = currentSamplePosition;
+        _activeAerialKickHasPreviousSample = true;
+
+        // 킥 활성 중 지속 전진 force — PuppetMaster 근육 스프링이 모멘텀을 상쇄하지 않도록
+        if (rigidbody3D != null && !rigidbody3D.isKinematic && _activeAerialKickForwardDirection.sqrMagnitude > 0.001f)
+            rigidbody3D.AddForce(_activeAerialKickForwardDirection * AerialKickSustainedForce, ForceMode.Acceleration);
+
+        if (!TryResolveAerialKickVictim(previousSamplePosition, currentSamplePosition, out var victimPlayer, out var hitPoint))
+            return;
+
+        _activeAerialKickHasHit = true;
+        ApplyAerialKickHit(victimPlayer, hitPoint);
+        ClearAerialKickHitDetectionWindow();
+    }
+
     private int ResolveCurrentSimulationTick()
     {
         return Runner != null ? Runner.Tick.Raw : Mathf.RoundToInt(Time.time / Time.fixedDeltaTime);
@@ -277,6 +361,19 @@ public sealed partial class NetworkPlayer
         _activePunchHasPreviousSample = false;
     }
 
+    private void ClearKickHitDetectionWindow()
+    {
+        _activeKickWindowEndTick = -1;
+        _activeKickHasPreviousSample = false;
+    }
+
+    private void ClearAerialKickHitDetectionWindow()
+    {
+        _activeAerialKickWindowEndTick = -1;
+        _activeAerialKickHasPreviousSample = false;
+        _activeAerialKickHasHit = false;
+    }
+
     private Vector3 ResolvePunchHitSamplePosition(bool isLeft)
     {
         var forward = ResolvePunchForward();
@@ -285,6 +382,27 @@ public sealed partial class NetworkPlayer
             return handTransform.position + forward * PunchHitForwardOffset;
 
         return transform.position + Vector3.up * 0.6f + forward * PunchFallbackReach;
+    }
+
+    private Vector3 ResolveKickHitSamplePosition(bool isLeft)
+    {
+        var forward = ResolvePunchForward();
+        var footTransform = ResolveKickFootTransform(isLeft);
+        if (footTransform != null)
+            return footTransform.position + forward * KickHitForwardOffset;
+
+        return transform.position + Vector3.up * 0.28f + forward * KickFallbackReach;
+    }
+
+    private Vector3 ResolveAerialKickHitSamplePosition()
+    {
+        var forward = ResolvePunchForward();
+        var root = _targetRoot != null ? _targetRoot : transform;
+        var speed = rigidbody3D != null ? rigidbody3D.velocity.magnitude : _activeAerialKickAttackerSpeed;
+        var normalizedSpeed = Mathf.Clamp01(speed / AerialKickSpeedForMaxBonus);
+        var reach = Mathf.Lerp(AerialKickForwardReachMin, AerialKickForwardReachMax, normalizedSpeed);
+        var height = Mathf.Lerp(AerialKickHeightMin, AerialKickHeightMax, normalizedSpeed);
+        return root.position + Vector3.up * height + forward * reach;
     }
 
     private Transform ResolvePunchHandTransform(bool isLeft)
@@ -312,6 +430,44 @@ public sealed partial class NetworkPlayer
         return _targetRoot;
     }
 
+    private Transform ResolveKickFootTransform(bool isLeft)
+    {
+        if (animator != null && animator.isHuman)
+        {
+            var footBone = animator.GetBoneTransform(isLeft ? HumanBodyBones.LeftFoot : HumanBodyBones.RightFoot);
+            if (footBone != null)
+                return footBone;
+
+            var lowerLegBone = animator.GetBoneTransform(isLeft ? HumanBodyBones.LeftLowerLeg : HumanBodyBones.RightLowerLeg);
+            if (lowerLegBone != null)
+                return lowerLegBone;
+        }
+
+        if (_puppetMaster != null && _puppetMaster.muscles != null)
+        {
+            var preferredName = isLeft ? "LeftFoot" : "RightFoot";
+            var fallbackName = isLeft ? "LeftLowerLeg" : "RightLowerLeg";
+            Transform fallback = null;
+            for (var i = 0; i < _puppetMaster.muscles.Length; i++)
+            {
+                var muscleTransform = _puppetMaster.muscles[i].transform;
+                if (muscleTransform == null)
+                    continue;
+
+                if (muscleTransform.name == preferredName)
+                    return muscleTransform;
+
+                if (fallback == null && muscleTransform.name == fallbackName)
+                    fallback = muscleTransform;
+            }
+
+            if (fallback != null)
+                return fallback;
+        }
+
+        return _targetRoot;
+    }
+
     private Vector3 ResolvePunchForward()
     {
         return _targetRoot != null ? _targetRoot.forward : transform.forward;
@@ -319,14 +475,53 @@ public sealed partial class NetworkPlayer
 
     private bool TryResolvePunchVictim(Vector3 sweepStart, Vector3 sweepEnd, out NetworkPlayer victimPlayer, out Vector3 hitPoint)
     {
+        return TryResolveCloseCombatVictim(
+            sweepStart,
+            sweepEnd,
+            PunchHitRadius,
+            _punchHitResults,
+            out victimPlayer,
+            out hitPoint);
+    }
+
+    private bool TryResolveKickVictim(Vector3 sweepStart, Vector3 sweepEnd, out NetworkPlayer victimPlayer, out Vector3 hitPoint)
+    {
+        return TryResolveCloseCombatVictim(
+            sweepStart,
+            sweepEnd,
+            KickHitRadius,
+            _kickHitResults,
+            out victimPlayer,
+            out hitPoint);
+    }
+
+    private bool TryResolveAerialKickVictim(Vector3 sweepStart, Vector3 sweepEnd, out NetworkPlayer victimPlayer, out Vector3 hitPoint)
+    {
+        return TryResolveCloseCombatVictim(
+            sweepStart,
+            sweepEnd,
+            AerialKickHitRadius,
+            _aerialKickHitResults,
+            out victimPlayer,
+            out hitPoint);
+    }
+
+    private bool TryResolveCloseCombatVictim(
+        Vector3 sweepStart,
+        Vector3 sweepEnd,
+        float radius,
+        Collider[] hitResults,
+        out NetworkPlayer victimPlayer,
+        out Vector3 hitPoint)
+    {
         victimPlayer = null;
         hitPoint = sweepEnd;
 
         var hitCount = Physics.OverlapCapsuleNonAlloc(
             sweepStart,
             sweepEnd,
-            PunchHitRadius,
-            _punchHitResults,
+            radius,
+            hitResults,
             ~0,
             QueryTriggerInteraction.Ignore);
 
@@ -336,8 +531,8 @@ public sealed partial class NetworkPlayer
         var bestDistance = float.MaxValue;
         for (var i = 0; i < hitCount; i++)
         {
-            var hit = _punchHitResults[i];
-            _punchHitResults[i] = null;
+            var hit = hitResults[i];
+            hitResults[i] = null;
             if (hit == null)
                 continue;
 
@@ -434,6 +629,201 @@ public sealed partial class NetworkPlayer
         // 히트스탑 제거 — 파티애니멀즈 스타일은 래그돌 과장 반응이 타격감 핵심, 속도 동결은 물리 흐름을 끊음
         // ApplyLocalHitStop(victimPlayer);
         SpawnHitImpactVFX(hitPoint, knockbackDir, appliedKnockback);
+    }
+
+    private void ApplyKickHit(NetworkPlayer victimPlayer, Vector3 hitPoint)
+    {
+        if (victimPlayer == null)
+            return;
+
+        var forward = ResolvePunchForward();
+        float lateralRatio;
+        float heightRatio;
+        var knockbackDir = BuildPunchKnockbackDirection(victimPlayer, forward, hitPoint, out lateralRatio, out heightRatio);
+        var speedBonus = 1f + Mathf.Clamp01(_activeKickAttackerSpeed / 8f) * 0.55f;
+        var finalKnockback = _activeKickKnockbackForce * speedBonus;
+
+        victimPlayer.ApplyCombinedDamage(
+            _activeKickHealthDamage,
+            _activeKickStunDamage,
+            "Kick",
+            _activeKickAttackerSpeed,
+            _activeKickKnockbackForce,
+            1.0f,
+            deferStunEntryDamping: true,
+            instigator: this);
+        var isStunnedByHit = !victimPlayer._isActiveRagdoll;
+        var collapseVictim = isStunnedByHit && victimPlayer.GetPhysicalPhase() == PhysicalPhase.StunnedCollapse;
+        var appliedKnockback = isStunnedByHit ? finalKnockback * StunLaunchKnockbackScale : finalKnockback;
+        victimPlayer.ArmHitInstabilityBoost(appliedKnockback);
+        victimPlayer.ArmHitFlinch(appliedKnockback);
+        victimPlayer.ArmDirectionalCombatFlinch(hitPoint, appliedKnockback);
+
+        var victimRb = victimPlayer.rigidbody3D;
+        var victimVelocityBeforeForce = victimRb != null && !victimRb.isKinematic
+            ? victimRb.velocity
+            : Vector3.zero;
+        if (victimRb != null && !victimRb.isKinematic)
+        {
+            victimRb.AddForce(knockbackDir * appliedKnockback, ForceMode.Impulse);
+            var rotationScale = collapseVictim
+                ? Mathf.Lerp(0.04f, 0.07f, heightRatio)
+                : isStunnedByHit
+                    ? Mathf.Lerp(0.10f, 0.14f, heightRatio)
+                    : Mathf.Lerp(0.26f, 0.34f, heightRatio);
+            victimRb.AddForceAtPosition(
+                knockbackDir * appliedKnockback * rotationScale,
+                hitPoint,
+                ForceMode.Impulse);
+
+            if (lateralRatio > 0.20f)
+            {
+                var yawSign = Mathf.Sign(Vector3.Cross(victimPlayer.transform.forward, knockbackDir).y);
+                var yawTorqueScale = collapseVictim
+                    ? Mathf.Lerp(0.02f, 0.045f, lateralRatio)
+                    : Mathf.Lerp(0.10f, 0.18f, lateralRatio);
+                victimRb.AddTorque(Vector3.up * yawSign * appliedKnockback * yawTorqueScale, ForceMode.Impulse);
+            }
+        }
+
+        victimPlayer.TraceStunForceEvent(
+            "KickRoot",
+            victimRb,
+            knockbackDir * appliedKnockback,
+            ForceMode.Impulse,
+            victimVelocityBeforeForce,
+            victimRb != null && !victimRb.isKinematic ? victimRb.velocity : victimVelocityBeforeForce,
+            appliedKnockback > 0.0001f,
+            $"isStunnedByHit={isStunnedByHit} collapseVictim={collapseVictim}");
+
+        ApplyPunchFollowThrough(knockbackDir, finalKnockback);
+        ApplyMuscleImpulseOnHit(victimPlayer, hitPoint, knockbackDir, appliedKnockback);
+        if (isStunnedByHit)
+            victimPlayer.DampenStunEntryVelocities();
+
+        TriggerAttackCameraKick(forward, finalKnockback);
+        victimPlayer.TriggerVictimCameraKick(knockbackDir, appliedKnockback);
+        SpawnHitImpactVFX(hitPoint, knockbackDir, appliedKnockback);
+    }
+
+    private void ApplyAerialKickHit(NetworkPlayer victimPlayer, Vector3 hitPoint)
+    {
+        if (victimPlayer == null)
+            return;
+
+        var forward = ResolvePunchForward();
+        ResolveAerialKickImpactStats(victimPlayer, out var finalHealthDamage, out var finalStunDamage, out var finalKnockback, out var attackerSpeed);
+
+        float lateralRatio;
+        float heightRatio;
+        var knockbackDir = BuildPunchKnockbackDirection(victimPlayer, forward, hitPoint, out lateralRatio, out heightRatio);
+
+        victimPlayer.ApplyCombinedDamage(
+            finalHealthDamage,
+            finalStunDamage,
+            "AerialKick",
+            attackerSpeed,
+            finalKnockback,
+            1.0f,
+            deferStunEntryDamping: true,
+            instigator: this);
+        var isStunnedByHit = !victimPlayer._isActiveRagdoll;
+        var collapseVictim = isStunnedByHit && victimPlayer.GetPhysicalPhase() == PhysicalPhase.StunnedCollapse;
+        var appliedKnockback = isStunnedByHit ? finalKnockback * StunLaunchKnockbackScale : finalKnockback;
+        victimPlayer.ArmHitInstabilityBoost(appliedKnockback);
+        victimPlayer.ArmHitFlinch(appliedKnockback);
+        victimPlayer.ArmDirectionalCombatFlinch(hitPoint, appliedKnockback);
+
+        var victimRb = victimPlayer.rigidbody3D;
+        var victimVelocityBeforeForce = victimRb != null && !victimRb.isKinematic
+            ? victimRb.velocity
+            : Vector3.zero;
+        if (victimRb != null && !victimRb.isKinematic)
+        {
+            victimRb.AddForce(knockbackDir * appliedKnockback, ForceMode.Impulse);
+            var rotationScale = collapseVictim
+                ? Mathf.Lerp(0.045f, 0.075f, heightRatio)
+                : isStunnedByHit
+                    ? Mathf.Lerp(0.11f, 0.15f, heightRatio)
+                    : Mathf.Lerp(0.30f, 0.38f, heightRatio);
+            victimRb.AddForceAtPosition(
+                knockbackDir * appliedKnockback * rotationScale,
+                hitPoint,
+                ForceMode.Impulse);
+
+            if (lateralRatio > 0.18f)
+            {
+                var yawSign = Mathf.Sign(Vector3.Cross(victimPlayer.transform.forward, knockbackDir).y);
+                var yawTorqueScale = collapseVictim
+                    ? Mathf.Lerp(0.025f, 0.05f, lateralRatio)
+                    : Mathf.Lerp(0.12f, 0.22f, lateralRatio);
+                victimRb.AddTorque(Vector3.up * yawSign * appliedKnockback * yawTorqueScale, ForceMode.Impulse);
+            }
+        }
+
+        victimPlayer.TraceStunForceEvent(
+            "AerialKickRoot",
+            victimRb,
+            knockbackDir * appliedKnockback,
+            ForceMode.Impulse,
+            victimVelocityBeforeForce,
+            victimRb != null && !victimRb.isKinematic ? victimRb.velocity : victimVelocityBeforeForce,
+            appliedKnockback > 0.0001f,
+            $"airborneVictim={!victimPlayer._isGrounded} collapseVictim={collapseVictim}");
+
+        ApplyPunchFollowThrough(knockbackDir, finalKnockback * 1.12f);
+        ApplyMuscleImpulseOnHit(victimPlayer, hitPoint, knockbackDir, appliedKnockback);
+        if (isStunnedByHit)
+            victimPlayer.DampenStunEntryVelocities();
+
+        TriggerAttackCameraKick(forward, finalKnockback * 1.08f);
+        victimPlayer.TriggerVictimCameraKick(knockbackDir, appliedKnockback);
+        SpawnHitImpactVFX(hitPoint, knockbackDir, appliedKnockback);
+    }
+
+    private void ResolveAerialKickImpactStats(
+        NetworkPlayer victimPlayer,
+        out float healthDamage,
+        out float stunDamage,
+        out float knockbackForce,
+        out float attackerSpeed)
+    {
+        var forward = ResolvePunchForward();
+        var velocity = rigidbody3D != null ? rigidbody3D.velocity : Vector3.zero;
+        var totalSpeed = Mathf.Max(_activeAerialKickStartSpeed, velocity.magnitude);
+        var forwardSpeed = Mathf.Max(0f, Vector3.Dot(velocity, forward));
+        attackerSpeed = Mathf.Max(totalSpeed * 0.7f, forwardSpeed);
+
+        var normalizedMomentum = Mathf.Clamp01(attackerSpeed / AerialKickSpeedForMaxBonus);
+        var damageScale = 1f + normalizedMomentum * _activeAerialKickVelocityDamageMultiplier;
+        var stunScale = 1f + normalizedMomentum * (_activeAerialKickVelocityDamageMultiplier + 0.45f);
+        var knockbackScale = 1f + normalizedMomentum * 0.9f;
+
+        healthDamage = _activeAerialKickHealthDamage * damageScale;
+        stunDamage = _activeAerialKickStunDamage * stunScale;
+        knockbackForce = _activeAerialKickKnockbackForce * knockbackScale;
+
+        if (victimPlayer != null && !victimPlayer._isGrounded)
+        {
+            stunDamage *= _activeAerialKickAirborneVulnerabilityMultiplier;
+            healthDamage *= Mathf.Lerp(1f, _activeAerialKickAirborneVulnerabilityMultiplier, 0.35f);
+            knockbackForce *= Mathf.Lerp(1f, _activeAerialKickAirborneVulnerabilityMultiplier, 0.28f);
+        }
+    }
+
+    private void ApplyAerialKickMissPenalty()
+    {
+        if (_activeAerialKickHasHit || !_isActiveRagdoll || GetIsDeadState())
+            return;
+
+        if (_activeAerialKickSelfStunDuration <= 0.01f)
+        {
+            ArmHitInstabilityBoost(1.1f);
+            _hitRecoilTimer = Mathf.Max(_hitRecoilTimer, HIT_RECOIL_DURATION * 0.75f);
+            return;
+        }
+
+        TriggerStun(Mathf.Clamp(_activeAerialKickSelfStunDuration, 0.18f, 0.75f));
     }
 
     private Vector3 BuildPunchKnockbackDirection(NetworkPlayer victimPlayer, Vector3 forward)
@@ -618,58 +1008,37 @@ public sealed partial class NetworkPlayer
         var collapsePhase = TickStunCollapseTimer(dt);
         var stunnedPhase = ResolveCurrentStunnedPhase(collapsePhase);
         SetLocalPhysicalPhase(stunnedPhase, 1f, false);
+        UpdateLocalCarryMode();
+        TickCarryReleaseSettle(dt);
         ApplyStunCollapseSpringState(collapsePhase);
 
-        // FixedUpdateNetwork()는 HasStateAuthority에서만 실행되므로 항상 host.
-        bool beingCarried = _beingGrabbedRefCount > 0;
-
-        // _wasBeingCarriedLastStunnedTick은 이전 틱의 값을 먼저 읽은 뒤 갱신해야 한다.
-        // 이 시점에서 읽으면 "지난 틱에 운반 중이었는가"를 정확히 판단할 수 있다.
-        bool carryJustEnded = _wasBeingCarriedLastStunnedTick && !beingCarried;
-        bool carryJustStarted = !_wasBeingCarriedLastStunnedTick && beingCarried;
-
-        // 운반 중이면 ForceRecover()보다 먼저 처리해야 한다.
-        // ForceRecover()가 _lastSafePosition을 읽을 때 carry 위치가 이미 저장돼 있어야
-        // TeleportToSafeStandUpPosition이 올바른 위치(carry 위치)로 텔레포트한다.
-        // 순서를 바꾸지 않으면 ForceRecover()가 기절 전 위치를 사용해 원위치로 돌아가는 버그 발생.
-        if (beingCarried)
-        {
-            // carry 중 _hasRecoverAnchorPose 클리어: 종료 후 SyncRootToPhysicsBody()가
-            // 기절 전 위치(_recoverAnchorPosition)로 X,Z를 덮어쓰는 것을 방지.
-            _hasRecoverAnchorPose = false;
-
-            // carry 진입 첫 틱: PuppetMaster pinWeight = 0으로 설정.
-            // pinWeight > 0이면 target skeleton의 월드 위치(기절 진입 위치)로 근육을 끌어당기는
-            // 스프링 힘이 carry joint와 줄다리기를 일으켜 캐릭터가 원래 위치로 돌아가는 버그 발생.
-            if (carryJustStarted && _puppetMaster != null)
-            {
-                _savedCarryPinWeight = _puppetMaster.pinWeight;
-                _puppetMaster.pinWeight = 0f;
-            }
-
-            SyncCarriedRootToPhysicsBody();
-
-            // 운반 위치를 안전 위치로 저장 (ForceRecover 전에 반드시 수행).
-            RememberSafeTransform(transform.position, transform.rotation);
-        }
-        else if (carryJustEnded && _puppetMaster != null)
-        {
-            // carry 종료 직후: pinWeight 복원.
-            _puppetMaster.pinWeight = _savedCarryPinWeight;
-        }
-
-        _wasBeingCarriedLastStunnedTick = beingCarried;
-
         // 잡혀서 운반 중이면 기절 타이머 정지 (운반 중 자동 회복 방지)
-        bool pauseStunTimer = beingCarried;
+        bool pauseStunTimer = _beingGrabbedRefCount > 0;
         var remaining = GetStunTimeRemaining() - (pauseStunTimer ? 0f : dt);
         SetStunTimeRemaining(remaining);
 
         if (remaining <= 0f && !pauseStunTimer)
         {
-            ForceRecover();  // 이 시점에 _lastSafePosition = carry 위치 (위에서 업데이트됨)
+            ForceRecover();
             if (_isActiveRagdoll)
                 return true;
+        }
+
+        bool beingCarried = _beingGrabbedRefCount > 0;
+
+        // 운반 중: 루트 바디 중력 비활성화 — grab joint와 PuppetMaster hips-root 조인트 충돌 방지
+        // 중력이 남아 있으면 root가 매 물리 스텝마다 바닥으로 끌려가 body가 찌그러짐
+        if (rigidbody3D != null && !rigidbody3D.isKinematic)
+        {
+            if (beingCarried && rigidbody3D.useGravity)
+            {
+                rigidbody3D.useGravity = false;
+                rigidbody3D.velocity = Vector3.zero;
+            }
+            else if (!beingCarried && !rigidbody3D.useGravity)
+            {
+                rigidbody3D.useGravity = true;
+            }
         }
 
         ClampStunnedMotion(collapsePhase, beingCarried);
@@ -678,23 +1047,13 @@ public sealed partial class NetworkPlayer
         else
             TraceStunnedMotionSample("TryTickStunnedState");
 
-        if (!beingCarried)
-        {
-            // carry 종료 직후 첫 틱: 즉시 hips 위치로 스냅 (lerp 없이).
-            // carryJustEnded는 이전 틱 값으로 판단하므로 올바르게 첫 틱을 감지한다.
-            if (carryJustEnded)
-            {
-                if (TryResolveRootSyncTargetPosition(out var snapPos))
-                {
-                    transform.position = snapPos;
-                    RememberSafeTransform(transform.position, transform.rotation);
-                }
-            }
-            else
-            {
-                SyncRootToPhysicsBody();
-            }
-        }
+        // 기절 중 물리 뼈(메인 리지드바디)가 잡기 조인트 등에 의해 끌려갈 수 있으므로
+        // 루트 트랜스폼을 메인 리지드바디 위치에 맞춘다.
+        // 이렇게 해야 NetworkTransform이 원격 클라이언트에 올바른 위치를 전달한다.
+        if (beingCarried)
+            SyncCarriedRootToPhysicsBody();
+        else
+            SyncRootToPhysicsBody();
 
         return true;
     }
@@ -791,6 +1150,21 @@ public sealed partial class NetworkPlayer
         return $"({value.x:F2},{value.y:F2},{value.z:F2})";
     }
 
+    private static float ResolveCarryEmergencySnapDistance(float baseSnapDistance)
+    {
+        return Mathf.Max(baseSnapDistance * 1.75f, baseSnapDistance + 0.75f);
+    }
+
+    private static float ResolveCarryEmergencyVerticalGap(float baseVerticalGap)
+    {
+        return Mathf.Max(baseVerticalGap * 1.60f, baseVerticalGap + 0.25f);
+    }
+
+    private static float ResolveCarryCorrectionFollowSpeed(float baseSpeed, bool largeCorrection)
+    {
+        return baseSpeed * (largeCorrection ? 2.35f : 1f);
+    }
+
     private void SyncCarriedRootToPhysicsBody()
     {
         // CarrySolveFrame: carry anchor 기준으로 root follow
@@ -818,11 +1192,15 @@ public sealed partial class NetworkPlayer
         var dt = Runner != null ? Runner.DeltaTime : Time.fixedDeltaTime;
         var settings = ResolveCarryModeSettings();
         var verticalGap = targetPos.y - previousRootPos.y;
-        var shouldSnap = delta.sqrMagnitude > settings.rootSnapDistance * settings.rootSnapDistance ||
-                         verticalGap > settings.rootSnapVerticalGap;
+        var requiresStrongCorrection = delta.sqrMagnitude > settings.rootSnapDistance * settings.rootSnapDistance ||
+                                       verticalGap > settings.rootSnapVerticalGap;
+        var emergencySnapDistance = ResolveCarryEmergencySnapDistance(settings.rootSnapDistance);
+        var emergencyVerticalGap = ResolveCarryEmergencyVerticalGap(settings.rootSnapVerticalGap);
+        var shouldEmergencySnap = delta.sqrMagnitude > emergencySnapDistance * emergencySnapDistance ||
+                                  verticalGap > emergencyVerticalGap;
 
         Vector3 newRootPos;
-        if (shouldSnap)
+        if (shouldEmergencySnap)
         {
             newRootPos = targetPos;
         }
@@ -830,12 +1208,19 @@ public sealed partial class NetworkPlayer
         {
             var planarCurrent = new Vector3(previousRootPos.x, 0f, previousRootPos.z);
             var planarTarget = new Vector3(targetPos.x, 0f, targetPos.z);
-            var planarNext = Vector3.MoveTowards(planarCurrent, planarTarget, settings.rootPlanarFollowSpeed * dt);
-            var yNext = Mathf.MoveTowards(previousRootPos.y, targetPos.y, settings.rootVerticalFollowSpeed * dt);
+            var planarNext = Vector3.MoveTowards(
+                planarCurrent,
+                planarTarget,
+                ResolveCarryCorrectionFollowSpeed(settings.rootPlanarFollowSpeed, requiresStrongCorrection) * dt);
+            var yNext = Mathf.MoveTowards(
+                previousRootPos.y,
+                targetPos.y,
+                ResolveCarryCorrectionFollowSpeed(settings.rootVerticalFollowSpeed, requiresStrongCorrection) * dt);
             newRootPos = new Vector3(planarNext.x, yNext, planarNext.z);
         }
 
-        ApplyCarryRootPosition(newRootPos, shouldSnap);
+        // 운반 중에는 항상 velocity 리셋 — 잔여 중력/충돌 속도가 root를 끌어내리는 것 방지
+        ApplyCarryRootPosition(newRootPos, resetVelocity: shouldEmergencySnap);
 
         // carry anchor 캐시 갱신 (네트워크 동기화 + settle 용)
         _lastCarryAnchorPosition = targetPos;
@@ -847,7 +1232,7 @@ public sealed partial class NetworkPlayer
                 "CarryAnchorSolve",
                 $"mode={_localCarryMode} prevRoot={FormatCarryDebugVector(previousRootPos)} target={FormatCarryDebugVector(targetPos)} " +
                 $"newRoot={FormatCarryDebugVector(newRootPos)} delta={FormatCarryDebugVector(delta)} " +
-                $"verticalGap={verticalGap:F2} remainingGap={remainingGap:F2} snap={shouldSnap}",
+                $"verticalGap={verticalGap:F2} remainingGap={remainingGap:F2} correction={requiresStrongCorrection} emergencySnap={shouldEmergencySnap}",
                 remainingGap > CarryRootDebugGapThreshold);
         }
     }
@@ -856,8 +1241,103 @@ public sealed partial class NetworkPlayer
     /// CarryRig의 victim anchor를 기준으로 carry target 위치를 해석.
     /// victim 쪽: hips-chest 가중 평균 anchor
     /// </summary>
+    private int CountCarryHandsTargetingSelf(NetworkPlayer candidateHolder, NetworkId selfId)
+    {
+        if (candidateHolder == null)
+            return 0;
+
+        var count = 0;
+        if (candidateHolder.TryGetNetworkHeldAnchorData(HandGrabHandler.HandSide.Left, out var leftTargetId, out _, out _) &&
+            leftTargetId == selfId)
+        {
+            count++;
+        }
+
+        if (candidateHolder.TryGetNetworkHeldAnchorData(HandGrabHandler.HandSide.Right, out var rightTargetId, out _, out _) &&
+            rightTargetId == selfId)
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    private bool TryResolveCarrierOwnedVictimRootTarget(out Vector3 targetPos, out Vector3 targetFwd)
+    {
+        targetPos = default;
+        targetFwd = transform.forward;
+
+        if (_localCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim ||
+            !IsNetworkReady ||
+            !Object.IsValid)
+        {
+            return false;
+        }
+
+        var selfId = Object.Id;
+        NetworkPlayer bestHolder = null;
+        var bestCarryMode = SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None;
+        var bestHoldVariant = CharacterGrabController.HoldVariant.None;
+        var bestHandCount = 0;
+        var bestDistanceSqr = float.PositiveInfinity;
+
+        foreach (var candidate in RegisteredPlayers)
+        {
+            if (candidate == null || candidate == this || !candidate.IsNetworkReady || !candidate.Object.IsValid)
+                continue;
+
+            var candidateCarryMode = candidate.GetLocalCarryMode();
+            if (candidateCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry &&
+                candidateCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry)
+            {
+                continue;
+            }
+
+            var handCount = CountCarryHandsTargetingSelf(candidate, selfId);
+            if (handCount <= 0)
+                continue;
+
+            var candidateDistanceSqr = (candidate.transform.position - transform.position).sqrMagnitude;
+            if (handCount < bestHandCount ||
+                (handCount == bestHandCount && candidateDistanceSqr >= bestDistanceSqr))
+            {
+                continue;
+            }
+
+            var candidateHoldVariant = candidate.ResolveCurrentOrReplicatedHoldVariant();
+            if (candidateHoldVariant != CharacterGrabController.HoldVariant.FrontCarry &&
+                candidateHoldVariant != CharacterGrabController.HoldVariant.OverheadCarry &&
+                candidateHoldVariant != CharacterGrabController.HoldVariant.DualCarry)
+            {
+                candidateHoldVariant = candidateCarryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry
+                    ? CharacterGrabController.HoldVariant.DualCarry
+                    : CharacterGrabController.HoldVariant.OverheadCarry;
+            }
+
+            bestHolder = candidate;
+            bestCarryMode = candidateCarryMode;
+            bestHoldVariant = candidateHoldVariant;
+            bestHandCount = handCount;
+            bestDistanceSqr = candidateDistanceSqr;
+        }
+
+        if (bestHolder == null)
+            return false;
+
+        var holderCarryRig = bestHolder.GetCarryRig();
+        return holderCarryRig != null &&
+               holderCarryRig.TryGetCarriedVictimRootTargetWorld(bestCarryMode, bestHoldVariant, out targetPos, out targetFwd);
+    }
+
     private bool TryResolveCarryAnchorTargetPosition(out Vector3 targetPos)
     {
+        if (_localCarryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim &&
+            TryResolveCarrierOwnedVictimRootTarget(out targetPos, out var carrierTargetForward))
+        {
+            _lastCarryAnchorForward = carrierTargetForward;
+            return true;
+        }
+
         if (TryResolveCarryAnchorBasePosition(out var anchorPos, out var anchorFwd))
         {
             _lastCarryAnchorForward = anchorFwd;
@@ -881,7 +1361,7 @@ public sealed partial class NetworkPlayer
         if (carryRig != null)
         {
             carryRig.UpdateVictimAnchor();
-            if (carryRig.TryGetVictimAnchorWorld(out anchorPos, out anchorFwd))
+            if (carryRig.TryGetVictimSupportFrameWorld(out anchorPos, out anchorFwd))
                 return true;
         }
 
@@ -898,6 +1378,13 @@ public sealed partial class NetworkPlayer
 
     private void CaptureCarriedVictimRootOffset()
     {
+        if (TryResolveCarrierOwnedVictimRootTarget(out _, out _))
+        {
+            _hasCarriedVictimRootOffset = false;
+            _carriedVictimRootOffset = Vector3.zero;
+            return;
+        }
+
         if (!TryResolveCarryAnchorBasePosition(out var anchorPos, out _))
         {
             _hasCarriedVictimRootOffset = false;
@@ -915,24 +1402,17 @@ public sealed partial class NetworkPlayer
     /// </summary>
     private SSAFYPlayTime.Character.CarryPhysicsProfile.CarryModeSettings ResolveCarryModeSettings()
     {
+        return ResolveCarryModeSettings(_localCarryMode);
+    }
+
+    private SSAFYPlayTime.Character.CarryPhysicsProfile.CarryModeSettings ResolveCarryModeSettings(
+        SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode mode)
+    {
         if (carryPhysicsProfile != null)
-            return carryPhysicsProfile.GetSettings(_localCarryMode);
+            return carryPhysicsProfile.GetSettings(mode);
 
         // 폴백: 기존 하드코드 값
-        return new SSAFYPlayTime.Character.CarryPhysicsProfile.CarryModeSettings
-        {
-            rootPlanarFollowSpeed = CarriedRootPlanarSyncSpeed,
-            rootVerticalFollowSpeed = CarriedRootVerticalSyncSpeed,
-            rootSnapDistance = CarriedRootSnapDistance,
-            rootSnapVerticalGap = CarriedRootSnapVerticalGap,
-            proxyRootFollowSpeed = CarryProxyRootFollowSpeed,
-            proxyRootSnapDistance = CarryProxyRootSnapDistance,
-            carryReleaseSettleDuration = 0.15f,
-            carrierTorsoReactionMultiplier = 1.15f,
-            carrierTurnAssistMultiplier = 1.1f,
-            victimCoreDriveSpringMultiplier = 0.9f,
-            victimCoreDriveDamperMultiplier = 0.95f
-        };
+        return SSAFYPlayTime.Character.CarryPhysicsProfile.GetDefaultSettings(mode);
     }
 
     /// <summary>
@@ -977,10 +1457,6 @@ public sealed partial class NetworkPlayer
         if (previousMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim &&
             newMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim)
         {
-            // 새 carry 시작 시 이전 release settle 취소.
-            // settle이 남아 있으면 _lastCarryAnchorPosition(이전 carry anchor)으로 root가
-            // 당겨져 새 carry 위치와 충돌하는 버그 발생.
-            _carryReleaseSettleRemaining = 0f;
             CaptureCarriedVictimRootOffset();
         }
         else if (previousMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim &&
@@ -991,9 +1467,15 @@ public sealed partial class NetworkPlayer
         }
 
         _localCarryMode = newMode;
+        if (newMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None)
+            _lastObservedCarryMode = newMode;
 
         if (previousMode != newMode)
         {
+            TraceCarryDebugSample(
+                "UpdateLocalCarryMode",
+                $"carry={previousMode}->{newMode} phase={phase} hasVictimRootOffset={_hasCarriedVictimRootOffset}",
+                forceSample: true);
             TraceStartupLaunchDiagnostics(
                 "UpdateLocalCarryMode",
                 force: true,
@@ -1018,9 +1500,22 @@ public sealed partial class NetworkPlayer
             var toAnchor = _lastCarryAnchorPosition - currentRoot;
             if (toAnchor.sqrMagnitude > 0.01f)
             {
-                var settleSpeed = 8f * dt;
-                var settledRoot = Vector3.MoveTowards(currentRoot, _lastCarryAnchorPosition, settleSpeed);
-                ApplyCarryRootPosition(settledRoot, true);
+                var settleMode = _lastObservedCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None
+                    ? _lastObservedCarryMode
+                    : SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry;
+                var settings = ResolveCarryModeSettings(settleMode);
+                var planarCurrent = new Vector3(currentRoot.x, 0f, currentRoot.z);
+                var planarTarget = new Vector3(_lastCarryAnchorPosition.x, 0f, _lastCarryAnchorPosition.z);
+                var planarNext = Vector3.MoveTowards(
+                    planarCurrent,
+                    planarTarget,
+                    ResolveCarryCorrectionFollowSpeed(settings.rootPlanarFollowSpeed, largeCorrection: true) * dt);
+                var yNext = Mathf.MoveTowards(
+                    currentRoot.y,
+                    _lastCarryAnchorPosition.y,
+                    ResolveCarryCorrectionFollowSpeed(settings.rootVerticalFollowSpeed, largeCorrection: true) * dt);
+                var settledRoot = new Vector3(planarNext.x, yNext, planarNext.z);
+                ApplyCarryRootPosition(settledRoot, resetVelocity: false);
 
                 TraceCarryDebugSample(
                     "CarryReleaseSettle",
@@ -1043,42 +1538,6 @@ public sealed partial class NetworkPlayer
         }
 
         transform.position = nextRootPosition;
-    }
-
-    /// <summary>
-    /// GetInput() 성공 여부와 무관하게 매 FixedUpdateNetwork 틱마다 실행.
-    /// 기절/회복/피격 타이머가 패킷 손실의 영향을 받지 않도록 DoPhysicsStep에서 분리.
-    ///
-    /// 분리 이유: DoPhysicsStep은 GetInput() 성공 시에만 실행되므로
-    /// 패킷 손실 틱에 기절 지속시간·회복 타이머·HP 무적 타이머가 멈추는 문제가 있었음.
-    /// </summary>
-    internal void TickAlwaysStates(float dt)
-    {
-        TickHitRecoil(dt);
-        TickHitFlinch(dt);
-        TickHitInstabilityBoost(dt);
-        TickVitalState(dt);
-        UpdateStunDecay(dt);
-        UpdateRecoveringWindow(dt);
-        TryTickStunnedState(dt);
-    }
-
-    /// <summary>
-    /// 의식 있는 플레이어가 BeingGrabbed / Dragged 상태일 때
-    /// 잡기 조인트가 hips 뼈만 끌고 가고 root는 locomotion이 구동하므로
-    /// transform.position을 hips 위치로 즉시 스냅하여 NetworkTransform이
-    /// 올바른 위치를 모든 클라이언트에 전달하도록 한다.
-    ///
-    /// GetInput() 결과와 무관하게 FixedUpdateNetwork()에서 항상 호출되어야 한다.
-    /// </summary>
-    private void SyncInteractionRootPosition()
-    {
-        if (_localPhysicalPhase != PhysicalPhase.BeingGrabbed &&
-            _localPhysicalPhase != PhysicalPhase.Dragged)
-            return;
-
-        if (TryResolveRootSyncTargetPosition(out var syncPos))
-            transform.position = syncPos;
     }
 
     private void SyncRootToPhysicsBody()
@@ -1167,10 +1626,8 @@ public sealed partial class NetworkPlayer
         else
         {
             _coyoteTimeRemaining -= dt;
-            // 하강 중(vy < 0)일 때 추가 중력 배율 적용 → 점프 어감 개선 (떠다니는 느낌 제거)
-            var fallMult = rigidbody3D.velocity.y < 0f ? config.fallGravityMultiplier : 1f;
             rigidbody3D.AddForce(
-                Vector3.down * config.extraGravity * fallMult * Mathf.Max(0.05f, gravityMultiplier),
+                Vector3.down * config.extraGravity * Mathf.Max(0.05f, gravityMultiplier),
                 ForceMode.Acceleration);
         }
 
@@ -1185,14 +1642,12 @@ public sealed partial class NetworkPlayer
             : Vector3.Dot(moveDirection, rigidbody3D.velocity);
 
         RotateTowardInput(cameraRelativeMove, inputMagnitude, dt);
-        ApplyMovementForce(moveDirection, inputMagnitude, moveSpeedMultiplier, dt);
+        ApplyMovementForce(moveDirection, inputMagnitude, moveSpeedMultiplier, input.Sprint, dt);
         ApplyJumpIfPossible(input.Jump, jumpMultiplier);
         _stateMachine.Tick(_isGrounded, inputMagnitude, dt, config);
 
         var planarVelocity = rigidbody3D.velocity;
         planarVelocity.y = 0f;
-        // 0.4f 계수: PartyMonsterAnimationDriver의 PM_LocomotionThreshold(0.1f)와
-        // 걷기 시작 속도(0.25 m/s) 사이의 보정값. 변경 시 임계값도 함께 조정 필요.
         var normalizedMoveSpeed = planarVelocity.magnitude * 0.4f;
         var locomotionState = ResolveLocomotionState(normalizedMoveSpeed, input.Sprint);
         SetMotorPresentationState(normalizedMoveSpeed, (int)_stateMachine.CurrentState, locomotionState);
@@ -1248,7 +1703,7 @@ public sealed partial class NetworkPlayer
         desiredRotation = Quaternion.identity;
         rotateSpeed = config != null ? config.rotateSpeedDeg : 360f;
 
-        if (!IsAnyHandHoldingObject() || !TryGetAverageHeldAnchorWorldPosition(out var grabAnchorWorld))
+        if (!IsAnyHandHoldingObject() || !TryGetCarryOrHeldReferenceWorldPosition(out var grabAnchorWorld))
             return false;
 
         var pivotPosition = ResolveGrabFacingPivotPosition();
@@ -1292,6 +1747,19 @@ public sealed partial class NetworkPlayer
             var turnScale = config != null && config.grabTurnSpeedScale > 0f ? config.grabTurnSpeedScale : 0.45f;
             rotateSpeed *= turnScale;
         }
+
+        TraceMoveHoldFacing(
+            "TryResolveGrabFacingRotation",
+            currentYaw,
+            anchorYaw,
+            desiredYaw,
+            currentDelta,
+            desiredDelta,
+            clampedDelta,
+            softLimit,
+            hardLimit,
+            rotateSpeed,
+            hasMoveInput);
 
         return true;
     }
@@ -1338,7 +1806,12 @@ public sealed partial class NetworkPlayer
         return transform.position;
     }
 
-    private void ApplyMovementForce(Vector3 moveDirection, float inputMagnitude, float moveSpeedMultiplier, float dt)
+    private void ApplyMovementForce(
+        Vector3 moveDirection,
+        float inputMagnitude,
+        float moveSpeedMultiplier,
+        bool sprintPressed,
+        float dt)
     {
         var planarVelocity = rigidbody3D.velocity;
         planarVelocity.y = 0f;
@@ -1364,6 +1837,19 @@ public sealed partial class NetworkPlayer
             acceleration *= HIT_RECOIL_ACCEL_SCALE;
         var maxVelocityChange = Mathf.Max(0f, acceleration) * dt;
         var velocityDelta = Vector3.ClampMagnitude(targetVelocity - planarVelocity, maxVelocityChange);
+
+        TraceMoveHoldForce(
+            "ApplyMovementForce",
+            moveDirection,
+            inputMagnitude,
+            moveSpeedMultiplier,
+            planarVelocity,
+            targetVelocity,
+            velocityDelta,
+            acceleration,
+            sprintPressed,
+            recoilActive,
+            unstableHitPenalty);
 
         if (dt > 0f)
         {
@@ -1565,12 +2051,12 @@ public sealed partial class NetworkPlayer
             return PhysicalPhase.Holding;
         }
 
+        if (_isGrabActive)
+            return PhysicalPhase.GrabIntent;
+
         // 장비 아이템(수박칼, 화염방사기 등) 장착 중
         if (_itemRuntimeHost != null && _itemRuntimeHost.IsHeldItemEquipment)
             return PhysicalPhase.WeaponEquipped;
-
-        if (_isGrabActive)
-            return PhysicalPhase.GrabIntent;
 
         return PhysicalPhase.Stable;
     }
@@ -1578,14 +2064,6 @@ public sealed partial class NetworkPlayer
     private void SetLocalPhysicalPhase(PhysicalPhase phase, float instability, bool dragged)
     {
         var previousPhase = _localPhysicalPhase;
-        if (debugGrabLog && phase != _localPhysicalPhase)
-        {
-            Debug.Log($"[Phase] {name}: {_localPhysicalPhase} → {phase} " +
-                $"(anyHolding={IsAnyHandHoldingObject()}, beingGrabbed={_beingGrabbedRefCount > 0}, " +
-                $"isAnyStunned={IsAnyHandHoldingStunnedPlayer}, isDual={IsDualGrabbingStunnedPlayer}, " +
-                $"instability={instability:F2})", this);
-        }
-
         _localPhysicalPhase = phase;
         _localInstability = Mathf.Clamp01(instability);
         _localIsDragged = dragged;
@@ -1695,6 +2173,8 @@ public sealed partial class NetworkPlayer
 
         _isActiveRagdoll = false;
         ClearPunchHitDetectionWindow();
+        ClearKickHitDetectionWindow();
+        ClearAerialKickHitDetectionWindow();
         _isLeftGrabActive = false;
         _isRightGrabActive = false;
         _isGrabActive = false;
@@ -1944,7 +2424,8 @@ public sealed partial class NetworkPlayer
         var rootPlanarBefore = new Vector2(rootVelocityBefore.x, rootVelocityBefore.z).magnitude;
         var rootPlanarAfter = new Vector2(rootVelocityAfter.x, rootVelocityAfter.z).magnitude;
         var rootToPelvisGap = Mathf.Abs(transform.position.y - pelvisY);
-        if (rootToPelvisGap <= CarriedRootSnapVerticalGap)
+        var carriedVictimSettings = ResolveCarryModeSettings(SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim);
+        if (rootToPelvisGap <= carriedVictimSettings.rootSnapVerticalGap)
             return;
 
         TraceCarryDebugSample(
@@ -2116,6 +2597,8 @@ public sealed partial class NetworkPlayer
 
         _isActiveRagdoll = true;
         ClearPunchHitDetectionWindow();
+        ClearKickHitDetectionWindow();
+        ClearAerialKickHitDetectionWindow();
         _isLeftGrabActive = false;
         _isRightGrabActive = false;
         _isGrabActive = false;
@@ -2510,6 +2993,63 @@ public sealed partial class NetworkPlayer
     private Vector3 _activePunchPreviousSamplePosition;
     private readonly Collider[] _punchHitResults = new Collider[PunchHitBufferSize];
 
+    private const string KickCombatStatId = "KICK";
+    private const float FallbackKickHealthDamage = 4f;
+    private const float FallbackKickStunDamage = 14f;
+    private const float FallbackKickKnockbackForce = 12f;
+    private const float KickHitRadius = 0.42f;
+    private const float KickHitForwardOffset = 0.14f;
+    private const float KickActiveWindowSeconds = 0.12f;
+    private const float KickFallbackReach = 0.95f;
+    private const int KickHitBufferSize = 16;
+    private int _kickCooldownUntilTick;
+    private int _activeKickWindowEndTick = -1;
+    private bool _activeKickIsLeft;
+    private bool _activeKickHasPreviousSample;
+    private float _activeKickHealthDamage;
+    private float _activeKickStunDamage;
+    private float _activeKickKnockbackForce;
+    private float _activeKickAttackerSpeed;
+    private Vector3 _activeKickPreviousSamplePosition;
+    private readonly Collider[] _kickHitResults = new Collider[KickHitBufferSize];
+
+    private const string AerialKickCombatStatId = "JET_KICK";
+    private const float FallbackAerialKickHealthDamage = 15f;
+    private const float FallbackAerialKickStunDamage = 50f;
+    private const float FallbackAerialKickKnockbackForce = 18f;
+    private const float FallbackAerialKickSelfStunDuration = 0.4f;
+    private const float FallbackAerialKickVelocityDamageMultiplier = 1.25f;
+    private const float FallbackAerialKickAirborneVulnerabilityMultiplier = 1.5f;
+    private const float AerialKickHitRadius = 0.56f;
+    private const float AerialKickActiveWindowSeconds = 0.28f;
+    private const float AerialKickFallbackCooldown = 1.25f;
+    private const float AerialKickForwardReachMin = 0.72f;
+    private const float AerialKickForwardReachMax = 1.35f;
+    private const float AerialKickHeightMin = 0.55f;
+    private const float AerialKickHeightMax = 0.84f;
+    private const float AerialKickSpeedForMaxBonus = 10.5f;
+    private const float AerialKickForwardBurstBase = 3.6f;
+    private const float AerialKickForwardBurstSpeedScale = 0.34f;
+    private const float AerialKickUpwardBurstMin = 0.04f;
+    private const float AerialKickUpwardBurstMax = 0.18f;
+    private const float AerialKickSustainedForce = 18f;
+    private Vector3 _activeAerialKickForwardDirection;
+    private const int AerialKickHitBufferSize = 16;
+    private int _aerialKickCooldownUntilTick;
+    private int _activeAerialKickWindowEndTick = -1;
+    private bool _activeAerialKickHasPreviousSample;
+    private bool _activeAerialKickHasHit;
+    private float _activeAerialKickHealthDamage;
+    private float _activeAerialKickStunDamage;
+    private float _activeAerialKickKnockbackForce;
+    private float _activeAerialKickSelfStunDuration;
+    private float _activeAerialKickVelocityDamageMultiplier;
+    private float _activeAerialKickAirborneVulnerabilityMultiplier;
+    private float _activeAerialKickAttackerSpeed;
+    private float _activeAerialKickStartSpeed;
+    private Vector3 _activeAerialKickPreviousSamplePosition;
+    private readonly Collider[] _aerialKickHitResults = new Collider[AerialKickHitBufferSize];
+
     // ─── 히트스탑 상태 ───
     private float _hitStopEndTime;
     private Vector3 _hitStopSavedVelocity;
@@ -2675,6 +3215,24 @@ public sealed partial class NetworkPlayer
         return 0.35f;
     }
 
+    internal float GetConfiguredKickCooldown()
+    {
+        var stat = CombatSettings.Instance?.GetAttackStat(KickCombatStatId);
+        if (stat.HasValue)
+            return Mathf.Max(stat.Value.CooldownSec, KickActiveWindowSeconds);
+
+        return 0.45f;
+    }
+
+    internal float GetConfiguredAerialKickCooldown()
+    {
+        var stat = CombatSettings.Instance?.GetAttackStat(AerialKickCombatStatId);
+        if (stat.HasValue)
+            return Mathf.Max(stat.Value.CooldownSec, AerialKickActiveWindowSeconds);
+
+        return AerialKickFallbackCooldown;
+    }
+
     internal bool TryBeginPunchHitDetection(bool isLeft)
     {
         if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
@@ -2697,6 +3255,90 @@ public sealed partial class NetworkPlayer
         _activePunchAttackerSpeed = rigidbody3D != null ? rigidbody3D.velocity.magnitude : 0f;
         _activePunchWindowEndTick = currentTick + Mathf.Max(1, Mathf.RoundToInt(PunchActiveWindowSeconds * tickRate));
         return true;
+    }
+
+    internal bool TryBeginKickHitDetection(bool isLeft)
+    {
+        if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
+            return false;
+
+        var stat = CombatSettings.Instance?.GetAttackStat(KickCombatStatId);
+        var cooldown = GetConfiguredKickCooldown();
+        var currentTick = ResolveCurrentSimulationTick();
+        var tickRate = Runner != null ? (int)Runner.TickRate : Mathf.Max(1, Mathf.RoundToInt(1f / Time.fixedDeltaTime));
+        var cooldownTicks = Mathf.Max(1, Mathf.RoundToInt(cooldown * tickRate));
+        if (currentTick < _kickCooldownUntilTick)
+            return false;
+
+        _kickCooldownUntilTick = currentTick + cooldownTicks;
+        _activeKickIsLeft = isLeft;
+        _activeKickHasPreviousSample = false;
+        _activeKickHealthDamage = stat.HasValue ? stat.Value.BaseDamage : FallbackKickHealthDamage;
+        _activeKickStunDamage = stat.HasValue ? stat.Value.StunDamage : FallbackKickStunDamage;
+        _activeKickKnockbackForce = stat.HasValue ? stat.Value.KnockbackForce : FallbackKickKnockbackForce;
+        _activeKickAttackerSpeed = rigidbody3D != null ? rigidbody3D.velocity.magnitude : 0f;
+        _activeKickWindowEndTick = currentTick + Mathf.Max(1, Mathf.RoundToInt(KickActiveWindowSeconds * tickRate));
+        return true;
+    }
+
+    internal bool TryBeginAerialKickHitDetection()
+    {
+        if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
+            return false;
+
+        if (_isGrounded || !_isActiveRagdoll || GetIsDeadState())
+            return false;
+
+        var stat = CombatSettings.Instance?.GetAttackStat(AerialKickCombatStatId);
+        var cooldown = GetConfiguredAerialKickCooldown();
+        var currentTick = ResolveCurrentSimulationTick();
+        var tickRate = Runner != null ? (int)Runner.TickRate : Mathf.Max(1, Mathf.RoundToInt(1f / Time.fixedDeltaTime));
+        var cooldownTicks = Mathf.Max(1, Mathf.RoundToInt(cooldown * tickRate));
+        if (currentTick < _aerialKickCooldownUntilTick || _activeAerialKickWindowEndTick >= 0)
+            return false;
+
+        _aerialKickCooldownUntilTick = currentTick + cooldownTicks;
+        _activeAerialKickHasPreviousSample = false;
+        _activeAerialKickHasHit = false;
+        _activeAerialKickHealthDamage = stat.HasValue ? stat.Value.BaseDamage : FallbackAerialKickHealthDamage;
+        _activeAerialKickStunDamage = stat.HasValue ? stat.Value.StunDamage : FallbackAerialKickStunDamage;
+        _activeAerialKickKnockbackForce = stat.HasValue ? stat.Value.KnockbackForce : FallbackAerialKickKnockbackForce;
+        _activeAerialKickSelfStunDuration = stat.HasValue ? stat.Value.SelfStunDuration : FallbackAerialKickSelfStunDuration;
+        _activeAerialKickVelocityDamageMultiplier = stat.HasValue
+            ? Mathf.Max(0f, stat.Value.VelocityDamageMultiplier)
+            : FallbackAerialKickVelocityDamageMultiplier;
+        _activeAerialKickAirborneVulnerabilityMultiplier = stat.HasValue
+            ? Mathf.Max(1f, stat.Value.AirborneVulnerabilityMultiplier)
+            : FallbackAerialKickAirborneVulnerabilityMultiplier;
+        _activeAerialKickAttackerSpeed = rigidbody3D != null ? rigidbody3D.velocity.magnitude : 0f;
+        _activeAerialKickStartSpeed = _activeAerialKickAttackerSpeed;
+        _activeAerialKickWindowEndTick = currentTick + Mathf.Max(1, Mathf.RoundToInt(AerialKickActiveWindowSeconds * tickRate));
+
+        ApplyAerialKickBurst();
+        return true;
+    }
+
+    private void ApplyAerialKickBurst()
+    {
+        if (rigidbody3D == null || rigidbody3D.isKinematic)
+            return;
+
+        var planarForward = Vector3.ProjectOnPlane(ResolvePunchForward(), Vector3.up);
+        if (planarForward.sqrMagnitude < 0.0001f)
+            planarForward = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+        if (planarForward.sqrMagnitude < 0.0001f)
+            planarForward = Vector3.forward;
+
+        planarForward.Normalize();
+        _activeAerialKickForwardDirection = planarForward;
+        var velocity = rigidbody3D.velocity;
+        var forwardSpeed = Mathf.Max(0f, Vector3.Dot(velocity, planarForward));
+        var impulse = planarForward * (AerialKickForwardBurstBase + forwardSpeed * AerialKickForwardBurstSpeedScale);
+        var upwardBonus = Mathf.Lerp(
+            AerialKickUpwardBurstMin,
+            AerialKickUpwardBurstMax,
+            Mathf.Clamp01(Mathf.Abs(velocity.y) / 8f));
+        rigidbody3D.AddForce(impulse + Vector3.up * upwardBonus, ForceMode.Impulse);
     }
 
     internal void ExecutePunchHitDetection(bool isLeft)
@@ -2960,7 +3602,6 @@ public sealed partial class NetworkPlayer
         _stunSlowMotionHoldEnd = now + STUN_SLOWMO_HOLD_DURATION;
         _stunSlowMotionRampEnd = now + STUN_SLOWMO_HOLD_DURATION + STUN_SLOWMO_RAMP_DURATION;
 
-        Debug.Log($"[StunSlowMo] 시작: timeScale={STUN_SLOWMO_SCALE}");
     }
 
     /// <summary>
@@ -3024,7 +3665,6 @@ public sealed partial class NetworkPlayer
             Time.timeScale = 1f;
             Time.fixedDeltaTime = 0.02f;
             _stunSlowMotionActive = false;
-            Debug.Log("[StunSlowMo] 복원 완료");
             return;
         }
 
