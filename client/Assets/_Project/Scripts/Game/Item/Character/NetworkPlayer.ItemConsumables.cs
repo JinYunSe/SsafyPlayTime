@@ -18,6 +18,7 @@ public sealed partial class NetworkPlayer
     [Networked] private NetworkString<_32> NetworkedHeldItemId { get; set; }
 
     private string _lastReplicatedHeldItemId = string.Empty;
+    private string _lastBroadcastHeldItemId = string.Empty;
 
     public bool CanWriteItemBuffSnapshot()
     {
@@ -97,7 +98,16 @@ public sealed partial class NetworkPlayer
             return;
         }
 
-        NetworkedHeldItemId = _itemRuntimeHost != null ? _itemRuntimeHost.HeldItemId ?? string.Empty : string.Empty;
+        var heldItemId = _itemRuntimeHost != null ? _itemRuntimeHost.HeldItemId ?? string.Empty : string.Empty;
+        NetworkedHeldItemId = heldItemId;
+
+        if (string.Equals(_lastBroadcastHeldItemId, heldItemId, System.StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lastBroadcastHeldItemId = heldItemId;
+        RPC_SyncHeldItemPresentation(heldItemId);
     }
 
     private void ApplyReplicatedHeldItemPresentation()
@@ -107,17 +117,38 @@ public sealed partial class NetworkPlayer
             return;
         }
 
-        var runtimeHeldItemId = _itemRuntimeHost != null ? _itemRuntimeHost.HeldItemId ?? string.Empty : string.Empty;
+        if (_heldItemPresenter == null)
+        {
+            _heldItemPresenter = GetComponent<ItemCharacterHeldItemPresenter>();
+        }
+
         var replicatedHeldItemId = NetworkedHeldItemId.ToString();
-        var heldItemId = !string.IsNullOrWhiteSpace(runtimeHeldItemId)
+        var runtimeHeldItemId = _itemRuntimeHost != null ? _itemRuntimeHost.HeldItemId ?? string.Empty : string.Empty;
+        var heldItemId = HasInputAuthority && !string.IsNullOrWhiteSpace(runtimeHeldItemId)
             ? runtimeHeldItemId
             : replicatedHeldItemId;
-        if (string.Equals(_lastReplicatedHeldItemId, heldItemId, System.StringComparison.Ordinal))
+
+        if (string.Equals(_lastReplicatedHeldItemId, heldItemId, System.StringComparison.Ordinal) &&
+            _heldItemPresenter != null)
         {
             return;
         }
 
         _lastReplicatedHeldItemId = heldItemId;
+        _heldItemPresenter?.SetReplicatedHeldItemId(heldItemId);
+    }
+
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_SyncHeldItemPresentation(string heldItemId)
+    {
+        if (HasStateAuthority)
+        {
+            return;
+        }
+
+        heldItemId ??= string.Empty;
+        _lastReplicatedHeldItemId = heldItemId;
+
         if (_heldItemPresenter == null)
         {
             _heldItemPresenter = GetComponent<ItemCharacterHeldItemPresenter>();

@@ -49,9 +49,12 @@ public class WaterDamageZone : MonoBehaviour
         var routine = StartCoroutine(DamageTickRoutine(networkPlayer));
         _damageCoroutines.Add(networkPlayer, routine);
 
-        // 로컬 플레이어에게만 물 오버레이 표시
+        // 로컬 플레이어에게만 물 오버레이 표시 + 사망 시 즉시 해제 구독
         if (networkPlayer.HasInputAuthority)
+        {
             GameHUD.FindOrCreate().ShowWaterOverlay();
+            networkPlayer.OnNetworkPlayerDied += OnLocalPlayerDiedInWater;
+        }
     }
 
     private void OnTriggerExit(Collider other)
@@ -66,9 +69,27 @@ public class WaterDamageZone : MonoBehaviour
             _damageCoroutines.Remove(networkPlayer);
         }
 
-        // 로컬 플레이어에게만 물 오버레이 제거
+        // 로컬 플레이어에게만 물 오버레이 제거 + 사망 구독 해제
         if (networkPlayer.HasInputAuthority)
+        {
+            networkPlayer.OnNetworkPlayerDied -= OnLocalPlayerDiedInWater;
             GameHUD.FindOrCreate().HideWaterOverlay();
+        }
+    }
+
+    // 물속에서 로컬 플레이어가 사망했을 때 수중 효과를 즉시 제거한다.
+    // OnTriggerExit는 콜라이더 비활성화 시 신뢰할 수 없으므로 명시적으로 처리.
+    private void OnLocalPlayerDiedInWater(NetworkPlayer deadPlayer)
+    {
+        deadPlayer.OnNetworkPlayerDied -= OnLocalPlayerDiedInWater;
+
+        if (_damageCoroutines.TryGetValue(deadPlayer, out var routine))
+        {
+            StopCoroutine(routine);
+            _damageCoroutines.Remove(deadPlayer);
+        }
+
+        GameHUD.FindOrCreate().HideWaterOverlay();
     }
 
     private IEnumerator DamageTickRoutine(NetworkPlayer player)
