@@ -47,6 +47,13 @@ public class MapManager : NetworkBehaviour
                 // controller.enabled = true; 
             }
         }
-        // else if (data is JoyconGimmickData joyData) { ... }
+        else if (data is JoyconGimmickData joyData)
+        {
+            RandomBoxSpawnManager boxManager = FindObjectOfType<RandomBoxSpawnManager>();
+            if (boxManager != null)
+            {
+                boxManager.Initialize(joyData);
+            }
+        }
     }
 }
