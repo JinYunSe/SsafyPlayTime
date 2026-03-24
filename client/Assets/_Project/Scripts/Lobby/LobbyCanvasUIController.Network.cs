@@ -792,13 +792,13 @@ namespace SSAFYPlayTime
 
             var latchedLeftGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
             var latchedRightGrabHold = _netRightMouseDown && _netRightMouseConsumedAsGrab;
-
             var payload = new PlayerNetworkInput
             {
                 Move = _netMoveInput,
                 CameraYaw = _netCameraYaw,
                 Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
                 Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
+                PrimaryUseHold = _netLeftMouseDown,
                 Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
                 Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
                 LeftGrabHold = latchedLeftGrabHold,
