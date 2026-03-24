@@ -40,6 +40,8 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private Material spriteMaterial;
         [SerializeField] private Material solidMaterial;
 
+        private Vector3? _effectLocalScaleOverride;
+
         private void OnEnable()
         {
             RefreshVisual();
@@ -68,6 +70,21 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             ApplyShellTransparency();
             EnsureEffectChild();
+        }
+
+        public void SetEffectLocalScaleOverride(Vector3 scale)
+        {
+            _effectLocalScaleOverride = new Vector3(
+                Mathf.Max(0.001f, scale.x),
+                Mathf.Max(0.001f, scale.y),
+                Mathf.Max(0.001f, scale.z));
+            RefreshVisual();
+        }
+
+        public void ClearEffectLocalScaleOverride()
+        {
+            _effectLocalScaleOverride = null;
+            RefreshVisual();
         }
 
         private void ApplyShellTransparency()
@@ -134,7 +151,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             effectRoot.localPosition = Vector3.zero;
             effectRoot.localRotation = Quaternion.identity;
-            effectRoot.localScale = effectLocalScale;
+            effectRoot.localScale = _effectLocalScaleOverride ?? effectLocalScale;
             DisableColliders(effectRoot.gameObject);
 
             if (!Application.isPlaying)
