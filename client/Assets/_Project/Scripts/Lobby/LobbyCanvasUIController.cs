@@ -1226,6 +1226,18 @@ namespace SSAFYPlayTime
                 }
             }
 
+            if (IsActiveGameplayScene())
+                StartCoroutine(CoLeaveGameVoluntarily());
+            else
+                OnLeaveRoomClicked();
+        }
+
+        private IEnumerator CoLeaveGameVoluntarily()
+        {
+            SceneManager.LoadScene(launcherSceneName);
+            while (!IsActiveSceneNamed(launcherSceneName))
+                yield return null;
+            ResetCharacterSlotState();
             OnLeaveRoomClicked();
         }
 
