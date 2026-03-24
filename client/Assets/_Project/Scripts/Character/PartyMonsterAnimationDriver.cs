@@ -991,8 +991,14 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
     string ResolveHoldUpperBodyStateName()
     {
-        if (ShouldUseCarryUpperBodyState() && HasUpperBodyState(CarryState))
-            return CarryState;
+        if (ShouldUseCarryUpperBodyState())
+        {
+            if (ShouldUseGrabUpperBodyForCarry() && HasUpperBodyState(GrabState))
+                return GrabState;
+
+            if (HasUpperBodyState(CarryState))
+                return CarryState;
+        }
 
         return HasUpperBodyState(GrabState) ? GrabState : string.Empty;
     }
@@ -1007,6 +1013,17 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         return networkPlayer != null &&
                networkPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.CarryingStunned;
+    }
+
+    bool ShouldUseGrabUpperBodyForCarry()
+    {
+        if (characterGrabController == null)
+            return false;
+
+        var holdVariant = characterGrabController.CurrentHoldVariant;
+        return holdVariant == CharacterGrabController.HoldVariant.FrontCarry ||
+               holdVariant == CharacterGrabController.HoldVariant.OverheadCarry ||
+               holdVariant == CharacterGrabController.HoldVariant.DualCarry;
     }
 
     bool HasUpperBodyState(string stateName)
