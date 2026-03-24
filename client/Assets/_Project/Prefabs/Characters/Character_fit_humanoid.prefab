@@ -1619,6 +1619,8 @@ MonoBehaviour:
   useAnimatedVisualOnly: 1
   disablePhysicsAnimationSync: 1
   holdPoint: {fileID: 0}
+  carryRig: {fileID: 0}
+  carryPhysicsProfile: {fileID: 11400000, guid: 643d10470b314152b2fb81754bc89197, type: 2}
   _CharacterTypeIndex: -1
   _BoneRotations: []
   _NetworkedIsActiveRagdoll:

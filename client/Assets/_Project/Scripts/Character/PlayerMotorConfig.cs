@@ -23,6 +23,7 @@ namespace SSAFYPlayTime.Character
         [Header("Jump/Gravity")]
         public float jumpImpulse = 20f;
         public float extraGravity = 10f;
+        public float fallGravityMultiplier = 2f;
 
         [Header("Ground")]
         public float groundProbeRadius = 0.1f;

@@ -30,8 +30,8 @@ public class LookAtTargetTracker : MonoBehaviour
     [SerializeField] private float scanInterval = 0.2f;
 
     [Header("Movement Damping")]
-    [SerializeField, Range(0f, 1f)] private float movingWeightScale = 0.3f;
-    [SerializeField] private float movingSpeedThreshold = 1.5f;
+    [SerializeField, Range(0f, 1f)] private float movingWeightScale = 0.12f;
+    [SerializeField] private float movingSpeedThreshold = 1.0f;
 
     private Transform _currentTarget;
     private float _targetWeight;
