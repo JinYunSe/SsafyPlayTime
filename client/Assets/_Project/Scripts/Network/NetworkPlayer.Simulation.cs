@@ -246,6 +246,21 @@ public sealed partial class NetworkPlayer
         _localInstability = Mathf.Max(_localInstability, Mathf.Min(1f, HIT_RECOIL_INSTABILITY_FLOOR + boost * 0.2f));
     }
 
+    private bool ShouldSuppressRepeatedHitReaction()
+    {
+        return GetNoStaggerRemaining() > 0f;
+    }
+
+    private void ApplyCloseCombatHitReaction(Vector3 hitPoint, float impactMagnitude, bool suppressReaction)
+    {
+        if (suppressReaction)
+            return;
+
+        ArmHitInstabilityBoost(impactMagnitude);
+        ArmHitFlinch(impactMagnitude);
+        ArmDirectionalCombatFlinch(hitPoint, impactMagnitude);
+    }
+
     private bool ShouldApplyHitMovementPenalty()
     {
         if (!_isActiveRagdoll || _isRecovering || _isRecoverStabilizing)
@@ -614,6 +629,7 @@ public sealed partial class NetworkPlayer
         if (victimPlayer == null)
             return;
 
+        var suppressRepeatReaction = victimPlayer.ShouldSuppressRepeatedHitReaction();
         var forward = ResolvePunchForward();
         float lateralRatio;
         float heightRatio;
@@ -633,9 +649,7 @@ public sealed partial class NetworkPlayer
         var isStunnedByHit = !victimPlayer._isActiveRagdoll;
         var collapseVictim = isStunnedByHit && victimPlayer.GetPhysicalPhase() == PhysicalPhase.StunnedCollapse;
         var appliedKnockback = isStunnedByHit ? finalKnockback * StunLaunchKnockbackScale : finalKnockback;
-        victimPlayer.ArmHitInstabilityBoost(appliedKnockback);
-        victimPlayer.ArmHitFlinch(appliedKnockback);
-        victimPlayer.ArmDirectionalCombatFlinch(hitPoint, appliedKnockback);
+        victimPlayer.ApplyCloseCombatHitReaction(hitPoint, appliedKnockback, suppressRepeatReaction);
 
         var victimRb = victimPlayer.rigidbody3D;
         var victimVelocityBeforeForce = victimRb != null && !victimRb.isKinematic
@@ -692,6 +706,7 @@ public sealed partial class NetworkPlayer
         if (victimPlayer == null)
             return;
 
+        var suppressRepeatReaction = victimPlayer.ShouldSuppressRepeatedHitReaction();
         var forward = ResolvePunchForward();
         float lateralRatio;
         float heightRatio;
@@ -711,9 +726,7 @@ public sealed partial class NetworkPlayer
         var isStunnedByHit = !victimPlayer._isActiveRagdoll;
         var collapseVictim = isStunnedByHit && victimPlayer.GetPhysicalPhase() == PhysicalPhase.StunnedCollapse;
         var appliedKnockback = isStunnedByHit ? finalKnockback * StunLaunchKnockbackScale : finalKnockback;
-        victimPlayer.ArmHitInstabilityBoost(appliedKnockback);
-        victimPlayer.ArmHitFlinch(appliedKnockback);
-        victimPlayer.ArmDirectionalCombatFlinch(hitPoint, appliedKnockback);
+        victimPlayer.ApplyCloseCombatHitReaction(hitPoint, appliedKnockback, suppressRepeatReaction);
 
         var victimRb = victimPlayer.rigidbody3D;
         var victimVelocityBeforeForce = victimRb != null && !victimRb.isKinematic
@@ -767,6 +780,7 @@ public sealed partial class NetworkPlayer
         if (victimPlayer == null)
             return;
 
+        var suppressRepeatReaction = victimPlayer.ShouldSuppressRepeatedHitReaction();
         var forward = ResolvePunchForward();
         ResolveAerialKickImpactStats(victimPlayer, out var finalHealthDamage, out var finalStunDamage, out var finalKnockback, out var attackerSpeed);
 
@@ -786,9 +800,7 @@ public sealed partial class NetworkPlayer
         var isStunnedByHit = !victimPlayer._isActiveRagdoll;
         var collapseVictim = isStunnedByHit && victimPlayer.GetPhysicalPhase() == PhysicalPhase.StunnedCollapse;
         var appliedKnockback = isStunnedByHit ? finalKnockback * StunLaunchKnockbackScale : finalKnockback;
-        victimPlayer.ArmHitInstabilityBoost(appliedKnockback);
-        victimPlayer.ArmHitFlinch(appliedKnockback);
-        victimPlayer.ArmDirectionalCombatFlinch(hitPoint, appliedKnockback);
+        victimPlayer.ApplyCloseCombatHitReaction(hitPoint, appliedKnockback, suppressRepeatReaction);
 
         var victimRb = victimPlayer.rigidbody3D;
         var victimVelocityBeforeForce = victimRb != null && !victimRb.isKinematic
