@@ -1147,6 +1147,24 @@ namespace SSAFYPlayTime
             _spawnedCharacterIndexByPlayerId.Clear();
         }
 
+        // GameScene에서 플레이어가 자발적으로 로비로 이동할 때 호출합니다.
+        // 로컬 캐릭터를 즉사 처리해 사망 순서를 기록한 뒤 방을 나갑니다.
+        public void LeaveGameVoluntarily()
+        {
+            if (_runner != null && _runner.IsRunning)
+            {
+                foreach (var np in FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None))
+                {
+                    if (np == null || np.Object == null) continue;
+                    if (!np.HasInputAuthority) continue;
+                    np.KillImmediately("LeaveGameVoluntarily");
+                    break;
+                }
+            }
+
+            OnLeaveRoomClicked();
+        }
+
         // 방 나가기 버튼 클릭 처리. 러너를 종료하고 로비 패널로 복귀해 방 목록을 다시 불러온다.
         private async void OnLeaveRoomClicked()
         {
