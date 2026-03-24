@@ -321,10 +321,21 @@ namespace SSAFYPlayTime
                 }
 
                 // GameScene에서 방장이 나간 경우 → Migration 대신 게임 종료 처리
-                if (IsActiveGameplayScene() && !_isShowingGameEndPanel)
+                // _isShowingGameEndPanel=true는 PlayerLeft에서 이미 TriggerHostExitAndReturnToLobby가
+                // 호출된 상태를 의미한다. 이 경우 migration을 진행하면 CoReturnToLobbyOnHostExit와
+                // ShutdownRunnerAsync/StartGame이 충돌하므로 Runner만 종료하고 즉시 반환한다.
+                if (IsActiveGameplayScene())
                 {
-                    Debug.Log("[Lobby] Host exited during gameplay → returning to lobby.");
-                    TriggerHostExitAndReturnToLobby();
+                    if (!_isShowingGameEndPanel)
+                    {
+                        Debug.Log("[Lobby] Host exited during gameplay → returning to lobby.");
+                        TriggerHostExitAndReturnToLobby();
+                    }
+                    else
+                    {
+                        Debug.Log("[Lobby] Host exited during gameplay, already returning to lobby → shutdown runner only.");
+                        _ = ShutdownRunnerAsync();
+                    }
                     return;
                 }
 
@@ -792,13 +803,13 @@ namespace SSAFYPlayTime
 
             var latchedLeftGrabHold = _netLeftMouseDown && _netLeftMouseConsumedAsGrab;
             var latchedRightGrabHold = _netRightMouseDown && _netRightMouseConsumedAsGrab;
-
             var payload = new PlayerNetworkInput
             {
                 Move = _netMoveInput,
                 CameraYaw = _netCameraYaw,
                 Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
                 Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
+                PrimaryUseHold = _netLeftMouseDown,
                 Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
                 Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
                 LeftGrabHold = latchedLeftGrabHold,
@@ -1031,8 +1042,14 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            EnsureLauncherBackgroundMusic();
+            RefreshLauncherBackgroundMusicState();
+
             if (IsActiveGameplayScene())
             {
+                _isShowingGameEndPanel = false;
+                PlayBackgroundMusicClip(GetGameplayBackgroundMusicClip());
+
                 if (nicknamePanel != null) nicknamePanel.SetActive(false);
                 if (lobbyPanel != null) lobbyPanel.SetActive(false);
                 if (roomPanel != null) roomPanel.SetActive(false);
