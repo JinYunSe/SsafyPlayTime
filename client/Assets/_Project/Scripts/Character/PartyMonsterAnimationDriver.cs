@@ -41,10 +41,10 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     float grabHoldThreshold = 0.15f;
 
     [SerializeField]
-    float attackLockDuration = 0.08f;
+    float attackLockDuration = 0.11f;
 
     [SerializeField]
-    float attackVisualDuration = 0.3f;
+    float attackVisualDuration = 0.4f;
 
     [SerializeField]
     float throwLockDuration = 0.85f;
@@ -221,7 +221,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
                 // 피호스트 로컬 플레이어: 입력은 읽어서 즉시 예측 연출,
                 // 로코모션은 네트워크 기반 (자기 rigidbody는 시뮬 안 하므로)
                 HandleInput();
-                UpdateLocomotionForOwnerProxy();
+                UpdateLocomotionForLocallyControlledPlayer();
             }
             else
             {
@@ -239,7 +239,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         TryFlushPunchBuffer();
 
         // 그랩 중에도 locomotion 애니메이션 유지 (전투는 Upper Body Layer에서 처리)
-        UpdateLocomotion();
+        UpdateLocomotionForLocallyControlledPlayer();
 
         UpdateUpperBodyLayerState();
     }
@@ -946,19 +946,50 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
     void UpdateLocomotion()
     {
-        float speed = 0f;
+        UpdateLocomotionForLocallyControlledPlayer();
+    }
 
-        if (rigidbody3D != null)
-        {
-            Vector3 planarVelocity = rigidbody3D.velocity;
-            planarVelocity.y = 0f;
-            speed = planarVelocity.magnitude;
-        }
+    float ResolveLocallyControlledMeasuredSpeed()
+    {
+        if (rigidbody3D == null)
+            return 0f;
 
-        isSprinting = Input.GetKey(KeyCode.LeftShift) && speed > locomotionThreshold;
-        var locomotionState = speed <= locomotionThreshold
+        Vector3 planarVelocity = rigidbody3D.velocity;
+        planarVelocity.y = 0f;
+        return planarVelocity.magnitude * 0.4f;
+    }
+
+    void UpdateLocomotionForLocallyControlledPlayer()
+    {
+        var localMove = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+        var predictedMagnitude = Mathf.Clamp01(localMove.magnitude);
+        var measuredSpeed = ResolveLocallyControlledMeasuredSpeed();
+        var networkSpeed = networkPlayer != null ? networkPlayer.GetNetworkedMoveSpeed() : 0f;
+        var authoritativeSpeed = Mathf.Max(measuredSpeed, networkSpeed);
+        var isHolding = networkPlayer != null &&
+                        networkPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.Holding;
+
+        var predictedSpeed = predictedMagnitude;
+        if (isHolding)
+            predictedSpeed = Mathf.Lerp(authoritativeSpeed, predictedMagnitude, 0.35f);
+
+        var speed = Mathf.Max(authoritativeSpeed, predictedSpeed);
+        var movementThreshold = isHolding ? locomotionThreshold * 0.85f : locomotionThreshold;
+        var wantsLocomotion = isHolding
+            ? speed > movementThreshold
+            : predictedMagnitude > movementThreshold || authoritativeSpeed > movementThreshold;
+        var allowSprintPresentation = Input.GetKey(KeyCode.LeftShift) &&
+                                      (!isHolding || speed > locomotionThreshold * 1.2f);
+        var fallbackLocomotionState = speed <= locomotionThreshold
             ? NetworkPlayer.PresentationLocomotionState.Idle
-            : (isSprinting ? NetworkPlayer.PresentationLocomotionState.Sprint : NetworkPlayer.PresentationLocomotionState.Walk);
+            : (allowSprintPresentation
+                ? NetworkPlayer.PresentationLocomotionState.Sprint
+                : NetworkPlayer.PresentationLocomotionState.Walk);
+        var locomotionState = wantsLocomotion
+            ? (allowSprintPresentation
+                ? NetworkPlayer.PresentationLocomotionState.Sprint
+                : NetworkPlayer.PresentationLocomotionState.Walk)
+            : (networkPlayer != null ? networkPlayer.GetNetworkedLocomotionState() : fallbackLocomotionState);
 
         ApplyLocomotionState(locomotionState, speed);
     }
@@ -978,31 +1009,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
     void UpdateLocomotionForOwnerProxy()
     {
-        if (networkPlayer == null)
-            return;
-
-        var localMove = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
-        var predictedMagnitude = Mathf.Clamp01(localMove.magnitude);
-        var networkSpeed = networkPlayer.GetNetworkedMoveSpeed();
-        var isHolding = networkPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.Holding;
-        var predictedSpeed = predictedMagnitude;
-        if (isHolding)
-            predictedSpeed = Mathf.Lerp(networkSpeed, predictedMagnitude, 0.35f);
-
-        var speed = Mathf.Max(networkSpeed, predictedSpeed);
-        var movementThreshold = isHolding ? locomotionThreshold * 0.85f : locomotionThreshold;
-        var wantsLocomotion = isHolding
-            ? speed > movementThreshold
-            : predictedMagnitude > movementThreshold;
-        var allowSprintPresentation = Input.GetKey(KeyCode.LeftShift) &&
-                                      (!isHolding || speed > locomotionThreshold * 1.2f);
-        var locomotionState = wantsLocomotion
-            ? (allowSprintPresentation
-                ? NetworkPlayer.PresentationLocomotionState.Sprint
-                : NetworkPlayer.PresentationLocomotionState.Walk)
-            : networkPlayer.GetNetworkedLocomotionState();
-
-        ApplyLocomotionState(locomotionState, speed);
+        UpdateLocomotionForLocallyControlledPlayer();
     }
 
     void UpdateCurrentLocomotion()
@@ -1010,13 +1017,13 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         if (isRemoteProxy)
         {
             if (isLocalWithoutAuthority)
-                UpdateLocomotionForOwnerProxy();
+                UpdateLocomotionForLocallyControlledPlayer();
             else
                 UpdateLocomotionFromNetwork();
             return;
         }
 
-        UpdateLocomotion();
+        UpdateLocomotionForLocallyControlledPlayer();
     }
 
     /// <summary>
@@ -1235,7 +1242,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return;
 
         // 펀치 콤보는 짧은 블렌드, 그랩·던지기는 약간 긴 블렌드
-        float blendTime = (stateName == PunchLeftState || stateName == PunchRightState) ? 0.08f : 0.12f;
+        float blendTime = (stateName == PunchLeftState || stateName == PunchRightState) ? 0.11f : 0.12f;
         animator.CrossFadeInFixedTime(stateName, blendTime, UpperBodyLayer, 0f);
         currentUpperBodyStateName = stateName;
     }

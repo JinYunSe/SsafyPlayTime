@@ -4,6 +4,7 @@ using UnityEngine;
 
 namespace SSAFYPlayTime.Character
 {
+    [DefaultExecutionOrder(100)]
     public class BodyPartPhysicsManager : MonoBehaviour
     {
         private const float DefaultWobbleBlendSpeed = 6f;
@@ -56,6 +57,16 @@ namespace SSAFYPlayTime.Character
         private float[] _currentPinWeights;
         private float[] _currentMuscleWeights;
         private bool _initialized;
+
+        // ─── Carried Pose Restore ───
+        // BeingCarriedStunned 진입 시 ragdoll 본들을 기준 포즈로 점진 복원
+        private Quaternion[] _restPoseLocalRotations;
+        private bool _restPoseCaptured;
+        private bool _carriedPoseRestoreActive;
+        private float _carriedPoseRestoreTimer;
+        private const float CarriedPoseRestoreDuration = 0.4f;
+        private const float CarriedPoseRestoreLimbStrength = 0.7f;
+        private const float CarriedPoseRestoreCoreStrength = 0.5f;
 
         // ─── Anchor Grab Overlay ───
         // 특정 앵커 부위가 잡혔을 때 해당 근육의 pin/muscle weight를 낮추는 오버레이.
@@ -132,6 +143,7 @@ namespace SSAFYPlayTime.Character
             ApplyDynamicWobble(Time.deltaTime);
             TickCombatFlinch(Time.deltaTime);
             ApplyAnchorGrabOverlay();
+            TickCarriedPoseRestore(Time.deltaTime);
         }
 
         public void SetState(BodyPartPhysicsProfile.CharacterPhysicsState newState)
@@ -203,6 +215,7 @@ namespace SSAFYPlayTime.Character
             _currentMuscleWeights = new float[count];
 
             CacheRootDriveMaterials();
+            CaptureRestPose(count);
 
             for (var i = 0; i < count; i++)
             {
@@ -410,7 +423,8 @@ namespace SSAFYPlayTime.Character
         private static bool ShouldApplyStateImmediately(BodyPartPhysicsProfile.CharacterPhysicsState state)
         {
             return IsShapeCriticalState(state) ||
-                   state == BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse;
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.SettledStunned;
         }
 
         private float UpdateWobbleAmount(float dt)
@@ -768,6 +782,75 @@ namespace SSAFYPlayTime.Character
             }
         }
 
+        // ─── Carried Pose Restore ───
+
+        private void CaptureRestPose(int count)
+        {
+            if (_restPoseCaptured)
+                return;
+
+            _restPoseLocalRotations = new Quaternion[count];
+            for (var i = 0; i < count; i++)
+            {
+                var muscle = puppetMaster.muscles[i];
+                if (muscle.target != null)
+                    _restPoseLocalRotations[i] = muscle.target.localRotation;
+                else
+                    _restPoseLocalRotations[i] = Quaternion.identity;
+            }
+
+            _restPoseCaptured = true;
+        }
+
+        private void TickCarriedPoseRestore(float dt)
+        {
+            if (!_restPoseCaptured || puppetMaster == null)
+                return;
+
+            var isCarriedStunned = _targetState == BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned;
+
+            if (isCarriedStunned && !_carriedPoseRestoreActive)
+            {
+                // 전환 진입: 복원 시작
+                _carriedPoseRestoreActive = true;
+                _carriedPoseRestoreTimer = 0f;
+            }
+            else if (!isCarriedStunned && _carriedPoseRestoreActive)
+            {
+                // 전환 해제
+                _carriedPoseRestoreActive = false;
+                _carriedPoseRestoreTimer = 0f;
+                return;
+            }
+
+            if (!_carriedPoseRestoreActive)
+                return;
+
+            _carriedPoseRestoreTimer += dt;
+            var progress = Mathf.Clamp01(_carriedPoseRestoreTimer / CarriedPoseRestoreDuration);
+            // 이징: 시작 빠르고 끝 부드럽게
+            var easedProgress = 1f - (1f - progress) * (1f - progress);
+
+            var count = Mathf.Min(puppetMaster.muscles.Length, _restPoseLocalRotations.Length);
+            for (var i = 0; i < count; i++)
+            {
+                var muscle = puppetMaster.muscles[i];
+                if (muscle.target == null)
+                    continue;
+
+                var category = _muscleCategories[i];
+                var strength = (category == BodyPartPhysicsProfile.BodyPartCategory.Torso)
+                    ? CarriedPoseRestoreCoreStrength
+                    : CarriedPoseRestoreLimbStrength;
+
+                var blendWeight = easedProgress * strength;
+                muscle.target.localRotation = Quaternion.Slerp(
+                    muscle.target.localRotation,
+                    _restPoseLocalRotations[i],
+                    blendWeight);
+            }
+        }
+
         private static BodyPartPhysicsProfile.CharacterPhysicsState MapPhysicalPhaseToState(NetworkPlayer.PhysicalPhase phase)
         {
             return phase switch
@@ -777,6 +860,8 @@ namespace SSAFYPlayTime.Character
                 NetworkPlayer.PhysicalPhase.Unstable => BodyPartPhysicsProfile.CharacterPhysicsState.Unstable,
                 NetworkPlayer.PhysicalPhase.StunnedCollapse => BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse,
                 NetworkPlayer.PhysicalPhase.Stunned => BodyPartPhysicsProfile.CharacterPhysicsState.Stunned,
+                NetworkPlayer.PhysicalPhase.SettledStunned => BodyPartPhysicsProfile.CharacterPhysicsState.SettledStunned,
+                NetworkPlayer.PhysicalPhase.DraggedStunned => BodyPartPhysicsProfile.CharacterPhysicsState.DraggedStunned,
                 NetworkPlayer.PhysicalPhase.BeingCarriedStunned => BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned,
                 NetworkPlayer.PhysicalPhase.Recovering => BodyPartPhysicsProfile.CharacterPhysicsState.Recovering,
                 NetworkPlayer.PhysicalPhase.CarryingStunned => BodyPartPhysicsProfile.CharacterPhysicsState.CarryingStunned,

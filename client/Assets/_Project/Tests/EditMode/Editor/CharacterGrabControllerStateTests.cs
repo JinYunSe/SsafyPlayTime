@@ -89,7 +89,7 @@ public sealed class CharacterGrabControllerStateTests
     }
 
     [Test]
-    public void ThrowableObjectState_RejectsStunnedAndCarryStates()
+    public void ThrowableObjectState_AllowsObjectsAndStunnedCarryStates()
     {
         Assert.That(
             CharacterGrabController.IsThrowableObjectState(
@@ -100,11 +100,21 @@ public sealed class CharacterGrabControllerStateTests
             CharacterGrabController.IsThrowableObjectState(
                 CharacterGrabController.GrabActionState.HoldOneHandStunned,
                 CharacterGrabController.HoldVariant.StunnedPlayer),
-            Is.False);
+            Is.True);
         Assert.That(
             CharacterGrabController.IsThrowableObjectState(
                 CharacterGrabController.GrabActionState.FrontCarry,
                 CharacterGrabController.HoldVariant.FrontCarry),
+            Is.True);
+        Assert.That(
+            CharacterGrabController.IsThrowableObjectState(
+                CharacterGrabController.GrabActionState.DualCarry,
+                CharacterGrabController.HoldVariant.DualCarry),
+            Is.True);
+        Assert.That(
+            CharacterGrabController.IsThrowableObjectState(
+                CharacterGrabController.GrabActionState.Idle,
+                CharacterGrabController.HoldVariant.CarriedVictim),
             Is.False);
     }
 }
