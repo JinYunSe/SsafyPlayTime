@@ -1,4 +1,4 @@
-﻿using Fusion;
+using Fusion;
 using RootMotion.Dynamics;
 using SSAFYPlayTime.Character;
 using SSAFYPlayTime.Gameplay.Items;
