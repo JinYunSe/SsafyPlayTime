@@ -3303,31 +3303,6 @@ MonoBehaviour:
     - {fileID: 282333193}
     - {fileID: 160373005}
     - {fileID: 1293392384}
-  sceneDirectSlots:
-  - questionMark: {fileID: 0}
-    characterModels:
-    - {fileID: 275993255}
-    - {fileID: 116498693}
-    - {fileID: 1043147987}
-    - {fileID: 1592683832}
-  - questionMark: {fileID: 0}
-    characterModels:
-    - {fileID: 1382584209}
-    - {fileID: 559097595}
-    - {fileID: 187527637}
-    - {fileID: 1511703048}
-  - questionMark: {fileID: 0}
-    characterModels:
-    - {fileID: 2124524859}
-    - {fileID: 419850831}
-    - {fileID: 1972674122}
-    - {fileID: 1046695814}
-  - questionMark: {fileID: 0}
-    characterModels:
-    - {fileID: 1631039342}
-    - {fileID: 1791353488}
-    - {fileID: 1037634114}
-    - {fileID: 1801142166}
   allowSoloStart: 1
   nicknamePanel: {fileID: 860748352}
   lobbyPanel: {fileID: 1519384042}
@@ -3340,15 +3315,8 @@ MonoBehaviour:
   gameEndPanel: {fileID: 90000001}
   hostExitNoticeModal: {fileID: 855217787}
   hostExitNoticeCloseButton: {fileID: 972513041}
-  rankingContainer: {fileID: 0}
   returnToRoomButton: {fileID: 90000113}
   returnToLobbyButton: {fileID: 90000123}
-  podiumSlots:
-  - {fileID: 1458442614}
-  - {fileID: 367545463}
-  - {fileID: 1885728048}
-  - {fileID: 562471357}
-  podiumParent: {fileID: 1580304932}
   nicknameInput: {fileID: 1557318892}
   nicknameConfirmButton: {fileID: 106028743}
   mainPanelNicknameText: {fileID: 1055428661}
@@ -3974,7 +3942,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &90000002
 RectTransform:
   m_ObjectHideFlags: 0
@@ -4940,7 +4908,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: b61f62000e03b5842ab40645e2e3e966, type: 2}
     - target: {fileID: 1339412196800576122, guid: 478a2bade54d6384c9269afe7afb9ef8,
         type: 3}
       propertyPath: mainJoint
@@ -5025,6 +4993,11 @@ PrefabInstance:
         type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7869998136420906756, guid: 478a2bade54d6384c9269afe7afb9ef8,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 8050714215843509432, guid: 478a2bade54d6384c9269afe7afb9ef8,
         type: 3}
@@ -6244,7 +6217,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: 6713ccef4e57f674b8efe17ccb718740, type: 2}
     - target: {fileID: 3128119269913478486, guid: aca21095da6423a4b9a65cc3557e3b1b,
         type: 3}
       propertyPath: m_LocalScale.x
@@ -7846,7 +7819,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: b61f62000e03b5842ab40645e2e3e966, type: 2}
     - target: {fileID: 2235237411835398360, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: thisCollider
@@ -10576,7 +10549,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: 6713ccef4e57f674b8efe17ccb718740, type: 2}
     - target: {fileID: 1339412196800576122, guid: 478a2bade54d6384c9269afe7afb9ef8,
         type: 3}
       propertyPath: mainJoint
@@ -12001,7 +11974,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: 6713ccef4e57f674b8efe17ccb718740, type: 2}
     - target: {fileID: 1339412196800576122, guid: 478a2bade54d6384c9269afe7afb9ef8,
         type: 3}
       propertyPath: mainJoint
@@ -17438,7 +17411,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: 6713ccef4e57f674b8efe17ccb718740, type: 2}
     - target: {fileID: 3128119269913478486, guid: aca21095da6423a4b9a65cc3557e3b1b,
         type: 3}
       propertyPath: m_LocalScale.x
@@ -17615,7 +17588,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: b61f62000e03b5842ab40645e2e3e966, type: 2}
     - target: {fileID: 3128119269913478486, guid: aca21095da6423a4b9a65cc3557e3b1b,
         type: 3}
       propertyPath: m_LocalScale.x
@@ -17797,7 +17770,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: 6713ccef4e57f674b8efe17ccb718740, type: 2}
     - target: {fileID: 2585524039233981247, guid: a549592e9106b134387b5390c6894cc7,
         type: 3}
       propertyPath: m_Name
@@ -21638,7 +21611,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: 6713ccef4e57f674b8efe17ccb718740, type: 2}
     - target: {fileID: 2235237411835398360, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: thisCollider
@@ -23521,7 +23494,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: 6713ccef4e57f674b8efe17ccb718740, type: 2}
     - target: {fileID: 2585524039233981247, guid: a549592e9106b134387b5390c6894cc7,
         type: 3}
       propertyPath: m_Name
@@ -24474,7 +24447,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: b61f62000e03b5842ab40645e2e3e966, type: 2}
     - target: {fileID: 2585524039233981247, guid: a549592e9106b134387b5390c6894cc7,
         type: 3}
       propertyPath: m_Name
@@ -25080,7 +25053,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: 6713ccef4e57f674b8efe17ccb718740, type: 2}
     - target: {fileID: 2235237411835398360, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: thisCollider
@@ -27481,7 +27454,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: 6713ccef4e57f674b8efe17ccb718740, type: 2}
     - target: {fileID: 1339412196800576122, guid: 478a2bade54d6384c9269afe7afb9ef8,
         type: 3}
       propertyPath: mainJoint
@@ -27653,7 +27626,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: 6713ccef4e57f674b8efe17ccb718740, type: 2}
     - target: {fileID: 2585524039233981247, guid: a549592e9106b134387b5390c6894cc7,
         type: 3}
       propertyPath: m_Name
@@ -29562,7 +29535,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: 6713ccef4e57f674b8efe17ccb718740, type: 2}
     - target: {fileID: 3128119269913478486, guid: aca21095da6423a4b9a65cc3557e3b1b,
         type: 3}
       propertyPath: m_LocalScale.x
@@ -31666,7 +31639,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 588e4a0593e17cc44817f920f4c24447, type: 2}
+      objectReference: {fileID: 9100000, guid: 6713ccef4e57f674b8efe17ccb718740, type: 2}
     - target: {fileID: 2235237411835398360, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: thisCollider
