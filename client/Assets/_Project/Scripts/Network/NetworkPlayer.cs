@@ -227,6 +227,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private CarryPhysicsProfile.CarryMode _localCarryMode = CarryPhysicsProfile.CarryMode.None;
     private CarryPhysicsProfile.CarryMode _lastObservedCarryMode = CarryPhysicsProfile.CarryMode.None;
     private float _carryReleaseSettleRemaining;
+    private bool _suppressNextCarryReleaseSettle;
     private Vector3 _lastCarryAnchorPosition;
     private Vector3 _lastCarryAnchorForward;
     private Vector3 _carriedVictimRootOffset;
@@ -245,12 +246,21 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     // 공개 상태 API
     /// <summary>기절 중 여부 (activeRagdoll이 아닌 상태)</summary>
     public bool IsStunned => !_isActiveRagdoll;
+    /// <summary>그로기 상태 여부. 짧은 연속 피격에 취약하지만 아직 완전 기절은 아님.</summary>
+    public bool IsGroggy => IsGroggyActive();
     /// <summary>기절 회복 직후 취약 상태 여부</summary>
     public bool IsRecovering => _isRecovering;
     /// <summary>전투 행동(펀치/그랩/던지기) 가능 여부. 기절/회복 중이거나 사망 상태면 false.</summary>
     public bool CanPerformCombatActions => _isActiveRagdoll && !_isRecovering && !GetIsDeadState();
     /// <summary>이동 가능 여부. 기절 중이거나 사망 상태면 false.</summary>
     public bool CanDriveLocomotion => _isActiveRagdoll && !GetIsDeadState();
+
+    /// <summary>기절 중 추가 피격이 들어왔을 때 어떤 후처리를 할지 지정한다.</summary>
+    public enum DownedHitPolicy : byte
+    {
+        Ignore = 0,
+        RecoveryPenalty = 1
+    }
 
     /// <summary>카메라가 따라가야 할 타겟. Follow 앵커가 있으면 앵커, 없으면 transform.</summary>
     public Transform GetCameraFollowTarget() => _cameraFollowAnchor != null ? _cameraFollowAnchor : transform;
@@ -345,7 +355,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             var phase = GetPhysicalPhase();
             return phase == PhysicalPhase.Recovering ||
                    phase == PhysicalPhase.StunnedCollapse ||
-                   phase == PhysicalPhase.Stunned;
+                   phase == PhysicalPhase.Stunned ||
+                   phase == PhysicalPhase.SettledStunned ||
+                   phase == PhysicalPhase.DraggedStunned;
         }
 
         return false;
@@ -470,7 +482,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         CarryingStunned = 8,
         WeaponEquipped = 9,
         BeingCarriedStunned = 10,
-        StunnedCollapse = 11
+        StunnedCollapse = 11,
+        DraggedStunned = 12,
+        SettledStunned = 13
     }
 
     private enum CameraAnchorSourceMode : byte
@@ -514,6 +528,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     // OwnerProxy 플레이어 판별 관계
     /// <summary>AuthorityOwner: 호스트 로컬 플레이어</summary>
     private bool IsAuthorityOwner => HasStateAuthority && HasInputAuthority;
+    /// <summary>LocallyControlled: 현재 클라이언트가 직접 조작하는 플레이어</summary>
+    private bool IsLocallyControlled => Runner == null || HasInputAuthority;
     /// <summary>OwnerProxy: 입력 권한은 있지만 물리 권한은 없는 로컬 플레이어</summary>
     private bool IsOwnerProxy => HasInputAuthority && !HasStateAuthority;
     /// <summary>RemoteProxy: 입력 권한과 물리 권한이 모두 없는 원격 플레이어</summary>
@@ -991,6 +1007,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
             case PhysicalPhase.BeingGrabbed:
             case PhysicalPhase.Dragged:
+            case PhysicalPhase.DraggedStunned:
                 halfAngle = 42f;
                 return true;
 
@@ -1203,16 +1220,16 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         return ResolveYawOnlyAnchorOffsetPosition(transform, cameraAnchorFallbackRootLocalOffset);
     }
 
-    private Vector3 ResolveCameraAnchorDesiredPosition(bool includeOwnerProxyBias)
+    private Vector3 ResolveCameraAnchorDesiredPosition(bool includeLocalControlBias)
     {
         var settings = ResolveCameraAnchorFollowSettings();
         var basePosition = ResolveCameraAnchorBasePosition();
-        if (!includeOwnerProxyBias)
+        if (!includeLocalControlBias)
             return basePosition;
 
         return basePosition
-             + ResolveOwnerProxyCameraAnchorLead(settings.ownerProxyLeadScale)
-             + ResolveOwnerProxyCameraAnchorCorrection(
+             + ResolveLocalControlledCameraAnchorLead(settings.ownerProxyLeadScale)
+             + ResolveLocalControlledCameraAnchorCorrection(
                  settings.ownerProxyCorrectionScale,
                  settings.maxOwnerProxyCorrectionDistance);
     }
@@ -1226,9 +1243,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         return basis.position + yawOnlyRotation * localOffset;
     }
 
-    private Vector3 ResolveOwnerProxyCameraAnchorLead(float leadScale)
+    private Vector3 ResolveLocalControlledCameraAnchorLead(float leadScale)
     {
-        if (!IsOwnerProxy || ShouldUseHardPhysicsPresentation())
+        if (!IsLocallyControlled || ShouldUseHardPhysicsPresentation())
             return Vector3.zero;
         if (NetworkedIsBeingGrabbed || IsDraggedByPhysics() || IsGrabFacingLocked())
             return Vector3.zero;
@@ -1248,9 +1265,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         return moveDirection.normalized * (cameraAnchorOwnerProxyLeadDistance * leadScale * moveMagnitude);
     }
 
-    private Vector3 ResolveOwnerProxyCameraAnchorCorrection(float correctionScale, float maxCorrectionDistance)
+    private Vector3 ResolveLocalControlledCameraAnchorCorrection(float correctionScale, float maxCorrectionDistance)
     {
-        if (!IsOwnerProxy || ShouldUseHardPhysicsPresentation())
+        if (!IsLocallyControlled || ShouldUseHardPhysicsPresentation())
             return Vector3.zero;
         if (NetworkedIsBeingGrabbed || IsDraggedByPhysics() || IsGrabFacingLocked())
             return Vector3.zero;
@@ -1327,6 +1344,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             phase == PhysicalPhase.Dragged ||
             phase == PhysicalPhase.StunnedCollapse ||
             phase == PhysicalPhase.Stunned ||
+            phase == PhysicalPhase.SettledStunned ||
+            phase == PhysicalPhase.DraggedStunned ||
             phase == PhysicalPhase.BeingCarriedStunned)
         {
             return new CameraAnchorFollowSettings(
@@ -1428,6 +1447,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             PhysicalPhase.Dragged => true,
             PhysicalPhase.StunnedCollapse => true,
             PhysicalPhase.Stunned => true,
+            PhysicalPhase.SettledStunned => true,
+            PhysicalPhase.DraggedStunned => true,
             PhysicalPhase.BeingCarriedStunned => true,
             _ => false
         };
@@ -1440,6 +1461,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
                phase == PhysicalPhase.Unstable ||
                phase == PhysicalPhase.StunnedCollapse ||
                phase == PhysicalPhase.Stunned ||
+               phase == PhysicalPhase.SettledStunned ||
+               phase == PhysicalPhase.DraggedStunned ||
                phase == PhysicalPhase.BeingCarriedStunned;
     }
 
@@ -1630,6 +1653,17 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             StartCoroutine(CoResyncAllFieldDropsOnHostMigration());
     }
 
+    private static SyncPhysicsObject.BodyPartType MapMuscleGroupToBodyPartType(Muscle.Group group)
+    {
+        return group switch
+        {
+            Muscle.Group.Hips => SyncPhysicsObject.BodyPartType.Core,
+            Muscle.Group.Spine => SyncPhysicsObject.BodyPartType.Core,
+            Muscle.Group.Head => SyncPhysicsObject.BodyPartType.Head,
+            _ => SyncPhysicsObject.BodyPartType.Limb
+        };
+    }
+
     private void InitializeInternal()
     {
         EnsureVitalStateInitialized();
@@ -1655,6 +1689,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
                 var sync = boneGo.GetComponent<SyncPhysicsObject>();
                 if (sync == null)
                     sync = boneGo.AddComponent<SyncPhysicsObject>();
+                sync.SetBodyPartType(MapMuscleGroupToBodyPartType(muscle.props.group));
                 syncPhysicsObjects[i] = sync;
             }
         }
@@ -2118,7 +2153,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     {
         if (_cameraFollowAnchor != null) return;
         var go = new GameObject("_CameraFollowAnchor");
-        var initialPosition = ResolveCameraAnchorDesiredPosition(includeOwnerProxyBias: false);
+        var initialPosition = ResolveCameraAnchorDesiredPosition(includeLocalControlBias: false);
         go.transform.position = initialPosition;
         _cameraFollowAnchor = go.transform;
 
@@ -2137,7 +2172,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         // 1f - Exp(-speed * dt): 프레임레이트 독립적인 지수 감쇠 보간
         // Time.deltaTime * speed 방식보다 FPS 차이에 따른 반응속도 변화를 줄인다.
-        var desiredPosition = ResolveCameraAnchorDesiredPosition(includeOwnerProxyBias: true);
+        var desiredPosition = ResolveCameraAnchorDesiredPosition(includeLocalControlBias: true);
         var settings = ResolveCameraAnchorFollowSettings();
 
         var snapDistance = settings.snapDistance;

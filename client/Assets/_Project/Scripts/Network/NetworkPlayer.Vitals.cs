@@ -24,6 +24,11 @@ public sealed partial class NetworkPlayer
     [Networked] private float NetworkedHealthHitImmunityRemaining { get; set; }
     [Networked] private float NetworkedStunHitImmunityRemaining { get; set; }
     [Networked] private float NetworkedNoStaggerRemaining { get; set; }
+    [Networked] private float NetworkedStunShield { get; set; }
+    [Networked] private float NetworkedStunShieldRecoverDelayRemaining { get; set; }
+    [Networked] private float NetworkedGroggyRemaining { get; set; }
+    [Networked] private float NetworkedStunComboWindowRemaining { get; set; }
+    [Networked] private int NetworkedRecentStunHitCount { get; set; }
     [Networked] private float NetworkedDeathFreezeRemaining { get; set; }
 
     private int _localMaxHealth = DefaultHiddenMaxHealth;
@@ -35,6 +40,11 @@ public sealed partial class NetworkPlayer
     private float _localHealthHitImmunityRemaining;
     private float _localStunHitImmunityRemaining;
     private float _localNoStaggerRemaining;
+    private float _localStunShield;
+    private float _localStunShieldRecoverDelayRemaining;
+    private float _localGroggyRemaining;
+    private float _localStunComboWindowRemaining;
+    private int _localRecentStunHitCount;
     private float _localDeathFreezeRemaining;
     private bool _localVitalsInitialized;
     private Coroutine _localDeathTransitionCoroutine;
@@ -71,6 +81,11 @@ public sealed partial class NetworkPlayer
                 _localHealthHitImmunityRemaining = 0f;
                 _localStunHitImmunityRemaining = 0f;
                 _localNoStaggerRemaining = 0f;
+                _localStunShield = ResolveConfiguredStunShieldCapacity();
+                _localStunShieldRecoverDelayRemaining = 0f;
+                _localGroggyRemaining = 0f;
+                _localStunComboWindowRemaining = 0f;
+                _localRecentStunHitCount = 0;
                 _localDeathFreezeRemaining = 0f;
                 _localVitalsInitialized = true;
             }
@@ -94,6 +109,11 @@ public sealed partial class NetworkPlayer
             NetworkedHealthHitImmunityRemaining = 0f;
             NetworkedStunHitImmunityRemaining = 0f;
             NetworkedNoStaggerRemaining = 0f;
+            NetworkedStunShield = ResolveConfiguredStunShieldCapacity();
+            NetworkedStunShieldRecoverDelayRemaining = 0f;
+            NetworkedGroggyRemaining = 0f;
+            NetworkedStunComboWindowRemaining = 0f;
+            NetworkedRecentStunHitCount = 0;
             NetworkedDeathFreezeRemaining = 0f;
         }
     }
@@ -124,8 +144,23 @@ public sealed partial class NetworkPlayer
             if (NetworkedNoStaggerRemaining > 0f)
                 NetworkedNoStaggerRemaining = Mathf.Max(0f, NetworkedNoStaggerRemaining - dt);
 
+            if (NetworkedStunShieldRecoverDelayRemaining > 0f)
+                NetworkedStunShieldRecoverDelayRemaining = Mathf.Max(0f, NetworkedStunShieldRecoverDelayRemaining - dt);
+
+            if (NetworkedGroggyRemaining > 0f)
+                NetworkedGroggyRemaining = Mathf.Max(0f, NetworkedGroggyRemaining - dt);
+
+            if (NetworkedStunComboWindowRemaining > 0f)
+            {
+                NetworkedStunComboWindowRemaining = Mathf.Max(0f, NetworkedStunComboWindowRemaining - dt);
+                if (NetworkedStunComboWindowRemaining <= 0f)
+                    NetworkedRecentStunHitCount = 0;
+            }
+
             if (NetworkedDeathFreezeRemaining > 0f)
                 NetworkedDeathFreezeRemaining = Mathf.Max(0f, NetworkedDeathFreezeRemaining - dt);
+
+            RecoverStunShield(dt, networked: true);
 
             return;
         }
@@ -146,13 +181,28 @@ public sealed partial class NetworkPlayer
         if (_localNoStaggerRemaining > 0f)
             _localNoStaggerRemaining = Mathf.Max(0f, _localNoStaggerRemaining - dt);
 
+        if (_localStunShieldRecoverDelayRemaining > 0f)
+            _localStunShieldRecoverDelayRemaining = Mathf.Max(0f, _localStunShieldRecoverDelayRemaining - dt);
+
+        if (_localGroggyRemaining > 0f)
+            _localGroggyRemaining = Mathf.Max(0f, _localGroggyRemaining - dt);
+
+        if (_localStunComboWindowRemaining > 0f)
+        {
+            _localStunComboWindowRemaining = Mathf.Max(0f, _localStunComboWindowRemaining - dt);
+            if (_localStunComboWindowRemaining <= 0f)
+                _localRecentStunHitCount = 0;
+        }
+
         if (_localDeathFreezeRemaining > 0f)
             _localDeathFreezeRemaining = Mathf.Max(0f, _localDeathFreezeRemaining - dt);
+
+        RecoverStunShield(dt, networked: false);
     }
 
     public bool ApplyCombinedDamage(float healthDamage, float stunDamage, string source)
     {
-        return ApplyCombinedDamage(healthDamage, stunDamage, source, 0f, 0f, 1f, false, null);
+        return ApplyCombinedDamage(healthDamage, stunDamage, source, 0f, 0f, 1f, false, null, 0, 1f, DownedHitPolicy.Ignore);
     }
 
     public bool ApplyCombinedDamage(
@@ -163,7 +213,10 @@ public sealed partial class NetworkPlayer
         float impulseMagnitude,
         float bodyPartMultiplier = 1f,
         bool deferStunEntryDamping = false,
-        NetworkPlayer instigator = null)
+        NetworkPlayer instigator = null,
+        int hitCountToStun = 0,
+        float groggyVulnerabilityMultiplier = 1f,
+        DownedHitPolicy downedHitPolicy = DownedHitPolicy.Ignore)
     {
         var applied = false;
         if (healthDamage > 0f)
@@ -171,7 +224,16 @@ public sealed partial class NetworkPlayer
 
         if (stunDamage > 0f)
         {
-            ApplyStunDamage(stunDamage, bodyPartMultiplier, attackerVelocity, impulseMagnitude, deferStunEntryDamping, instigator);
+            ApplyStunDamage(
+                stunDamage,
+                bodyPartMultiplier,
+                attackerVelocity,
+                impulseMagnitude,
+                deferStunEntryDamping,
+                instigator,
+                hitCountToStun,
+                groggyVulnerabilityMultiplier,
+                downedHitPolicy);
             applied = true;
         }
 
@@ -244,6 +306,11 @@ public sealed partial class NetworkPlayer
         SetHealthHitImmunityRemaining(0f);
         SetStunHitImmunityRemaining(0f);
         SetNoStaggerRemaining(0f);
+        SetStunShield(0f);
+        SetStunShieldRecoverDelayRemaining(0f);
+        SetGroggyRemaining(0f);
+        SetStunComboWindowRemaining(0f);
+        SetRecentStunHitCount(0);
         SetDeathFreezeRemaining(0f);
 
         TryForceDropHeldContentOnDeath();
@@ -254,6 +321,8 @@ public sealed partial class NetworkPlayer
         _isGrabActive = false;
         SetStunTimeRemaining(0f);
         SetAccumulatedStun(0f);
+        _stunnedFloorSettleTimer = 0f;
+        _stunnedGroundContactTimer = 0f;
         ClearPunchHitDetectionWindow();
         ClearKickHitDetectionWindow();
         ClearAerialKickHitDetectionWindow();
@@ -670,6 +739,53 @@ public sealed partial class NetworkPlayer
             : 0.28f;
     }
 
+    private float ResolveConfiguredStunShieldCapacity()
+    {
+        return CombatSettings.Instance != null
+            ? Mathf.Max(0f, CombatSettings.Instance.stunShieldCapacity)
+            : 10f;
+    }
+
+    private float ResolveConfiguredStunShieldRecoverPerSec()
+    {
+        return CombatSettings.Instance != null
+            ? Mathf.Max(0f, CombatSettings.Instance.stunShieldRecoverPerSec)
+            : 5f;
+    }
+
+    private float ResolveConfiguredStunShieldRecoverDelay()
+    {
+        return CombatSettings.Instance != null
+            ? Mathf.Max(0f, CombatSettings.Instance.stunShieldRecoverDelay)
+            : 1.25f;
+    }
+
+    private float ResolveConfiguredStunShieldRecoveryRefill()
+    {
+        return CombatSettings.Instance != null
+            ? Mathf.Max(0f, CombatSettings.Instance.stunShieldRecoveryRefill)
+            : 12f;
+    }
+
+    private float ResolveConfiguredGroggyDuration()
+    {
+        return CombatSettings.Instance != null
+            ? Mathf.Max(0f, CombatSettings.Instance.groggyDuration)
+            : 2.0f;
+    }
+
+    private float ResolveConfiguredGroggyMultiplier()
+    {
+        return CombatSettings.Instance != null
+            ? Mathf.Max(1f, CombatSettings.Instance.groggyMultiplier)
+            : 1.8f;
+    }
+
+    private float ResolveConfiguredStunComboWindow()
+    {
+        return Mathf.Max(0.2f, ResolveConfiguredGroggyDuration());
+    }
+
     private float ResolveConfiguredRecentHealthDamageWindow()
     {
         return CombatSettings.Instance != null
@@ -737,6 +853,129 @@ public sealed partial class NetworkPlayer
             NetworkedNoStaggerRemaining = clamped;
         else
             _localNoStaggerRemaining = clamped;
+    }
+
+    private float GetStunShield()
+    {
+        var maxShield = ResolveConfiguredStunShieldCapacity();
+        if (IsNetworkReady)
+            return Mathf.Clamp(NetworkedStunShield, 0f, maxShield);
+
+        return Mathf.Clamp(_localStunShield, 0f, maxShield);
+    }
+
+    private void SetStunShield(float value)
+    {
+        var clamped = Mathf.Clamp(value, 0f, ResolveConfiguredStunShieldCapacity());
+        if (IsNetworkReady)
+            NetworkedStunShield = clamped;
+        else
+            _localStunShield = clamped;
+    }
+
+    private float GetStunShieldRecoverDelayRemaining()
+    {
+        if (IsNetworkReady)
+            return NetworkedStunShieldRecoverDelayRemaining;
+
+        return _localStunShieldRecoverDelayRemaining;
+    }
+
+    private void SetStunShieldRecoverDelayRemaining(float value)
+    {
+        var clamped = Mathf.Max(0f, value);
+        if (IsNetworkReady)
+            NetworkedStunShieldRecoverDelayRemaining = clamped;
+        else
+            _localStunShieldRecoverDelayRemaining = clamped;
+    }
+
+    private float GetGroggyRemaining()
+    {
+        if (IsNetworkReady)
+            return NetworkedGroggyRemaining;
+
+        return _localGroggyRemaining;
+    }
+
+    private void SetGroggyRemaining(float value)
+    {
+        var clamped = Mathf.Max(0f, value);
+        if (IsNetworkReady)
+            NetworkedGroggyRemaining = clamped;
+        else
+            _localGroggyRemaining = clamped;
+    }
+
+    private float GetStunComboWindowRemaining()
+    {
+        if (IsNetworkReady)
+            return NetworkedStunComboWindowRemaining;
+
+        return _localStunComboWindowRemaining;
+    }
+
+    private void SetStunComboWindowRemaining(float value)
+    {
+        var clamped = Mathf.Max(0f, value);
+        if (IsNetworkReady)
+            NetworkedStunComboWindowRemaining = clamped;
+        else
+            _localStunComboWindowRemaining = clamped;
+    }
+
+    private int GetRecentStunHitCount()
+    {
+        if (IsNetworkReady)
+            return Mathf.Max(0, NetworkedRecentStunHitCount);
+
+        return Mathf.Max(0, _localRecentStunHitCount);
+    }
+
+    private void SetRecentStunHitCount(int value)
+    {
+        var clamped = Mathf.Max(0, value);
+        if (IsNetworkReady)
+            NetworkedRecentStunHitCount = clamped;
+        else
+            _localRecentStunHitCount = clamped;
+    }
+
+    private bool IsGroggyActive()
+    {
+        return GetGroggyRemaining() > 0f;
+    }
+
+    private void RecoverStunShield(float dt, bool networked)
+    {
+        if (dt <= 0f || !_isActiveRagdoll || GetIsDeadState())
+            return;
+
+        if (networked)
+        {
+            if (NetworkedStunShieldRecoverDelayRemaining > 0f)
+                return;
+
+            var maxShield = ResolveConfiguredStunShieldCapacity();
+            if (NetworkedStunShield >= maxShield)
+                return;
+
+            NetworkedStunShield = Mathf.Min(
+                maxShield,
+                NetworkedStunShield + ResolveConfiguredStunShieldRecoverPerSec() * dt);
+            return;
+        }
+
+        if (_localStunShieldRecoverDelayRemaining > 0f)
+            return;
+
+        var localMaxShield = ResolveConfiguredStunShieldCapacity();
+        if (_localStunShield >= localMaxShield)
+            return;
+
+        _localStunShield = Mathf.Min(
+            localMaxShield,
+            _localStunShield + ResolveConfiguredStunShieldRecoverPerSec() * dt);
     }
 
     private int GetMaxHealth()

@@ -379,7 +379,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                     stunDamage,
                     "SatelliteStrike",
                     0f,
-                    explosionForce);
+                    explosionForce,
+                    downedHitPolicy: NetworkPlayer.DownedHitPolicy.RecoveryPenalty);
                 return;
             }
 

@@ -24,6 +24,10 @@ public class CombatSettings : MonoBehaviour
     public float groggyMultiplier = 1.8f;
     public float airborneMultiplier = 1.5f;
     public float recoveringMultiplier = 2.0f;
+    public float downedRecoverScaleStart = 1.0f;
+    public float downedRecoverScaleMin = 0.35f;
+    public float downedRecoverScaleHitPenalty = 0.18f;
+    public float downedHitPenaltyCooldown = 0.22f;
     public float stunMinDuration = 1.5f;
     public float stunMaxDuration = 8.0f;
     public float stunVelocityBonus = 0.15f;
@@ -31,6 +35,10 @@ public class CombatSettings : MonoBehaviour
     public float stunRehitImmunity = 0.18f;
     public float stunNoStaggerWindow = 0.24f;
     public float stunRepeatDamageScale = 0.28f;
+    public float stunShieldCapacity = 10f;
+    public float stunShieldRecoverPerSec = 5f;
+    public float stunShieldRecoverDelay = 1.25f;
+    public float stunShieldRecoveryRefill = 12f;
     public float groggyDuration = 2.0f;
     public float groggyToStunChance = 0.7f;
     public float headbuttSelfStunWall = 2.5f;
@@ -135,6 +143,10 @@ public class CombatSettings : MonoBehaviour
         if (p.TryGetValue("KNOCKOUT_GROGGY_MULTIPLIER", out v)) groggyMultiplier = v;
         if (p.TryGetValue("KNOCKOUT_AIRBORNE_MULTIPLIER", out v)) airborneMultiplier = v;
         if (p.TryGetValue("KNOCKOUT_RECOVERING_MULTIPLIER", out v)) recoveringMultiplier = v;
+        if (p.TryGetValue("DOWNED_RECOVER_SCALE_START", out v)) downedRecoverScaleStart = Mathf.Max(0.05f, v);
+        if (p.TryGetValue("DOWNED_RECOVER_SCALE_MIN", out v)) downedRecoverScaleMin = Mathf.Max(0.05f, v);
+        if (p.TryGetValue("DOWNED_RECOVER_SCALE_HIT_PENALTY", out v)) downedRecoverScaleHitPenalty = Mathf.Max(0f, v);
+        if (p.TryGetValue("DOWNED_HIT_PENALTY_COOLDOWN", out v)) downedHitPenaltyCooldown = Mathf.Max(0f, v);
         if (p.TryGetValue("STUN_MIN_DURATION", out v)) stunMinDuration = v;
         if (p.TryGetValue("STUN_MAX_DURATION", out v)) stunMaxDuration = v;
         if (p.TryGetValue("STUN_VELOCITY_BONUS", out v)) stunVelocityBonus = v;
@@ -142,6 +154,10 @@ public class CombatSettings : MonoBehaviour
         if (p.TryGetValue("STUN_REHIT_IMMUNITY", out v)) stunRehitImmunity = Mathf.Max(0f, v);
         if (p.TryGetValue("STUN_NO_STAGGER_WINDOW", out v)) stunNoStaggerWindow = Mathf.Max(0f, v);
         if (p.TryGetValue("STUN_REPEAT_DAMAGE_SCALE", out v)) stunRepeatDamageScale = Mathf.Clamp01(v);
+        if (p.TryGetValue("STUN_SHIELD_CAPACITY", out v)) stunShieldCapacity = Mathf.Max(0f, v);
+        if (p.TryGetValue("STUN_SHIELD_RECOVER_PER_SEC", out v)) stunShieldRecoverPerSec = Mathf.Max(0f, v);
+        if (p.TryGetValue("STUN_SHIELD_RECOVER_DELAY", out v)) stunShieldRecoverDelay = Mathf.Max(0f, v);
+        if (p.TryGetValue("STUN_SHIELD_RECOVERY_REFILL", out v)) stunShieldRecoveryRefill = Mathf.Max(0f, v);
         if (p.TryGetValue("GROGGY_DURATION", out v)) groggyDuration = v;
         if (p.TryGetValue("GROGGY_TO_STUN_CHANCE", out v)) groggyToStunChance = v;
         if (p.TryGetValue("HEADBUTT_SELF_STUN_WALL", out v)) headbuttSelfStunWall = v;

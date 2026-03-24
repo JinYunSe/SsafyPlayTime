@@ -17,6 +17,7 @@ namespace SSAFYPlayTime.Stage
         [Header("Force")]
         [SerializeField] private float knockbackForce = 28f;
         [SerializeField, Range(0f, 1f)] private float verticalLift = 0.35f;
+        [SerializeField, Range(0f, 1f)] private float stunnedKnockbackScale = 0.35f;
         [SerializeField, Range(0f, 1f)] private float recoveringKnockbackScale = 0.45f;
 
         [Header("Stun")]
@@ -61,8 +62,6 @@ namespace SSAFYPlayTime.Stage
                     ? other.attachedRigidbody
                     : other.GetComponent<Rigidbody>();
 
-            if (networkPlayer != null && networkPlayer.IsStunned)
-                return;
             if (playerRb == null)
                 return;
 
@@ -95,12 +94,28 @@ namespace SSAFYPlayTime.Stage
                 pushDir = (away.normalized + Vector3.up * verticalLift).normalized;
             }
 
-            var forceScale = (networkPlayer != null && networkPlayer.IsRecovering)
-                ? recoveringKnockbackScale
-                : 1f;
+            var forceScale = 1f;
+            if (networkPlayer != null)
+            {
+                if (networkPlayer.IsStunned)
+                    forceScale = stunnedKnockbackScale;
+                else if (networkPlayer.IsRecovering)
+                    forceScale = recoveringKnockbackScale;
+            }
 
             // 1) 래그돌 전환
-            networkPlayer?.ApplyCombinedDamage(healthDamage, stunDamage, "HammerKnockback");
+            networkPlayer?.ApplyCombinedDamage(
+                healthDamage,
+                stunDamage,
+                "HammerKnockback",
+                _velocity.magnitude,
+                knockbackForce * forceScale,
+                1f,
+                false,
+                null,
+                0,
+                1f,
+                NetworkPlayer.DownedHitPolicy.RecoveryPenalty);
 
             var appliedForce = pushDir * knockbackForce * forceScale;
             var velocityBefore = playerRb.velocity;

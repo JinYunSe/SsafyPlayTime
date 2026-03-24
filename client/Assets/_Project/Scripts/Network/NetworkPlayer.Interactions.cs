@@ -50,7 +50,7 @@ public sealed partial class NetworkPlayer
             TryProcessDrop();
 
         if (throwRequested)
-            TryProcessSecondaryAction(anyHolding);
+            TryProcessSecondaryAction(anyHolding, hasHeldRuntimeItem);
 
         ResetInteractionTriggers();
         UpdateGrabbingAnimatorFlag();
@@ -151,28 +151,50 @@ public sealed partial class NetworkPlayer
             TryDropHeldItemByKey();
     }
 
-    private void TryProcessThrow()
+    private bool TryProcessThrow()
     {
         var didThrow = false;
+        Transform thrownStunnedTargetRoot = null;
         foreach (var handler in _handGrabHandlers)
         {
             if (handler == null || !handler.IsHoldingThrowableTarget)
                 continue;
 
+            var targetRoot = handler.GrabTargetRoot;
+            var isStunnedTarget = handler.IsHoldingStunnedPlayer;
+            if (thrownStunnedTargetRoot != null && targetRoot == thrownStunnedTargetRoot)
+                continue;
+
             handler.Throw();
             didThrow = true;
+
+            if (isStunnedTarget && targetRoot != null)
+                thrownStunnedTargetRoot = targetRoot;
         }
 
         if (didThrow)
             RaiseAnimationEvent(AnimationEventType.Throw, H_Throw);
+
+        return didThrow;
     }
 
-    private void TryProcessSecondaryAction(bool anyHolding)
+    private static bool ShouldAllowKickFallback(bool anyHolding, bool hasHeldRuntimeItem)
+    {
+        return !anyHolding && !hasHeldRuntimeItem;
+    }
+
+    private void TryProcessSecondaryAction(bool anyHolding, bool hasHeldRuntimeItem)
     {
         if (anyHolding)
         {
-            TryProcessThrow();
+            if (TryProcessThrow())
+                return;
+
+            return;
         }
+
+        if (hasHeldRuntimeItem)
+            return;
 
         if (TryProcessAerialKick())
             return;
@@ -180,7 +202,8 @@ public sealed partial class NetworkPlayer
         if (TryPickupNearestFieldItemByKey())
             return;
 
-        TryProcessKick();
+        if (ShouldAllowKickFallback(anyHolding, hasHeldRuntimeItem))
+            TryProcessKick();
     }
 
     private void TryProcessKick()
