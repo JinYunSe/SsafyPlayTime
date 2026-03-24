@@ -18,6 +18,18 @@ namespace SSAFYPlayTime
 {
     public sealed partial class LobbyCanvasUIController : MonoBehaviour, INetworkRunnerCallbacks
     {
+        [System.Serializable]
+        public class SceneRoomSlot
+        {
+            public GameObject questionMark;
+            public GameObject[] characterModels;
+        }
+
+        [Header("Scene Room Slots")]
+        [SerializeField] private List<SceneRoomSlot> sceneRoomSlots;
+
+        [Header("Scene Direct Slots (Podium Game End)")]
+        [SerializeField] private List<SceneRoomSlot> sceneDirectSlots;
 
         private sealed class RoomSnapshot
         {
@@ -99,12 +111,22 @@ namespace SSAFYPlayTime
         [Header("Game End Panel")]
         [Tooltip("게임 종료 후 순위를 표시하는 패널 (LauncherScene 캔버스 하위)")]
         [SerializeField] private GameObject gameEndPanel;
+        [Tooltip("방장 비정상 종료 시 표시할 안내 모달 (LobbyCanvas/HostExitNoticeModal)")]
+        [SerializeField] private GameObject hostExitNoticeModal;
+        [Tooltip("HostExitNoticeModal의 확인 버튼")]
+        [SerializeField] private Button hostExitNoticeCloseButton;
         [Tooltip("순위 항목 RankingItemUI들이 배치된 부모 Transform")]
         [SerializeField] private Transform rankingContainer;
         [Tooltip("같은 방으로 버튼")]
         [SerializeField] private Button returnToRoomButton;
         [Tooltip("처음으로 버튼")]
         [SerializeField] private Button returnToLobbyButton;
+
+        [Header("Game End 3D Podium")]
+        [SerializeField] private Transform[] podiumSlots; // 1, 2, 3, 4등이 설 자리
+        private readonly List<GameObject> _spawnedGameEndCharacters = new(); // 소환된 캐릭터 기억해둘 리스트
+        [Header("3D Podium")]
+        [SerializeField] private GameObject podiumParent;
 
         [Header("Nickname")]
         [SerializeField] private TMP_InputField nicknameInput;
@@ -155,6 +177,14 @@ namespace SSAFYPlayTime
         [SerializeField] private Button selectFitCharacterButton;
         [SerializeField] private Button selectWiseCharacterButton;
         [SerializeField] private Button selectRandomCharacterButton;
+
+        [Header("Character Selection Animators")]
+        [SerializeField] private Animator selectSsatyAnimator;
+        [SerializeField] private Animator selectAlGAnimator;
+        [SerializeField] private Animator selectFitAnimator;
+        [SerializeField] private Animator selectWiseAnimator;
+        [SerializeField] private Animator selectRandomAnimator;
+
         [SerializeField] private bool lockPlayerSlotLayoutToViewport = true;
         [SerializeField] private float playerSlotViewportY = 0.36f;
         [SerializeField] private float playerSlotVerticalPixelOffset = 0f;
@@ -169,50 +199,16 @@ namespace SSAFYPlayTime
         [SerializeField] private float playerSlotQuarterWidthScale = 0.95f;
         [SerializeField] private float nicknameFontSizeMin = 32f;
         [SerializeField] private float nicknameFontSizeMax = 64f;
-        [SerializeField] private float characterVerticalOffset = 20f;
-        [SerializeField] private float characterExtraVerticalOffset = 20f;
         [SerializeField] private float algCharacterVerticalOffsetAdjustment = -10f;
         [SerializeField] private float fitCharacterVerticalOffsetAdjustment = 32f;
         [SerializeField] private float fitCharacterWorldYAdjustment = -0.73f;
         [SerializeField] private float wiseCharacterVerticalOffsetAdjustment = 10f;
-        [SerializeField] private Transform characterRuntimeRoot;
         [SerializeField] private Camera characterPlacementCamera;
-        [SerializeField] private float characterWorldDepth = 8f;
-        [SerializeField] private Vector3 characterWorldOffset = Vector3.zero;
-        [SerializeField] private float characterScreenPaddingPixels = 24f;
-        [SerializeField] private bool keepCharacterScreenSize = true;
         [SerializeField] private float characterTargetScreenHeightPixels = 170f;
         [SerializeField] private float characterScreenHeightMultiplier = 2.5f;
-        [SerializeField] private bool useFixedCharacterScale = true;
-        [SerializeField] private Vector3 fixedCharacterScale = new Vector3(5f, 5f, 5f);
         [Header("Slot Particle Rotation Y Overrides (degrees, Slot1~4)")]
-        [SerializeField] private float[] slotParticleRotationYOffsets = { 180f, 180f, 180f, 180f };
 
         [Header("Character Kind Overrides (Ssaty=0, AlG=1, Fit=2, Wise=3, Random=4)")]
-        [SerializeField] private Vector3[] characterKindPositionOffsets =
-        {
-            Vector3.zero,
-            Vector3.zero,
-            Vector3.zero,
-            Vector3.zero,
-            Vector3.zero
-        };
-        [SerializeField] private Vector3[] characterKindRotationOffsets =
-        {
-            Vector3.zero,
-            Vector3.zero,
-            Vector3.zero,
-            Vector3.zero,
-            Vector3.zero
-        };
-        [SerializeField] private Vector3[] characterKindScaleMultipliers =
-        {
-            Vector3.one,
-            Vector3.one,
-            Vector3.one,
-            Vector3.one,
-            Vector3.one
-        };
         [SerializeField] private bool testShowOneCharacterPerSlot = true;
         [SerializeField] private Button leaveRoomButton;
         [SerializeField] private Button startGameButton;
@@ -296,7 +292,6 @@ namespace SSAFYPlayTime
         // SemaphoreSlim(1, 1) : 최대 1개의 코루틴만 동시에 러너를 조작할 수 있도록 제한한다.
         private readonly SemaphoreSlim _runnerLock = new(1, 1);
         private readonly Dictionary<int, ParticipantPresence> _roomParticipantsByPlayerId = new();
-        private readonly Transform[,] _slotCharacterRoots = new Transform[PlayerSlotCount, CharacterOptionCount];
         private readonly int[] _selectedCharacterIndexBySlot = { -1, -1, -1, -1 };
         private readonly int[] _playerIdBySlot = { -1, -1, -1, -1 };
         private readonly Dictionary<int, int> _selectedCharacterIndexByPlayerId = new();
@@ -309,13 +304,6 @@ namespace SSAFYPlayTime
         // 호스트 마이그레이션 후 새 방장에게 준비 상태를 재전송할 때 사용된다.
         private bool _localIsReady;
         private readonly Dictionary<int, bool> _readyStateByPlayerId = new();
-        private readonly Dictionary<Transform, Vector3> _characterBaseLocalScales = new();
-        private readonly Dictionary<Transform, Quaternion> _characterBaseLocalRotations = new();
-        private readonly Dictionary<Transform, Quaternion> _characterVisualChildBaseLocalRotations = new();
-        private readonly Dictionary<Transform, float> _characterBaseBoundsHeights = new();
-        private readonly Dictionary<Transform, int> _characterOptionIndexByTransform = new();
-        private readonly Dictionary<Transform, float> _characterPrePlacedWorldY = new();
-        private bool _characterSlotsInitialized;
         private bool _gameEndReturnTransitionStarted;
         // 게임 종료 후 순위 화면 표시 중 여부. IsActiveSceneNamed("GameEndScene") 대신 사용한다.
         private bool _isShowingGameEndPanel;
@@ -324,6 +312,9 @@ namespace SSAFYPlayTime
         // 게임 종료 후 LauncherScene 진입 시 백그라운드에서 실행되는 방 자동 입장 Task.
         // 버튼 클릭 시 이 Task를 await해 완료 여부를 확인한다.
         private Task<bool> _gameEndAutoRoomJoinTask;
+        // GameResultData.Clear() 전에 캡처한 로컬 플레이어 순위.
+        // StartAutoRoomJoinFromGameEndAsync()에서 순위 기반 딜레이 계산에 사용한다.
+        private int _localPlayerRankForAutoJoin;
         private AudioSource _launcherBackgroundMusicSource;
         private GameAudioSource _launcherBackgroundMusicCategory;
 
@@ -331,10 +322,32 @@ namespace SSAFYPlayTime
         // 모든 UI 참조는 Inspector에서 SerializeField로 직접 할당해야 한다.
         private void Start()
         {
-            // LauncherScene 재로드 시 DontDestroyOnLoad 인스턴스가 이미 존재하면 새 인스턴스를 제거한다.
+            // LauncherScene 재로드 시 DontDestroyOnLoad 인스턴스가 이미 존재하면 새 인스턴스의 씬 참조를 넘겨주고 제거한다.
             var existing = FindObjectsByType<LobbyCanvasUIController>(FindObjectsSortMode.None);
             if (existing.Length > 1)
             {
+                var persistent = existing.FirstOrDefault(x => x != this);
+                if (persistent != null)
+                {
+                    // podiumParent, podiumSlots, sceneRoomSlots, sceneDirectSlots는 이전하지 않는다.
+                    // persistent 인스턴스의 자식(DontDestroyOnLoad)이 이미 유효한 참조를 갖고 있으므로
+                    // 새 씬의 참조로 교체하면 Destroy(gameObject) 시 파괴되어 MissingReferenceException 발생.
+                    persistent.characterPlacementCamera = this.characterPlacementCamera;
+
+                    // Screen Space - Camera Canvas는 씬 재로드 시 worldCamera 참조가 파괴된다.
+                    // DontDestroyOnLoad Canvas의 worldCamera를 새 씬의 카메라로 갱신해야
+                    // CharacterGroup의 SpriteRenderer가 정상 렌더링된다.
+                    var persistentCanvas = persistent.GetComponentInParent<Canvas>(true);
+                    var thisCanvas = GetComponentInParent<Canvas>(true);
+                    if (persistentCanvas != null && thisCanvas != null && thisCanvas.worldCamera != null)
+                        persistentCanvas.worldCamera = thisCanvas.worldCamera;
+                    persistent.ssatyCharacterRoot = this.ssatyCharacterRoot;
+                    persistent.alGCharacterRoot = this.alGCharacterRoot;
+                    persistent.fitCharacterRoot = this.fitCharacterRoot;
+                    persistent.wiseCharacterRoot = this.wiseCharacterRoot;
+                    persistent.randomCharacterRoot = this.randomCharacterRoot;
+                    persistent.fallbackSpawnPoints = this.fallbackSpawnPoints;
+                }
                 Destroy(gameObject);
                 return;
             }
@@ -357,11 +370,13 @@ namespace SSAFYPlayTime
             NormalizeCanvasRoot();
             NormalizeRoomListBindings();
             BindEvents();
-            InitializeCharacterSlotsIfNeeded();
             if (characterPreview != null)
             {
                 characterPreview.Initialize(GetNameSlots());
             }
+            
+            if (podiumParent != null) podiumParent.SetActive(false);
+
             SceneManager.sceneLoaded += OnManagedSceneLoaded;
             ShowNicknamePanel();
         }
@@ -376,8 +391,18 @@ namespace SSAFYPlayTime
 
         private void EnsureGameSettingModal()
         {
-            // LobbyAudioSettingsModal은 Hierarchy에서 컴포넌트로 미리 부착되어 있어야 합니다.
-            // Awake에서 슬라이더 바인딩, OnEnable에서 값 갱신이 자동으로 수행됩니다.
+            if (gameSettingModal == null)
+            {
+                return;
+            }
+
+            var modalController = gameSettingModal.GetComponent<LobbyAudioSettingsModal>();
+            if (modalController == null)
+            {
+                modalController = gameSettingModal.AddComponent<LobbyAudioSettingsModal>();
+            }
+
+            modalController.InitializeIfNeeded();
         }
 
         private void EnsureLauncherBackgroundMusic()
@@ -467,8 +492,6 @@ namespace SSAFYPlayTime
 
             if (roomPanel != null && roomPanel.activeSelf)
             {
-                LayoutNameSlotsForCurrentViewport();
-                AlignAllCharacterCandidatesToNameSlots();
                 characterPreview?.UpdateFrame();
             }
         }
@@ -519,7 +542,6 @@ namespace SSAFYPlayTime
                 { nameof(selectFitCharacterButton), selectFitCharacterButton },
                 { nameof(selectWiseCharacterButton), selectWiseCharacterButton },
                 { nameof(selectRandomCharacterButton), selectRandomCharacterButton },
-                { nameof(characterRuntimeRoot), characterRuntimeRoot },
                 { nameof(leaveRoomButton), leaveRoomButton },
             };
 
@@ -541,6 +563,7 @@ namespace SSAFYPlayTime
         // 오브젝트 파괴 시 NetworkRunner를 안전하게 종료한다.
         private async void OnDestroy()
         {
+            if (_runner != null) _runner.RemoveCallbacks(this);
             SceneManager.sceneLoaded -= OnManagedSceneLoaded;
             await ShutdownRunnerAsync();
         }
@@ -1172,14 +1195,53 @@ namespace SSAFYPlayTime
             if (_isProcessing) return;
             _isProcessing = true;
 
-            bool joined = _gameEndAutoRoomJoinTask != null && await _gameEndAutoRoomJoinTask;
+            bool joined = false;
+            try
+            {
+                if (_gameEndAutoRoomJoinTask != null)
+                {
+                    // 최대 10초 대기 후 미완료 시 실패로 처리 (PlayMode/오프라인 환경 대응)
+                    var timeout = Task.Delay(10000);
+                    var completed = await Task.WhenAny(_gameEndAutoRoomJoinTask, timeout);
+                    if (completed == _gameEndAutoRoomJoinTask && !_gameEndAutoRoomJoinTask.IsFaulted)
+                        joined = _gameEndAutoRoomJoinTask.Result;
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Lobby] ExecuteReturnFromGameEndAsync: 자동 방 입장 태스크 오류. {e.Message}");
+                joined = false;
+            }
 
             if (!joined)
             {
-                // 방 자동 입장 실패 → 로비 메인으로 fallback
+                // 방 자동 입장 실패 → goToLobby 여부에 따라 분기하되 gameEndPanel은 무조건 닫는다.
                 _isProcessing = false;
+                _isShowingGameEndPanel = false;
+                _localIsReady = false;
+                _localSelectedCharacterIndex = -1;
+
+                foreach (var obj in _spawnedGameEndCharacters)
+                { if (obj != null) Destroy(obj); }
+                _spawnedGameEndCharacters.Clear();
+
+                if (gameEndPanel != null) gameEndPanel.SetActive(false);
+                if (podiumParent != null) podiumParent.SetActive(false);
+                HideAllCharacterSlots();
                 ResetGameEndReturnState();
-                ShowLobbyPanel();
+
+                if (goToLobby)
+                    ShowLobbyPanel();
+                else
+                {
+                    for (int s = 0; s < _playerIdBySlot.Length; s++)
+                    {
+                        _playerIdBySlot[s] = -1;
+                        _selectedCharacterIndexBySlot[s] = -1;
+                    }
+                    ShowRoomPanel();
+                    UpdateRoomPanel();
+                }
                 return;
             }
 
@@ -1188,7 +1250,13 @@ namespace SSAFYPlayTime
                 // 로비 선택: gameEndPanel 닫기 → 방 세션 퇴장 → 로비 패널 표시.
                 // 퇴장 시 host migration이 발생하면 다음 순위 플레이어가 방장을 이어받는다.
                 _isShowingGameEndPanel = false;
+
+                foreach (var obj in _spawnedGameEndCharacters)
+                { if (obj != null) Destroy(obj); }
+                _spawnedGameEndCharacters.Clear();
+
                 if (gameEndPanel != null) gameEndPanel.SetActive(false);
+                if (podiumParent != null) podiumParent.SetActive(false);
                 _currentRoomName = string.Empty;
                 _currentRoomOwner = "-";
                 _currentOwnerPlayerId = -1;
@@ -1212,18 +1280,69 @@ namespace SSAFYPlayTime
                 // LauncherScene에 이미 있으므로 씬 전환 없이 패널 전환만 한다.
                 _isProcessing = false;
                 _isShowingGameEndPanel = false;
+                _localIsReady = false;
+                _localSelectedCharacterIndex = -1;
+
+                foreach (var obj in _spawnedGameEndCharacters)
+                { if (obj != null) Destroy(obj); }
+                _spawnedGameEndCharacters.Clear();
+
                 if (gameEndPanel != null) gameEndPanel.SetActive(false);
+                if (podiumParent != null) podiumParent.SetActive(false);
+
+                // sceneDirectSlots 캐릭터를 모두 숨긴다 (podiumParent 하위가 아닐 경우 대비).
+                if (sceneDirectSlots != null)
+                {
+                    foreach (var slot in sceneDirectSlots)
+                    {
+                        if (slot == null) continue;
+                        if (slot.questionMark != null) slot.questionMark.SetActive(false);
+                        if (slot.characterModels != null)
+                            foreach (var model in slot.characterModels)
+                                if (model != null) model.SetActive(false);
+                    }
+                }
+
+                // stale _playerIdBySlot 초기화 → UpdatePlayerSlots에서 isSamePlayer 판정 오류 방지.
+                for (int s = 0; s < _playerIdBySlot.Length; s++)
+                {
+                    _playerIdBySlot[s] = -1;
+                    _selectedCharacterIndexBySlot[s] = -1;
+                }
+
+                HideAllCharacterSlots();
                 ShowRoomPanel();
                 UpdateRoomPanel();
+
+                // 클라이언트(비방장)는 준비 취소 상태를 HOST에 명시적으로 전파한다.
+                // ApplyRosterPayload가 비동기로 _localIsReady를 덮어쓸 수 있으므로 강제 전송.
+                if (_runner != null && _runner.IsRunning && !_runner.IsServer && _runner.LocalPlayer.IsRealPlayer)
+                {
+                    _localIsReady = false;
+                    var localPid = _runner.LocalPlayer.PlayerId;
+                    _readyStateByPlayerId[localPid] = false;
+                    if (_roomParticipantsByPlayerId.TryGetValue(localPid, out var pres) && pres != null)
+                        pres.IsReady = false;
+                    SendReadyStateToHost(false);
+                    RefreshReadyButtonState();
+                    RefreshRoomActionButtonState();
+                }
             }
         }
 
         // Fusion runner.LoadScene() 호출 전에 세워두는 플래그.
         // Despawned()가 OnSceneLoadDone보다 늦게 실행될 수 있으므로
         // GameResultData.Entries가 비어 있어도 패널을 표시하도록 보장한다.
+        // RPC가 OnSceneLoadDone보다 늦게 도착하는 경우(타이밍 경쟁)를 대비해
+        // 이미 LauncherScene에 있으면 즉시 ShowGameEndPanel()을 호출한다.
         public void NotifyGameEndTransition()
         {
             _pendingGameEndPanel = true;
+            if (IsActiveSceneNamed(launcherSceneName) && !_isShowingGameEndPanel)
+            {
+                _pendingGameEndPanel = false;
+                ShowGameEndPanel();
+            }
         }
 
         // 게임 종료 후 LauncherScene 진입 시 OnSceneLoadDone에서 호출.
@@ -1269,6 +1388,8 @@ namespace SSAFYPlayTime
             _gameEndReturnTransitionStarted = false;
 
             DisplayRankings();
+            // Clear() 전에 순위를 캡처해 StartAutoRoomJoinFromGameEndAsync의 딜레이 계산에 사용한다.
+            _localPlayerRankForAutoJoin = GameResultData.LocalPlayerRank;
             // 표시 완료 후 데이터를 클리어해 이후 OnSceneLoadDone 재발생 시 패널이 중복 표시되지 않도록 한다.
             GameResultData.Clear();
 
@@ -1287,16 +1408,119 @@ namespace SSAFYPlayTime
             _gameEndAutoRoomJoinTask = StartAutoRoomJoinFromGameEndAsync();
         }
 
+        // ─── 방장 비정상 종료 → 로비 복귀 ────────────────────────────────────
+
+        // DebugGameEndTransition.PlayerLeft 및 OnShutdown/OnDisconnectedFromServer/OnHostMigration에서 호출.
+        // _isShowingGameEndPanel 플래그를 먼저 세워 중복 진입을 방지하고 코루틴을 시작한다.
+        public void TriggerHostExitAndReturnToLobby()
+        {
+            if (_isShowingGameEndPanel)
+            {
+                Debug.LogWarning("[HostExit] TriggerHostExitAndReturnToLobby 차단됨: _isShowingGameEndPanel=true");
+                return;
+            }
+            Debug.Log("[HostExit] TriggerHostExitAndReturnToLobby 진입");
+            _isShowingGameEndPanel = true;
+            _pendingGameEndPanel = false;
+            StartCoroutine(CoReturnToLobbyOnHostExit());
+        }
+
+        private IEnumerator CoReturnToLobbyOnHostExit()
+        {
+            Debug.Log($"[HostExit] 코루틴 시작. 현재 씬={SceneManager.GetActiveScene().name}");
+            if (!IsActiveSceneNamed(launcherSceneName))
+            {
+                Debug.Log($"[HostExit] LauncherScene 로드 시작 (launcherSceneName={launcherSceneName})");
+                SceneManager.LoadScene(launcherSceneName);
+                while (!IsActiveSceneNamed(launcherSceneName))
+                    yield return null;
+                Debug.Log("[HostExit] LauncherScene 로드 완료");
+                // SceneManager.LoadScene은 Fusion 경로가 아니므로 OnSceneLoadDone이 발동하지 않는다.
+                // 캐릭터 슬롯 재초기화를 허용하도록 수동으로 리셋한다.
+                ResetCharacterSlotState();
+            }
+
+            _currentRoomName = string.Empty;
+            _currentRoomOwner = "-";
+            _currentOwnerPlayerId = -1;
+            _currentRoomIsPrivate = false;
+            _currentRoomPassword = string.Empty;
+            _localSelectedCharacterIndex = -1;
+            _localIsReady = false;
+            _localPlayerRankForAutoJoin = 0;
+            // OnHostMigration이 저장한 준비 상태를 클리어해 재입장 시 Ready 복원을 방지한다.
+            _migrationReadyStateByClientId.Clear();
+            _isMigrating = false;
+
+            Debug.Log("[HostExit] ShowLobbyPanel 호출");
+            ShowLobbyPanel();
+
+            yield return null;
+            Debug.Log("[HostExit] ShowHostExitNoticeModal 호출");
+            ShowHostExitNoticeModal();
+        }
+
+        private void ShowHostExitNoticeModal()
+        {
+            // Inspector 미연결 시 이름으로 자동 탐색 (빌드 환경 포함)
+            if (hostExitNoticeModal == null)
+            {
+                foreach (var t in FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (t.name == "HostExitNoticeModal") { hostExitNoticeModal = t.gameObject; break; }
+                }
+            }
+
+            if (hostExitNoticeModal == null)
+            {
+                Debug.LogWarning("[HostExit] HostExitNoticeModal을 찾을 수 없습니다.");
+                _isShowingGameEndPanel = false;
+                return;
+            }
+
+            // 버튼도 미연결 시 자식에서 자동 탐색
+            if (hostExitNoticeCloseButton == null)
+            {
+                foreach (var btn in hostExitNoticeModal.GetComponentsInChildren<Button>(true))
+                {
+                    if (btn.name == "ConfirmButton") { hostExitNoticeCloseButton = btn; break; }
+                }
+            }
+
+            Debug.Log($"[HostExit] 모달 표시. modal={hostExitNoticeModal.name}, btn={hostExitNoticeCloseButton?.name}");
+
+            if (hostExitNoticeCloseButton != null)
+            {
+                hostExitNoticeCloseButton.onClick.RemoveAllListeners();
+                hostExitNoticeCloseButton.onClick.AddListener(() =>
+                {
+                    hostExitNoticeModal.SetActive(false);
+                    _isShowingGameEndPanel = false;
+                });
+            }
+            else
+            {
+                Debug.LogWarning("[HostExit] ConfirmButton을 찾을 수 없습니다.");
+                _isShowingGameEndPanel = false;
+            }
+
+            hostExitNoticeModal.SetActive(true);
+            Debug.Log($"[HostExit] 모달 SetActive(true) 완료.");
+        }
+
         private void DisplayRankings()
         {
             if (rankingContainer == null) return;
 
-            var entries = GameResultData.Entries
-                .OrderBy(e => e.Rank)
-                .ToList();
+            if (podiumParent != null)
+            {
+                podiumParent.SetActive(true);
+            }
 
+            var entries = GameResultData.Entries.OrderBy(e => e.Rank).ToList();
             var rankingItems = rankingContainer.GetComponentsInChildren<RankingItemUI>(true).ToList();
 
+            // 기존 UI(글자) 리스트 업데이트
             for (int i = 0; i < rankingItems.Count; i++)
             {
                 bool shouldShow = i < entries.Count;
@@ -1304,11 +1528,76 @@ namespace SSAFYPlayTime
                 if (shouldShow)
                 {
                     var entry = entries[i];
-                    var nickname = !string.IsNullOrWhiteSpace(entry.Nickname)
-                        ? entry.Nickname
-                        : $"Player{entry.PlayerId}";
+                    var nickname = !string.IsNullOrWhiteSpace(entry.Nickname) ? entry.Nickname : $"Player{entry.PlayerId}";
+                    // 캐릭터 인덱스 파라미터
                     rankingItems[i].SetData(entry.Rank, nickname, entry.CharacterTypeIndex);
                 }
+            }
+
+            // 3D 캐릭터 단상 소환 (이전에 소환된 애들이 있으면 청소)
+            foreach (var obj in _spawnedGameEndCharacters) { if (obj != null) Destroy(obj); }
+            _spawnedGameEndCharacters.Clear();
+
+            // 단상 자리를 안 만들어뒀으면 그냥 종료 (에러 방지)
+            if (podiumSlots == null || podiumSlots.Length == 0) return;
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                if (i >= podiumSlots.Length) break; // 단상 개수보다 사람이 많으면 패스
+                
+                var entry = entries[i];
+                int rankIndex = i; // 0=1등, 1=2등, 2=3등, 3=4등
+
+                // 닉네임 3D Text: "NicknameText" 이름의 TextMeshPro를 우선 탐색, 없으면 첫 번째로 fallback
+                var nickname = !string.IsNullOrWhiteSpace(entry.Nickname) ? entry.Nickname : $"Player{entry.PlayerId}";
+                var allTexts3D = podiumSlots[rankIndex].GetComponentsInChildren<TMPro.TextMeshPro>(true);
+                TMPro.TextMeshPro nickText3D = null;
+                foreach (var t in allTexts3D)
+                {
+                    if (t.gameObject.name.Contains("Nickname") || t.gameObject.name.Contains("nickname"))
+                    { nickText3D = t; break; }
+                }
+                if (nickText3D == null && allTexts3D.Length > 0) nickText3D = allTexts3D[0];
+                if (nickText3D != null) nickText3D.text = nickname;
+
+                // 캐릭터 번호
+                int charIndex = entry.CharacterTypeIndex;
+
+                // sceneDirectSlots가 설정되어 있다면 수동 배치된 모델을 활용
+                if (sceneDirectSlots != null && rankIndex < sceneDirectSlots.Count)
+                {
+                    var slot = sceneDirectSlots[rankIndex];
+                    if (slot != null && slot.characterModels != null)
+                    {
+                        if (slot.questionMark != null)
+                            slot.questionMark.SetActive(charIndex == (int)CharacterKind.Random);
+
+                        for (int option = 0; option < slot.characterModels.Length; option++)
+                        {
+                            var model = slot.characterModels[option];
+                            if (model != null)
+                            {
+                                bool isSelectedModel = (option == charIndex && charIndex != (int)CharacterKind.Random);
+                                model.SetActive(isSelectedModel);
+                                if (isSelectedModel)
+                                {
+                                    Animator anim = model.GetComponentInChildren<Animator>();
+                                    if (anim != null)
+                                    {
+                                        int actualRank = rankIndex + 1;
+                                        anim.SetInteger("Rank", actualRank);
+                                    }
+                                }
+                            }
+                        }
+                        continue; // 새 로직 탔으면 Instantiate 생략
+                    }
+                }
+
+                // sceneDirectSlots가 없으면 캐릭터를 표시하지 않는다.
+                // Inspector에서 LobbyCanvasUIController > Scene Direct Slots 항목에
+                // 각 단상(1~4등) 위치의 캐릭터 모델을 연결해야 합니다.
+                Debug.LogWarning($"[Lobby] DisplayRankings: sceneDirectSlots[{rankIndex}]가 설정되지 않았습니다. Inspector에서 Scene Direct Slots를 연결하세요.");
             }
         }
 
@@ -1339,7 +1628,7 @@ namespace SSAFYPlayTime
             //   3등: 300ms → CLIENT로 입장
             //   4등: 450ms → CLIENT로 입장
             const int RankDelayMs = 150;
-            var localRank = GameResultData.LocalPlayerRank;
+            var localRank = _localPlayerRankForAutoJoin;
             var delaySteps = localRank > 0 ? (localRank - 1) : MaxPlayers;
             if (delaySteps > 0)
                 await Task.Delay(delaySteps * RankDelayMs);
@@ -1422,19 +1711,10 @@ namespace SSAFYPlayTime
         }
 
         // GameScene 전환 시 파괴된 캐릭터 오브젝트 참조를 초기화한다.
-        // LauncherScene 복귀 후 InitializeCharacterSlotsIfNeeded()가 재실행되도록 플래그를 리셋한다.
         private void ResetCharacterSlotState()
         {
-            _characterSlotsInitialized = false;
-            for (var slot = 0; slot < PlayerSlotCount; slot++)
-                for (var option = 0; option < CharacterOptionCount; option++)
-                    _slotCharacterRoots[slot, option] = null;
-
-            _characterPrePlacedWorldY.Clear();
-            _characterBaseBoundsHeights.Clear();
-            _characterBaseLocalScales.Clear();
-            _characterBaseLocalRotations.Clear();
-            _characterOptionIndexByTransform.Clear();
+            // CharacterPreviewController 슬롯 상태 리셋
+            characterPreview?.ResetSlots();
         }
 
         // 현재 방 이름·공개 여부·플레이어 슬롯·게임 시작 버튼 활성 상태를 갱신한다.
@@ -1488,9 +1768,25 @@ namespace SSAFYPlayTime
                     var isReady = !isOwner && _readyStateByPlayerId.TryGetValue(participant.PlayerId, out var ready) && ready;
                     slot.text = participant.Nickname;
                     UpdateReadyBadge(readyBadges[i], isReady);
-                    _playerIdBySlot[i] = participant.PlayerId;
-                    _selectedCharacterIndexBySlot[i] = SanitizeCharacterIndexOrNone(participant.CharacterIndex);
-                    ApplySelectedCharacterForSlot(i, true);
+
+                    // 변경 감지 로직
+                    int lastPlayerId = _playerIdBySlot[i];
+                    int newPlayerId = participant.PlayerId;
+                    int lastCharIdx = _selectedCharacterIndexBySlot[i];
+                    int newCharIdx = SanitizeCharacterIndexOrNone(participant.CharacterIndex);
+
+                    // 애니메이션 재생 조건:
+                    // 1. 같은 플레이어가 슬롯에 계속 머물러 있어야 함 (새로 들어온 사람은 기뻐하지 않음)
+                    // 2. 캐릭터 인덱스가 실제로 바뀌어야 함
+                    // 3. 바뀐 캐릭터가 랜덤(?)이 아니어야 함
+                    bool isSamePlayer = (lastPlayerId != -1 && lastPlayerId == newPlayerId);
+                    bool charChanged = (lastCharIdx != newCharIdx);
+                    bool shouldPlayAnim = isSamePlayer && charChanged && (newCharIdx != (int)CharacterKind.Random) && (newCharIdx != -1);
+
+                    _playerIdBySlot[i] = newPlayerId;
+                    _selectedCharacterIndexBySlot[i] = newCharIdx;
+
+                    ApplySelectedCharacterForSlot(i, true, shouldPlayAnim);
                     characterPreview?.UpdateSlot(i, participant.PlayerId, participant.CharacterIndex, true);
                 }
                 else
@@ -1499,257 +1795,12 @@ namespace SSAFYPlayTime
                     UpdateReadyBadge(readyBadges[i], false);
                     _playerIdBySlot[i] = -1;
                     _selectedCharacterIndexBySlot[i] = -1;
-                    ApplySelectedCharacterForSlot(i, false);
+                    ApplySelectedCharacterForSlot(i, false, false);
                     characterPreview?.UpdateSlot(i, -1, -1, false);
                 }
             }
 
-            LayoutNameSlotsForCurrentViewport();
-            AlignAllCharacterCandidatesToNameSlots();
             RefreshCharacterSelectionUiState();
-        }
-
-        // 슬롯×캐릭터 조합의 프리뷰 오브젝트를 생성하거나 씬에 미리 배치된 오브젝트를 재사용해 초기화한다.
-        // 이미 초기화됐으면 즉시 반환한다.
-        private void InitializeCharacterSlotsIfNeeded()
-        {
-            if (_characterSlotsInitialized)
-            {
-                return;
-            }
-
-            var templates = new[] { ssatyCharacterRoot, alGCharacterRoot, fitCharacterRoot, wiseCharacterRoot, randomCharacterRoot };
-            var nameSlots = GetNameSlots();
-            if (templates.Take(4).Any(t => t == null) || nameSlots.Any(t => t == null))
-            {
-                return;
-            }
-
-            var runtimeRoot = ResolveCharacterRuntimeRoot();
-            // slot(플레이어 슬롯 0~3) × option(캐릭터 종류 0~4) 조합의 2차원 배열을 구성한다.
-            for (var slot = 0; slot < PlayerSlotCount; slot++)
-            {
-                for (var option = 0; option < CharacterOptionCount; option++)
-                {
-                    var template = templates[option];
-                    if (template == null) continue;
-                    // 씬에 미리 배치된 오브젝트가 있으면 Instantiate 없이 재사용한다.
-                    // 이름 규칙: "{템플릿명}_Slot{슬롯번호}" (예: "SsatyCharacterUI_Slot1")
-                    var prePlacedName = $"{template.name}_Slot{slot + 1}";
-                    var prePlaced = runtimeRoot.Find(prePlacedName);
-
-                    Transform cloneTransform;
-                    if (prePlaced != null)
-                    {
-                        // 씬에 미리 배치된 오브젝트 재사용 — 월드 Y 좌표를 고정 기준으로 저장
-                        cloneTransform = prePlaced;
-                        ConfigureCharacterPreviewClone(cloneTransform.gameObject);
-                        _characterPrePlacedWorldY[cloneTransform] = cloneTransform.position.y;
-                    }
-                    else
-                    {
-                        // 미리 배치된 오브젝트가 없으면 런타임에 템플릿을 복제해 생성
-                        var clone = Instantiate(template, runtimeRoot, true);
-                        clone.name = prePlacedName;
-                        ConfigureCharacterPreviewClone(clone);
-                        cloneTransform = clone.transform;
-                    }
-
-                    cloneTransform.gameObject.SetActive(false);
-                    _slotCharacterRoots[slot, option] = cloneTransform;
-                    _characterBaseLocalScales[cloneTransform] = cloneTransform.localScale;
-                    _characterBaseLocalRotations[cloneTransform] = cloneTransform.localRotation;
-                    CacheCharacterVisualChildRotations(cloneTransform);
-                    _characterBaseBoundsHeights[cloneTransform] = CalculateCombinedBoundsHeight(cloneTransform);
-                    _characterOptionIndexByTransform[cloneTransform] = option;
-                }
-            }
-
-            for (var i = 0; i < templates.Length; i++)
-            {
-                if (templates[i] != null)
-                {
-                    templates[i].SetActive(false);
-                }
-            }
-
-            _characterSlotsInitialized = true;
-            AlignAllCharacterCandidatesToNameSlots();
-        }
-
-        // 모든 슬롯의 캐릭터 오브젝트를 해당 슬롯의 이름 텍스트 위치에 정렬한다.
-        private void AlignAllCharacterCandidatesToNameSlots()
-        {
-            InitializeCharacterSlotsIfNeeded();
-            if (!_characterSlotsInitialized)
-            {
-                return;
-            }
-
-            var nameSlots = GetNameSlots();
-            for (var slot = 0; slot < PlayerSlotCount; slot++)
-            {
-                var nameSlot = nameSlots[slot];
-                for (var option = 0; option < CharacterOptionCount; option++)
-                {
-                    AlignCharacterSlot(_slotCharacterRoots[slot, option], nameSlot, slot);
-                }
-            }
-        }
-
-        // 캐릭터 슬롯 하나를 이름 슬롯 텍스트 위치 기준으로 배치한다.
-        // UI 공간(RectTransform)과 월드 공간 오브젝트 두 가지 경우를 모두 처리한다.
-        private void AlignCharacterSlot(Transform characterSlot, TMP_Text nameSlot, int slotIndex = -1)
-        {
-            if (characterSlot == null || nameSlot == null || nameSlot.transform is not RectTransform nameRect)
-            {
-                return;
-            }
-
-            if (characterSlot is RectTransform charRect)
-            {
-                if (characterSlot.parent != nameRect.parent)
-                {
-                    characterSlot.SetParent(nameRect.parent, false);
-                }
-
-                var characterSpecificOffset = GetCharacterSpecificVerticalOffset(characterSlot);
-                var kindPositionOffset = GetCharacterKindPositionOffset(characterSlot);
-                charRect.anchorMin = nameRect.anchorMin;
-                charRect.anchorMax = nameRect.anchorMax;
-                charRect.pivot = nameRect.pivot;
-                charRect.anchoredPosition = nameRect.anchoredPosition + new Vector2(
-                    kindPositionOffset.x,
-                    characterVerticalOffset + characterExtraVerticalOffset + characterSpecificOffset + kindPositionOffset.y);
-                ApplyRotationToVisuals(characterSlot);
-                if (useFixedCharacterScale)
-                {
-                    charRect.localScale = Vector3.Scale(fixedCharacterScale, GetCharacterKindScaleMultiplier(characterSlot));
-                }
-                return;
-            }
-
-            var worldCam = ResolveCharacterPlacementCamera();
-            if (worldCam == null)
-            {
-                return;
-            }
-
-            var uiCam = ResolveUiCamera();
-            var uiWorldPoint = GetNameAnchorWorldPoint(nameSlot, nameRect);
-            var screenPoint = RectTransformUtility.WorldToScreenPoint(uiCam, uiWorldPoint);
-            var kindPositionOffsetWorld = GetCharacterKindPositionOffset(characterSlot);
-            screenPoint.x += kindPositionOffsetWorld.x;
-            screenPoint.y += characterVerticalOffset + characterExtraVerticalOffset
-                             + GetCharacterSpecificVerticalOffset(characterSlot)
-                             + kindPositionOffsetWorld.y;
-            var padding = Mathf.Max(0f, characterScreenPaddingPixels);
-            screenPoint.x = Mathf.Clamp(screenPoint.x, padding, Screen.width - padding);
-            screenPoint.y = Mathf.Clamp(screenPoint.y, padding, Screen.height - padding);
-
-            var depth = characterWorldDepth;
-            if (depth <= 0f)
-            {
-                // Inspector에서 depth가 설정되지 않은 경우 현재 캐릭터 위치의 카메라 기준 깊이를 사용한다.
-                // 카메라 뒤쪽(음수)이면 기본값 8f로 폴백한다.
-                depth = Vector3.Dot(characterSlot.position - worldCam.transform.position, worldCam.transform.forward);
-                if (depth <= 0f)
-                {
-                    depth = 8f;
-                }
-            }
-
-            var targetWorld = worldCam.ScreenToWorldPoint(new Vector3(screenPoint.x, screenPoint.y, depth));
-            var finalPos = targetWorld + characterWorldOffset + new Vector3(0f, 0f, kindPositionOffsetWorld.z);
-            if (_characterPrePlacedWorldY.TryGetValue(characterSlot, out var lockedY))
-            {
-                finalPos.y = lockedY + GetCharacterPrePlacedWorldYAdjustment(characterSlot) + kindPositionOffsetWorld.y;
-            }
-            characterSlot.position = finalPos;
-            ApplyRotationToVisuals(characterSlot);
-            ApplySlotParticleRotationY(characterSlot, slotIndex);
-
-            if (useFixedCharacterScale)
-            {
-                characterSlot.localScale = Vector3.Scale(fixedCharacterScale, GetCharacterKindScaleMultiplier(characterSlot));
-            }
-            else if (keepCharacterScreenSize)
-            {
-                ApplyCharacterScreenHeightScale(characterSlot, worldCam);
-            }
-        }
-
-        // 현재 뷰포트 크기를 기준으로 4개 플레이어 이름 슬롯의 위치와 크기를 매 프레임 갱신한다.
-        private void LayoutNameSlotsForCurrentViewport()
-        {
-            if (!lockPlayerSlotLayoutToViewport)
-            {
-                return;
-            }
-
-            var canvasRect = GetComponentInParent<Canvas>()?.transform as RectTransform;
-            if (canvasRect == null)
-            {
-                return;
-            }
-
-            var slotTexts = GetNameSlots();
-            var slotX = new[] { 0.125f, 0.375f, 0.625f, 0.875f };
-            var y = Mathf.Clamp01(playerSlotViewportY + playerSlotExtraViewportY);
-            var sizeMultiplier = Mathf.Max(0.5f, playerSlotSizeMultiplier);
-            var width = Mathf.Clamp(
-                canvasRect.rect.width * Mathf.Max(0.05f, playerSlotWidthRatio) * sizeMultiplier,
-                Mathf.Max(1f, playerSlotMinWidth),
-                Mathf.Max(playerSlotMinWidth, playerSlotMaxWidth * sizeMultiplier));
-            if (useQuarterWidthNameSlots)
-            {
-                var quarterWidth = canvasRect.rect.width / PlayerSlotCount;
-                var margin = Mathf.Max(0f, playerSlotQuarterHorizontalMargin);
-                var quarterScaledWidth = (quarterWidth - margin * 2f) * Mathf.Max(0.5f, playerSlotQuarterWidthScale);
-                width = Mathf.Max(1f, quarterScaledWidth);
-            }
-            var height = Mathf.Max(1f, playerSlotHeight * sizeMultiplier);
-
-            for (var i = 0; i < slotTexts.Length; i++)
-            {
-                var text = slotTexts[i];
-                if (text == null || text.transform is not RectTransform rect)
-                {
-                    continue;
-                }
-
-                rect.anchorMin = new Vector2(slotX[i], y);
-                rect.anchorMax = new Vector2(slotX[i], y);
-                rect.pivot = new Vector2(0.5f, 0.5f);
-                rect.anchoredPosition = new Vector2(0f, playerSlotVerticalPixelOffset);
-                rect.sizeDelta = new Vector2(width, height);
-
-                text.alignment = TextAlignmentOptions.Center;
-                text.enableWordWrapping = false;
-                text.overflowMode = TextOverflowModes.Ellipsis;
-                text.enableAutoSizing = true;
-                text.fontSizeMin = Mathf.Max(8f, nicknameFontSizeMin);
-                text.fontSizeMax = Mathf.Max(text.fontSizeMin, nicknameFontSizeMax);
-            }
-        }
-
-        private static Vector3 GetNameAnchorWorldPoint(TMP_Text nameSlot, RectTransform nameRect)
-        {
-            if (nameSlot == null || nameRect == null)
-            {
-                return Vector3.zero;
-            }
-
-            // Use rendered glyph bounds so world characters track the visible nickname
-            // instead of the full stretched text rect.
-            nameSlot.ForceMeshUpdate();
-            var bounds = nameSlot.textBounds;
-            if (bounds.size.sqrMagnitude > 0.0001f)
-            {
-                return nameRect.TransformPoint(bounds.center);
-            }
-
-            return nameRect.TransformPoint(nameRect.rect.center);
         }
 
         // 캐릭터 배치에 사용할 카메라를 반환한다. 인스펙터 지정 → Camera.main → 씬 탐색 순으로 폴백한다.
@@ -1783,167 +1834,6 @@ namespace SSAFYPlayTime
             }
 
             return canvas.worldCamera != null ? canvas.worldCamera : ResolveCharacterPlacementCamera();
-        }
-
-        // 캐릭터 프리뷰 클론의 부모가 될 런타임 루트 Transform을 반환한다.
-        // 인스펙터 미설정 시 씬에서 "LobbyCharacterRuntimeRoot"를 찾거나 새로 생성한다.
-        private Transform ResolveCharacterRuntimeRoot()
-        {
-            if (characterRuntimeRoot != null)
-            {
-                return characterRuntimeRoot;
-            }
-
-            var root = GameObject.Find("LobbyCharacterRuntimeRoot");
-            if (root == null)
-            {
-                root = new GameObject("LobbyCharacterRuntimeRoot");
-            }
-
-            characterRuntimeRoot = root.transform;
-            return characterRuntimeRoot;
-        }
-
-        private void CacheCharacterVisualChildRotations(Transform characterSlot)
-        {
-            if (characterSlot == null)
-            {
-                return;
-            }
-
-            for (var i = 0; i < characterSlot.childCount; i++)
-            {
-                var child = characterSlot.GetChild(i);
-                if (child == null)
-                {
-                    continue;
-                }
-
-                _characterVisualChildBaseLocalRotations[child] = child.localRotation;
-            }
-        }
-
-        private void ApplyRotationToVisuals(Transform characterSlot)
-        {
-            if (characterSlot == null)
-            {
-                return;
-            }
-
-            var combinedRotation = Quaternion.Euler(GetCharacterKindRotationOffset(characterSlot));
-            if (_characterBaseLocalRotations.TryGetValue(characterSlot, out var rootBaseRotation))
-            {
-                characterSlot.localRotation = rootBaseRotation;
-            }
-
-            if (characterSlot.childCount <= 0)
-            {
-                characterSlot.localRotation *= combinedRotation;
-                return;
-            }
-
-            for (var i = 0; i < characterSlot.childCount; i++)
-            {
-                var child = characterSlot.GetChild(i);
-                if (child == null)
-                {
-                    continue;
-                }
-
-                if (!_characterVisualChildBaseLocalRotations.TryGetValue(child, out var childBaseRotation))
-                {
-                    childBaseRotation = child.localRotation;
-                    _characterVisualChildBaseLocalRotations[child] = childBaseRotation;
-                }
-
-                child.localRotation = childBaseRotation * combinedRotation;
-            }
-        }
-
-        // 캐릭터별 추가 수직 오프셋을 반환한다.
-        private float GetCharacterSpecificVerticalOffset(Transform characterSlot)
-        {
-            if (characterSlot == null)
-            {
-                return 0f;
-            }
-
-            if (!_characterOptionIndexByTransform.TryGetValue(characterSlot, out var option))
-            {
-                return 0f;
-            }
-
-            return option switch
-            {
-                (int)CharacterKind.AlG => algCharacterVerticalOffsetAdjustment,
-                (int)CharacterKind.Fit => fitCharacterVerticalOffsetAdjustment,
-                (int)CharacterKind.Wise => wiseCharacterVerticalOffsetAdjustment,
-                _ => 0f
-            };
-        }
-
-        // 미리 배치된 캐릭터의 월드 Y 보정값을 반환한다. 스티의 경우 별도 조정값을 적용한다.
-        private float GetCharacterPrePlacedWorldYAdjustment(Transform characterSlot)
-        {
-            if (_characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) &&
-                option == (int)CharacterKind.Fit)
-            {
-                return fitCharacterWorldYAdjustment;
-            }
-
-            return 0f;
-        }
-
-        private void ApplySlotParticleRotationY(Transform characterSlot, int slotIndex)
-        {
-            if (characterSlot == null || slotIndex < 0 ||
-                slotParticleRotationYOffsets == null || slotIndex >= slotParticleRotationYOffsets.Length)
-            {
-                return;
-            }
-
-            var ps = characterSlot.GetComponent<ParticleSystem>();
-            if (ps == null)
-            {
-                return;
-            }
-
-            var totalY = slotParticleRotationYOffsets[slotIndex] * Mathf.Deg2Rad;
-            var main = ps.main;
-            main.startRotationY = new ParticleSystem.MinMaxCurve(totalY);
-        }
-
-        private Vector3 GetCharacterKindPositionOffset(Transform characterSlot)
-        {
-            if (characterKindPositionOffsets != null &&
-                _characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) &&
-                option >= 0 && option < characterKindPositionOffsets.Length)
-            {
-                return characterKindPositionOffsets[option];
-            }
-            return Vector3.zero;
-        }
-
-        private Vector3 GetCharacterKindRotationOffset(Transform characterSlot)
-        {
-            if (characterKindRotationOffsets != null &&
-                _characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) &&
-                option >= 0 && option < characterKindRotationOffsets.Length)
-            {
-                return characterKindRotationOffsets[option];
-            }
-            return Vector3.zero;
-        }
-
-        private Vector3 GetCharacterKindScaleMultiplier(Transform characterSlot)
-        {
-            if (characterKindScaleMultipliers != null &&
-                _characterOptionIndexByTransform.TryGetValue(characterSlot, out var option) &&
-                option >= 0 && option < characterKindScaleMultipliers.Length)
-            {
-                return characterKindScaleMultipliers[option];
-            }
-            return Vector3.one;
         }
 
         private static void ConfigureCharacterPreviewClone(GameObject clone)
@@ -2009,82 +1899,19 @@ namespace SSAFYPlayTime
             }
         }
 
-        // 캐릭터가 화면에서 일정 픽셀 높이를 유지하도록 localScale을 조정한다.
-        private void ApplyCharacterScreenHeightScale(Transform characterRoot, Camera worldCam)
-        {
-            if (characterRoot == null || worldCam == null)
-            {
-                return;
-            }
-
-            if (!_characterBaseLocalScales.TryGetValue(characterRoot, out var baseLocalScale))
-            {
-                baseLocalScale = characterRoot.localScale;
-                _characterBaseLocalScales[characterRoot] = baseLocalScale;
-            }
-
-            if (!_characterBaseBoundsHeights.TryGetValue(characterRoot, out var baseBoundsHeight) || baseBoundsHeight <= 0.001f)
-            {
-                baseBoundsHeight = Mathf.Max(0.001f, CalculateCombinedBoundsHeight(characterRoot));
-                _characterBaseBoundsHeights[characterRoot] = baseBoundsHeight;
-            }
-
-            var origin = characterRoot.position;
-            var pxA = worldCam.WorldToScreenPoint(origin);
-            var pxB = worldCam.WorldToScreenPoint(origin + worldCam.transform.up);
-            var pixelsPerWorldUnit = Mathf.Abs(pxB.y - pxA.y);
-            if (pixelsPerWorldUnit <= 0.0001f)
-            {
-                return;
-            }
-
-            var effectiveTargetScreenHeight = Mathf.Max(1f, characterTargetScreenHeightPixels) *
-                                              Mathf.Max(0.5f, characterScreenHeightMultiplier);
-            var targetWorldHeight = effectiveTargetScreenHeight / pixelsPerWorldUnit;
-            var scaleRatio = targetWorldHeight / baseBoundsHeight;
-            characterRoot.localScale = baseLocalScale * scaleRatio;
-        }
-
-        // root 하위의 모든 Renderer 바운딩박스를 합산해 전체 높이(Y)를 반환한다.
-        private static float CalculateCombinedBoundsHeight(Transform root)
-        {
-            if (root == null)
-            {
-                return 1f;
-            }
-
-            var renderers = root.GetComponentsInChildren<Renderer>(true);
-            if (renderers == null || renderers.Length == 0)
-            {
-                return 1f;
-            }
-
-            var bounds = renderers[0].bounds;
-            for (var i = 1; i < renderers.Length; i++)
-            {
-                if (renderers[i] == null)
-                {
-                    continue;
-                }
-
-                bounds.Encapsulate(renderers[i].bounds);
-            }
-
-            return Mathf.Max(0.001f, bounds.size.y);
-        }
-
         // 모든 슬롯의 캐릭터 오브젝트를 비활성화하고 CharacterPreview도 초기화한다.
         private void HideAllCharacterSlots()
         {
-            for (var slot = 0; slot < PlayerSlotCount; slot++)
+            // sceneRoomSlots(Hierarchy 직접 배치) 방식의 캐릭터도 모두 숨긴다.
+            if (sceneRoomSlots != null)
             {
-                for (var option = 0; option < CharacterOptionCount; option++)
+                foreach (var slot in sceneRoomSlots)
                 {
-                    var root = _slotCharacterRoots[slot, option];
-                    if (root != null)
-                    {
-                        root.gameObject.SetActive(false);
-                    }
+                    if (slot == null) continue;
+                    if (slot.questionMark != null) slot.questionMark.SetActive(false);
+                    if (slot.characterModels != null)
+                        foreach (var model in slot.characterModels)
+                            if (model != null) model.SetActive(false);
                 }
             }
 
@@ -2346,28 +2173,44 @@ namespace SSAFYPlayTime
         }
 
         // 슬롯의 선택 캐릭터에 해당하는 오브젝트만 활성화하고 나머지는 비활성화한다.
-        private void ApplySelectedCharacterForSlot(int slotIndex, bool slotHasPlayer)
+        private void ApplySelectedCharacterForSlot(int slotIndex, bool slotHasPlayer, bool playAnimation = false)
         {
-            InitializeCharacterSlotsIfNeeded();
-            if (!_characterSlotsInitialized || slotIndex < 0 || slotIndex >= PlayerSlotCount)
-            {
-                return;
-            }
-
             var selectedIndex = _selectedCharacterIndexBySlot[slotIndex];
-            // 선택하지 않은 경우(selectedIndex < 0)에는 ?（Random）를 기본 표시한다.
             var displayIndex = selectedIndex >= 0 ? selectedIndex : (int)CharacterKind.Random;
             var shouldShow = slotHasPlayer;
-            for (var option = 0; option < CharacterOptionCount; option++)
-            {
-                var rect = _slotCharacterRoots[slotIndex, option];
-                if (rect == null)
-                {
-                    continue;
-                }
 
-                rect.gameObject.SetActive(shouldShow && option == displayIndex);
+            // 1. Scene Room Slots (수동 배치) 로직
+            if (sceneRoomSlots != null && slotIndex < sceneRoomSlots.Count)
+            {
+                var slot = sceneRoomSlots[slotIndex];
+                if (slot != null && slot.characterModels != null)
+                {
+                    if (slot.questionMark != null)
+                    {
+                        bool showQM = (shouldShow && displayIndex == (int)CharacterKind.Random);
+                        // 현재 켜짐/꺼짐 상태가 다를 때만 조작
+                        if (slot.questionMark.activeSelf != showQM)
+                            slot.questionMark.SetActive(showQM);
+                    }
+
+                    for (int option = 0; option < slot.characterModels.Length; option++)
+                    {
+                        var model = slot.characterModels[option];
+                        if (model != null)
+                        {
+                            bool isSelectedModel = (shouldShow && option == displayIndex && displayIndex != (int)CharacterKind.Random);
+
+                            // 이미 켜져있는 내 캐릭터는 건드리지 않기
+                            if (model.activeSelf != isSelectedModel)
+                            {
+                                model.SetActive(isSelectedModel);
+                            }
+                        }
+                    }
+                }
+                return; // 새 로직을 탔으면 여기서 종료
             }
+
         }
 
         // 캐릭터 이름 문자열을 CharacterKind 인덱스로 변환한다. 매칭 실패 시 -1을 반환한다.
@@ -2452,9 +2295,14 @@ namespace SSAFYPlayTime
             lobbyPanel.SetActive(true);
             roomPanel.SetActive(false);
             passwordModal.SetActive(false);
+            if (hostExitNoticeModal != null) hostExitNoticeModal.SetActive(false);
             lobbyHeaderText.text = string.Format(nicknameHeaderFormat, _nickname);
             HideAllCharacterSlots();
             RefreshCharacterSelectionUiState();
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            // 모달 미닫힘 등 예외 케이스 방어: 로비 패널 진입 시 플래그 해제
+            _isShowingGameEndPanel = false;
 
             if (_isNicknameConfirmed)
             {
@@ -2473,6 +2321,11 @@ namespace SSAFYPlayTime
             lobbyPanel.SetActive(false);
             if (mainPanel != null) mainPanel.SetActive(false);
             roomPanel.SetActive(true);
+            if (hostExitNoticeModal != null) hostExitNoticeModal.SetActive(false);
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            // 모달 미닫힘 등 예외 케이스 방어: 방 패널 진입 시 플래그 해제
+            _isShowingGameEndPanel = false;
             RefreshRoomActionButtonState();
 
             // 방 입장 시 캐릭터 선택이 없으면 ? (Random)을 기본값으로 설정한다.
