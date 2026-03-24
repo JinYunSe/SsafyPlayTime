@@ -2908,7 +2908,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Nickname
+  m_text: "\uB2C9\uB124\uC784"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: eaf2a37f71d1abe4996b6a2df8a01e2d, type: 2}
   m_sharedMaterial: {fileID: 2030051191386961463, guid: eaf2a37f71d1abe4996b6a2df8a01e2d,
@@ -3405,6 +3405,8 @@ MonoBehaviour:
     type: 3}
   gameplayBackgroundMusicClip: {fileID: 8300000, guid: 33545ad9c84e399438e9919fb694dc5b,
     type: 3}
+  launcherBackgroundMusicResourcePath: _Project/Sounds/title
+  gameplayBackgroundMusicResourcePath: _Project/Sounds/battle
   gamePanel: {fileID: 0}
   leaveGameButton: {fileID: 0}
   gameHUDPrefab: {fileID: 0}
@@ -4169,7 +4171,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "\uAC19\uC740 \uBC29\uC73C\uB85C"
+  m_text: "\uBC29\uC73C\uB85C"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 9f17a1a7ac5795b4192f79beae6ed952, type: 2}
   m_sharedMaterial: {fileID: 7492925811454161293, guid: 9f17a1a7ac5795b4192f79beae6ed952,
@@ -4425,7 +4427,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "\uCCAB\uC74C\uC73C\uB85C"
+  m_text: "\uCC98\uC74C\uC73C\uB85C"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 9f17a1a7ac5795b4192f79beae6ed952, type: 2}
   m_sharedMaterial: {fileID: 7492925811454161293, guid: 9f17a1a7ac5795b4192f79beae6ed952,
@@ -4511,21 +4513,6 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 117955738}
     m_Modifications:
-    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: SortKey
-      value: 3173614160
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_UseGravity
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_IsKinematic
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 348058667930669166, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: mainJoint
@@ -4640,6 +4627,21 @@ PrefabInstance:
         type: 3}
       propertyPath: lifecycleManager
       value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: SortKey
+      value: 3173614160
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_UseGravity
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_IsKinematic
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2207186028006840218, guid: f29327e0646462940b61cbb3daaf84e6,
         type: 3}
@@ -5419,7 +5421,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Nickname
+  m_text: "\uB2C9\uB124\uC784"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: eaf2a37f71d1abe4996b6a2df8a01e2d, type: 2}
   m_sharedMaterial: {fileID: 2030051191386961463, guid: eaf2a37f71d1abe4996b6a2df8a01e2d,
@@ -7795,21 +7797,6 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 119630778}
     m_Modifications:
-    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: SortKey
-      value: 3173614160
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_UseGravity
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_IsKinematic
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 348058667930669166, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: mainJoint
@@ -7924,6 +7911,21 @@ PrefabInstance:
         type: 3}
       propertyPath: lifecycleManager
       value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: SortKey
+      value: 3173614160
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_UseGravity
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_IsKinematic
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2207186028006840218, guid: f29327e0646462940b61cbb3daaf84e6,
         type: 3}
@@ -12342,7 +12344,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Nickname
+  m_text: "\uB2C9\uB124\uC784"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: eaf2a37f71d1abe4996b6a2df8a01e2d, type: 2}
   m_sharedMaterial: {fileID: 2030051191386961463, guid: eaf2a37f71d1abe4996b6a2df8a01e2d,
@@ -15485,7 +15487,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Nickname
+  m_text: "\uB2C9\uB124\uC784"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: eaf2a37f71d1abe4996b6a2df8a01e2d, type: 2}
   m_sharedMaterial: {fileID: 2030051191386961463, guid: eaf2a37f71d1abe4996b6a2df8a01e2d,
@@ -15657,7 +15659,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Nickname
+  m_text: "\uB2C9\uB124\uC784"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: eaf2a37f71d1abe4996b6a2df8a01e2d, type: 2}
   m_sharedMaterial: {fileID: 2030051191386961463, guid: eaf2a37f71d1abe4996b6a2df8a01e2d,
@@ -17929,7 +17931,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: nickname
+  m_text: "\uB2C9\uB124\uC784"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 9f17a1a7ac5795b4192f79beae6ed952, type: 2}
   m_sharedMaterial: {fileID: 7492925811454161293, guid: 9f17a1a7ac5795b4192f79beae6ed952,
@@ -18494,21 +18496,6 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 1702262009}
     m_Modifications:
-    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: SortKey
-      value: 3173614160
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_UseGravity
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_IsKinematic
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 348058667930669166, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: mainJoint
@@ -18618,6 +18605,21 @@ PrefabInstance:
         type: 3}
       propertyPath: lifecycleManager
       value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: SortKey
+      value: 3173614160
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_UseGravity
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_IsKinematic
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2207186028006840218, guid: f29327e0646462940b61cbb3daaf84e6,
         type: 3}
@@ -21111,21 +21113,6 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 1538384749}
     m_Modifications:
-    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: SortKey
-      value: 3173614160
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_UseGravity
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_IsKinematic
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 348058667930669166, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: mainJoint
@@ -21241,6 +21228,21 @@ PrefabInstance:
       propertyPath: lifecycleManager
       value: 
       objectReference: {fileID: 0}
+    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: SortKey
+      value: 3173614160
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_UseGravity
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_IsKinematic
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 2207186028006840218, guid: f29327e0646462940b61cbb3daaf84e6,
         type: 3}
       propertyPath: m_Enabled
@@ -21311,21 +21313,6 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 1519384043}
     m_Modifications:
-    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: SortKey
-      value: 3173614160
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_UseGravity
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_IsKinematic
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 348058667930669166, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: mainJoint
@@ -21440,6 +21427,21 @@ PrefabInstance:
         type: 3}
       propertyPath: lifecycleManager
       value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: SortKey
+      value: 3173614160
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_UseGravity
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_IsKinematic
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2207186028006840218, guid: f29327e0646462940b61cbb3daaf84e6,
         type: 3}
@@ -24354,21 +24356,6 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 304020050}
     m_Modifications:
-    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: SortKey
-      value: 3173614160
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_UseGravity
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_IsKinematic
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 348058667930669166, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: mainJoint
@@ -24483,6 +24470,21 @@ PrefabInstance:
         type: 3}
       propertyPath: lifecycleManager
       value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: SortKey
+      value: 3173614160
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_UseGravity
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_IsKinematic
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2207186028006840218, guid: f29327e0646462940b61cbb3daaf84e6,
         type: 3}
@@ -24553,21 +24555,6 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 1237896207}
     m_Modifications:
-    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: SortKey
-      value: 3173614160
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_UseGravity
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_IsKinematic
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 348058667930669166, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: mainJoint
@@ -24682,6 +24669,21 @@ PrefabInstance:
         type: 3}
       propertyPath: lifecycleManager
       value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: SortKey
+      value: 3173614160
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_UseGravity
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_IsKinematic
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2207186028006840218, guid: f29327e0646462940b61cbb3daaf84e6,
         type: 3}
@@ -24906,21 +24908,6 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 2140856211}
     m_Modifications:
-    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: SortKey
-      value: 3173614160
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_UseGravity
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_IsKinematic
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 348058667930669166, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: mainJoint
@@ -25035,6 +25022,21 @@ PrefabInstance:
         type: 3}
       propertyPath: lifecycleManager
       value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: SortKey
+      value: 3173614160
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_UseGravity
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_IsKinematic
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2207186028006840218, guid: f29327e0646462940b61cbb3daaf84e6,
         type: 3}
@@ -26628,7 +26630,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Nickname
+  m_text: "\uB2C9\uB124\uC784"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: eaf2a37f71d1abe4996b6a2df8a01e2d, type: 2}
   m_sharedMaterial: {fileID: 2030051191386961463, guid: eaf2a37f71d1abe4996b6a2df8a01e2d,
@@ -28480,7 +28482,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Nickname
+  m_text: "\uB2C9\uB124\uC784"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: eaf2a37f71d1abe4996b6a2df8a01e2d, type: 2}
   m_sharedMaterial: {fileID: 2030051191386961463, guid: eaf2a37f71d1abe4996b6a2df8a01e2d,
@@ -29726,21 +29728,6 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 1233792496}
     m_Modifications:
-    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: SortKey
-      value: 3173614160
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_UseGravity
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_IsKinematic
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 348058667930669166, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: mainJoint
@@ -29855,6 +29842,21 @@ PrefabInstance:
         type: 3}
       propertyPath: lifecycleManager
       value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: SortKey
+      value: 3173614160
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_UseGravity
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_IsKinematic
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2207186028006840218, guid: f29327e0646462940b61cbb3daaf84e6,
         type: 3}
@@ -30931,21 +30933,6 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 505783221}
     m_Modifications:
-    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: SortKey
-      value: 3173614160
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_UseGravity
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
-        type: 3}
-      propertyPath: m_IsKinematic
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 348058667930669166, guid: e741400b47183824e890e9d1ff5a829e,
         type: 3}
       propertyPath: mainJoint
@@ -31060,6 +31047,21 @@ PrefabInstance:
         type: 3}
       propertyPath: lifecycleManager
       value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 5249229011960500453, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: SortKey
+      value: 3173614160
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_UseGravity
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7918343038873853307, guid: c8e06478457086e4786befdccad4e62d,
+        type: 3}
+      propertyPath: m_IsKinematic
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2207186028006840218, guid: f29327e0646462940b61cbb3daaf84e6,
         type: 3}
@@ -31490,7 +31492,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Nickname
+  m_text: "\uB2C9\uB124\uC784"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: eaf2a37f71d1abe4996b6a2df8a01e2d, type: 2}
   m_sharedMaterial: {fileID: 2030051191386961463, guid: eaf2a37f71d1abe4996b6a2df8a01e2d,
