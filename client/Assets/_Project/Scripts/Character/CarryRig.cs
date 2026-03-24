@@ -39,7 +39,7 @@ namespace SSAFYPlayTime.Character
         [SerializeField] private Vector3 overheadCarryVictimRootLocalOffset = new Vector3(0f, -1.05f, 0.02f);
         [SerializeField] private Vector3 dualCarryVictimRootLocalOffset = new Vector3(0f, -1.00f, 0.05f);
 
-        private static readonly Vector3 StunnedSingleCarrierAnchorLift = new Vector3(0f, 0.70f, 0.18f);
+        private static readonly Vector3 StunnedSingleCarrierAnchorLift = new Vector3(0f, 0.48f, 0.14f);
         private static readonly Vector3 StunnedDualCarrierAnchorLift = new Vector3(0f, 0.60f, 0.12f);
         private static readonly Vector3 StunnedSingleVictimRootLift = new Vector3(0f, 0.42f, -0.08f);
         private static readonly Vector3 StunnedDualVictimRootLift = new Vector3(0f, 0.34f, -0.05f);
