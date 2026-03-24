@@ -23,4 +23,5 @@ public class MapData : ScriptableObject
     public float DamageInterval => damageInterval;
     public float InitialDelay => initialDelay;
     public List<MapGimmickData> Gimmicks => gimmicks;
+
 }
