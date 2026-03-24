@@ -167,7 +167,6 @@ namespace SSAFYPlayTime.Gameplay.Items
         {
             _controller?.ResetRuntimeState();
         }
-
         public void SetOwnerTransform(Transform owner)
         {
             ownerTransform = owner != null ? owner : transform;

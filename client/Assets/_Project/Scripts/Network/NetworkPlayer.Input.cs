@@ -9,6 +9,7 @@ public sealed partial class NetworkPlayer
     private Quaternion _lastSafeRotation = Quaternion.identity;
     private bool _hasLastSafeTransform;
     private float _nextOutOfBoundsRecoverAt;
+    private SpawnPointGroup _cachedSpawnPointGroup;
 
     private float ResolveCameraYaw()
     {
@@ -88,7 +89,7 @@ public sealed partial class NetworkPlayer
         // This keeps PartyMonsterAnimationDriver.SyncGrabAnimation() in sync.
         if (Runner != null && HasInputAuthority && !HasStateAuthority)
         {
-            var unifiedGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab;
+            var unifiedGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab && !HasHeldRuntimeItem();
             _isLeftGrabActive = unifiedGrabHold;
             _isRightGrabActive = unifiedGrabHold;
             _isGrabActive = unifiedGrabHold;
@@ -141,7 +142,7 @@ public sealed partial class NetworkPlayer
             PrimaryUseHold = _leftMouseDown,
             Drop = _dropTriggered,
             Throw = _throwTriggered,
-            LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab,
+            LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab && !HasHeldRuntimeItem(),
             RightGrabHold = false,
             Headbutt = Input.GetMouseButtonDown(2),
             Sprint = Input.GetKey(KeyCode.LeftShift)
@@ -173,6 +174,8 @@ public sealed partial class NetworkPlayer
 
     private void SynchronizeNetworkSimulationState()
     {
+        var previousNetworkedHipsPosition = NetworkedHipsPosition;
+
         if (syncPhysicsObjects != null)
         {
             for (int i = 0; i < syncPhysicsObjects.Length; i++)
@@ -190,10 +193,24 @@ public sealed partial class NetworkPlayer
                 NetworkedHipsPosition = hipsMuscle.joint.transform.position;
         }
 
+        var hipsUpdatedThisFrame = previousNetworkedHipsPosition != NetworkedHipsPosition;
+
         NetworkedIsActiveRagdoll = _isActiveRagdoll;
         NetworkedPhysicalPhase = (byte)_localPhysicalPhase;
         NetworkedInstability = _localInstability;
         NetworkedIsDragged = _localIsDragged;
+        var currentGrabActionState = CharacterGrabController.GrabActionState.Idle;
+        var currentHoldVariant = CharacterGrabController.HoldVariant.None;
+        var currentLeftHandHoldMode = CharacterGrabController.HandHoldMode.None;
+        var currentRightHandHoldMode = CharacterGrabController.HandHoldMode.None;
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            currentGrabActionState = characterGrabController.CurrentActionState;
+            currentHoldVariant = characterGrabController.CurrentHoldVariant;
+            currentLeftHandHoldMode = characterGrabController.LeftHandMode;
+            currentRightHandHoldMode = characterGrabController.RightHandMode;
+        }
 
         // ── CarrySolveFrame: carry anchor 네트워크 동기화 (carrier/victim 분리) ──
         NetworkedCarryMode = (byte)_localCarryMode;
@@ -203,7 +220,7 @@ public sealed partial class NetworkPlayer
             {
                 // victim: 자신의 hips-chest 가중 평균 anchor 전송
                 carryRig.UpdateVictimAnchor();
-                if (carryRig.TryGetVictimAnchorWorld(out var vPos, out var vFwd))
+                if (carryRig.TryGetVictimSupportFrameWorld(out var vPos, out var vFwd))
                 {
                     NetworkedVictimAnchorPosition = vPos;
                     NetworkedVictimAnchorForward = vFwd;
@@ -224,12 +241,18 @@ public sealed partial class NetworkPlayer
                     NetworkedVictimRootOffsetValid = false;
                 }
 
+                var victimCarryRootPosition = transform.position;
+                if (TryResolveCarrierOwnedVictimRootTarget(out var carrierOwnedVictimRootPosition, out _))
+                    victimCarryRootPosition = carrierOwnedVictimRootPosition;
+
+                NetworkedVictimCarryRootPosition = victimCarryRootPosition;
+                NetworkedVictimCarryRootValid = true;
                 NetworkedCarrierAnchorValid = false;
             }
             else
             {
-                // carrier: 자신의 carry rig anchor 전송
-                if (carryRig.TryGetCarrierAnchorWorld(_localCarryMode, out var cPos, out var cFwd))
+                // carrier: 자신의 torso 기반 support frame 전송
+                if (carryRig.TryGetCarrierSupportFrameWorld(_localCarryMode, currentHoldVariant, out var cPos, out var cFwd))
                 {
                     NetworkedCarrierAnchorPosition = cPos;
                     NetworkedCarrierAnchorForward = cFwd;
@@ -242,13 +265,59 @@ public sealed partial class NetworkPlayer
 
                 NetworkedVictimAnchorValid = false;
                 NetworkedVictimRootOffsetValid = false;
+                NetworkedVictimCarryRootValid = false;
             }
         }
         else
         {
             NetworkedVictimAnchorValid = false;
             NetworkedVictimRootOffsetValid = false;
+            NetworkedVictimCarryRootValid = false;
             NetworkedCarrierAnchorValid = false;
+        }
+
+        if (_localCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None)
+        {
+            var victimAnchorDetails = (bool)NetworkedVictimAnchorValid
+                ? $" victimAnchor={FormatCarryDebugVector(NetworkedVictimAnchorPosition)}"
+                : string.Empty;
+            var victimRootOffsetDetails = (bool)NetworkedVictimRootOffsetValid
+                ? $" victimRootOffset={FormatCarryDebugVector(NetworkedVictimRootOffset)}"
+                : string.Empty;
+            var victimCarryRootDetails = (bool)NetworkedVictimCarryRootValid
+                ? $" victimCarryRoot={FormatCarryDebugVector(NetworkedVictimCarryRootPosition)}"
+                : string.Empty;
+            var carrierAnchorDetails = (bool)NetworkedCarrierAnchorValid
+                ? $" carrierAnchor={FormatCarryDebugVector(NetworkedCarrierAnchorPosition)}"
+                : string.Empty;
+            TraceCarryDebugSample(
+                "PublishCarryState",
+                $"phase={GetPhysicalPhase()} hipsNet={FormatCarryDebugVector(NetworkedHipsPosition)} hipsUpdated={hipsUpdatedThisFrame} " +
+                $"holdVariant={currentHoldVariant} " +
+                $"victimAnchorValid={(bool)NetworkedVictimAnchorValid} " +
+                $"victimRootOffsetValid={(bool)NetworkedVictimRootOffsetValid} " +
+                $"victimCarryRootValid={(bool)NetworkedVictimCarryRootValid} " +
+                $"carrierAnchorValid={(bool)NetworkedCarrierAnchorValid}" +
+                victimAnchorDetails +
+                victimRootOffsetDetails +
+                victimCarryRootDetails +
+                carrierAnchorDetails,
+                forceSample: _localCarryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim);
+        }
+
+        if (characterGrabController != null)
+        {
+            NetworkedGrabActionState = (byte)currentGrabActionState;
+            NetworkedGrabHoldVariant = (byte)currentHoldVariant;
+            NetworkedLeftHandHoldMode = (byte)currentLeftHandHoldMode;
+            NetworkedRightHandHoldMode = (byte)currentRightHandHoldMode;
+        }
+        else
+        {
+            NetworkedGrabActionState = (byte)CharacterGrabController.GrabActionState.Idle;
+            NetworkedGrabHoldVariant = (byte)CharacterGrabController.HoldVariant.None;
+            NetworkedLeftHandHoldMode = (byte)CharacterGrabController.HandHoldMode.None;
+            NetworkedRightHandHoldMode = (byte)CharacterGrabController.HandHoldMode.None;
         }
 
         SynchronizeStunPresentationPhase();
@@ -302,7 +371,8 @@ public sealed partial class NetworkPlayer
             return true;
         }
 
-        var spawnGroup = FindObjectOfType<SpawnPointGroup>();
+        _cachedSpawnPointGroup ??= FindObjectOfType<SpawnPointGroup>();
+        var spawnGroup = _cachedSpawnPointGroup;
         if (spawnGroup != null && spawnGroup.transform.childCount > 0)
         {
             var index = Random.Range(0, spawnGroup.transform.childCount);
@@ -368,13 +438,16 @@ public sealed partial class NetworkPlayer
         if (!TryResolveRecoveryTransform(out var recoveryPosition, out var recoveryRotation))
             recoveryRotation = transform.rotation;
 
-        rigidbody3D.position = recoveryPosition;
-        rigidbody3D.rotation = recoveryRotation;
         transform.SetPositionAndRotation(recoveryPosition, recoveryRotation);
-        if (rigidbody3D != null && !rigidbody3D.isKinematic)
+        if (rigidbody3D != null)
         {
-            rigidbody3D.velocity = Vector3.zero;
-            rigidbody3D.angularVelocity = Vector3.zero;
+            rigidbody3D.position = recoveryPosition;
+            rigidbody3D.rotation = recoveryRotation;
+            if (!rigidbody3D.isKinematic)
+            {
+                rigidbody3D.velocity = Vector3.zero;
+                rigidbody3D.angularVelocity = Vector3.zero;
+            }
         }
         RememberSafeTransform(recoveryPosition, recoveryRotation);
         ForceRecover();

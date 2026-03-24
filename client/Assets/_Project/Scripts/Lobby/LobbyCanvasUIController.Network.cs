@@ -162,7 +162,15 @@ namespace SSAFYPlayTime
                 Debug.Log("[Lobby] Shutdown in progress, skip recovery.");
                 return;
             }
-            
+
+            // GameScene에서 방장 강제 종료 감지 → 즉시 게임 종료 처리
+            if (!_isShowingGameEndPanel && IsActiveSceneNamed(gameplaySceneName))
+            {
+                Debug.Log("[Lobby] Host exited during gameplay → returning to lobby.");
+                TriggerHostExitAndReturnToLobby();
+                return;
+            }
+
             CleanupRunnerAfterGameEndHostExit();
         }
 
@@ -183,7 +191,15 @@ namespace SSAFYPlayTime
                 Debug.Log("[Lobby] Shutdown in progress, skip disconnect recovery.");
                 return;
             }
-            
+
+            // GameScene에서 서버 연결 끊김 = 방장 강제 종료 → 즉시 게임 종료 처리
+            if (!_isShowingGameEndPanel && IsActiveSceneNamed(gameplaySceneName))
+            {
+                Debug.Log("[Lobby] Disconnected from host during gameplay → returning to lobby.");
+                TriggerHostExitAndReturnToLobby();
+                return;
+            }
+
             CleanupRunnerAfterGameEndHostExit();
         }
 
@@ -302,6 +318,14 @@ namespace SSAFYPlayTime
                 {
                     if (kvp.Key != leavingHostId)
                         _migrationOldPlayerIdByClientId[kvp.Value] = kvp.Key;
+                }
+
+                // GameScene에서 방장이 나간 경우 → Migration 대신 게임 종료 처리
+                if (IsActiveGameplayScene() && !_isShowingGameEndPanel)
+                {
+                    Debug.Log("[Lobby] Host exited during gameplay → returning to lobby.");
+                    TriggerHostExitAndReturnToLobby();
+                    return;
                 }
 
                 // GameScene에서 마이그레이션 발생 시 ShutdownRunnerAsync 전에 위치를 캡처한다.
@@ -695,10 +719,7 @@ namespace SSAFYPlayTime
                 (bool)payload.Punch ||
                 (bool)payload.Throw ||
                 (bool)payload.Drop ||
-                (bool)payload.Headbutt ||
-                (bool)payload.LeftGrabHold ||
-                (bool)payload.RightGrabHold ||
-                (bool)payload.Sprint;
+                (bool)payload.Headbutt;
 
             var now = Time.unscaledTime;
             if (!forceLog && now - _lastMoveSyncInputLogAt < MOVE_SYNC_INPUT_LOG_INTERVAL)
@@ -724,11 +745,6 @@ namespace SSAFYPlayTime
                 return;
 
             var forceLog =
-                _netMoveInputRaw.sqrMagnitude > 0.0001f ||
-                _netMoveInput.sqrMagnitude > 0.0001f ||
-                _netSprintHeld ||
-                _netLeftMouseDown ||
-                _netRightMouseDown ||
                 _netPunchQueued ||
                 _netThrowQueued ||
                 _netJumpQueued ||
