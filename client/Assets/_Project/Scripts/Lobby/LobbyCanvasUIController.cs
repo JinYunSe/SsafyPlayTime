@@ -217,6 +217,7 @@ namespace SSAFYPlayTime
         [SerializeField] private string gameplaySceneName = string.Empty;
         [SerializeField] private string launcherSceneName = "LauncherScene";
         [SerializeField] private AudioClip launcherBackgroundMusicClip;
+        [SerializeField] private AudioClip gameplayBackgroundMusicClip;
         [Header("In-Game Panel (GameScene)")]
         [SerializeField] private GameObject gamePanel;
         [SerializeField] private Button leaveGameButton;
@@ -443,8 +444,37 @@ namespace SSAFYPlayTime
                 SceneManager.GetActiveScene().name,
                 launcherSceneName,
                 StringComparison.Ordinal);
+            var isGameplaySceneLoaded = false;
+            var hasOtherLoadedScene = false;
+            for (var i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var loadedScene = SceneManager.GetSceneAt(i);
+                if (!loadedScene.IsValid() || !loadedScene.isLoaded)
+                {
+                    continue;
+                }
 
-            if (!isLauncherSceneActive || launcherBackgroundMusicClip == null)
+                if (string.Equals(loadedScene.name, launcherSceneName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(gameplaySceneName) &&
+                    string.Equals(loadedScene.name, gameplaySceneName, StringComparison.Ordinal))
+                {
+                    isGameplaySceneLoaded = true;
+                }
+
+                hasOtherLoadedScene = true;
+            }
+
+            var targetClip = _isShowingGameEndPanel
+                ? null
+                : isGameplaySceneLoaded
+                ? gameplayBackgroundMusicClip
+                : (!isLauncherSceneActive || hasOtherLoadedScene ? null : launcherBackgroundMusicClip);
+
+            if (targetClip == null)
             {
                 if (_launcherBackgroundMusicSource.isPlaying)
                 {
@@ -454,9 +484,9 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            if (_launcherBackgroundMusicSource.clip != launcherBackgroundMusicClip)
+            if (_launcherBackgroundMusicSource.clip != targetClip)
             {
-                _launcherBackgroundMusicSource.clip = launcherBackgroundMusicClip;
+                _launcherBackgroundMusicSource.clip = targetClip;
             }
 
             if (!_launcherBackgroundMusicSource.isPlaying)
