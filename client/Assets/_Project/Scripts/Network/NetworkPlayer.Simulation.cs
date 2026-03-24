@@ -92,6 +92,7 @@ public sealed partial class NetworkPlayer
         TickPunchHitDetectionWindow();
         TickKickHitDetectionWindow();
         TickAerialKickHitDetectionWindow();
+        TickAerialKickSpringRestore(dt);
         SyncHeldItemNetworkState();
     }
 
@@ -338,10 +339,6 @@ public sealed partial class NetworkPlayer
         _activeAerialKickPreviousSamplePosition = currentSamplePosition;
         _activeAerialKickHasPreviousSample = true;
 
-        // 킥 활성 중 지속 전진 force — PuppetMaster 근육 스프링이 모멘텀을 상쇄하지 않도록
-        if (rigidbody3D != null && !rigidbody3D.isKinematic && _activeAerialKickForwardDirection.sqrMagnitude > 0.001f)
-            rigidbody3D.AddForce(_activeAerialKickForwardDirection * AerialKickSustainedForce, ForceMode.Acceleration);
-
         if (!TryResolveAerialKickVictim(previousSamplePosition, currentSamplePosition, out var victimPlayer, out var hitPoint))
             return;
 
@@ -372,6 +369,10 @@ public sealed partial class NetworkPlayer
         _activeAerialKickWindowEndTick = -1;
         _activeAerialKickHasPreviousSample = false;
         _activeAerialKickHasHit = false;
+
+        // 킥 종료 → spring 점진 복원 시작
+        if (_isAerialKickMomentumActive)
+            _aerialKickSpringRestoreTimer = AerialKickSpringRestoreDuration;
     }
 
     private Vector3 ResolvePunchHitSamplePosition(bool isLeft)
@@ -2172,6 +2173,9 @@ public sealed partial class NetworkPlayer
         }
 
         _isActiveRagdoll = false;
+        RestorePuppetMasterMappingAfterAerialKick();
+        _isAerialKickMomentumActive = false;
+        _aerialKickSpringRestoreTimer = 0f;
         ClearPunchHitDetectionWindow();
         ClearKickHitDetectionWindow();
         ClearAerialKickHitDetectionWindow();
@@ -2596,6 +2600,9 @@ public sealed partial class NetworkPlayer
         }
 
         _isActiveRagdoll = true;
+        RestorePuppetMasterMappingAfterAerialKick();
+        _isAerialKickMomentumActive = false;
+        _aerialKickSpringRestoreTimer = 0f;
         ClearPunchHitDetectionWindow();
         ClearKickHitDetectionWindow();
         ClearAerialKickHitDetectionWindow();
@@ -3028,12 +3035,16 @@ public sealed partial class NetworkPlayer
     private const float AerialKickHeightMin = 0.55f;
     private const float AerialKickHeightMax = 0.84f;
     private const float AerialKickSpeedForMaxBonus = 10.5f;
-    private const float AerialKickForwardBurstBase = 3.6f;
-    private const float AerialKickForwardBurstSpeedScale = 0.34f;
-    private const float AerialKickUpwardBurstMin = 0.04f;
-    private const float AerialKickUpwardBurstMax = 0.18f;
-    private const float AerialKickSustainedForce = 18f;
+    private const float AerialKickForwardBoostSpeed = 8f;
+    private const float AerialKickUpwardBoost = 1.2f;
+    private const float AerialKickVelocityPreserveScale = 1.0f;
+    private const float AerialKickSpringLerpDuringKick = 0.12f;
+    private const float AerialKickSpringRestoreDuration = 0.18f;
     private Vector3 _activeAerialKickForwardDirection;
+    private bool _isAerialKickMomentumActive;
+    private float _aerialKickSpringRestoreTimer;
+    private bool _aerialKickMappingSuppressed;
+    private float _aerialKickSavedMappingWeight;
     private const int AerialKickHitBufferSize = 16;
     private int _aerialKickCooldownUntilTick;
     private int _activeAerialKickWindowEndTick = -1;
@@ -3331,14 +3342,116 @@ public sealed partial class NetworkPlayer
 
         planarForward.Normalize();
         _activeAerialKickForwardDirection = planarForward;
-        var velocity = rigidbody3D.velocity;
-        var forwardSpeed = Mathf.Max(0f, Vector3.Dot(velocity, planarForward));
-        var impulse = planarForward * (AerialKickForwardBurstBase + forwardSpeed * AerialKickForwardBurstSpeedScale);
-        var upwardBonus = Mathf.Lerp(
-            AerialKickUpwardBurstMin,
-            AerialKickUpwardBurstMax,
-            Mathf.Clamp01(Mathf.Abs(velocity.y) / 8f));
-        rigidbody3D.AddForce(impulse + Vector3.up * upwardBonus, ForceMode.Impulse);
+
+        // 기존 velocity 보존 + 킥 방향 부스트 합산
+        var currentVelocity = rigidbody3D.velocity;
+        var kickVelocity = planarForward * AerialKickForwardBoostSpeed
+                         + Vector3.up * AerialKickUpwardBoost;
+        var finalVelocity = currentVelocity * AerialKickVelocityPreserveScale + kickVelocity;
+
+        // root rigidbody에 velocity 직접 설정
+        rigidbody3D.velocity = finalVelocity;
+
+        // PuppetMaster muscle 전체에 동일 velocity 주입
+        if (_puppetMaster != null && _puppetMaster.muscles != null)
+        {
+            foreach (var muscle in _puppetMaster.muscles)
+            {
+                if (muscle.joint == null) continue;
+                var rb = muscle.joint.GetComponent<Rigidbody>();
+                if (rb != null && !rb.isKinematic)
+                    rb.velocity = finalVelocity;
+            }
+        }
+
+        // 관절 spring 약화 — muscle이 momentum에 저항하지 않도록
+        WeakenJointSpringsForAerialKick();
+        // PuppetMaster Map()이 target skeleton 위치를 덮어쓰지 않도록 매핑 억제
+        SuppressPuppetMasterMappingForAerialKick();
+        _isAerialKickMomentumActive = true;
+        _aerialKickSpringRestoreTimer = 0f;
+    }
+
+    private void WeakenJointSpringsForAerialKick()
+    {
+        if (mainJoint != null)
+        {
+            var jd = mainJoint.slerpDrive;
+            jd.positionSpring = _startSlerpPositionSpring * AerialKickSpringLerpDuringKick;
+            mainJoint.slerpDrive = jd;
+        }
+
+        for (int i = 0; i < syncPhysicsObjects.Length; i++)
+            syncPhysicsObjects[i].SetSpringLerp(AerialKickSpringLerpDuringKick);
+    }
+
+    private void RestoreJointSpringsAfterAerialKick()
+    {
+        if (mainJoint != null)
+        {
+            var jd = mainJoint.slerpDrive;
+            jd.positionSpring = _startSlerpPositionSpring;
+            mainJoint.slerpDrive = jd;
+        }
+
+        for (int i = 0; i < syncPhysicsObjects.Length; i++)
+            syncPhysicsObjects[i].MakeActiveRagdoll();
+
+        RestorePuppetMasterMappingAfterAerialKick();
+        _isAerialKickMomentumActive = false;
+        _aerialKickSpringRestoreTimer = 0f;
+    }
+
+    private void TickAerialKickSpringRestore(float dt)
+    {
+        if (!_isAerialKickMomentumActive || _aerialKickSpringRestoreTimer <= 0f)
+            return;
+
+        _aerialKickSpringRestoreTimer -= dt;
+        if (_aerialKickSpringRestoreTimer <= 0f)
+        {
+            RestoreJointSpringsAfterAerialKick();
+            return;
+        }
+
+        var t = 1f - (_aerialKickSpringRestoreTimer / AerialKickSpringRestoreDuration);
+        var springLerp = Mathf.Lerp(AerialKickSpringLerpDuringKick, 1f, t);
+
+        if (mainJoint != null)
+        {
+            var jd = mainJoint.slerpDrive;
+            jd.positionSpring = _startSlerpPositionSpring * springLerp;
+            mainJoint.slerpDrive = jd;
+        }
+
+        for (int i = 0; i < syncPhysicsObjects.Length; i++)
+            syncPhysicsObjects[i].SetSpringLerp(springLerp);
+    }
+
+    private void SuppressPuppetMasterMappingForAerialKick()
+    {
+        if (_aerialKickMappingSuppressed || _puppetMaster == null)
+            return;
+
+        // 기존 _forceAnimatorVisualLatch가 활성이면 이미 mappingWeight=0이므로 건드리지 않음
+        if (_forceAnimatorVisualLatch)
+            return;
+
+        _aerialKickSavedMappingWeight = _puppetMaster.mappingWeight;
+        _puppetMaster.mappingWeight = 0f;
+        _aerialKickMappingSuppressed = true;
+    }
+
+    private void RestorePuppetMasterMappingAfterAerialKick()
+    {
+        if (!_aerialKickMappingSuppressed || _puppetMaster == null)
+            return;
+
+        // 다른 시스템이 이미 mappingWeight를 제어 중이면 건드리지 않음
+        if (!_forceAnimatorVisualLatch)
+            _puppetMaster.mappingWeight = _aerialKickSavedMappingWeight;
+
+        _aerialKickMappingSuppressed = false;
     }
 
     internal void ExecutePunchHitDetection(bool isLeft)

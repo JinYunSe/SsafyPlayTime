@@ -449,7 +449,39 @@ public sealed partial class NetworkPlayer
         gapBefore = Vector3.Distance(rootBefore, carryRootTarget);
         gapAfter = gapBefore;
         didSnap = false;
-        return false;
+        if (HasStateAuthority || gapBefore <= 0.0001f)
+            return false;
+
+        // residual target/gap은 상위 로직에서 계산한 힌트이므로 본 보정은 실제 carry root target 기준으로 진행한다.
+        var settings = carryPhysicsProfile != null
+            ? carryPhysicsProfile.GetSettings(carryMode)
+            : SSAFYPlayTime.Character.CarryPhysicsProfile.GetDefaultSettings(carryMode);
+        var proxyFollowSpeed = settings.proxyRootFollowSpeed;
+        var proxySnapDistance = settings.proxyRootSnapDistance;
+
+        if (gapBefore >= proxySnapDistance)
+        {
+            rootAfter = carryRootTarget;
+            didSnap = true;
+        }
+        else
+        {
+            var step = Mathf.Max(0.10f, proxyFollowSpeed * Time.deltaTime * Mathf.Max(slowMoAlphaScale, 0.35f));
+            rootAfter = Vector3.MoveTowards(rootBefore, carryRootTarget, step);
+        }
+
+        ApplyProxyCarryRootPosition(rootAfter, isSettling);
+        gapAfter = Vector3.Distance(rootAfter, carryRootTarget);
+        return (rootAfter - rootBefore).sqrMagnitude > 0.000001f;
+    }
+
+    private void ApplyProxyCarryRootPosition(Vector3 nextRootPosition, bool isSettling = false)
+    {
+        // settle 중에는 rigidbody position을 건드리지 않음 — 물리 velocity 기반 이동 보존
+        if (!isSettling && !HasStateAuthority && rigidbody3D != null && !rigidbody3D.isKinematic)
+            rigidbody3D.position = nextRootPosition;
+
+        transform.position = nextRootPosition;
     }
 
     private void CacheProxyCarryTargets(PhysicalPhase phase, Vector3 carryAnchorTarget, Vector3 carryRootTarget)
@@ -551,16 +583,6 @@ public sealed partial class NetworkPlayer
         var blend = Mathf.InverseLerp(CarryReleaseSettleHipsSoftAlignDistance, hardSnapDistance, exitAnchorGap);
         blend = Mathf.Lerp(0.45f, 1f, blend);
         return Vector3.Lerp(desiredHipsPosition, _carryExitSnapshotAnchor, blend);
-    }
-
-    private void ApplyProxyCarryRootPosition(Vector3 nextRootPosition, bool isSettling = false)
-    {
-        // settle 중에는 rigidbody position을 건드리지 않음 — 물리 velocity 기반 이동 보존
-        // Keep the proxy root transform and root Rigidbody aligned during carry correction.
-        if (!HasStateAuthority && rigidbody3D != null)
-            rigidbody3D.position = nextRootPosition;
-
-        transform.position = nextRootPosition;
     }
 
     private bool TryResolveProxyCarryTargets(
