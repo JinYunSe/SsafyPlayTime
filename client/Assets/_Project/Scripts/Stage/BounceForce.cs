@@ -43,6 +43,19 @@ public class BounceForce : MonoBehaviour
         var appliedForce = pushDir * bounceForce * forceScale;
         var velocityBefore = playerRb.velocity;
         playerRb.AddForce(appliedForce, ForceMode.Impulse);
+
+        /*if (networkPlayer != null)
+        {
+            if (networkPlayer.HasStateAuthority)
+            {
+                playerRb.AddForce(appliedForce, ForceMode.Impulse);
+            }
+            else
+            {
+                networkPlayer.RPC_ApplyBounceForce(appliedForce);
+            }
+        }*/
+
         networkPlayer?.TraceStunForceEvent(
             "BounceForce",
             playerRb,
