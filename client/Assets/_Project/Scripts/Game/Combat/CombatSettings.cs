@@ -28,6 +28,9 @@ public class CombatSettings : MonoBehaviour
     public float stunMaxDuration = 8.0f;
     public float stunVelocityBonus = 0.15f;
     public float stunWeightBonus = 0.02f;
+    public float stunRehitImmunity = 0.18f;
+    public float stunNoStaggerWindow = 0.24f;
+    public float stunRepeatDamageScale = 0.28f;
     public float groggyDuration = 2.0f;
     public float groggyToStunChance = 0.7f;
     public float headbuttSelfStunWall = 2.5f;
@@ -136,6 +139,9 @@ public class CombatSettings : MonoBehaviour
         if (p.TryGetValue("STUN_MAX_DURATION", out v)) stunMaxDuration = v;
         if (p.TryGetValue("STUN_VELOCITY_BONUS", out v)) stunVelocityBonus = v;
         if (p.TryGetValue("STUN_WEIGHT_BONUS", out v)) stunWeightBonus = v;
+        if (p.TryGetValue("STUN_REHIT_IMMUNITY", out v)) stunRehitImmunity = Mathf.Max(0f, v);
+        if (p.TryGetValue("STUN_NO_STAGGER_WINDOW", out v)) stunNoStaggerWindow = Mathf.Max(0f, v);
+        if (p.TryGetValue("STUN_REPEAT_DAMAGE_SCALE", out v)) stunRepeatDamageScale = Mathf.Clamp01(v);
         if (p.TryGetValue("GROGGY_DURATION", out v)) groggyDuration = v;
         if (p.TryGetValue("GROGGY_TO_STUN_CHANCE", out v)) groggyToStunChance = v;
         if (p.TryGetValue("HEADBUTT_SELF_STUN_WALL", out v)) headbuttSelfStunWall = v;
