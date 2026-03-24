@@ -25,6 +25,8 @@ namespace SSAFYPlayTime.Character
         [SerializeField] private bool applyDuringRecovering = true;
 
         [Header("Core Grab Drive")]
+        [SerializeField] private float holdingCoreSpringMultiplier = 1.04f;
+        [SerializeField] private float holdingCoreDamperMultiplier = 1.03f;
         [SerializeField] private float carryingCoreSpringMultiplier = 1.15f;
         [SerializeField] private float carryingCoreDamperMultiplier = 1.1f;
         [SerializeField] private float dualCarryCoreSpringMultiplier = 1.4f;
@@ -50,10 +52,11 @@ namespace SSAFYPlayTime.Character
         private enum CoreDriveMode : byte
         {
             Off = 0,
-            Carrying = 1,
-            DualCarryCarrier = 2,
-            GrabbedVictim = 3,
-            CarriedVictim = 4
+            Holding = 1,
+            Carrying = 2,
+            DualCarryCarrier = 3,
+            GrabbedVictim = 4,
+            CarriedVictim = 5
         }
 
         private sealed class RuntimeLink
@@ -246,7 +249,7 @@ namespace SSAFYPlayTime.Character
 
             return networkPlayer.GetPhysicalPhase() switch
             {
-                NetworkPlayer.PhysicalPhase.Holding => CoreDriveMode.Carrying,
+                NetworkPlayer.PhysicalPhase.Holding => CoreDriveMode.Holding,
                 NetworkPlayer.PhysicalPhase.CarryingStunned => networkPlayer.IsDualGrabbingStunnedPlayer
                     ? CoreDriveMode.DualCarryCarrier
                     : CoreDriveMode.Carrying,
@@ -637,6 +640,11 @@ namespace SSAFYPlayTime.Character
         {
             switch (mode)
             {
+                case CoreDriveMode.Holding:
+                    springMultiplier = holdingCoreSpringMultiplier;
+                    damperMultiplier = holdingCoreDamperMultiplier;
+                    break;
+
                 case CoreDriveMode.Carrying:
                     springMultiplier = carryingCoreSpringMultiplier;
                     damperMultiplier = carryingCoreDamperMultiplier;
@@ -772,6 +780,20 @@ namespace SSAFYPlayTime.Character
                     anchorNames = null;
                     break;
             }
+        }
+
+        public string BuildCoreDriveDiagnosticsSummary()
+        {
+            ResolveReferences();
+
+            var desiredMode = ResolveCoreDriveMode();
+            ResolveCoreDriveMultipliers(desiredMode, out var springMultiplier, out var damperMultiplier);
+            var antiStretchEnabled = networkPlayer != null && ShouldEnableAntiStretch();
+
+            return $"antiStretchActive={(_active ? 1 : 0)} antiStretchEnabled={(antiStretchEnabled ? 1 : 0)} " +
+                   $"coreMode={desiredMode} currentMode={_currentCoreDriveMode} " +
+                   $"springMult={springMultiplier:F2} damperMult={damperMultiplier:F2} " +
+                   $"dynamicLinks={_dynamicGrabLinks.Count} coreResolved={(_coreDriveResolved ? 1 : 0)}";
         }
     }
 }

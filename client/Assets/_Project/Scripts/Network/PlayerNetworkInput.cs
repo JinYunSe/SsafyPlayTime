@@ -21,11 +21,17 @@ public struct PlayerNetworkInput : INetworkInput
     // Drop held item.
     public NetworkBool Drop;
 
-    // Short right click: throw while physically holding a target.
+    // Short right click: throw held target, airborne flying kick, or grounded secondary fallback (pickup / kick).
     public NetworkBool Throw;
 
     // Hold left click past threshold: keep grab intent active.
     public NetworkBool LeftGrabHold;
+
+    // Hold right click past threshold: keep right-hand grab active.
+    public NetworkBool RightGrabHold;
+
+    // Middle mouse button.
+    public NetworkBool Headbutt;
 
     // Sprint.
     public NetworkBool Sprint;
