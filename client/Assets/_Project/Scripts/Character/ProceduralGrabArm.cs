@@ -329,7 +329,8 @@ public class ProceduralGrabArm : MonoBehaviour
                 _leftIKTarget.position = ResolveHoldTarget(true, anchorWorld);
                 _leftReachDir = (_leftIKTarget.position - puppetMaster.targetRoot.position).normalized;
                 // 손바닥이 앵커(잡힌 대상 표면)를 향하도록 IK rotation 설정
-                OrientIKTargetToAnchor(_leftIKTarget, anchorWorld, true);
+                if (!IsStunnedCarrySupportHand(_leftHandler))
+                    OrientIKTargetToAnchor(_leftIKTarget, anchorWorld, true);
             }
             else
             {
@@ -377,7 +378,8 @@ public class ProceduralGrabArm : MonoBehaviour
                     : _rightHandler.GetGrabAnchorWorldPosition();
                 _rightIKTarget.position = ResolveHoldTarget(false, anchorWorld);
                 _rightReachDir = (_rightIKTarget.position - puppetMaster.targetRoot.position).normalized;
-                OrientIKTargetToAnchor(_rightIKTarget, anchorWorld, false);
+                if (!IsStunnedCarrySupportHand(_rightHandler))
+                    OrientIKTargetToAnchor(_rightIKTarget, anchorWorld, false);
             }
             else
             {
@@ -464,7 +466,10 @@ public class ProceduralGrabArm : MonoBehaviour
         {
             EnsureSolverReady(leftArmIK);
             leftArmIK.solver.SetIKPositionWeight(_leftBlend);
-            leftArmIK.solver.SetIKRotationWeight(leftHolding ? _leftBlend * holdIKRotationWeight : 0f);
+            var leftRotationWeight = leftHolding && !IsStunnedCarrySupportHand(_leftHandler)
+                ? _leftBlend * holdIKRotationWeight
+                : 0f;
+            leftArmIK.solver.SetIKRotationWeight(leftRotationWeight);
             leftArmIK.solver.Update();
         }
 
@@ -472,7 +477,10 @@ public class ProceduralGrabArm : MonoBehaviour
         {
             EnsureSolverReady(rightArmIK);
             rightArmIK.solver.SetIKPositionWeight(_rightBlend);
-            rightArmIK.solver.SetIKRotationWeight(rightHolding ? _rightBlend * holdIKRotationWeight : 0f);
+            var rightRotationWeight = rightHolding && !IsStunnedCarrySupportHand(_rightHandler)
+                ? _rightBlend * holdIKRotationWeight
+                : 0f;
+            rightArmIK.solver.SetIKRotationWeight(rightRotationWeight);
             rightArmIK.solver.Update();
         }
     }
