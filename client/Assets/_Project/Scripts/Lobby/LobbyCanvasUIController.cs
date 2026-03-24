@@ -1215,6 +1215,11 @@ namespace SSAFYPlayTime
         // 로컬 캐릭터를 즉사 처리해 사망 순서를 기록한 뒤 방을 나갑니다.
         public void LeaveGameVoluntarily()
         {
+            // _isProcessing을 미리 세워 SceneManager.LoadScene 이후 OnShutdown/OnDisconnectedFromServer가
+            // TriggerHostExitAndReturnToLobby를 잘못 호출하는 race condition을 방지한다.
+            if (_isProcessing) return;
+            _isProcessing = true;
+
             if (_runner != null && _runner.IsRunning)
             {
                 foreach (var np in FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None))
@@ -1229,7 +1234,10 @@ namespace SSAFYPlayTime
             if (IsActiveGameplayScene())
                 StartCoroutine(CoLeaveGameVoluntarily());
             else
+            {
+                _isProcessing = false;
                 OnLeaveRoomClicked();
+            }
         }
 
         private IEnumerator CoLeaveGameVoluntarily()
@@ -1238,6 +1246,9 @@ namespace SSAFYPlayTime
             while (!IsActiveSceneNamed(launcherSceneName))
                 yield return null;
             ResetCharacterSlotState();
+            // 씬 전환이 완료된 시점에서는 IsActiveSceneNamed(gameplaySceneName)=false이므로
+            // OnShutdown이 TriggerHostExitAndReturnToLobby를 호출할 위험이 없다.
+            _isProcessing = false;
             OnLeaveRoomClicked();
         }
 
@@ -1549,6 +1560,12 @@ namespace SSAFYPlayTime
             // OnHostMigration이 저장한 준비 상태를 클리어해 재입장 시 Ready 복원을 방지한다.
             _migrationReadyStateByClientId.Clear();
             _isMigrating = false;
+
+            // OnShutdown/OnDisconnectedFromServer 경로에서는 Runner가 이미 종료 중이지만,
+            // PlayerLeft 경로에서는 Runner가 아직 살아있을 수 있다.
+            // fire-and-forget으로 종료 요청을 보내 orphan 상태를 방지한다.
+            // _runner==null이거나 이미 Shutdown 중이면 ShutdownRunnerInternalAsync 내부에서 무시된다.
+            _ = ShutdownRunnerAsync();
 
             Debug.Log("[HostExit] ShowLobbyPanel 호출");
             ShowLobbyPanel();
