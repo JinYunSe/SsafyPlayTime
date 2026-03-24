@@ -1118,20 +1118,10 @@ public class HandGrabHandler : MonoBehaviour
         cj.anchor = palmAnchorOffset;
         cj.connectedAnchor = localAnchor;
 
-        // 기절자: 강체 연결 (운반 시 반드시 따라와야 함)
-        // 일반 플레이어/오브젝트: 탄성 연결 (이동 속도 저하 방지)
-        if (targetType == GrabDriveProfile.GrabTargetType.StunnedPlayer)
-        {
-            cj.xMotion = ConfigurableJointMotion.Limited;
-            cj.yMotion = ConfigurableJointMotion.Limited;
-            cj.zMotion = ConfigurableJointMotion.Limited;
-        }
-        else
-        {
-            cj.xMotion = ConfigurableJointMotion.Limited;
-            cj.yMotion = ConfigurableJointMotion.Limited;
-            cj.zMotion = ConfigurableJointMotion.Limited;
-        }
+        // 모든 타겟: 선형 Limited + 각도 Free로 유지해 과도한 속도 저하를 막는다.
+        cj.xMotion = ConfigurableJointMotion.Limited;
+        cj.yMotion = ConfigurableJointMotion.Limited;
+        cj.zMotion = ConfigurableJointMotion.Limited;
         cj.angularXMotion = ConfigurableJointMotion.Free;
         cj.angularYMotion = ConfigurableJointMotion.Free;
         cj.angularZMotion = ConfigurableJointMotion.Free;
