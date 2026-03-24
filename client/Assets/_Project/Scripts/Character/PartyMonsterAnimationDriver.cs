@@ -25,6 +25,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     const string UpperBodyIdleState = "UpperBodyIdle";
     const string MovementSpeedParameter = "movementSpeed";
     const string IsSprintingParameter = "isSprinting";
+    const float AerialKickEndPoseHoldMaxDuration = 1.15f;
 
     [SerializeField]
     Animator animator;
@@ -64,6 +65,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     NetworkPlayer networkPlayer;
     CharacterGrabController characterGrabController;
     float attackButtonPressedAt = -1f;
+    float nextOwnerProxyAerialKickPredictionAt = float.NegativeInfinity;
     float actionLockedUntil;
     float upperBodyStateVisibleUntil;
     bool isGrabPoseActive;
@@ -98,6 +100,8 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     PlayableGraph aerialKickGraph;
     AnimationClipPlayable aerialKickPlayable;
     AnimationPlayableOutput aerialKickOutput;
+    bool isAerialKickEndPoseHeld;
+    float aerialKickEndPoseForceReleaseTime = float.NegativeInfinity;
     PlayableGraph recoveryGraph;
     AnimationClipPlayable recoveryPlayable;
     AnimationPlayableOutput recoveryOutput;
@@ -316,6 +320,8 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     internal void CancelAerialKickAnimation()
     {
         isAerialKickAnimationActive = false;
+        isAerialKickEndPoseHeld = false;
+        aerialKickEndPoseForceReleaseTime = float.NegativeInfinity;
         currentAerialKickClip = null;
         RestoreAerialKickAnimatorRootPose();
         hasAerialKickAnimatorRootPose = false;
@@ -586,6 +592,8 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         currentAerialKickClip = clip;
         isAerialKickAnimationActive = true;
+        isAerialKickEndPoseHeld = false;
+        aerialKickEndPoseForceReleaseTime = float.NegativeInfinity;
         CacheAerialKickAnimatorRootPose();
         actionLockedUntil = Time.time + Mathf.Max(aerialKickLockDuration, clip.length);
         upperBodyStateVisibleUntil = actionLockedUntil;
@@ -606,6 +614,27 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         aerialKickGraph.Play();
     }
 
+    void HoldAerialKickEndPose()
+    {
+        if (!aerialKickGraph.IsValid() || currentAerialKickClip == null)
+            return;
+
+        var poseTime = Mathf.Max(0f, currentAerialKickClip.length - (1f / 60f));
+        aerialKickPlayable.SetTime(poseTime);
+        aerialKickPlayable.SetSpeed(0d);
+    }
+
+    bool ShouldKeepHoldingAerialKickPose()
+    {
+        if (!isAerialKickEndPoseHeld)
+            return false;
+
+        if (Time.time >= aerialKickEndPoseForceReleaseTime)
+            return false;
+
+        return networkPlayer == null || !networkPlayer.ShouldEndAerialKickPresentation();
+    }
+
     void TickAerialKickAnimation()
     {
         if (!isAerialKickAnimationActive)
@@ -617,13 +646,32 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return;
         }
 
-        if (aerialKickPlayable.IsDone())
+        if (aerialKickPlayable.IsDone() && !isAerialKickEndPoseHeld)
+        {
+            isAerialKickEndPoseHeld = true;
+            aerialKickEndPoseForceReleaseTime = Time.time + AerialKickEndPoseHoldMaxDuration;
+            actionLockedUntil = Mathf.Max(actionLockedUntil, aerialKickEndPoseForceReleaseTime);
+            upperBodyStateVisibleUntil = Mathf.Max(upperBodyStateVisibleUntil, actionLockedUntil);
+            HoldAerialKickEndPose();
+        }
+
+        if (!isAerialKickEndPoseHeld)
+            return;
+
+        if (!ShouldKeepHoldingAerialKickPose())
+        {
             StopAerialKickAnimation();
+            return;
+        }
+
+        HoldAerialKickEndPose();
     }
 
     void StopAerialKickAnimation()
     {
         isAerialKickAnimationActive = false;
+        isAerialKickEndPoseHeld = false;
+        aerialKickEndPoseForceReleaseTime = float.NegativeInfinity;
         currentAerialKickClip = null;
         RestoreAerialKickAnimatorRootPose();
         hasAerialKickAnimatorRootPose = false;
@@ -780,6 +828,16 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         // 기절 중이거나 회복 안정화 중이면 전투 입력 무시
         if (networkPlayer != null && !networkPlayer.CanPerformCombatActions)
             return;
+
+        if (isLocalWithoutAuthority &&
+            networkPlayer != null &&
+            Input.GetMouseButtonDown(1) &&
+            Time.time >= nextOwnerProxyAerialKickPredictionAt &&
+            networkPlayer.ShouldPredictOwnerProxyAerialKickPresentation())
+        {
+            nextOwnerProxyAerialKickPredictionAt = Time.time + networkPlayer.GetConfiguredAerialKickCooldown();
+            PlayAerialKick();
+        }
 
         if (Input.GetMouseButtonDown(0))
             attackButtonPressedAt = Time.time;

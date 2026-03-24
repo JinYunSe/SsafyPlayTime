@@ -95,6 +95,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     // 액티브 래그돌 상태
     [Networked] public NetworkBool NetworkedIsActiveRagdoll { get; set; }
+    [Networked] private NetworkBool NetworkedIsGrounded { get; set; }
     [Networked] private byte NetworkedStunPresentationPhase { get; set; }
 
     // 그랩 상태 동기화
@@ -320,6 +321,44 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             return (PhysicalPhase)NetworkedPhysicalPhase;
 
         return _localPhysicalPhase;
+    }
+
+    internal bool IsGroundedForPresentation()
+    {
+        if (IsNetworkReady && !HasStateAuthority)
+            return NetworkedIsGrounded;
+
+        return _isGrounded;
+    }
+
+    internal bool ShouldEndAerialKickPresentation()
+    {
+        if (IsGroundedForPresentation())
+            return true;
+
+        if (IsNetworkReady && !HasStateAuthority)
+        {
+            var phase = GetPhysicalPhase();
+            return phase == PhysicalPhase.Recovering ||
+                   phase == PhysicalPhase.StunnedCollapse ||
+                   phase == PhysicalPhase.Stunned;
+        }
+
+        return false;
+    }
+
+    internal bool ShouldPredictOwnerProxyAerialKickPresentation()
+    {
+        if (!IsNetworkReady || !HasInputAuthority || HasStateAuthority)
+            return false;
+
+        if (!CanPerformCombatActions || IsGroundedForPresentation())
+            return false;
+
+        var phase = GetPhysicalPhase();
+        return phase == PhysicalPhase.Stable ||
+               phase == PhysicalPhase.GrabIntent ||
+               phase == PhysicalPhase.WeaponEquipped;
     }
 
     internal float GetPhysicalInstability()
@@ -1521,6 +1560,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (HasStateAuthority)
         {
             NetworkedIsActiveRagdoll = true;
+            NetworkedIsGrounded = _isGrounded;
             NetworkedStunPresentationPhase = (byte)StunPresentationPhase.Active;
             NetworkedPhysicalPhase = (byte)PhysicalPhase.Stable;
             NetworkedInstability = 0f;
