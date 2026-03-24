@@ -1031,8 +1031,14 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            EnsureLauncherBackgroundMusic();
+            RefreshLauncherBackgroundMusicState();
+
             if (IsActiveGameplayScene())
             {
+                _isShowingGameEndPanel = false;
+                PlayBackgroundMusicClip(GetGameplayBackgroundMusicClip());
+
                 if (nicknamePanel != null) nicknamePanel.SetActive(false);
                 if (lobbyPanel != null) lobbyPanel.SetActive(false);
                 if (roomPanel != null) roomPanel.SetActive(false);
