@@ -21,6 +21,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         private const string VisualRootName = "Visual";
         private const float GrowthFieldColliderRadius = 0.16f;
         private const float ShrinkFieldColliderRadius = 0.18f;
+        private const float AmericanoFieldColliderRadius = 0.28f;
         private const float DefaultFieldColliderRadius = 0.24f;
         private const float ConsumableFieldDrag = 1.75f;
         private const float ConsumableFieldAngularDrag = 12f;
@@ -424,6 +425,13 @@ namespace SSAFYPlayTime.Gameplay.Items
             {
                 sphereCollider.center = Vector3.zero;
                 sphereCollider.radius = ShrinkFieldColliderRadius;
+                return;
+            }
+
+            if (string.Equals(itemId, ItemIds.Americano, System.StringComparison.Ordinal))
+            {
+                sphereCollider.center = Vector3.zero;
+                sphereCollider.radius = AmericanoFieldColliderRadius;
                 return;
             }
 
