@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+
+using Fusion;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Stage
@@ -12,7 +14,7 @@ namespace SSAFYPlayTime.Stage
     /// 2) SphereCollider의 Is Trigger = true, Radius를 해머 머리 크기에 맞게 조절
     /// 3) 같은 오브젝트에 이 스크립트 추가
     /// </summary>
-    public class HammerKnockback : MonoBehaviour
+    public class HammerKnockback : NetworkBehaviour
     {
         [Header("Force")]
         [SerializeField] private float knockbackForce = 28f;
@@ -26,7 +28,8 @@ namespace SSAFYPlayTime.Stage
         [SerializeField] private float healthDamage = 0f;
 
         [Header("Tumble")]
-        [SerializeField, Range(0f, 0.3f)] private float yawTorqueScale = 0.1f;
+        // [SerializeField, Range(0f, 0.3f)] private float yawTorqueScale = 0.1f;
+        [SerializeField, Range(0f, 0.3f)] private float yawTorqueScale = 0f;
 
         [Header("Detection")]
         [Tooltip("한 번 맞은 뒤 재발동 방지 쿨타임(초)")]
@@ -36,25 +39,49 @@ namespace SSAFYPlayTime.Stage
         private Vector3 _velocity;
         private readonly Dictionary<NetworkPlayer, float> _cooldowns = new();
 
-        private void Start()
+        public override void Spawned()
         {
             _prevPosition = transform.position;
         }
 
-        private void Update()
+        /*private void Update()
         {
             if (Time.deltaTime > 0f)
                 _velocity = (transform.position - _prevPosition) / Time.deltaTime;
             _prevPosition = transform.position;
+        }*/
+
+        public override void FixedUpdateNetwork()
+        {
+            if (!HasStateAuthority)
+                return;
+
+            _velocity = (transform.position - _prevPosition) / Runner.DeltaTime;
+            _prevPosition = transform.position;
         }
 
-        private void OnTriggerEnter(Collider other) => TryHit(other);
+        private void OnTriggerEnter(Collider other)
+        {
+            if (!HasStateAuthority)
+                return;
+
+            TryHit(other);
+        }
 
         // 플레이어가 트리거 안에 이미 있는 상태에서 해머가 스윙해도 감지
-        private void OnTriggerStay(Collider other) => TryHit(other);
+        private void OnTriggerStay(Collider other)
+        {
+            if (!HasStateAuthority) return;
+            TryHit(other);
+        }
 
         private void TryHit(Collider other)
         {
+            // 1. Fusion의 NetworkObject 컴포넌트를 통해 권한 체크
+            var networkObject = GetComponentInParent<NetworkObject>();
+            if (networkObject != null && !networkObject.HasStateAuthority)
+                return;
+
             var networkPlayer = other.transform.root.GetComponent<NetworkPlayer>();
             var playerRb = networkPlayer != null
                 ? other.transform.root.GetComponent<Rigidbody>()
@@ -68,9 +95,9 @@ namespace SSAFYPlayTime.Stage
             // 쿨타임 체크
             if (networkPlayer != null)
             {
-                if (_cooldowns.TryGetValue(networkPlayer, out var nextAllowed) && Time.time < nextAllowed)
+                if (_cooldowns.TryGetValue(networkPlayer, out var nextAllowed) && Runner.SimulationTime < nextAllowed)
                     return;
-                _cooldowns[networkPlayer] = Time.time + hitCooldown;
+                _cooldowns[networkPlayer] = Runner.SimulationTime + hitCooldown;
             }
 
             ApplyKnockback(networkPlayer, playerRb, other.transform.root.position);
@@ -101,6 +128,11 @@ namespace SSAFYPlayTime.Stage
                     forceScale = stunnedKnockbackScale;
                 else if (networkPlayer.IsRecovering)
                     forceScale = recoveringKnockbackScale;
+            }
+
+            if (networkPlayer != null)
+            {
+                playerRb.transform.position += Vector3.up * 0.2f + pushDir * 0.1f;
             }
 
             // 1) 래그돌 전환

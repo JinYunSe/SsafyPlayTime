@@ -59,6 +59,10 @@ public sealed partial class NetworkPlayer
     [SerializeField] private float replicatedBlackholeTargetOutlineScaleMultiplier = 1.045f;
     [SerializeField] private float satelliteProjectileTravelSec = 0.35f;
     [SerializeField] private float satelliteBeamHeight = 24f;
+    [SerializeField] private float satelliteWarningAdvanceSeconds = 2f;
+    [SerializeField] private float satelliteDefaultHealthDamage = 50f;
+    [SerializeField] private float satelliteDefaultStunDamage = 50f;
+    [SerializeField] private float satelliteDefaultExplosionForce = 8f;
     [SerializeField] private float flamethrowerVisualForwardOffset = 0.7f;
     [SerializeField] private float flamethrowerVisualHeightOffset = 1.2f;
     [SerializeField] private float flamethrowerVisualScale = 2f;
@@ -669,9 +673,10 @@ public sealed partial class NetworkPlayer
             Quaternion.identity,
             proxy => proxy.InitializeSatelliteCharge(request.Radius));
 
-        if (request.WarningSec > 0f)
+        var effectiveWarningSec = Mathf.Max(0f, request.WarningSec - Mathf.Max(0f, satelliteWarningAdvanceSeconds));
+        if (effectiveWarningSec > 0f)
         {
-            yield return new WaitForSeconds(request.WarningSec);
+            yield return new WaitForSeconds(effectiveWarningSec);
         }
 
         DespawnNetworkedItemEffectProxy(ref _activeSatelliteChargeEffectProxy);
@@ -1176,12 +1181,17 @@ public sealed partial class NetworkPlayer
         float tickInterval,
         float duration)
     {
+        var totalHealth = totalHealthDamage > 0f ? totalHealthDamage : Mathf.Max(0f, satelliteDefaultHealthDamage);
+        var totalStun = totalStunDamage > 0f ? totalStunDamage : Mathf.Max(0f, satelliteDefaultStunDamage);
+        var appliedExplosionForce = explosionForce > 0f ? explosionForce : Mathf.Max(0f, satelliteDefaultExplosionForce);
         var tickCount = Mathf.Max(1, Mathf.CeilToInt(Mathf.Max(0.1f, duration) / Mathf.Max(0.01f, tickInterval)));
-        var damagePerTick = Mathf.Max(0f, totalHealthDamage) / tickCount;
-        var stunPerTick = Mathf.Max(0f, totalStunDamage) / tickCount;
+        var damagePerTick = totalHealth / tickCount;
+        var stunPerTick = totalStun / tickCount;
         var capsuleOffset = Mathf.Max(0f, (satelliteBeamHeight * 0.5f) - radius);
         var bottom = center + Vector3.down * capsuleOffset;
         var top = center + Vector3.up * capsuleOffset;
+        var damagedPlayerIds = new HashSet<int>();
+        var forcedBodyIds = new HashSet<int>();
 
         var overlapCount = Physics.OverlapCapsuleNonAlloc(
             bottom,
@@ -1199,21 +1209,25 @@ public sealed partial class NetworkPlayer
                 continue;
             }
 
-            var targetPlayer = hitCollider.GetComponentInParent<NetworkPlayer>();
-            if (targetPlayer != null && targetPlayer != this)
+            var targetPlayer = ResolveSatelliteStrikeTargetPlayer(hitCollider);
+            if (targetPlayer != null &&
+                damagedPlayerIds.Add(targetPlayer.GetInstanceID()))
             {
                 targetPlayer.ApplyCombinedDamage(
                     damagePerTick,
                     stunPerTick,
                     "SatelliteStrike",
                     0f,
-                    explosionForce,
+                    appliedExplosionForce,
                     instigator: this,
                     downedHitPolicy: DownedHitPolicy.RecoveryPenalty);
             }
 
-            var body = hitCollider.attachedRigidbody;
-            if (body != null && !body.isKinematic && explosionForce > 0f)
+            var body = ResolveSatelliteStrikeImpactBody(hitCollider, targetPlayer);
+            if (body != null &&
+                !body.isKinematic &&
+                appliedExplosionForce > 0f &&
+                forcedBodyIds.Add(body.GetInstanceID()))
             {
                 var offset = body.worldCenterOfMass - center;
                 var planarOffset = new Vector3(offset.x, 0f, offset.z);
@@ -1224,10 +1238,62 @@ public sealed partial class NetworkPlayer
                     : Random.insideUnitSphere.normalized;
                 direction.y = Mathf.Max(0.15f, 0.35f);
                 direction.Normalize();
-                body.AddForce(direction * (explosionForce * Mathf.Max(0.15f, falloff)), ForceMode.VelocityChange);
+                body.AddForce(direction * (appliedExplosionForce * Mathf.Max(0.15f, falloff)), ForceMode.VelocityChange);
             }
         }
     }
+
+    private static NetworkPlayer ResolveSatelliteStrikeTargetPlayer(Collider hitCollider)
+    {
+        if (hitCollider == null)
+        {
+            return null;
+        }
+
+        var targetPlayer = hitCollider.GetComponentInParent<NetworkPlayer>();
+        if (targetPlayer != null)
+        {
+            return targetPlayer;
+        }
+
+        if (hitCollider.attachedRigidbody != null)
+        {
+            targetPlayer = hitCollider.attachedRigidbody.GetComponentInParent<NetworkPlayer>();
+            if (targetPlayer != null)
+            {
+                return targetPlayer;
+            }
+
+            targetPlayer = hitCollider.attachedRigidbody.transform.root.GetComponentInChildren<NetworkPlayer>(true);
+            if (targetPlayer != null)
+            {
+                return targetPlayer;
+            }
+        }
+
+        return hitCollider.transform.root.GetComponentInChildren<NetworkPlayer>(true);
+    }
+
+    private static Rigidbody ResolveSatelliteStrikeImpactBody(Collider hitCollider, NetworkPlayer targetPlayer)
+    {
+        if (targetPlayer != null && targetPlayer.rigidbody3D != null)
+        {
+            return targetPlayer.rigidbody3D;
+        }
+
+        if (hitCollider == null)
+        {
+            return null;
+        }
+
+        if (hitCollider.attachedRigidbody != null)
+        {
+            return hitCollider.attachedRigidbody;
+        }
+
+        return hitCollider.GetComponentInParent<Rigidbody>();
+    }
+
 
     private Vector3 ResolveSatelliteGroundCenter(Vector3 requestedCenter)
     {
