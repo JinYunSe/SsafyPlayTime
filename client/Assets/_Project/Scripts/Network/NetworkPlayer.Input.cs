@@ -133,6 +133,7 @@ public sealed partial class NetworkPlayer
 
     private PlayerNetworkInput BuildSandboxInput()
     {
+        var canSendGrabHold = Time.time >= _grabDisabledUntilTime && !HasHeldRuntimeItem();
         return new PlayerNetworkInput
         {
             Move = _sandboxInput,
@@ -142,7 +143,7 @@ public sealed partial class NetworkPlayer
             PrimaryUseHold = _leftMouseDown,
             Drop = _dropTriggered,
             Throw = _throwTriggered,
-            LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab && !HasHeldRuntimeItem(),
+            LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab && canSendGrabHold,
             RightGrabHold = false,
             Headbutt = Input.GetMouseButtonDown(2),
             Sprint = Input.GetKey(KeyCode.LeftShift)
