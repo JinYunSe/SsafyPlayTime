@@ -91,7 +91,8 @@ public sealed partial class NetworkPlayer
         UpdatePhysicalPhaseState(dt);
         TickPunchHitDetectionWindow();
         TickKickHitDetectionWindow();
-        TickAerialKickHitDetectionWindow();
+        TickAerialKickHitDetectionWindow(dt);
+        TickAerialKickMomentum(dt);
         TickAerialKickSpringRestore(dt);
         SyncHeldItemNetworkState();
     }
@@ -306,7 +307,7 @@ public sealed partial class NetworkPlayer
         ClearKickHitDetectionWindow();
     }
 
-    private void TickAerialKickHitDetectionWindow()
+    private void TickAerialKickHitDetectionWindow(float dt)
     {
         if (_activeAerialKickWindowEndTick < 0)
             return;
@@ -314,17 +315,35 @@ public sealed partial class NetworkPlayer
         if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
         {
             ClearAerialKickHitDetectionWindow();
+            BeginAerialKickSpringRestore();
             return;
         }
 
         if (!_isActiveRagdoll || GetIsDeadState())
         {
             ClearAerialKickHitDetectionWindow();
+            BeginAerialKickSpringRestore();
             return;
         }
 
         var currentTick = ResolveCurrentSimulationTick();
-        if ((_activeAerialKickHasPreviousSample && _isGrounded) || currentTick > _activeAerialKickWindowEndTick)
+        if (_activeAerialKickHasPreviousSample && _isGrounded)
+        {
+            _activeAerialKickGroundedGraceTimer -= dt;
+            if (_activeAerialKickGroundedGraceTimer <= 0f)
+            {
+                ApplyAerialKickMissPenalty();
+                ClearAerialKickHitDetectionWindow();
+                BeginAerialKickSpringRestore();
+                return;
+            }
+        }
+        else
+        {
+            _activeAerialKickGroundedGraceTimer = AerialKickGroundedGraceDuration;
+        }
+
+        if (currentTick > _activeAerialKickWindowEndTick)
         {
             ApplyAerialKickMissPenalty();
             ClearAerialKickHitDetectionWindow();
@@ -369,10 +388,26 @@ public sealed partial class NetworkPlayer
         _activeAerialKickWindowEndTick = -1;
         _activeAerialKickHasPreviousSample = false;
         _activeAerialKickHasHit = false;
+        _activeAerialKickGroundedGraceTimer = 0f;
+        if (!_isAerialKickMomentumActive)
+        {
+            _activeAerialKickTargetPlanarSpeed = 0f;
+            _activeAerialKickHasLeftGround = false;
+            _activeAerialKickFlightForceReleaseTime = float.NegativeInfinity;
+            _activeAerialKickForwardDirection = Vector3.zero;
+        }
 
         // 킥 종료 → spring 점진 복원 시작
-        if (_isAerialKickMomentumActive)
-            _aerialKickSpringRestoreTimer = AerialKickSpringRestoreDuration;
+    }
+
+    private void BeginAerialKickSpringRestore()
+    {
+        if (!_isAerialKickMomentumActive || _aerialKickSpringRestoreTimer > 0f)
+            return;
+
+        _activeAerialKickTargetPlanarSpeed = 0f;
+        _activeAerialKickFlightForceReleaseTime = float.NegativeInfinity;
+        _aerialKickSpringRestoreTimer = AerialKickSpringRestoreDuration;
     }
 
     private Vector3 ResolvePunchHitSamplePosition(bool isLeft)
@@ -817,7 +852,7 @@ public sealed partial class NetworkPlayer
         if (_activeAerialKickHasHit || !_isActiveRagdoll || GetIsDeadState())
             return;
 
-        if (_activeAerialKickSelfStunDuration <= 0.01f)
+        if (_activeAerialKickSelfStunDuration <= 0.01f || !ShouldApplyAerialKickSelfStun())
         {
             ArmHitInstabilityBoost(1.1f);
             _hitRecoilTimer = Mathf.Max(_hitRecoilTimer, HIT_RECOIL_DURATION * 0.75f);
@@ -825,6 +860,22 @@ public sealed partial class NetworkPlayer
         }
 
         TriggerStun(Mathf.Clamp(_activeAerialKickSelfStunDuration, 0.18f, 0.75f));
+    }
+
+    private bool ShouldApplyAerialKickSelfStun()
+    {
+        if (_activeAerialKickSelfStunChance <= 0f)
+            return false;
+
+        if (_activeAerialKickSelfStunChance >= 1f)
+            return true;
+
+        var seed = ResolveCurrentSimulationTick() * 12.9898f
+            + transform.position.x * 78.233f
+            + transform.position.z * 37.719f;
+        var pseudoRandom = Mathf.Abs(Mathf.Sin(seed) * 43758.5453f);
+        pseudoRandom -= Mathf.Floor(pseudoRandom);
+        return pseudoRandom <= _activeAerialKickSelfStunChance;
     }
 
     private Vector3 BuildPunchKnockbackDirection(NetworkPlayer victimPlayer, Vector3 forward)
@@ -3028,7 +3079,7 @@ public sealed partial class NetworkPlayer
     private const float FallbackAerialKickVelocityDamageMultiplier = 1.25f;
     private const float FallbackAerialKickAirborneVulnerabilityMultiplier = 1.5f;
     private const float AerialKickHitRadius = 0.56f;
-    private const float AerialKickActiveWindowSeconds = 0.28f;
+    private const float AerialKickActiveWindowSeconds = 0.42f;
     private const float AerialKickFallbackCooldown = 1.25f;
     private const float AerialKickForwardReachMin = 0.72f;
     private const float AerialKickForwardReachMax = 1.35f;
@@ -3038,6 +3089,12 @@ public sealed partial class NetworkPlayer
     private const float AerialKickForwardBoostSpeed = 8f;
     private const float AerialKickUpwardBoost = 1.2f;
     private const float AerialKickVelocityPreserveScale = 1.0f;
+    private const float AerialKickGroundedGraceDuration = 0.10f;
+    private const float AerialKickMomentumAirborneSpeedScale = 0.88f;
+    private const float AerialKickMomentumGroundedSpeedScale = 0.72f;
+    private const float AerialKickMomentumMinPlanarSpeed = 6.2f;
+    private const float AerialKickMomentumPlanarAcceleration = 24f;
+    private const float AerialKickFlightMaxDuration = 1.15f;
     private const float AerialKickSpringLerpDuringKick = 0.12f;
     private const float AerialKickSpringRestoreDuration = 0.18f;
     private Vector3 _activeAerialKickForwardDirection;
@@ -3054,10 +3111,15 @@ public sealed partial class NetworkPlayer
     private float _activeAerialKickStunDamage;
     private float _activeAerialKickKnockbackForce;
     private float _activeAerialKickSelfStunDuration;
+    private float _activeAerialKickSelfStunChance;
     private float _activeAerialKickVelocityDamageMultiplier;
     private float _activeAerialKickAirborneVulnerabilityMultiplier;
     private float _activeAerialKickAttackerSpeed;
     private float _activeAerialKickStartSpeed;
+    private float _activeAerialKickTargetPlanarSpeed;
+    private float _activeAerialKickGroundedGraceTimer;
+    private bool _activeAerialKickHasLeftGround;
+    private float _activeAerialKickFlightForceReleaseTime = float.NegativeInfinity;
     private Vector3 _activeAerialKickPreviousSamplePosition;
     private readonly Collider[] _aerialKickHitResults = new Collider[AerialKickHitBufferSize];
 
@@ -3315,6 +3377,7 @@ public sealed partial class NetworkPlayer
         _activeAerialKickStunDamage = stat.HasValue ? stat.Value.StunDamage : FallbackAerialKickStunDamage;
         _activeAerialKickKnockbackForce = stat.HasValue ? stat.Value.KnockbackForce : FallbackAerialKickKnockbackForce;
         _activeAerialKickSelfStunDuration = stat.HasValue ? stat.Value.SelfStunDuration : FallbackAerialKickSelfStunDuration;
+        _activeAerialKickSelfStunChance = stat.HasValue ? Mathf.Clamp01(stat.Value.SelfStunChance) : 1f;
         _activeAerialKickVelocityDamageMultiplier = stat.HasValue
             ? Mathf.Max(0f, stat.Value.VelocityDamageMultiplier)
             : FallbackAerialKickVelocityDamageMultiplier;
@@ -3324,6 +3387,7 @@ public sealed partial class NetworkPlayer
         _activeAerialKickAttackerSpeed = rigidbody3D != null ? rigidbody3D.velocity.magnitude : 0f;
         _activeAerialKickStartSpeed = _activeAerialKickAttackerSpeed;
         _activeAerialKickWindowEndTick = currentTick + Mathf.Max(1, Mathf.RoundToInt(AerialKickActiveWindowSeconds * tickRate));
+        _activeAerialKickGroundedGraceTimer = AerialKickGroundedGraceDuration;
 
         ApplyAerialKickBurst();
         return true;
@@ -3348,6 +3412,9 @@ public sealed partial class NetworkPlayer
         var kickVelocity = planarForward * AerialKickForwardBoostSpeed
                          + Vector3.up * AerialKickUpwardBoost;
         var finalVelocity = currentVelocity * AerialKickVelocityPreserveScale + kickVelocity;
+        _activeAerialKickTargetPlanarSpeed = Mathf.Max(
+            AerialKickMomentumMinPlanarSpeed,
+            Vector3.ProjectOnPlane(finalVelocity, Vector3.up).magnitude);
 
         // root rigidbody에 velocity 직접 설정
         rigidbody3D.velocity = finalVelocity;
@@ -3370,6 +3437,54 @@ public sealed partial class NetworkPlayer
         SuppressPuppetMasterMappingForAerialKick();
         _isAerialKickMomentumActive = true;
         _aerialKickSpringRestoreTimer = 0f;
+        _activeAerialKickHasLeftGround = !_isGrounded;
+        _activeAerialKickFlightForceReleaseTime = Time.time + AerialKickFlightMaxDuration;
+    }
+
+    private void TickAerialKickMomentum(float dt)
+    {
+        if (!_isAerialKickMomentumActive || _aerialKickSpringRestoreTimer > 0f)
+            return;
+
+        if (rigidbody3D == null || rigidbody3D.isKinematic)
+            return;
+
+        if (!_activeAerialKickHasLeftGround && !_isGrounded)
+            _activeAerialKickHasLeftGround = true;
+
+        if (_activeAerialKickWindowEndTick < 0)
+        {
+            var hasLandedAfterLaunch = _activeAerialKickHasLeftGround && _isGrounded;
+            var shouldForceRelease = Time.time >= _activeAerialKickFlightForceReleaseTime;
+            if (hasLandedAfterLaunch || shouldForceRelease)
+            {
+                BeginAerialKickSpringRestore();
+                return;
+            }
+        }
+
+        var forward = _activeAerialKickForwardDirection;
+        if (forward.sqrMagnitude < 0.0001f)
+            return;
+
+        forward.Normalize();
+
+        var currentVelocity = rigidbody3D.velocity;
+        var planarVelocity = Vector3.ProjectOnPlane(currentVelocity, Vector3.up);
+        var sustainScale = _isGrounded
+            ? AerialKickMomentumGroundedSpeedScale
+            : AerialKickMomentumAirborneSpeedScale;
+        var minimumPlanarSpeed = _isGrounded
+            ? AerialKickMomentumMinPlanarSpeed * 0.85f
+            : AerialKickMomentumMinPlanarSpeed;
+        var targetPlanarSpeed = Mathf.Max(minimumPlanarSpeed, _activeAerialKickTargetPlanarSpeed * sustainScale);
+        var desiredPlanarVelocity = forward * targetPlanarSpeed;
+        var nextPlanarVelocity = Vector3.MoveTowards(
+            planarVelocity,
+            desiredPlanarVelocity,
+            AerialKickMomentumPlanarAcceleration * dt);
+
+        rigidbody3D.velocity = new Vector3(nextPlanarVelocity.x, currentVelocity.y, nextPlanarVelocity.z);
     }
 
     private void WeakenJointSpringsForAerialKick()
@@ -3400,6 +3515,10 @@ public sealed partial class NetworkPlayer
         RestorePuppetMasterMappingAfterAerialKick();
         _isAerialKickMomentumActive = false;
         _aerialKickSpringRestoreTimer = 0f;
+        _activeAerialKickTargetPlanarSpeed = 0f;
+        _activeAerialKickHasLeftGround = false;
+        _activeAerialKickFlightForceReleaseTime = float.NegativeInfinity;
+        _activeAerialKickForwardDirection = Vector3.zero;
     }
 
     private void TickAerialKickSpringRestore(float dt)
