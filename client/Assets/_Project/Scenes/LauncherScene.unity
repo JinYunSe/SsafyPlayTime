@@ -3403,6 +3403,8 @@ MonoBehaviour:
   launcherSceneName: LauncherScene
   launcherBackgroundMusicClip: {fileID: 8300000, guid: d33f9694b4f88434eba4074e4f01acb7,
     type: 3}
+  gameplayBackgroundMusicClip: {fileID: 8300000, guid: 33545ad9c84e399438e9919fb694dc5b,
+    type: 3}
   gamePanel: {fileID: 0}
   leaveGameButton: {fileID: 0}
   gameHUDPrefab: {fileID: 0}
