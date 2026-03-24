@@ -31,6 +31,7 @@ namespace SSAFYPlayTime
             }
 
             _instance = this;
+            DontDestroyOnLoad(gameObject);
 
             if (lobbyController == null)
             {

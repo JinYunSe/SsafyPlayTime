@@ -455,6 +455,10 @@ namespace SSAFYPlayTime
                 return;
             }
 
+            // 마이그레이션 복원은 1회만 적용한다.
+            // 항목을 소비하지 않으면 이후 자발적 재입장 시에도 stale ready 상태가 복원된다.
+            _migrationReadyStateByClientId.Remove(clientId);
+
             _readyStateByPlayerId[player.PlayerId] = isReady;
             if (_roomParticipantsByPlayerId.TryGetValue(player.PlayerId, out var presence) && presence != null)
             {
