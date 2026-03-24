@@ -162,6 +162,10 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [SerializeField, Range(0.05f, 0.5f)] private float startupLaunchDiagnosticsSampleInterval = 0.15f;
     [SerializeField, Range(1f, 8f)] private float startupLaunchDiagnosticsWindow = 4f;
 
+    [Header("Aerial Kick Diagnostics")]
+    [SerializeField] private bool enableAerialKickDiagnostics = true;
+    [SerializeField, Range(0.03f, 0.5f)] private float aerialKickDiagnosticsSampleInterval = 0.12f;
+
     // ─── 로컬 변수 ───
     private float _localMoveSpeed;
     private int _localMotorState;
@@ -359,6 +363,16 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         return phase == PhysicalPhase.Stable ||
                phase == PhysicalPhase.GrabIntent ||
                phase == PhysicalPhase.WeaponEquipped;
+    }
+
+    internal bool ShouldLogAerialKickDiagnostics()
+    {
+        return enableAerialKickDiagnostics && (Application.isEditor || Debug.isDebugBuild);
+    }
+
+    internal float GetAerialKickDiagnosticsSampleInterval()
+    {
+        return Mathf.Max(0.03f, aerialKickDiagnosticsSampleInterval);
     }
 
     internal float GetPhysicalInstability()

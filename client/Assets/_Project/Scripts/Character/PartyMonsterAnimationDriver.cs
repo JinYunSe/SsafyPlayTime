@@ -25,7 +25,8 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     const string UpperBodyIdleState = "UpperBodyIdle";
     const string MovementSpeedParameter = "movementSpeed";
     const string IsSprintingParameter = "isSprinting";
-    const float AerialKickEndPoseHoldMaxDuration = 1.15f;
+    const float AerialKickEndPoseHoldMaxDuration = 4.00f;
+    const float AerialKickEndPoseHoldExtensionDuration = 0.75f;
 
     [SerializeField]
     Animator animator;
@@ -184,7 +185,10 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         }
 
         if (isRecoveryPhase && isAerialKickAnimationActive)
+        {
+            LogAerialKickAnimationEvent("Stop", "recovery-phase-entered");
             StopAerialKickAnimation();
+        }
 
         // Handoff transition can occasionally miss the visual restore latch in player builds.
         // Keep the fallback strictly inside the actual recovery phase so it cannot affect normal combat.
@@ -612,6 +616,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         aerialKickOutput.SetSourcePlayable(aerialKickPlayable);
         aerialKickOutput.SetWeight(1f);
         aerialKickGraph.Play();
+        LogAerialKickAnimationEvent("Start", $"clip={clip.name} length={clip.length:F2}");
     }
 
     void HoldAerialKickEndPose()
@@ -630,7 +635,12 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return false;
 
         if (Time.time >= aerialKickEndPoseForceReleaseTime)
+        {
+            if (networkPlayer != null && !networkPlayer.IsGroundedForPresentation())
+                return true;
+
             return false;
+        }
 
         return networkPlayer == null || !networkPlayer.ShouldEndAerialKickPresentation();
     }
@@ -653,13 +663,32 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             actionLockedUntil = Mathf.Max(actionLockedUntil, aerialKickEndPoseForceReleaseTime);
             upperBodyStateVisibleUntil = Mathf.Max(upperBodyStateVisibleUntil, actionLockedUntil);
             HoldAerialKickEndPose();
+            LogAerialKickAnimationEvent("HoldEndPose", $"forceReleaseAt={aerialKickEndPoseForceReleaseTime:F2}");
         }
 
         if (!isAerialKickEndPoseHeld)
             return;
 
+        if (Time.time >= aerialKickEndPoseForceReleaseTime &&
+            networkPlayer != null &&
+            !networkPlayer.IsGroundedForPresentation())
+        {
+            aerialKickEndPoseForceReleaseTime = Time.time + AerialKickEndPoseHoldExtensionDuration;
+            actionLockedUntil = Mathf.Max(actionLockedUntil, aerialKickEndPoseForceReleaseTime);
+            upperBodyStateVisibleUntil = Mathf.Max(upperBodyStateVisibleUntil, actionLockedUntil);
+            LogAerialKickAnimationEvent("ExtendHold", $"extendedUntil={aerialKickEndPoseForceReleaseTime:F2}");
+        }
+
         if (!ShouldKeepHoldingAerialKickPose())
         {
+            var reason = Time.time >= aerialKickEndPoseForceReleaseTime
+                ? "timeout"
+                : networkPlayer == null
+                    ? "network-player-missing"
+                    : networkPlayer.IsGroundedForPresentation()
+                        ? "presentation-grounded"
+                        : $"presentation-ended phase={networkPlayer.GetPhysicalPhase()}";
+            LogAerialKickAnimationEvent("Stop", reason);
             StopAerialKickAnimation();
             return;
         }
@@ -722,6 +751,25 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         animator.transform.localPosition = aerialKickAnimatorLocalPosition;
         animator.transform.localScale = aerialKickAnimatorLocalScale;
+    }
+
+    bool ShouldLogAerialKickDiagnostics()
+    {
+        return networkPlayer != null
+            ? networkPlayer.ShouldLogAerialKickDiagnostics()
+            : (Application.isEditor || Debug.isDebugBuild);
+    }
+
+    void LogAerialKickAnimationEvent(string source, string note)
+    {
+        if (!ShouldLogAerialKickDiagnostics())
+            return;
+
+        var grounded = networkPlayer != null && networkPlayer.IsGroundedForPresentation();
+        var phase = networkPlayer != null ? networkPlayer.GetPhysicalPhase().ToString() : "none";
+        Debug.Log(
+            $"[AerialKickAnim] {name} {source} t={Time.time:F2} active={isAerialKickAnimationActive} hold={isAerialKickEndPoseHeld} grounded={grounded} phase={phase} note={note}",
+            this);
     }
 
     void StartRecoveryAnimation(AnimationClip clip)

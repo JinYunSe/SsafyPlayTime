@@ -22,6 +22,8 @@ public sealed partial class NetworkPlayer
     [Networked] private float NetworkedRecentHealthDamage { get; set; }
     [Networked] private float NetworkedRecentHealthWindowRemaining { get; set; }
     [Networked] private float NetworkedHealthHitImmunityRemaining { get; set; }
+    [Networked] private float NetworkedStunHitImmunityRemaining { get; set; }
+    [Networked] private float NetworkedNoStaggerRemaining { get; set; }
     [Networked] private float NetworkedDeathFreezeRemaining { get; set; }
 
     private int _localMaxHealth = DefaultHiddenMaxHealth;
@@ -31,6 +33,8 @@ public sealed partial class NetworkPlayer
     private float _localRecentHealthDamage;
     private float _localRecentHealthWindowRemaining;
     private float _localHealthHitImmunityRemaining;
+    private float _localStunHitImmunityRemaining;
+    private float _localNoStaggerRemaining;
     private float _localDeathFreezeRemaining;
     private bool _localVitalsInitialized;
     private Coroutine _localDeathTransitionCoroutine;
@@ -65,6 +69,8 @@ public sealed partial class NetworkPlayer
                 _localRecentHealthDamage = 0f;
                 _localRecentHealthWindowRemaining = 0f;
                 _localHealthHitImmunityRemaining = 0f;
+                _localStunHitImmunityRemaining = 0f;
+                _localNoStaggerRemaining = 0f;
                 _localDeathFreezeRemaining = 0f;
                 _localVitalsInitialized = true;
             }
@@ -86,6 +92,8 @@ public sealed partial class NetworkPlayer
             NetworkedRecentHealthDamage = 0f;
             NetworkedRecentHealthWindowRemaining = 0f;
             NetworkedHealthHitImmunityRemaining = 0f;
+            NetworkedStunHitImmunityRemaining = 0f;
+            NetworkedNoStaggerRemaining = 0f;
             NetworkedDeathFreezeRemaining = 0f;
         }
     }
@@ -110,6 +118,12 @@ public sealed partial class NetworkPlayer
             if (NetworkedHealthHitImmunityRemaining > 0f)
                 NetworkedHealthHitImmunityRemaining = Mathf.Max(0f, NetworkedHealthHitImmunityRemaining - dt);
 
+            if (NetworkedStunHitImmunityRemaining > 0f)
+                NetworkedStunHitImmunityRemaining = Mathf.Max(0f, NetworkedStunHitImmunityRemaining - dt);
+
+            if (NetworkedNoStaggerRemaining > 0f)
+                NetworkedNoStaggerRemaining = Mathf.Max(0f, NetworkedNoStaggerRemaining - dt);
+
             if (NetworkedDeathFreezeRemaining > 0f)
                 NetworkedDeathFreezeRemaining = Mathf.Max(0f, NetworkedDeathFreezeRemaining - dt);
 
@@ -125,6 +139,12 @@ public sealed partial class NetworkPlayer
 
         if (_localHealthHitImmunityRemaining > 0f)
             _localHealthHitImmunityRemaining = Mathf.Max(0f, _localHealthHitImmunityRemaining - dt);
+
+        if (_localStunHitImmunityRemaining > 0f)
+            _localStunHitImmunityRemaining = Mathf.Max(0f, _localStunHitImmunityRemaining - dt);
+
+        if (_localNoStaggerRemaining > 0f)
+            _localNoStaggerRemaining = Mathf.Max(0f, _localNoStaggerRemaining - dt);
 
         if (_localDeathFreezeRemaining > 0f)
             _localDeathFreezeRemaining = Mathf.Max(0f, _localDeathFreezeRemaining - dt);
@@ -222,6 +242,8 @@ public sealed partial class NetworkPlayer
         SetRecentHealthDamage(0f);
         SetRecentHealthWindowRemaining(0f);
         SetHealthHitImmunityRemaining(0f);
+        SetStunHitImmunityRemaining(0f);
+        SetNoStaggerRemaining(0f);
         SetDeathFreezeRemaining(0f);
 
         TryForceDropHeldContentOnDeath();
@@ -627,6 +649,27 @@ public sealed partial class NetworkPlayer
             : DefaultHealthHitImmunity;
     }
 
+    private float ResolveConfiguredStunRehitImmunity()
+    {
+        return CombatSettings.Instance != null
+            ? Mathf.Max(0f, CombatSettings.Instance.stunRehitImmunity)
+            : 0.18f;
+    }
+
+    private float ResolveConfiguredNoStaggerWindow()
+    {
+        return CombatSettings.Instance != null
+            ? Mathf.Max(0f, CombatSettings.Instance.stunNoStaggerWindow)
+            : 0.24f;
+    }
+
+    private float ResolveConfiguredRepeatStunDamageScale()
+    {
+        return CombatSettings.Instance != null
+            ? Mathf.Clamp01(CombatSettings.Instance.stunRepeatDamageScale)
+            : 0.28f;
+    }
+
     private float ResolveConfiguredRecentHealthDamageWindow()
     {
         return CombatSettings.Instance != null
@@ -660,6 +703,40 @@ public sealed partial class NetworkPlayer
     {
         var maxHealth = Mathf.Max(1, GetMaxHealth());
         return Mathf.Clamp01((float)GetCurrentHealth() / maxHealth);
+    }
+
+    private float GetStunHitImmunityRemaining()
+    {
+        if (IsNetworkReady)
+            return NetworkedStunHitImmunityRemaining;
+
+        return _localStunHitImmunityRemaining;
+    }
+
+    private void SetStunHitImmunityRemaining(float value)
+    {
+        var clamped = Mathf.Max(0f, value);
+        if (IsNetworkReady)
+            NetworkedStunHitImmunityRemaining = clamped;
+        else
+            _localStunHitImmunityRemaining = clamped;
+    }
+
+    private float GetNoStaggerRemaining()
+    {
+        if (IsNetworkReady)
+            return NetworkedNoStaggerRemaining;
+
+        return _localNoStaggerRemaining;
+    }
+
+    private void SetNoStaggerRemaining(float value)
+    {
+        var clamped = Mathf.Max(0f, value);
+        if (IsNetworkReady)
+            NetworkedNoStaggerRemaining = clamped;
+        else
+            _localNoStaggerRemaining = clamped;
     }
 
     private int GetMaxHealth()

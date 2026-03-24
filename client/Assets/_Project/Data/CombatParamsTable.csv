@@ -8,6 +8,9 @@ STUN_MIN_DURATION,Min stun duration,1.2,Minimum stun duration in seconds.
 STUN_MAX_DURATION,Max stun duration,4.8,Maximum stun duration in seconds.
 STUN_VELOCITY_BONUS,Velocity bonus,0.08,Extra stun duration from attacker speed.
 STUN_WEIGHT_BONUS,Impulse bonus,0.015,Extra stun duration from impact impulse.
+STUN_REHIT_IMMUNITY,Stun rehit immunity,0.18,Duration that sharply reduces repeated stun accumulation.
+STUN_NO_STAGGER_WINDOW,No stagger window,0.24,Duration that suppresses repeated hit-stagger reactions.
+STUN_REPEAT_DAMAGE_SCALE,Repeat stun scale,0.28,Scale applied to stun damage during the rehit immunity window.
 STUN_AUTO_RECOVER,Auto recover,1,1 keeps automatic recovery enabled.
 GROGGY_DURATION,Groggy duration,2.0,Base groggy duration in seconds.
 GROGGY_TO_STUN_CHANCE,Groggy to stun chance,0.7,Chance to transition from groggy to stun.
