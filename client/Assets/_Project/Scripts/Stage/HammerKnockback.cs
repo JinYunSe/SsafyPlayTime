@@ -20,6 +20,7 @@ namespace SSAFYPlayTime.Stage
         [Header("Force")]
         [SerializeField] private float knockbackForce = 28f;
         [SerializeField, Range(0f, 1f)] private float verticalLift = 0.35f;
+        [SerializeField, Range(0f, 1f)] private float stunnedKnockbackScale = 0.35f;
         [SerializeField, Range(0f, 1f)] private float recoveringKnockbackScale = 0.45f;
 
         [Header("Stun")]
@@ -91,8 +92,6 @@ namespace SSAFYPlayTime.Stage
                     ? other.attachedRigidbody
                     : other.GetComponent<Rigidbody>();
 
-            if (networkPlayer != null && networkPlayer.IsStunned)
-                return;
             if (playerRb == null)
                 return;
 
