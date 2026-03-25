@@ -260,7 +260,7 @@ namespace SSAFYPlayTime
         [SerializeField] private string roomTagPrivate = "[비공개]";
         [SerializeField] private string roomTagPublic = "[공개]";
         [SerializeField] private string emptyPlayerSlot = "-";
-        [SerializeField] private string nicknameHeaderFormat = "닉네임: {0}";
+        [SerializeField] private string nicknameHeaderFormat = "{0}님 파이팅!";
 
         private readonly List<RoomSnapshot> _roomSnapshots = new();
 
