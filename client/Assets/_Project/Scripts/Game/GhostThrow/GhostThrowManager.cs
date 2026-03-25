@@ -246,31 +246,13 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
             var ray = Camera.main.ScreenPointToRay(Input.mousePosition);
 
-            // [1단계] Plane.Raycast로 카메라 레이와 RayCastManager 수평 평면의 XZ 교차점을 구한다.
-            // [2단계] 그 XZ에서 BoxCollider 밑면 기준 수직 하향 레이 → Map 정확한 표면 Y 획득.
-            // 계단, 경사로 등 굴곡 있는 맵에서도 정확한 착탄 지점을 계산한다.
+            // RayCastManager BoxCollider(맵 상단 평면)에 레이를 쏴 hit.point를 목표 좌표로 사용.
+            // 카메라가 측면을 봐도 콜라이더 평면과의 교차점이 맵 상단 XYZ를 정확히 반환한다.
             Vector3 targetPoint;
-            if (_rayCastManagerCollider != null)
-            {
-                var plane = new Plane(Vector3.up, _rayCastManagerCollider.bounds.center);
-                if (plane.Raycast(ray, out float enter))
-                {
-                    var xzRef = ray.GetPoint(enter);
-                    var castOrigin = new Vector3(xzRef.x, _rayCastManagerCollider.bounds.min.y, xzRef.z);
-                    if (Physics.Raycast(castOrigin, Vector3.down, out RaycastHit surfaceHit, 200f, MapLayerMask))
-                        targetPoint = surfaceHit.point; // Map 정확한 표면
-                    else
-                        targetPoint = xzRef; // Map 미감지 시 평면 교차점 사용
-                }
-                else
-                {
-                    targetPoint = ResolveMapPlaneTarget(ray);
-                }
-            }
+            if (_rayCastManagerCollider != null && _rayCastManagerCollider.Raycast(ray, out RaycastHit rcHit, 1000f))
+                targetPoint = rcHit.point;
             else
-            {
-                targetPoint = ResolveMapPlaneTarget(ray);
-            }
+                targetPoint = ResolveMapPlaneTarget(ray); // 폴백
 
             lastThrowTime = Time.time;
 
@@ -432,12 +414,8 @@ namespace SSAFYPlayTime.Game.GhostThrow
                 _cachedRunner = FindAnyObjectByType<NetworkRunner>();
             var runner = _cachedRunner;
             if (runner == null || !runner.IsRunning || !runner.IsServer)
-            {
-                Debug.LogWarning($"[GhostThrow] TrySpawnOnlineFromRequest 실패: runner={runner}, IsRunning={runner?.IsRunning}, IsServer={runner?.IsServer}");
                 return false;
-            }
 
-            Debug.Log($"[GhostThrow] TrySpawnOnlineFromRequest: spawnPos={spawnPos} velocity={velocity}");
             return SpawnOnline(runner, isBanana, spawnPos, velocity);
         }
 
