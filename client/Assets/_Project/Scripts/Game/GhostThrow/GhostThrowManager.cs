@@ -23,9 +23,6 @@ namespace SSAFYPlayTime.Game.GhostThrow
         [Tooltip("타겟에서 카메라 방향으로 스폰 위치를 얼마나 오프셋할지 (m)")]
         public float spawnLaunchOffset = 8f;
 
-        [Header("Ghost Throw Spawn Point")]
-        [Tooltip("사망 후 폭탄/바나나가 발사될 고정 위치. 지정하면 항상 이 위치에서 발사됨.\n비워두면 카메라 방향 자동 계산 방식으로 폴백.")]
-        [SerializeField] private Transform ghostThrowSpawnPoint;
         public LayerMask hitLayer = ~0;
 
         [Header("Bomb Prefabs")]
@@ -46,6 +43,7 @@ namespace SSAFYPlayTime.Game.GhostThrow
         private bool _hasLoggedMissingLocalPlayer;
         private bool controlEnabled = true;
         private bool enableOutOfBoundsKillCheck;
+        private NetworkRunner _cachedRunner;
 
         public bool IsGhostThrowEnabled => _isGhostThrowEnabled;
 
@@ -71,12 +69,6 @@ namespace SSAFYPlayTime.Game.GhostThrow
             enableOutOfBoundsKillCheck = enabled;
         }
 
-        /// <summary>
-        /// 고스트 모드 진입 시 spawnPoint를 null로 설정해 카메라 기반 발사 위치를 사용하게 한다.
-        /// (캐릭터가 0,0,0에 고정된 후에도 카메라 시점에서 발사됨)
-        /// </summary>
-        public void SetGhostThrowSpawnPoint(Transform point) => ghostThrowSpawnPoint = point;
-
         private void Update()
         {
             if (_localPlayerStats == null && _localNetworkPlayer == null)
@@ -87,8 +79,6 @@ namespace SSAFYPlayTime.Game.GhostThrow
             if (!_isGhostThrowEnabled)
                 return;
 
-            // ghostThrowSpawnPoint가 없는 매니저는, 동일 씬에 스폰 포인트가 지정된
-            // 다른 활성 매니저가 있으면 입력을 양보한다. (중복 투척 방지)
             if (!ShouldHandleInput())
                 return;
 
@@ -101,21 +91,6 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
         private bool ShouldHandleInput()
         {
-            // 스폰 포인트가 지정된 매니저는 항상 우선권을 가진다
-            if (ghostThrowSpawnPoint != null)
-                return true;
-
-            // 스폰 포인트가 없는 경우: 이미 활성화된 다른 매니저 중
-            // ghostThrowSpawnPoint가 있는 것이 있으면 그쪽에 양보
-            var allManagers = FindObjectsByType<GhostThrowManager>(FindObjectsSortMode.None);
-            for (var i = 0; i < allManagers.Length; i++)
-            {
-                var other = allManagers[i];
-                if (other == null || other == this) continue;
-                if (other.isActiveAndEnabled && other._isGhostThrowEnabled && other.ghostThrowSpawnPoint != null)
-                    return false;
-            }
-
             return true;
         }
 
@@ -191,6 +166,12 @@ namespace SSAFYPlayTime.Game.GhostThrow
                 return;
             }
 
+            // _localNetworkPlayer가 이미 바인딩된 경우 위에서 처리 완료.
+            // null인 경우(아직 바인딩 전)에만 씬 탐색 폴백을 실행한다.
+            // 매 프레임 FindObjectsByType을 호출하지 않도록 바인딩 완료 시 조기 종료.
+            if (_localNetworkPlayer != null)
+                return;
+
             var allPlayers = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None);
             for (var i = 0; i < allPlayers.Length; i++)
             {
@@ -227,30 +208,36 @@ namespace SSAFYPlayTime.Game.GhostThrow
             }
 
             var ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-            var targetPoint = Physics.Raycast(ray, out RaycastHit hit, 1000f, hitLayer)
-                ? hit.point
-                : ray.GetPoint(100f);
-
-            lastThrowTime = Time.time;
-
-            // 스폰 위치: 고정 스폰 포인트가 있으면 그것을, 없으면 타겟 위 고정 높이에서 발사.
-            // 관전 카메라(공전 고도)를 기준으로 스폰하면 카메라→타겟 거리가 수십 미터가 되어
-            // 포물선 계산 오차가 커지고 목표 지점에 정확히 도달하지 못한다.
-            // 타겟 위 spawnHeight + 카메라 방향으로 spawnForwardOffset 오프셋을 사용하면
-            // 어떤 카메라 위치에서도 스폰-타겟 간 거리가 짧아 정확도가 보장된다.
-            Vector3 spawnPos;
-            if (ghostThrowSpawnPoint != null)
+            Vector3 targetPoint;
+            if (Physics.Raycast(ray, out RaycastHit hit, 1000f, hitLayer))
             {
-                spawnPos = ghostThrowSpawnPoint.position;
+                targetPoint = hit.point;
+            }
+            else if (TryRaycastMapTag(ray, out var mapPoint))
+            {
+                targetPoint = mapPoint;
             }
             else
             {
-                var camDir = (Camera.main.transform.position - targetPoint).normalized;
-                spawnPos = targetPoint + Vector3.up * spawnHeight + camDir * spawnForwardOffset;
+                targetPoint = ResolveMapPlaneTarget(ray);
             }
+
+            lastThrowTime = Time.time;
+
+            // 카메라→타겟 방향의 수평 성분만 사용한다.
+            // 수직 성분을 포함하면 카메라가 위에서 내려다볼수록 camDir.xz → 0 이 되어
+            // dx → 0, 포물선이 수직 낙하로 퇴화하거나 arcHeight에 비해 너무 작아진다.
+            var camToTargetH = Camera.main.transform.position - targetPoint;
+            camToTargetH.y = 0f;
+            var camHorizontalDir = camToTargetH.sqrMagnitude > 0.01f
+                ? camToTargetH.normalized
+                : Vector3.forward; // 카메라가 타겟 바로 위에 있을 때 폴백
+            var spawnPos = targetPoint + Vector3.up * spawnHeight + camHorizontalDir * spawnLaunchOffset;
             var initialVelocity = CalculateParabolicVelocity(spawnPos, targetPoint);
 
-            var runner = FindAnyObjectByType<NetworkRunner>();
+            if (_cachedRunner == null || !_cachedRunner.IsRunning)
+                _cachedRunner = FindAnyObjectByType<NetworkRunner>();
+            var runner = _cachedRunner;
             if (runner != null && runner.IsRunning)
             {
                 // ── 온라인 경로 ──────────────────────────────────────────────
@@ -299,8 +286,13 @@ namespace SSAFYPlayTime.Game.GhostThrow
             // ② 카메라 가시성 제한: frustum top plane 기준으로 정점이 화면 안에 들어오도록 arcHeight를 클램프
             float maxArcForVisibility = ComputeMaxVisibleArcHeight(from, to);
 
-            // ③ 최종 적용: 속도 제약(하한) 우선, 가능하면 가시성 범위(상한) 안으로 제한
-            float effectiveArcHeight = Mathf.Max(minArcForSpeed, Mathf.Min(maxArcForVisibility, arcHeight));
+            // ③ 수평 거리 상한: 호 높이가 수평 이동 거리를 초과하면
+            //    타겟 위 구조물(플랫폼, 오버행 등)에 충돌할 위험이 커진다.
+            float maxArcByDistance = Mathf.Max(1f, dx);
+
+            // ④ 최종 적용: 속도 제약(하한) 우선, 가시성·거리 상한 안으로 제한
+            float effectiveArcHeight = Mathf.Max(minArcForSpeed,
+                Mathf.Min(maxArcForVisibility, Mathf.Min(arcHeight, maxArcByDistance)));
 
             // 원하는 호 높이에서 초기 수직 속도 계산
             float vy0 = Mathf.Sqrt(Mathf.Max(0f, -2f * g * effectiveArcHeight));
@@ -355,9 +347,50 @@ namespace SSAFYPlayTime.Game.GhostThrow
             return Mathf.Max(1f, maxArc);
         }
 
+        /// <summary>
+        /// 레이를 모든 레이어에 쏜 뒤 "Map" 태그 콜라이더에 닿은 첫 번째 지점을 반환한다.
+        /// </summary>
+        private static bool TryRaycastMapTag(Ray ray, out Vector3 point)
+        {
+            var hits = Physics.RaycastAll(ray, 1000f);
+            System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+            foreach (var h in hits)
+            {
+                if (h.collider.CompareTag("Map"))
+                {
+                    point = h.point;
+                    return true;
+                }
+            }
+
+            point = Vector3.zero;
+            return false;
+        }
+
+        /// <summary>
+        /// hitLayer와 Map 태그 레이캐스트 모두 실패했을 때(허공 클릭 등)
+        /// 레이 전방 지점에서 수직 하향 레이캐스트로 Map 태그 바닥을 찾는다.
+        /// 그래도 없으면 ray.GetPoint(50f)를 사용한다.
+        /// </summary>
+        private static Vector3 ResolveMapPlaneTarget(Ray ray)
+        {
+            var sampleOrigin = ray.GetPoint(50f) + Vector3.up * 100f;
+            var downHits = Physics.RaycastAll(sampleOrigin, Vector3.down, 200f);
+            System.Array.Sort(downHits, (a, b) => a.distance.CompareTo(b.distance));
+            foreach (var h in downHits)
+            {
+                if (h.collider.CompareTag("Map"))
+                    return h.point;
+            }
+
+            return ray.GetPoint(50f);
+        }
+
         internal bool TrySpawnOnlineFromRequest(bool isBanana, Vector3 spawnPos, Vector3 velocity)
         {
-            var runner = FindAnyObjectByType<NetworkRunner>();
+            if (_cachedRunner == null || !_cachedRunner.IsRunning)
+                _cachedRunner = FindAnyObjectByType<NetworkRunner>();
+            var runner = _cachedRunner;
             if (runner == null || !runner.IsRunning || !runner.IsServer)
                 return false;
 
