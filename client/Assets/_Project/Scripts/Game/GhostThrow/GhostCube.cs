@@ -48,9 +48,14 @@ namespace SSAFYPlayTime.Game.GhostThrow
         private bool _groundCountdownStarted = false;
         private float _groundCountdownEnd = 0f;
 
+        // 스폰 직후 콜라이더 겹침으로 인한 즉시 폭발 방지용 면역 시간
+        private float _spawnedTime;
+
         // ─── Fusion 네트워크 수명 타이머 ───────────────────────
         public override void Spawned()
         {
+            _spawnedTime = Time.time;
+
             if (HasStateAuthority)
             {
                 LifeTimer = TickTimer.CreateFromSeconds(Runner, lifeTime);
@@ -108,6 +113,8 @@ namespace SSAFYPlayTime.Game.GhostThrow
         {
             if (_hasExploded) return;
             if (_groundCountdownStarted) return; // 이미 카운트다운 중이면 무시
+            // 스폰 직후 콜라이더 겹침으로 인한 즉시 폭발 방지 (100ms 면역)
+            if (Time.time - _spawnedTime < 0.1f) return;
 
             bool hitsPlayer = IsPlayer(collision.gameObject);
 
