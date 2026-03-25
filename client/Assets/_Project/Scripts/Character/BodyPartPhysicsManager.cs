@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text;
 using RootMotion.Dynamics;
 using UnityEngine;
 
@@ -20,6 +21,22 @@ namespace SSAFYPlayTime.Character
         private const float DefaultGrabbedLooseBonus = 0.16f;
         private const float DefaultUnstableLooseBonus = 0.10f;
         private const float DefaultDraggedLooseBonus = 0.08f;
+        private const float PlainStunCollapseTorsoPinFloor = 0.18f;
+        private const float PlainStunCollapseTorsoMuscleFloor = 0.38f;
+        private const float PlainStunCollapseHeadPinFloor = 0.14f;
+        private const float PlainStunCollapseHeadMuscleFloor = 0.25f;
+        private const float PlainStunCollapseArmPinFloor = 0.12f;
+        private const float PlainStunCollapseArmMuscleFloor = 0.22f;
+        private const float PlainStunCollapseHandPinFloor = 0.10f;
+        private const float PlainStunCollapseHandMuscleFloor = 0.18f;
+        private const float PlainStunCollapseLegPinFloor = 0.22f;
+        private const float PlainStunCollapseLegMuscleFloor = 0.30f;
+        private const float PlainStunCollapseTorsoStaticFrictionFloor = 0.52f;
+        private const float PlainStunCollapseTorsoDynamicFrictionFloor = 0.34f;
+        private const float PlainStunCollapseLegStaticFrictionFloor = 0.85f;
+        private const float PlainStunCollapseLegDynamicFrictionFloor = 0.58f;
+        private const float PlainStunStaticFrictionFloor = 0.70f;
+        private const float PlainStunDynamicFrictionFloor = 0.46f;
 
         [Header("References")]
         [SerializeField] private BodyPartPhysicsProfile profile;
@@ -47,6 +64,9 @@ namespace SSAFYPlayTime.Character
         [SerializeField, Range(0f, 0.5f)] private float unstableLooseBonus = 0.10f;
         [SerializeField, Range(0f, 0.5f)] private float draggedLooseBonus = 0.08f;
 
+        [Header("Limp Structural Support")]
+        [SerializeField] private bool enableLimpStructuralSupport = true;
+
         private BodyPartPhysicsProfile.CharacterPhysicsState _currentState = BodyPartPhysicsProfile.CharacterPhysicsState.Normal;
         private BodyPartPhysicsProfile.CharacterPhysicsState _targetState = BodyPartPhysicsProfile.CharacterPhysicsState.Normal;
         public BodyPartPhysicsProfile.CharacterPhysicsState CurrentState => _currentState;
@@ -63,6 +83,7 @@ namespace SSAFYPlayTime.Character
         private Quaternion[] _restPoseLocalRotations;
         private bool _restPoseCaptured;
         private bool _carriedPoseRestoreActive;
+        private bool _carriedPoseRestoreBypassLogged;
         private float _carriedPoseRestoreTimer;
         private const float CarriedPoseRestoreDuration = 0.4f;
         private const float CarriedPoseRestoreLimbStrength = 0.7f;
@@ -125,7 +146,19 @@ namespace SSAFYPlayTime.Character
             if (!_initialized)
                 return;
 
+            var previousCurrentState = _currentState;
+            var previousTargetState = _targetState;
             SyncStateFromNetworkPlayer();
+
+            if (networkPlayer != null &&
+                previousTargetState != _targetState &&
+                networkPlayer.IsStunDiagnosticsWindowActive())
+            {
+                networkPlayer.TraceStunDiagnosticSnapshot(
+                    "BodyPart.TargetStateChanged",
+                    $"bodyTarget={previousTargetState}->{_targetState}",
+                    force: true);
+            }
 
             if (_currentState != _targetState)
             {
@@ -144,6 +177,19 @@ namespace SSAFYPlayTime.Character
             TickCombatFlinch(Time.deltaTime);
             ApplyAnchorGrabOverlay();
             TickCarriedPoseRestore(Time.deltaTime);
+
+            if (networkPlayer != null &&
+                previousCurrentState != _currentState &&
+                networkPlayer.IsStunDiagnosticsWindowActive())
+            {
+                networkPlayer.TraceStunDiagnosticSnapshot(
+                    "BodyPart.CurrentStateChanged",
+                    $"bodyCurrent={previousCurrentState}->{_currentState}",
+                    force: true);
+            }
+
+            if (networkPlayer != null && networkPlayer.IsStunDiagnosticsWindowActive())
+                networkPlayer.TraceStunDiagnosticSnapshot("BodyPart.Sample");
         }
 
         public void SetState(BodyPartPhysicsProfile.CharacterPhysicsState newState)
@@ -302,7 +348,10 @@ namespace SSAFYPlayTime.Character
 
             for (var i = 0; i < count; i++)
             {
-                var settings = BodyPartPhysicsProfile.GetSettingsForCategory(stateProfile, _muscleCategories[i]);
+                var settings = ResolveEffectiveSettings(
+                    state,
+                    _muscleCategories[i],
+                    BodyPartPhysicsProfile.GetSettingsForCategory(stateProfile, _muscleCategories[i]));
                 ApplyToMuscle(i, settings);
                 _currentPinWeights[i] = settings.pinWeight;
                 _currentMuscleWeights[i] = settings.muscleWeight;
@@ -321,7 +370,10 @@ namespace SSAFYPlayTime.Character
 
             for (var i = 0; i < count; i++)
             {
-                var target = BodyPartPhysicsProfile.GetSettingsForCategory(targetProfile, _muscleCategories[i]);
+                var target = ResolveEffectiveSettings(
+                    _targetState,
+                    _muscleCategories[i],
+                    BodyPartPhysicsProfile.GetSettingsForCategory(targetProfile, _muscleCategories[i]));
 
                 _currentPinWeights[i] = Mathf.Lerp(_currentPinWeights[i], target.pinWeight, t);
                 _currentMuscleWeights[i] = Mathf.Lerp(_currentMuscleWeights[i], target.muscleWeight, t);
@@ -415,16 +467,28 @@ namespace SSAFYPlayTime.Character
         private static bool IsShapeCriticalState(BodyPartPhysicsProfile.CharacterPhysicsState state)
         {
             return state == BodyPartPhysicsProfile.CharacterPhysicsState.Grabbed ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.Stunned ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.SettledStunned ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.DraggedStunned ||
                    state == BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned ||
                    state == BodyPartPhysicsProfile.CharacterPhysicsState.CarryingStunned ||
                    state == BodyPartPhysicsProfile.CharacterPhysicsState.Recovering;
         }
 
+        private static bool IsDownedState(BodyPartPhysicsProfile.CharacterPhysicsState state)
+        {
+            return state == BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.Stunned ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.SettledStunned ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.DraggedStunned ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned ||
+                   state == BodyPartPhysicsProfile.CharacterPhysicsState.Recovering;
+        }
+
         private static bool ShouldApplyStateImmediately(BodyPartPhysicsProfile.CharacterPhysicsState state)
         {
-            return IsShapeCriticalState(state) ||
-                   state == BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse ||
-                   state == BodyPartPhysicsProfile.CharacterPhysicsState.SettledStunned;
+            return IsShapeCriticalState(state);
         }
 
         private float UpdateWobbleAmount(float dt)
@@ -467,6 +531,91 @@ namespace SSAFYPlayTime.Character
             _lastMotionPosition = currentPosition;
             _lastMotionYaw = currentYaw;
             return _wobbleAmount;
+        }
+
+        private BodyPartPhysicsProfile.BodyPartSettings ResolveEffectiveSettings(
+            BodyPartPhysicsProfile.CharacterPhysicsState state,
+            BodyPartPhysicsProfile.BodyPartCategory category,
+            BodyPartPhysicsProfile.BodyPartSettings settings)
+        {
+            if (!enableLimpStructuralSupport || !BodyPartPhysicsProfile.UsesLimpStructuralSupport(state))
+                return settings;
+
+            if (state == BodyPartPhysicsProfile.CharacterPhysicsState.Recovering)
+            {
+                // Recovery already ramps back through its own stronger profile. Keep this path neutral.
+                return settings;
+            }
+
+            if (!BodyPartPhysicsProfile.IsPlainStunnedState(state))
+                return settings;
+
+            var collapsePhase = state == BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse;
+            var pinSupportScale = state switch
+            {
+                BodyPartPhysicsProfile.CharacterPhysicsState.Stunned => 1.08f,
+                BodyPartPhysicsProfile.CharacterPhysicsState.SettledStunned => 1.16f,
+                _ => 1f
+            };
+            var muscleSupportScale = state switch
+            {
+                BodyPartPhysicsProfile.CharacterPhysicsState.Stunned => 1.00f,
+                BodyPartPhysicsProfile.CharacterPhysicsState.SettledStunned => 1.05f,
+                _ => 1f
+            };
+            var frictionScale = state switch
+            {
+                BodyPartPhysicsProfile.CharacterPhysicsState.Stunned => 1.10f,
+                BodyPartPhysicsProfile.CharacterPhysicsState.SettledStunned => 1.25f,
+                _ => 1f
+            };
+            switch (category)
+            {
+                case BodyPartPhysicsProfile.BodyPartCategory.Torso:
+                    settings.pinWeight = Mathf.Max(settings.pinWeight, PlainStunCollapseTorsoPinFloor * pinSupportScale);
+                    settings.muscleWeight = Mathf.Max(settings.muscleWeight, PlainStunCollapseTorsoMuscleFloor * muscleSupportScale);
+                    settings.staticFriction = Mathf.Max(settings.staticFriction,
+                        collapsePhase
+                            ? PlainStunCollapseTorsoStaticFrictionFloor
+                            : PlainStunStaticFrictionFloor * frictionScale);
+                    settings.dynamicFriction = Mathf.Max(settings.dynamicFriction,
+                        collapsePhase
+                            ? PlainStunCollapseTorsoDynamicFrictionFloor
+                            : PlainStunDynamicFrictionFloor * frictionScale);
+                    settings.frictionCombine = collapsePhase
+                        ? PhysicMaterialCombine.Average
+                        : settings.frictionCombine;
+                    break;
+                case BodyPartPhysicsProfile.BodyPartCategory.Head:
+                    settings.pinWeight = Mathf.Max(settings.pinWeight, PlainStunCollapseHeadPinFloor * pinSupportScale);
+                    settings.muscleWeight = Mathf.Max(settings.muscleWeight, PlainStunCollapseHeadMuscleFloor * muscleSupportScale);
+                    break;
+                case BodyPartPhysicsProfile.BodyPartCategory.Arm:
+                    settings.pinWeight = Mathf.Max(settings.pinWeight, PlainStunCollapseArmPinFloor * pinSupportScale);
+                    settings.muscleWeight = Mathf.Max(settings.muscleWeight, PlainStunCollapseArmMuscleFloor * muscleSupportScale);
+                    break;
+                case BodyPartPhysicsProfile.BodyPartCategory.Hand:
+                    settings.pinWeight = Mathf.Max(settings.pinWeight, PlainStunCollapseHandPinFloor * pinSupportScale);
+                    settings.muscleWeight = Mathf.Max(settings.muscleWeight, PlainStunCollapseHandMuscleFloor * muscleSupportScale);
+                    break;
+                case BodyPartPhysicsProfile.BodyPartCategory.Leg:
+                    settings.pinWeight = Mathf.Max(settings.pinWeight, PlainStunCollapseLegPinFloor * pinSupportScale);
+                    settings.muscleWeight = Mathf.Max(settings.muscleWeight, PlainStunCollapseLegMuscleFloor * muscleSupportScale);
+                    settings.staticFriction = Mathf.Max(settings.staticFriction,
+                        collapsePhase
+                            ? PlainStunCollapseLegStaticFrictionFloor
+                            : PlainStunStaticFrictionFloor * frictionScale);
+                    settings.dynamicFriction = Mathf.Max(settings.dynamicFriction,
+                        collapsePhase
+                            ? PlainStunCollapseLegDynamicFrictionFloor
+                            : PlainStunDynamicFrictionFloor * frictionScale);
+                    settings.frictionCombine = collapsePhase
+                        ? PhysicMaterialCombine.Average
+                        : settings.frictionCombine;
+                    break;
+            }
+
+            return settings;
         }
 
         private void ApplyToMuscle(int index, BodyPartPhysicsProfile.BodyPartSettings settings)
@@ -554,9 +703,12 @@ namespace SSAFYPlayTime.Character
 
         private void ApplyRootDriveMaterials(BodyPartPhysicsProfile.StateProfile stateProfile)
         {
-            var settings = BodyPartPhysicsProfile.GetSettingsForCategory(
+            var settings = ResolveEffectiveSettings(
+                _targetState,
+                BodyPartPhysicsProfile.BodyPartCategory.Leg,
+                BodyPartPhysicsProfile.GetSettingsForCategory(
                 stateProfile,
-                BodyPartPhysicsProfile.BodyPartCategory.Leg);
+                BodyPartPhysicsProfile.BodyPartCategory.Leg));
             ApplyMaterialSettings(_rootDriveMaterials, settings);
         }
 
@@ -582,6 +734,9 @@ namespace SSAFYPlayTime.Character
         public void ArmCombatFlinch(Vector3 hitLocalOffset, float impactMagnitude, float duration)
         {
             if (puppetMaster == null || puppetMaster.muscles == null || !_initialized)
+                return;
+
+            if (IsDownedState(_currentState) || IsDownedState(_targetState))
                 return;
 
             var count = puppetMaster.muscles.Length;
@@ -644,6 +799,13 @@ namespace SSAFYPlayTime.Character
         {
             if (!_combatFlinchActive)
                 return;
+
+            if (IsDownedState(_currentState) || IsDownedState(_targetState))
+            {
+                _combatFlinchActive = false;
+                _combatFlinchTimer = 0f;
+                return;
+            }
 
             _combatFlinchTimer -= dt;
             if (_combatFlinchTimer <= 0f)
@@ -740,6 +902,9 @@ namespace SSAFYPlayTime.Character
             if (_anchorGrabMultipliers == null || _activeAnchorGrabs.Count == 0)
                 return;
 
+            if (IsDownedState(_currentState) || IsDownedState(_targetState))
+                return;
+
             var count = puppetMaster.muscles.Length;
             for (int i = 0; i < count; i++)
             {
@@ -807,6 +972,27 @@ namespace SSAFYPlayTime.Character
             if (!_restPoseCaptured || puppetMaster == null)
                 return;
 
+            ResolveNetworkPlayer();
+            if (networkPlayer != null && networkPlayer.UsesAnimatedVisualPresentationRig())
+            {
+                if (!_carriedPoseRestoreBypassLogged &&
+                    _targetState == BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned &&
+                    networkPlayer.IsStunDiagnosticsWindowActive())
+                {
+                    networkPlayer.TraceStunDiagnosticSnapshot(
+                        "BodyPart.CarriedPoseRestoreBypass",
+                        "visualOnlyPresentation=1 directTargetWrites=skipped",
+                        force: true);
+                    _carriedPoseRestoreBypassLogged = true;
+                }
+
+                _carriedPoseRestoreActive = false;
+                _carriedPoseRestoreTimer = 0f;
+                return;
+            }
+
+            _carriedPoseRestoreBypassLogged = false;
+
             var isCarriedStunned = _targetState == BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned;
 
             if (isCarriedStunned && !_carriedPoseRestoreActive)
@@ -849,6 +1035,75 @@ namespace SSAFYPlayTime.Character
                     _restPoseLocalRotations[i],
                     blendWeight);
             }
+        }
+
+        internal string BuildStunDiagnosticsSummary()
+        {
+            if (puppetMaster == null || !_initialized || _muscleCategories == null)
+            {
+                return $"body(state={_currentState}->{_targetState},init={(_initialized ? 1 : 0)})";
+            }
+
+            var preserveShape = IsShapeCriticalState(_currentState) || IsShapeCriticalState(_targetState);
+            var visualOnlyCarryBypass = networkPlayer != null &&
+                                        networkPlayer.UsesAnimatedVisualPresentationRig() &&
+                                        _targetState == BodyPartPhysicsProfile.CharacterPhysicsState.CarriedStunned;
+
+            var summary = new StringBuilder(256);
+            summary.Append("body(state=")
+                .Append(_currentState)
+                .Append("->")
+                .Append(_targetState)
+                .Append(",preserve=")
+                .Append(preserveShape ? 1 : 0)
+                .Append(",wobble=").Append(_wobbleAmount.ToString("F2"))
+                .Append(",flinch=").Append(_combatFlinchActive ? 1 : 0)
+                .Append(",anchors=").Append(_activeAnchorGrabs.Count)
+                .Append(",carryRestore=").Append(_carriedPoseRestoreActive ? 1 : 0)
+                .Append(",carryTimer=").Append(_carriedPoseRestoreTimer.ToString("F2"))
+                .Append(",carryBypass=").Append(visualOnlyCarryBypass ? 1 : 0)
+                .Append(')');
+
+            AppendCategorySummary(summary, "torso", BodyPartPhysicsProfile.BodyPartCategory.Torso);
+            AppendCategorySummary(summary, "head", BodyPartPhysicsProfile.BodyPartCategory.Head);
+            AppendCategorySummary(summary, "arm", BodyPartPhysicsProfile.BodyPartCategory.Arm);
+            AppendCategorySummary(summary, "hand", BodyPartPhysicsProfile.BodyPartCategory.Hand);
+            return summary.ToString();
+        }
+
+        private void AppendCategorySummary(
+            StringBuilder summary,
+            string label,
+            BodyPartPhysicsProfile.BodyPartCategory category)
+        {
+            var count = 0;
+            var totalPin = 0f;
+            var totalMuscle = 0f;
+            var totalMapping = 0f;
+
+            for (var i = 0; i < puppetMaster.muscles.Length; i++)
+            {
+                if (_muscleCategories[i] != category)
+                    continue;
+
+                totalPin += _currentPinWeights != null && i < _currentPinWeights.Length ? _currentPinWeights[i] : puppetMaster.muscles[i].props.pinWeight;
+                totalMuscle += _currentMuscleWeights != null && i < _currentMuscleWeights.Length ? _currentMuscleWeights[i] : puppetMaster.muscles[i].props.muscleWeight;
+                totalMapping += puppetMaster.muscles[i].props.mappingWeight;
+                count++;
+            }
+
+            if (count <= 0)
+                return;
+
+            summary.Append(' ')
+                .Append(label)
+                .Append("(p=")
+                .Append((totalPin / count).ToString("F2"))
+                .Append(",m=")
+                .Append((totalMuscle / count).ToString("F2"))
+                .Append(",map=")
+                .Append((totalMapping / count).ToString("F2"))
+                .Append(')');
         }
 
         private static BodyPartPhysicsProfile.CharacterPhysicsState MapPhysicalPhaseToState(NetworkPlayer.PhysicalPhase phase)

@@ -18,10 +18,18 @@ namespace SSAFYPlayTime.Character
         [Header("Anti-Stretch")]
         [SerializeField] private float handSlack = 0.04f;
         [SerializeField] private float footSlack = 0.05f;
+        [SerializeField] private float headToChestSlack = 0.03f;
+        [SerializeField] private float chestToHipsSlack = 0.04f;
+        [SerializeField] private float upperArmToChestSlack = 0.04f;
+        [SerializeField] private float upperLegToHipsSlack = 0.05f;
         [SerializeField] private float limitSpring = 80f;
         [SerializeField] private float limitDamper = 8f;
         [SerializeField] private float projectionDistance = 0.08f;
         [SerializeField] private float projectionAngle = 6f;
+        [SerializeField] private float stunnedLimpLimitSpringMultiplier = 2.4f;
+        [SerializeField] private float stunnedLimpLimitDamperMultiplier = 3.0f;
+        [SerializeField] private float recoveringLimitSpringMultiplier = 1.35f;
+        [SerializeField] private float recoveringLimitDamperMultiplier = 1.65f;
         [SerializeField] private bool applyDuringRecovering = true;
 
         [Header("Core Grab Drive")]
@@ -37,15 +45,26 @@ namespace SSAFYPlayTime.Character
         [SerializeField] private float carriedVictimCoreDamperMultiplier = 1.35f;
         [SerializeField] private float carriedVictimLimbSpringMultiplier = 1.5f;
         [SerializeField] private float carriedVictimLimbDamperMultiplier = 1.3f;
+        [SerializeField] private float stunnedLimpCoreSpringMultiplier = 0f;
+        [SerializeField] private float stunnedLimpCoreDamperMultiplier = 0.20f;
+        [SerializeField] private float stunnedLimpLimbSpringMultiplier = 0f;
+        [SerializeField] private float stunnedLimpLimbDamperMultiplier = 0.10f;
+        [SerializeField] private float recoveringCoreSpringMultiplier = 0.18f;
+        [SerializeField] private float recoveringCoreDamperMultiplier = 0.92f;
+        [SerializeField] private float recoveringLimbSpringMultiplier = 0.10f;
+        [SerializeField] private float recoveringLimbDamperMultiplier = 0.52f;
         [SerializeField] private bool verboseWarnings;
 
         private RuntimeLink[] _links;
+        private RuntimeLink[] _plainStunStructureLinks;
         private RuntimeDriveLink[] _coreDriveLinks;
         private RuntimeDriveLink[] _limbDriveLinks;
         private bool _resolved;
+        private bool _plainStructureResolved;
         private bool _coreDriveResolved;
         private bool _limbDriveResolved;
         private bool _active;
+        private bool _plainStructureActive;
         private bool _warnedMissingTargets;
         private bool _warnedMissingCoreJoints;
         private CoreDriveMode _currentCoreDriveMode;
@@ -60,7 +79,9 @@ namespace SSAFYPlayTime.Character
             Carrying = 2,
             DualCarryCarrier = 3,
             GrabbedVictim = 4,
-            CarriedVictim = 5
+            CarriedVictim = 5,
+            StunnedLimp = 6,
+            Recovering = 7
         }
 
         private sealed class RuntimeLink
@@ -91,9 +112,11 @@ namespace SSAFYPlayTime.Character
         {
             ResolveReferences();
             BuildLinkDefinitions();
+            BuildPlainStunStructureDefinitions();
             BuildCoreDriveDefinitions();
             BuildLimbDriveDefinitions();
             TryResolveLinkBodies();
+            TryResolvePlainStunStructureBodies();
             TryResolveCoreDriveJoints();
             TryResolveLimbDriveJoints();
         }
@@ -104,6 +127,7 @@ namespace SSAFYPlayTime.Character
                 return;
 
             RefreshCoreDrive(force: true);
+            RefreshLinkJointStrengths();
         }
 
         private void NormalizeTuning()
@@ -121,6 +145,8 @@ namespace SSAFYPlayTime.Character
             {
                 if (_active)
                     DisableAntiStretch();
+                if (_plainStructureActive)
+                    DisablePlainStunStructure();
 
                 RestoreCoreDrive();
                 return;
@@ -128,6 +154,8 @@ namespace SSAFYPlayTime.Character
 
             if (!_resolved)
                 TryResolveLinkBodies();
+            if (!_plainStructureResolved)
+                TryResolvePlainStunStructureBodies();
 
             if (!_coreDriveResolved)
                 TryResolveCoreDriveJoints();
@@ -141,18 +169,27 @@ namespace SSAFYPlayTime.Character
             else if (!shouldEnable && _active)
                 DisableAntiStretch();
 
+            var shouldEnablePlainStructure = ShouldEnablePlainStunStructure();
+            if (shouldEnablePlainStructure && !_plainStructureActive)
+                EnablePlainStunStructure();
+            else if (!shouldEnablePlainStructure && _plainStructureActive)
+                DisablePlainStunStructure();
+
             RefreshCoreDrive(force: false);
+            RefreshLinkJointStrengths();
         }
 
         private void OnDisable()
         {
             DisableAntiStretch();
+            DisablePlainStunStructure();
             RestoreCoreDrive();
         }
 
         private void OnDestroy()
         {
             DisableAntiStretch();
+            DisablePlainStunStructure();
             RestoreCoreDrive();
         }
 
@@ -257,6 +294,8 @@ namespace SSAFYPlayTime.Character
                 case NetworkPlayer.PhysicalPhase.Dragged:
                 case NetworkPlayer.PhysicalPhase.StunnedCollapse:
                 case NetworkPlayer.PhysicalPhase.Stunned:
+                case NetworkPlayer.PhysicalPhase.SettledStunned:
+                case NetworkPlayer.PhysicalPhase.DraggedStunned:
                 case NetworkPlayer.PhysicalPhase.BeingCarriedStunned:
                     return true;
                 case NetworkPlayer.PhysicalPhase.Recovering:
@@ -264,6 +303,21 @@ namespace SSAFYPlayTime.Character
                 default:
                     return false;
             }
+        }
+
+        private bool ShouldEnablePlainStunStructure()
+        {
+            if (networkPlayer == null)
+                return false;
+
+            return networkPlayer.GetPhysicalPhase() switch
+            {
+                NetworkPlayer.PhysicalPhase.StunnedCollapse => true,
+                NetworkPlayer.PhysicalPhase.Stunned => true,
+                NetworkPlayer.PhysicalPhase.SettledStunned => true,
+                NetworkPlayer.PhysicalPhase.Recovering => applyDuringRecovering,
+                _ => false
+            };
         }
 
         private CoreDriveMode ResolveCoreDriveMode()
@@ -280,7 +334,29 @@ namespace SSAFYPlayTime.Character
                 NetworkPlayer.PhysicalPhase.BeingGrabbed => CoreDriveMode.GrabbedVictim,
                 NetworkPlayer.PhysicalPhase.Dragged => CoreDriveMode.GrabbedVictim,
                 NetworkPlayer.PhysicalPhase.BeingCarriedStunned => CoreDriveMode.CarriedVictim,
+                NetworkPlayer.PhysicalPhase.StunnedCollapse => CoreDriveMode.StunnedLimp,
+                NetworkPlayer.PhysicalPhase.Stunned => CoreDriveMode.StunnedLimp,
+                NetworkPlayer.PhysicalPhase.SettledStunned => CoreDriveMode.StunnedLimp,
+                NetworkPlayer.PhysicalPhase.Recovering => applyDuringRecovering
+                    ? CoreDriveMode.Recovering
+                    : CoreDriveMode.Off,
                 _ => CoreDriveMode.Off
+            };
+        }
+
+        private void BuildPlainStunStructureDefinitions()
+        {
+            if (_plainStunStructureLinks != null && _plainStunStructureLinks.Length == 6)
+                return;
+
+            _plainStunStructureLinks = new[]
+            {
+                CreateLink("HeadToChest", new[] { "Head" }, new[] { "Chest", "Spine2", "Spine1", "Neck" }, headToChestSlack),
+                CreateLink("ChestToHips", new[] { "Chest", "Spine2" }, new[] { "Hips", "Pelvis", "Spine1" }, chestToHipsSlack),
+                CreateLink("LeftUpperArmToChest", new[] { "LeftUpperArm", "LeftArm" }, new[] { "Chest", "Spine2", "Spine1" }, upperArmToChestSlack),
+                CreateLink("RightUpperArmToChest", new[] { "RightUpperArm", "RightArm" }, new[] { "Chest", "Spine2", "Spine1" }, upperArmToChestSlack),
+                CreateLink("LeftUpperLegToHips", new[] { "LeftUpperLeg", "LeftThigh" }, new[] { "Hips", "Pelvis", "Spine1" }, upperLegToHipsSlack),
+                CreateLink("RightUpperLegToHips", new[] { "RightUpperLeg", "RightThigh" }, new[] { "Hips", "Pelvis", "Spine1" }, upperLegToHipsSlack)
             };
         }
 
@@ -311,11 +387,27 @@ namespace SSAFYPlayTime.Character
                 BuildLinkDefinitions();
 
             ResolveReferences();
+            _resolved = ResolveLinks(_links, warnIfMissing: true);
+        }
+
+        private void TryResolvePlainStunStructureBodies()
+        {
+            if (_plainStunStructureLinks == null || _plainStunStructureLinks.Length == 0)
+                BuildPlainStunStructureDefinitions();
+
+            ResolveReferences();
+            _plainStructureResolved = ResolveLinks(_plainStunStructureLinks, warnIfMissing: false);
+        }
+
+        private bool ResolveLinks(RuntimeLink[] links, bool warnIfMissing)
+        {
+            if (links == null || links.Length == 0)
+                return false;
 
             var resolvedCount = 0;
-            for (var i = 0; i < _links.Length; i++)
+            for (var i = 0; i < links.Length; i++)
             {
-                var link = _links[i];
+                var link = links[i];
                 if (link == null)
                     continue;
 
@@ -331,12 +423,14 @@ namespace SSAFYPlayTime.Character
                     resolvedCount++;
             }
 
-            _resolved = resolvedCount == _links.Length;
-            if (!_resolved && verboseWarnings && !_warnedMissingTargets)
+            var resolved = resolvedCount == links.Length;
+            if (!resolved && warnIfMissing && verboseWarnings && !_warnedMissingTargets)
             {
-                Debug.LogWarning($"[GrabAntiStretchController] Missing anti-stretch bodies on {name}. resolved={resolvedCount}/{_links.Length}");
+                Debug.LogWarning($"[GrabAntiStretchController] Missing anti-stretch bodies on {name}. resolved={resolvedCount}/{links.Length}");
                 _warnedMissingTargets = true;
             }
+
+            return resolved;
         }
 
         private void TryResolveCoreDriveJoints()
@@ -573,6 +667,20 @@ namespace SSAFYPlayTime.Character
             _active = true;
         }
 
+        private void EnablePlainStunStructure()
+        {
+            if (_plainStunStructureLinks == null)
+                return;
+
+            if (!_plainStructureResolved)
+                TryResolvePlainStunStructureBodies();
+
+            for (var i = 0; i < _plainStunStructureLinks.Length; i++)
+                EnsureJoint(_plainStunStructureLinks[i]);
+
+            _plainStructureActive = true;
+        }
+
         private void DisableAntiStretch()
         {
             if (_links == null)
@@ -601,6 +709,27 @@ namespace SSAFYPlayTime.Character
             }
 
             _active = false;
+        }
+
+        private void DisablePlainStunStructure()
+        {
+            if (_plainStunStructureLinks == null)
+            {
+                _plainStructureActive = false;
+                return;
+            }
+
+            for (var i = 0; i < _plainStunStructureLinks.Length; i++)
+            {
+                var joint = _plainStunStructureLinks[i]?.joint;
+                if (joint == null)
+                    continue;
+
+                Destroy(joint);
+                _plainStunStructureLinks[i].joint = null;
+            }
+
+            _plainStructureActive = false;
         }
 
         private void EnsureJoint(RuntimeLink link)
@@ -642,6 +771,62 @@ namespace SSAFYPlayTime.Character
             link.joint = joint;
         }
 
+        private void RefreshLinkJointStrengths()
+        {
+            ApplyLinkSpringScale(_links);
+            ApplyLinkSpringScale(_plainStunStructureLinks);
+
+            for (var i = 0; i < _dynamicGrabLinks.Count; i++)
+                ApplyLinkSpringScale(_dynamicGrabLinks[i]);
+        }
+
+        private void ApplyLinkSpringScale(RuntimeLink[] links)
+        {
+            if (links == null)
+                return;
+
+            for (var i = 0; i < links.Length; i++)
+                ApplyLinkSpringScale(links[i]);
+        }
+
+        private void ApplyLinkSpringScale(RuntimeLink link)
+        {
+            if (link?.joint == null)
+                return;
+
+            ResolveLinkSpringMultipliers(out var springMultiplier, out var damperMultiplier);
+            var spring = link.joint.linearLimitSpring;
+            spring.spring = limitSpring * springMultiplier;
+            spring.damper = limitDamper * damperMultiplier;
+            link.joint.linearLimitSpring = spring;
+        }
+
+        private void ResolveLinkSpringMultipliers(out float springMultiplier, out float damperMultiplier)
+        {
+            springMultiplier = 1f;
+            damperMultiplier = 1f;
+
+            if (networkPlayer == null)
+                return;
+
+            switch (networkPlayer.GetPhysicalPhase())
+            {
+                case NetworkPlayer.PhysicalPhase.StunnedCollapse:
+                case NetworkPlayer.PhysicalPhase.Stunned:
+                case NetworkPlayer.PhysicalPhase.SettledStunned:
+                    springMultiplier = stunnedLimpLimitSpringMultiplier;
+                    damperMultiplier = stunnedLimpLimitDamperMultiplier;
+                    return;
+                case NetworkPlayer.PhysicalPhase.Recovering:
+                    if (applyDuringRecovering)
+                    {
+                        springMultiplier = recoveringLimitSpringMultiplier;
+                        damperMultiplier = recoveringLimitDamperMultiplier;
+                    }
+                    return;
+            }
+        }
+
         private void CacheOriginalDrive(RuntimeDriveLink link)
         {
             if (link == null || link.joint == null || link.cachedOriginal)
@@ -657,30 +842,20 @@ namespace SSAFYPlayTime.Character
         {
             ResolveCoreDriveMultipliers(mode, out var springMultiplier, out var damperMultiplier);
 
-            for (var i = 0; i < _coreDriveLinks.Length; i++)
-            {
-                var link = _coreDriveLinks[i];
-                if (link == null || link.joint == null || !link.cachedOriginal)
-                    continue;
-
-                link.joint.slerpDrive = ScaleDrive(link.originalSlerpDrive, springMultiplier, damperMultiplier);
-                link.joint.angularXDrive = ScaleDrive(link.originalAngularXDrive, springMultiplier, damperMultiplier);
-                link.joint.angularYZDrive = ScaleDrive(link.originalAngularYZDrive, springMultiplier, damperMultiplier);
-            }
+            ApplyDriveScale(_coreDriveLinks, springMultiplier, damperMultiplier);
 
             // CarriedVictim 모드에서 팔다리 관절도 보강
             if (mode == CoreDriveMode.CarriedVictim && _limbDriveLinks != null && _limbDriveResolved)
             {
-                for (var i = 0; i < _limbDriveLinks.Length; i++)
-                {
-                    var link = _limbDriveLinks[i];
-                    if (link == null || link.joint == null || !link.cachedOriginal)
-                        continue;
-
-                    link.joint.slerpDrive = ScaleDrive(link.originalSlerpDrive, carriedVictimLimbSpringMultiplier, carriedVictimLimbDamperMultiplier);
-                    link.joint.angularXDrive = ScaleDrive(link.originalAngularXDrive, carriedVictimLimbSpringMultiplier, carriedVictimLimbDamperMultiplier);
-                    link.joint.angularYZDrive = ScaleDrive(link.originalAngularYZDrive, carriedVictimLimbSpringMultiplier, carriedVictimLimbDamperMultiplier);
-                }
+                ApplyDriveScale(_limbDriveLinks, carriedVictimLimbSpringMultiplier, carriedVictimLimbDamperMultiplier);
+            }
+            else if (mode == CoreDriveMode.StunnedLimp && _limbDriveLinks != null && _limbDriveResolved)
+            {
+                ApplyDriveScale(_limbDriveLinks, stunnedLimpLimbSpringMultiplier, stunnedLimpLimbDamperMultiplier);
+            }
+            else if (mode == CoreDriveMode.Recovering && _limbDriveLinks != null && _limbDriveResolved)
+            {
+                ApplyDriveScale(_limbDriveLinks, recoveringLimbSpringMultiplier, recoveringLimbDamperMultiplier);
             }
 
             _currentCoreDriveMode = mode;
@@ -720,6 +895,23 @@ namespace SSAFYPlayTime.Character
             _currentCoreDriveMode = CoreDriveMode.Off;
         }
 
+        private static void ApplyDriveScale(RuntimeDriveLink[] links, float springMultiplier, float damperMultiplier)
+        {
+            if (links == null)
+                return;
+
+            for (var i = 0; i < links.Length; i++)
+            {
+                var link = links[i];
+                if (link == null || link.joint == null || !link.cachedOriginal)
+                    continue;
+
+                link.joint.slerpDrive = ScaleDrive(link.originalSlerpDrive, springMultiplier, damperMultiplier);
+                link.joint.angularXDrive = ScaleDrive(link.originalAngularXDrive, springMultiplier, damperMultiplier);
+                link.joint.angularYZDrive = ScaleDrive(link.originalAngularYZDrive, springMultiplier, damperMultiplier);
+            }
+        }
+
         private void ResolveCoreDriveMultipliers(CoreDriveMode mode, out float springMultiplier, out float damperMultiplier)
         {
             switch (mode)
@@ -742,6 +934,16 @@ namespace SSAFYPlayTime.Character
                 case CoreDriveMode.CarriedVictim:
                     springMultiplier = carriedVictimCoreSpringMultiplier;
                     damperMultiplier = carriedVictimCoreDamperMultiplier;
+                    break;
+
+                case CoreDriveMode.StunnedLimp:
+                    springMultiplier = stunnedLimpCoreSpringMultiplier;
+                    damperMultiplier = stunnedLimpCoreDamperMultiplier;
+                    break;
+
+                case CoreDriveMode.Recovering:
+                    springMultiplier = recoveringCoreSpringMultiplier;
+                    damperMultiplier = recoveringCoreDamperMultiplier;
                     break;
 
                 default:
