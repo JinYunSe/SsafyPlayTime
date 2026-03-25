@@ -25,6 +25,8 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     const string UpperBodyIdleState = "UpperBodyIdle";
     const string MovementSpeedParameter = "movementSpeed";
     const string IsSprintingParameter = "isSprinting";
+    const float AerialKickEndPoseHoldMaxDuration = 4.00f;
+    const float AerialKickEndPoseHoldExtensionDuration = 0.75f;
 
     [SerializeField]
     Animator animator;
@@ -39,10 +41,10 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     float grabHoldThreshold = 0.15f;
 
     [SerializeField]
-    float attackLockDuration = 0.08f;
+    float attackLockDuration = 0.11f;
 
     [SerializeField]
-    float attackVisualDuration = 0.3f;
+    float attackVisualDuration = 0.4f;
 
     [SerializeField]
     float throwLockDuration = 0.85f;
@@ -64,6 +66,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     NetworkPlayer networkPlayer;
     CharacterGrabController characterGrabController;
     float attackButtonPressedAt = -1f;
+    float nextOwnerProxyAerialKickPredictionAt = float.NegativeInfinity;
     float actionLockedUntil;
     float upperBodyStateVisibleUntil;
     bool isGrabPoseActive;
@@ -98,6 +101,8 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     PlayableGraph aerialKickGraph;
     AnimationClipPlayable aerialKickPlayable;
     AnimationPlayableOutput aerialKickOutput;
+    bool isAerialKickEndPoseHeld;
+    float aerialKickEndPoseForceReleaseTime = float.NegativeInfinity;
     PlayableGraph recoveryGraph;
     AnimationClipPlayable recoveryPlayable;
     AnimationPlayableOutput recoveryOutput;
@@ -180,7 +185,10 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         }
 
         if (isRecoveryPhase && isAerialKickAnimationActive)
+        {
+            LogAerialKickAnimationEvent("Stop", "recovery-phase-entered");
             StopAerialKickAnimation();
+        }
 
         // Handoff transition can occasionally miss the visual restore latch in player builds.
         // Keep the fallback strictly inside the actual recovery phase so it cannot affect normal combat.
@@ -213,7 +221,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
                 // 피호스트 로컬 플레이어: 입력은 읽어서 즉시 예측 연출,
                 // 로코모션은 네트워크 기반 (자기 rigidbody는 시뮬 안 하므로)
                 HandleInput();
-                UpdateLocomotionForOwnerProxy();
+                UpdateLocomotionForLocallyControlledPlayer();
             }
             else
             {
@@ -231,7 +239,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         TryFlushPunchBuffer();
 
         // 그랩 중에도 locomotion 애니메이션 유지 (전투는 Upper Body Layer에서 처리)
-        UpdateLocomotion();
+        UpdateLocomotionForLocallyControlledPlayer();
 
         UpdateUpperBodyLayerState();
     }
@@ -316,6 +324,8 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     internal void CancelAerialKickAnimation()
     {
         isAerialKickAnimationActive = false;
+        isAerialKickEndPoseHeld = false;
+        aerialKickEndPoseForceReleaseTime = float.NegativeInfinity;
         currentAerialKickClip = null;
         RestoreAerialKickAnimatorRootPose();
         hasAerialKickAnimatorRootPose = false;
@@ -586,6 +596,8 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         currentAerialKickClip = clip;
         isAerialKickAnimationActive = true;
+        isAerialKickEndPoseHeld = false;
+        aerialKickEndPoseForceReleaseTime = float.NegativeInfinity;
         CacheAerialKickAnimatorRootPose();
         actionLockedUntil = Time.time + Mathf.Max(aerialKickLockDuration, clip.length);
         upperBodyStateVisibleUntil = actionLockedUntil;
@@ -604,6 +616,33 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         aerialKickOutput.SetSourcePlayable(aerialKickPlayable);
         aerialKickOutput.SetWeight(1f);
         aerialKickGraph.Play();
+        LogAerialKickAnimationEvent("Start", $"clip={clip.name} length={clip.length:F2}");
+    }
+
+    void HoldAerialKickEndPose()
+    {
+        if (!aerialKickGraph.IsValid() || currentAerialKickClip == null)
+            return;
+
+        var poseTime = Mathf.Max(0f, currentAerialKickClip.length - (1f / 60f));
+        aerialKickPlayable.SetTime(poseTime);
+        aerialKickPlayable.SetSpeed(0d);
+    }
+
+    bool ShouldKeepHoldingAerialKickPose()
+    {
+        if (!isAerialKickEndPoseHeld)
+            return false;
+
+        if (Time.time >= aerialKickEndPoseForceReleaseTime)
+        {
+            if (networkPlayer != null && !networkPlayer.IsGroundedForPresentation())
+                return true;
+
+            return false;
+        }
+
+        return networkPlayer == null || !networkPlayer.ShouldEndAerialKickPresentation();
     }
 
     void TickAerialKickAnimation()
@@ -617,13 +656,51 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return;
         }
 
-        if (aerialKickPlayable.IsDone())
+        if (aerialKickPlayable.IsDone() && !isAerialKickEndPoseHeld)
+        {
+            isAerialKickEndPoseHeld = true;
+            aerialKickEndPoseForceReleaseTime = Time.time + AerialKickEndPoseHoldMaxDuration;
+            actionLockedUntil = Mathf.Max(actionLockedUntil, aerialKickEndPoseForceReleaseTime);
+            upperBodyStateVisibleUntil = Mathf.Max(upperBodyStateVisibleUntil, actionLockedUntil);
+            HoldAerialKickEndPose();
+            LogAerialKickAnimationEvent("HoldEndPose", $"forceReleaseAt={aerialKickEndPoseForceReleaseTime:F2}");
+        }
+
+        if (!isAerialKickEndPoseHeld)
+            return;
+
+        if (Time.time >= aerialKickEndPoseForceReleaseTime &&
+            networkPlayer != null &&
+            !networkPlayer.IsGroundedForPresentation())
+        {
+            aerialKickEndPoseForceReleaseTime = Time.time + AerialKickEndPoseHoldExtensionDuration;
+            actionLockedUntil = Mathf.Max(actionLockedUntil, aerialKickEndPoseForceReleaseTime);
+            upperBodyStateVisibleUntil = Mathf.Max(upperBodyStateVisibleUntil, actionLockedUntil);
+            LogAerialKickAnimationEvent("ExtendHold", $"extendedUntil={aerialKickEndPoseForceReleaseTime:F2}");
+        }
+
+        if (!ShouldKeepHoldingAerialKickPose())
+        {
+            var reason = Time.time >= aerialKickEndPoseForceReleaseTime
+                ? "timeout"
+                : networkPlayer == null
+                    ? "network-player-missing"
+                    : networkPlayer.IsGroundedForPresentation()
+                        ? "presentation-grounded"
+                        : $"presentation-ended phase={networkPlayer.GetPhysicalPhase()}";
+            LogAerialKickAnimationEvent("Stop", reason);
             StopAerialKickAnimation();
+            return;
+        }
+
+        HoldAerialKickEndPose();
     }
 
     void StopAerialKickAnimation()
     {
         isAerialKickAnimationActive = false;
+        isAerialKickEndPoseHeld = false;
+        aerialKickEndPoseForceReleaseTime = float.NegativeInfinity;
         currentAerialKickClip = null;
         RestoreAerialKickAnimatorRootPose();
         hasAerialKickAnimatorRootPose = false;
@@ -674,6 +751,25 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         animator.transform.localPosition = aerialKickAnimatorLocalPosition;
         animator.transform.localScale = aerialKickAnimatorLocalScale;
+    }
+
+    bool ShouldLogAerialKickDiagnostics()
+    {
+        return networkPlayer != null
+            ? networkPlayer.ShouldLogAerialKickDiagnostics()
+            : (Application.isEditor || Debug.isDebugBuild);
+    }
+
+    void LogAerialKickAnimationEvent(string source, string note)
+    {
+        if (!ShouldLogAerialKickDiagnostics())
+            return;
+
+        var grounded = networkPlayer != null && networkPlayer.IsGroundedForPresentation();
+        var phase = networkPlayer != null ? networkPlayer.GetPhysicalPhase().ToString() : "none";
+        Debug.Log(
+            $"[AerialKickAnim] {name} {source} t={Time.time:F2} active={isAerialKickAnimationActive} hold={isAerialKickEndPoseHeld} grounded={grounded} phase={phase} note={note}",
+            this);
     }
 
     void StartRecoveryAnimation(AnimationClip clip)
@@ -781,6 +877,16 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         if (networkPlayer != null && !networkPlayer.CanPerformCombatActions)
             return;
 
+        if (isLocalWithoutAuthority &&
+            networkPlayer != null &&
+            Input.GetMouseButtonDown(1) &&
+            Time.time >= nextOwnerProxyAerialKickPredictionAt &&
+            networkPlayer.ShouldPredictOwnerProxyAerialKickPresentation())
+        {
+            nextOwnerProxyAerialKickPredictionAt = Time.time + networkPlayer.GetConfiguredAerialKickCooldown();
+            PlayAerialKick();
+        }
+
         if (Input.GetMouseButtonDown(0))
             attackButtonPressedAt = Time.time;
 
@@ -840,19 +946,50 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
     void UpdateLocomotion()
     {
-        float speed = 0f;
+        UpdateLocomotionForLocallyControlledPlayer();
+    }
 
-        if (rigidbody3D != null)
-        {
-            Vector3 planarVelocity = rigidbody3D.velocity;
-            planarVelocity.y = 0f;
-            speed = planarVelocity.magnitude;
-        }
+    float ResolveLocallyControlledMeasuredSpeed()
+    {
+        if (rigidbody3D == null)
+            return 0f;
 
-        isSprinting = Input.GetKey(KeyCode.LeftShift) && speed > locomotionThreshold;
-        var locomotionState = speed <= locomotionThreshold
+        Vector3 planarVelocity = rigidbody3D.velocity;
+        planarVelocity.y = 0f;
+        return planarVelocity.magnitude * 0.4f;
+    }
+
+    void UpdateLocomotionForLocallyControlledPlayer()
+    {
+        var localMove = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+        var predictedMagnitude = Mathf.Clamp01(localMove.magnitude);
+        var measuredSpeed = ResolveLocallyControlledMeasuredSpeed();
+        var networkSpeed = networkPlayer != null ? networkPlayer.GetNetworkedMoveSpeed() : 0f;
+        var authoritativeSpeed = Mathf.Max(measuredSpeed, networkSpeed);
+        var isHolding = networkPlayer != null &&
+                        networkPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.Holding;
+
+        var predictedSpeed = predictedMagnitude;
+        if (isHolding)
+            predictedSpeed = Mathf.Lerp(authoritativeSpeed, predictedMagnitude, 0.35f);
+
+        var speed = Mathf.Max(authoritativeSpeed, predictedSpeed);
+        var movementThreshold = isHolding ? locomotionThreshold * 0.85f : locomotionThreshold;
+        var wantsLocomotion = isHolding
+            ? speed > movementThreshold
+            : predictedMagnitude > movementThreshold || authoritativeSpeed > movementThreshold;
+        var allowSprintPresentation = Input.GetKey(KeyCode.LeftShift) &&
+                                      (!isHolding || speed > locomotionThreshold * 1.2f);
+        var fallbackLocomotionState = speed <= locomotionThreshold
             ? NetworkPlayer.PresentationLocomotionState.Idle
-            : (isSprinting ? NetworkPlayer.PresentationLocomotionState.Sprint : NetworkPlayer.PresentationLocomotionState.Walk);
+            : (allowSprintPresentation
+                ? NetworkPlayer.PresentationLocomotionState.Sprint
+                : NetworkPlayer.PresentationLocomotionState.Walk);
+        var locomotionState = wantsLocomotion
+            ? (allowSprintPresentation
+                ? NetworkPlayer.PresentationLocomotionState.Sprint
+                : NetworkPlayer.PresentationLocomotionState.Walk)
+            : (networkPlayer != null ? networkPlayer.GetNetworkedLocomotionState() : fallbackLocomotionState);
 
         ApplyLocomotionState(locomotionState, speed);
     }
@@ -872,31 +1009,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
     void UpdateLocomotionForOwnerProxy()
     {
-        if (networkPlayer == null)
-            return;
-
-        var localMove = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
-        var predictedMagnitude = Mathf.Clamp01(localMove.magnitude);
-        var networkSpeed = networkPlayer.GetNetworkedMoveSpeed();
-        var isHolding = networkPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.Holding;
-        var predictedSpeed = predictedMagnitude;
-        if (isHolding)
-            predictedSpeed = Mathf.Lerp(networkSpeed, predictedMagnitude, 0.35f);
-
-        var speed = Mathf.Max(networkSpeed, predictedSpeed);
-        var movementThreshold = isHolding ? locomotionThreshold * 0.85f : locomotionThreshold;
-        var wantsLocomotion = isHolding
-            ? speed > movementThreshold
-            : predictedMagnitude > movementThreshold;
-        var allowSprintPresentation = Input.GetKey(KeyCode.LeftShift) &&
-                                      (!isHolding || speed > locomotionThreshold * 1.2f);
-        var locomotionState = wantsLocomotion
-            ? (allowSprintPresentation
-                ? NetworkPlayer.PresentationLocomotionState.Sprint
-                : NetworkPlayer.PresentationLocomotionState.Walk)
-            : networkPlayer.GetNetworkedLocomotionState();
-
-        ApplyLocomotionState(locomotionState, speed);
+        UpdateLocomotionForLocallyControlledPlayer();
     }
 
     void UpdateCurrentLocomotion()
@@ -904,13 +1017,13 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         if (isRemoteProxy)
         {
             if (isLocalWithoutAuthority)
-                UpdateLocomotionForOwnerProxy();
+                UpdateLocomotionForLocallyControlledPlayer();
             else
                 UpdateLocomotionFromNetwork();
             return;
         }
 
-        UpdateLocomotion();
+        UpdateLocomotionForLocallyControlledPlayer();
     }
 
     /// <summary>
@@ -1129,7 +1242,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return;
 
         // 펀치 콤보는 짧은 블렌드, 그랩·던지기는 약간 긴 블렌드
-        float blendTime = (stateName == PunchLeftState || stateName == PunchRightState) ? 0.08f : 0.12f;
+        float blendTime = (stateName == PunchLeftState || stateName == PunchRightState) ? 0.11f : 0.12f;
         animator.CrossFadeInFixedTime(stateName, blendTime, UpperBodyLayer, 0f);
         currentUpperBodyStateName = stateName;
     }

@@ -12,9 +12,9 @@ public class ProceduralPunchArm : MonoBehaviour
     [SerializeField] PuppetMaster puppetMaster;
 
     [Header("Punch Timing")]
-    [SerializeField] float windUpDuration = 0.13f;
-    [SerializeField] float impactDuration = 0.07f;
-    [SerializeField] float recoveryDuration = 0.20f;
+    [SerializeField] float windUpDuration = 0.17f;
+    [SerializeField] float impactDuration = 0.09f;
+    [SerializeField] float recoveryDuration = 0.27f;
 
     [Header("Punch Reach")]
     [SerializeField] float punchReach = 0.7f;

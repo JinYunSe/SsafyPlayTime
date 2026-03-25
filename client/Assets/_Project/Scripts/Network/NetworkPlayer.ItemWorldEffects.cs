@@ -4,6 +4,9 @@ using Fusion;
 using SSAFYPlayTime.Gameplay.Items;
 using UnityEngine;
 using UnityEngine.Rendering;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public sealed partial class NetworkPlayer
 {
@@ -37,6 +40,12 @@ public sealed partial class NetworkPlayer
         "Assets/Polygon Arsenal/Prefabs/Interactive/BeamUp/Cylinder/BeamupCylinderBlue.prefab";
     private const string SatelliteCylinderResourcePath =
         "Polygon Arsenal/Prefabs/Interactive/BeamUp/Cylinder/BeamupCylinderBlue";
+    private const string SatelliteImpactSfxAssetPath = "Assets/Resources/_Project/Sounds/Item/SatelliteStrike.wav";
+    private const string SatelliteImpactSfxResourcePath = "_Project/Sounds/Item/SatelliteStrike";
+    private const string GrowthUseSfxAssetPath = "Assets/Resources/_Project/Sounds/Item/GrowthItemSound.WAV";
+    private const string GrowthUseSfxResourcePath = "_Project/Sounds/Item/GrowthItemSound";
+    private const string ShrinkUseSfxAssetPath = "Assets/Resources/_Project/Sounds/Item/ShrinkItemSound.mp3";
+    private const string ShrinkUseSfxResourcePath = "_Project/Sounds/Item/ShrinkItemSound";
 
     [Header("Item World Effects")]
     [SerializeField] private LayerMask itemWorldEffectMask = ~0;
@@ -59,7 +68,8 @@ public sealed partial class NetworkPlayer
     [SerializeField] private float replicatedBlackholeTargetOutlineScaleMultiplier = 1.045f;
     [SerializeField] private float satelliteProjectileTravelSec = 0.35f;
     [SerializeField] private float satelliteBeamHeight = 24f;
-    [SerializeField] private float satelliteWarningAdvanceSeconds = 2f;
+    [SerializeField] private float satelliteEffectiveRadiusMultiplier = 0.42f;
+    [SerializeField] private float satelliteWarningAdvanceSeconds = 0f;
     [SerializeField] private float satelliteDefaultHealthDamage = 50f;
     [SerializeField] private float satelliteDefaultStunDamage = 50f;
     [SerializeField] private float satelliteDefaultExplosionForce = 8f;
@@ -76,6 +86,9 @@ public sealed partial class NetworkPlayer
     private readonly HashSet<int> _replicatedFlamethrowerUniqueTargets = new();
     private readonly DefaultItemFieldPrefabResolver _replicatedEffectPrefabResolver = new();
     private static PhysicMaterial s_blackholeProjectileLowFrictionMaterial;
+    private static AudioClip s_satelliteImpactSfx;
+    private static AudioClip s_growthUseSfx;
+    private static AudioClip s_shrinkUseSfx;
 
     private bool _itemWorldEffectNetworkReady;
     private bool _itemWorldEffectEventsBound;
@@ -177,6 +190,7 @@ public sealed partial class NetworkPlayer
         _itemWorldEffectBoundHost.ItemConsumed += HandleItemConsumed;
         _itemWorldEffectBoundHost.ItemDropped += HandleRuntimeItemDropped;
         _itemWorldEffectBoundHost.MeleeSwingRequested += HandleMeleeSwingRequested;
+        _itemWorldEffectBoundHost.SfxRequested += HandleRuntimeSfxRequested;
         _itemWorldEffectEventsBound = true;
     }
 
@@ -197,8 +211,31 @@ public sealed partial class NetworkPlayer
         _itemWorldEffectBoundHost.ItemConsumed -= HandleItemConsumed;
         _itemWorldEffectBoundHost.ItemDropped -= HandleRuntimeItemDropped;
         _itemWorldEffectBoundHost.MeleeSwingRequested -= HandleMeleeSwingRequested;
+        _itemWorldEffectBoundHost.SfxRequested -= HandleRuntimeSfxRequested;
         _itemWorldEffectBoundHost = null;
         _itemWorldEffectEventsBound = false;
+    }
+
+    private void HandleRuntimeSfxRequested(string sfxId, Vector3 worldPosition, bool loop)
+    {
+        if (string.IsNullOrWhiteSpace(sfxId))
+            return;
+
+        AudioClip clip = null;
+        switch (sfxId)
+        {
+            case "SFX_ITEM_GROWTH":
+                clip = LoadEffectSfx(ref s_growthUseSfx, GrowthUseSfxAssetPath, GrowthUseSfxResourcePath);
+                break;
+            case "SFX_ITEM_SHRINK":
+                clip = LoadEffectSfx(ref s_shrinkUseSfx, ShrinkUseSfxAssetPath, ShrinkUseSfxResourcePath);
+                break;
+        }
+
+        if (clip == null)
+            return;
+
+        PlayEffectSfx(clip, worldPosition);
     }
 
     private bool CanWriteItemWorldEffectState()
@@ -238,6 +275,8 @@ public sealed partial class NetworkPlayer
             return;
         }
 
+        var effectiveRadius = ResolveSatelliteStrikeEffectiveRadius(request.Radius);
+
         NetworkedSatelliteStrikeCenter = request.Center;
         NetworkedSatelliteStrikeOrigin = request.Origin;
         NetworkedSatelliteStrikeForward = request.Forward;
@@ -248,7 +287,7 @@ public sealed partial class NetworkPlayer
         NetworkedSatelliteStrikeBaseDamage = request.BaseDamage;
         NetworkedSatelliteStrikeStunDamage = request.StunDamage;
         NetworkedSatelliteStrikeSeq++;
-        ItemRuntimeLog.Info(ItemIds.SatelliteStrike, $"Satellite strike request replicated: seq={NetworkedSatelliteStrikeSeq}, center={request.Center}, radius={request.Radius:0.00}", this);
+        ItemRuntimeLog.Info(ItemIds.SatelliteStrike, $"Satellite strike request replicated: seq={NetworkedSatelliteStrikeSeq}, center={request.Center}, radius={request.Radius:0.00}, hitRadius={effectiveRadius:0.00}", this);
 
         StartReplicatedSatelliteStrike(request, applyGameplay: true);
     }
@@ -590,6 +629,8 @@ public sealed partial class NetworkPlayer
             yield break;
         }
 
+        var effectiveRadius = ResolveSatelliteStrikeEffectiveRadius(request.Radius);
+
         var center = ResolveSatelliteGroundCenter(request.Center);
         var throwForward = ResolveReplicatedThrowForward(request.Forward, request.Center);
         var launchOrigin = request.Origin + Vector3.up * blackholeLaunchHeightOffset + throwForward * blackholeLaunchForwardOffset;
@@ -598,6 +639,7 @@ public sealed partial class NetworkPlayer
         var gravity = Physics.gravity;
         var travelStartTime = Time.time;
         var current = launchOrigin;
+        const float satelliteProjectileCastRadius = 0.18f;
 
         DespawnNetworkedItemEffectProxy(ref _activeSatelliteProjectileEffectProxy);
         _activeSatelliteProjectileEffectProxy = SpawnNetworkedItemEffectProxy(
@@ -631,14 +673,15 @@ public sealed partial class NetworkPlayer
             if (distance > 0.0001f &&
                 Physics.SphereCast(
                     current,
-                    0.18f,
+                    satelliteProjectileCastRadius,
                     move.normalized,
                     out var hit,
                     distance,
                     itemWorldEffectMask,
                     QueryTriggerInteraction.Ignore))
             {
-                center = hit.point + hit.normal.normalized * 0.02f;
+                var projectileCenter = projectile != null ? projectile.transform.position : current + move.normalized * hit.distance;
+                center = ResolveSatelliteGroundCenter(projectileCenter);
                 if (projectile != null)
                 {
                     projectile.transform.position = center;
@@ -673,7 +716,7 @@ public sealed partial class NetworkPlayer
             Quaternion.identity,
             proxy => proxy.InitializeSatelliteCharge(request.Radius));
 
-        var effectiveWarningSec = Mathf.Max(0f, request.WarningSec - Mathf.Max(0f, satelliteWarningAdvanceSeconds));
+        var effectiveWarningSec = Mathf.Max(0f, request.WarningSec);
         if (effectiveWarningSec > 0f)
         {
             yield return new WaitForSeconds(effectiveWarningSec);
@@ -686,38 +729,81 @@ public sealed partial class NetworkPlayer
             center,
             Quaternion.identity,
             proxy => proxy.InitializeSatelliteBeam(request.Radius));
+        PlaySatelliteImpactSfx(center);
+
+        if (applyGameplay)
+        {
+            ApplySatelliteStrikeGameplay(
+                center,
+                Mathf.Max(0.1f, effectiveRadius),
+                request.BaseDamage,
+                request.StunDamage,
+                request.Force);
+        }
 
         var duration = Mathf.Max(0.1f, request.DurationSec);
-        var tickInterval = 0.25f;
-        var elapsed = 0f;
-        while (elapsed < duration)
-        {
-            if (applyGameplay)
-            {
-                ApplySatelliteStrikeGameplay(
-                    center,
-                    Mathf.Max(0.1f, request.Radius),
-                    request.BaseDamage,
-                    request.StunDamage,
-                    request.Force,
-                    tickInterval,
-                    duration);
-            }
-
-            var waitSec = Mathf.Min(tickInterval, duration - elapsed);
-            elapsed += waitSec;
-            if (waitSec > 0f)
-            {
-                yield return new WaitForSeconds(waitSec);
-            }
-            else
-            {
-                yield return null;
-            }
-        }
+        yield return new WaitForSeconds(duration);
 
         DespawnNetworkedItemEffectProxy(ref _activeSatelliteBeamEffectProxy);
         _activeReplicatedSatelliteRoutine = null;
+    }
+
+    private float ResolveSatelliteStrikeEffectiveRadius(float requestedRadius)
+    {
+        var scaledRadius = requestedRadius * Mathf.Max(0.01f, satelliteEffectiveRadiusMultiplier);
+        return Mathf.Clamp(scaledRadius, 2.5f, 6.5f);
+    }
+
+    private static void PlaySatelliteImpactSfx(Vector3 worldPosition)
+    {
+        var clip = LoadSatelliteImpactSfx();
+        if (clip == null)
+            return;
+
+        PlayEffectSfx(clip, worldPosition, "ItemSfx_SatelliteStrike");
+    }
+
+    private static void PlayEffectSfx(AudioClip clip, Vector3 worldPosition, string objectName = null)
+    {
+        if (clip == null)
+            return;
+
+        var go = new GameObject(string.IsNullOrWhiteSpace(objectName) ? $"ItemSfx_{clip.name}" : objectName);
+        go.transform.position = worldPosition;
+
+        var source = go.AddComponent<AudioSource>();
+        source.clip = clip;
+        source.loop = false;
+        source.playOnAwake = false;
+        source.volume = 1f;
+        source.spatialBlend = 0f;
+
+        var categorizedSource = go.AddComponent<global::SSAFYPlayTime.GameAudioSource>();
+        categorizedSource.SetCategory(global::SSAFYPlayTime.GameAudioCategory.EffectSound);
+        categorizedSource.RefreshBaseVolumeFromCurrentSource();
+
+        source.Play();
+        Destroy(go, clip.length + 0.1f);
+    }
+
+    private static AudioClip LoadEffectSfx(ref AudioClip cache, string assetPath, string resourcePath)
+    {
+        if (cache != null)
+            return cache;
+
+#if UNITY_EDITOR
+        cache = AssetDatabase.LoadAssetAtPath<AudioClip>(assetPath);
+        if (cache != null)
+            return cache;
+#endif
+
+        cache = Resources.Load<AudioClip>(resourcePath);
+        return cache;
+    }
+
+    private static AudioClip LoadSatelliteImpactSfx()
+    {
+        return LoadEffectSfx(ref s_satelliteImpactSfx, SatelliteImpactSfxAssetPath, SatelliteImpactSfxResourcePath);
     }
 
     private void ApplyBlackholeGameplay(
@@ -1160,7 +1246,8 @@ public sealed partial class NetworkPlayer
                     "Flamethrower",
                     0f,
                     pushForce,
-                    instigator: this);
+                    instigator: this,
+                    downedHitPolicy: DownedHitPolicy.RecoveryPenalty);
             }
 
             var body = hitCollider.attachedRigidbody;
@@ -1176,16 +1263,11 @@ public sealed partial class NetworkPlayer
         float radius,
         float totalHealthDamage,
         float totalStunDamage,
-        float explosionForce,
-        float tickInterval,
-        float duration)
+        float explosionForce)
     {
         var totalHealth = totalHealthDamage > 0f ? totalHealthDamage : Mathf.Max(0f, satelliteDefaultHealthDamage);
         var totalStun = totalStunDamage > 0f ? totalStunDamage : Mathf.Max(0f, satelliteDefaultStunDamage);
         var appliedExplosionForce = explosionForce > 0f ? explosionForce : Mathf.Max(0f, satelliteDefaultExplosionForce);
-        var tickCount = Mathf.Max(1, Mathf.CeilToInt(Mathf.Max(0.1f, duration) / Mathf.Max(0.01f, tickInterval)));
-        var damagePerTick = totalHealth / tickCount;
-        var stunPerTick = totalStun / tickCount;
         var capsuleOffset = Mathf.Max(0f, (satelliteBeamHeight * 0.5f) - radius);
         var bottom = center + Vector3.down * capsuleOffset;
         var top = center + Vector3.up * capsuleOffset;
@@ -1197,8 +1279,8 @@ public sealed partial class NetworkPlayer
             top,
             radius,
             _replicatedSatelliteOverlapBuffer,
-            itemWorldEffectMask,
-            QueryTriggerInteraction.Ignore);
+            ~0,
+            QueryTriggerInteraction.Collide);
 
         for (var i = 0; i < overlapCount; i++)
         {
@@ -1213,12 +1295,13 @@ public sealed partial class NetworkPlayer
                 damagedPlayerIds.Add(targetPlayer.GetInstanceID()))
             {
                 targetPlayer.ApplyCombinedDamage(
-                    damagePerTick,
-                    stunPerTick,
+                    totalHealth,
+                    totalStun,
                     "SatelliteStrike",
                     0f,
                     appliedExplosionForce,
-                    instigator: this);
+                    instigator: this,
+                    downedHitPolicy: DownedHitPolicy.RecoveryPenalty);
             }
 
             var body = ResolveSatelliteStrikeImpactBody(hitCollider, targetPlayer);
