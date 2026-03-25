@@ -121,7 +121,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 _lastActivatedState = activated;
                 if (activated && _visualRoot != null)
                 {
-                    PlayAllParticles(_visualRoot);
+                    RestartAllParticles(_visualRoot);
                 }
             }
         }
@@ -284,7 +284,7 @@ namespace SSAFYPlayTime.Gameplay.Items
                 _lastActivatedState = Activated;
                 if (Activated)
                 {
-                    PlayAllParticles(_visualRoot);
+                    RestartAllParticles(_visualRoot);
                 }
             }
 
@@ -356,6 +356,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             root.transform.SetParent(transform, false);
             InstantiateVisual(TryLoadAsset(SatelliteChargeupAssetPath, SatelliteChargeupResourcePath), "Chargeup", root.transform);
             InstantiateVisual(TryLoadAsset(SatelliteCloudAssetPath, SatelliteCloudResourcePath), "Cloud", root.transform);
+            ConfigureLoopingParticles(root);
             return root;
         }
 
@@ -365,6 +366,7 @@ namespace SSAFYPlayTime.Gameplay.Items
             root.transform.SetParent(transform, false);
             InstantiateVisual(TryLoadAsset(SatelliteCloudAssetPath, SatelliteCloudResourcePath), "Cloud", root.transform);
             InstantiateVisual(TryLoadAsset(SatelliteCylinderAssetPath, SatelliteCylinderResourcePath), "Beam", root.transform);
+            ConfigureLoopingParticles(root);
             return root;
         }
 
@@ -494,6 +496,49 @@ namespace SSAFYPlayTime.Gameplay.Items
                     continue;
                 }
 
+                particle.Play(true);
+            }
+        }
+
+        private static void ConfigureLoopingParticles(GameObject root)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            var particles = root.GetComponentsInChildren<ParticleSystem>(true);
+            for (var i = 0; i < particles.Length; i++)
+            {
+                var particle = particles[i];
+                if (particle == null)
+                {
+                    continue;
+                }
+
+                var main = particle.main;
+                main.loop = true;
+                main.stopAction = ParticleSystemStopAction.None;
+            }
+        }
+
+        private static void RestartAllParticles(GameObject root)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            var particles = root.GetComponentsInChildren<ParticleSystem>(true);
+            for (var i = 0; i < particles.Length; i++)
+            {
+                var particle = particles[i];
+                if (particle == null)
+                {
+                    continue;
+                }
+
+                particle.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
                 particle.Play(true);
             }
         }
