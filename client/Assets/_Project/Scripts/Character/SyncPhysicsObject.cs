@@ -19,6 +19,8 @@ public class SyncPhysicsObject : MonoBehaviour
     [SerializeField]
     BodyPartType bodyPartType = BodyPartType.Limb;
 
+    public void SetBodyPartType(BodyPartType type) => bodyPartType = type;
+
     // 이 오브젝트의 물리 Rigidbody (자동 할당)
     Rigidbody rigidbody3D;
 
@@ -131,6 +133,56 @@ public class SyncPhysicsObject : MonoBehaviour
 
         JointDrive jointDrive = joint.slerpDrive;
         jointDrive.positionSpring = Mathf.Lerp(0f, startSlerpPositionSpring, t);
+        joint.slerpDrive = jointDrive;
+    }
+
+    // ── 기절 중 부위별 최소 스프링 유지 ──
+
+    private const float StunnedGroundedCoreScale = 0.12f;
+    private const float StunnedGroundedHeadScale = 0.06f;
+    private const float StunnedGroundedLimbScale = 0.02f;
+
+    private const float StunnedCarriedCoreScale = 0.38f;
+    private const float StunnedCarriedHeadScale = 0.22f;
+    private const float StunnedCarriedLimbScale = 0.08f;
+
+    /// <summary>
+    /// 기절 + 바닥에 누운 상태: 완전 래그돌보다 약간 높은 스프링으로
+    /// 코어 본의 최소 형태를 유지한다.
+    /// </summary>
+    public void MakeStunnedGrounded()
+    {
+        if (joint == null) return;
+
+        float scale = bodyPartType switch
+        {
+            BodyPartType.Core => StunnedGroundedCoreScale,
+            BodyPartType.Head => StunnedGroundedHeadScale,
+            _ => StunnedGroundedLimbScale
+        };
+
+        JointDrive jointDrive = joint.slerpDrive;
+        jointDrive.positionSpring = Mathf.Max(1f, startSlerpPositionSpring * scale);
+        joint.slerpDrive = jointDrive;
+    }
+
+    /// <summary>
+    /// 기절 + 운반 중: 코어 본에 충분한 스프링을 유지하여
+    /// 들린 상태에서 몸체가 구겨지지 않도록 한다.
+    /// </summary>
+    public void MakeStunnedCarried()
+    {
+        if (joint == null) return;
+
+        float scale = bodyPartType switch
+        {
+            BodyPartType.Core => StunnedCarriedCoreScale,
+            BodyPartType.Head => StunnedCarriedHeadScale,
+            _ => StunnedCarriedLimbScale
+        };
+
+        JointDrive jointDrive = joint.slerpDrive;
+        jointDrive.positionSpring = Mathf.Max(1f, startSlerpPositionSpring * scale);
         joint.slerpDrive = jointDrive;
     }
 }
