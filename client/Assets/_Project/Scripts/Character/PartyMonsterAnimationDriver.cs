@@ -25,8 +25,10 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     const string UpperBodyIdleState = "UpperBodyIdle";
     const string MovementSpeedParameter = "movementSpeed";
     const string IsSprintingParameter = "isSprinting";
-    const float AerialKickEndPoseHoldMaxDuration = 4.00f;
-    const float AerialKickEndPoseHoldExtensionDuration = 0.75f;
+    const float AerialKickAirbornePoseMinHoldDuration = 0.12f;
+    const float AerialKickAirbornePoseHoldMaxDuration = 1.50f;
+    const float AerialKickAirbornePoseNormalizedTime = 0.58f;
+    const float AerialKickAirbornePoseLeadSeconds = 0.10f;
 
     [SerializeField]
     Animator animator;
@@ -101,8 +103,9 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     PlayableGraph aerialKickGraph;
     AnimationClipPlayable aerialKickPlayable;
     AnimationPlayableOutput aerialKickOutput;
-    bool isAerialKickEndPoseHeld;
-    float aerialKickEndPoseForceReleaseTime = float.NegativeInfinity;
+    bool isAerialKickAirbornePoseHeld;
+    float aerialKickAirbornePoseMinHoldUntilTime = float.NegativeInfinity;
+    float aerialKickAirbornePoseMaxHoldUntilTime = float.NegativeInfinity;
     PlayableGraph recoveryGraph;
     AnimationClipPlayable recoveryPlayable;
     AnimationPlayableOutput recoveryOutput;
@@ -324,8 +327,9 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     internal void CancelAerialKickAnimation()
     {
         isAerialKickAnimationActive = false;
-        isAerialKickEndPoseHeld = false;
-        aerialKickEndPoseForceReleaseTime = float.NegativeInfinity;
+        isAerialKickAirbornePoseHeld = false;
+        aerialKickAirbornePoseMinHoldUntilTime = float.NegativeInfinity;
+        aerialKickAirbornePoseMaxHoldUntilTime = float.NegativeInfinity;
         currentAerialKickClip = null;
         RestoreAerialKickAnimatorRootPose();
         hasAerialKickAnimatorRootPose = false;
@@ -397,6 +401,22 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return;
 
         PlayKick(false);
+    }
+
+    public void PlayHeadbutt()
+    {
+        if (!CanDriveAnimation())
+            return;
+
+        PlayHeadbuttInternal(true);
+    }
+
+    public void PlayHeadbuttFromNetwork()
+    {
+        if (!CanDriveAnimation())
+            return;
+
+        PlayHeadbuttInternal(false);
     }
 
     public void PlayAerialKick()
@@ -489,6 +509,35 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             kickLeg.TriggerRightKick(forward);
     }
 
+    void PlayHeadbuttInternal(bool recordPrediction)
+    {
+        isGrabPoseActive = false;
+        ClearUpperBodyState();
+        currentUpperBodyStateName = null;
+        upperBodyStateVisibleUntil = 0f;
+
+        if (networkPlayer != null)
+        {
+            if (!networkPlayer.PlayProceduralHeadbuttPresentation())
+                return;
+
+            if (recordPrediction)
+                networkPlayer.NotifyLocalHeadbuttPrediction();
+
+            actionLockedUntil = Time.time + ResolveHeadbuttLockDuration();
+            return;
+        }
+
+        var headbutt = GetComponent<ProceduralHeadbutt>();
+        if (headbutt == null)
+            headbutt = gameObject.AddComponent<ProceduralHeadbutt>();
+
+        if (!headbutt.TryTriggerHeadbutt(transform.forward))
+            return;
+
+        actionLockedUntil = Time.time + ResolveHeadbuttLockDuration();
+    }
+
     void CacheReferences()
     {
         puppetMaster = GetComponentInChildren<PuppetMaster>(true);
@@ -510,6 +559,15 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         var kickLeg = GetComponent<ProceduralKickLeg>();
         return kickLeg != null ? kickLeg.TotalKickDuration : 0.45f;
+    }
+
+    float ResolveHeadbuttLockDuration()
+    {
+        if (networkPlayer != null)
+            return networkPlayer.ResolveHeadbuttPresentationLockDuration();
+
+        var headbutt = GetComponent<ProceduralHeadbutt>();
+        return headbutt != null ? headbutt.TotalHeadbuttDuration : 0.34f;
     }
 
     bool TryPlayQueuedRecoveryAnimation()
@@ -596,8 +654,9 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         currentAerialKickClip = clip;
         isAerialKickAnimationActive = true;
-        isAerialKickEndPoseHeld = false;
-        aerialKickEndPoseForceReleaseTime = float.NegativeInfinity;
+        isAerialKickAirbornePoseHeld = false;
+        aerialKickAirbornePoseMinHoldUntilTime = float.NegativeInfinity;
+        aerialKickAirbornePoseMaxHoldUntilTime = float.NegativeInfinity;
         CacheAerialKickAnimatorRootPose();
         actionLockedUntil = Time.time + Mathf.Max(aerialKickLockDuration, clip.length);
         upperBodyStateVisibleUntil = actionLockedUntil;
@@ -619,30 +678,66 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         LogAerialKickAnimationEvent("Start", $"clip={clip.name} length={clip.length:F2}");
     }
 
-    void HoldAerialKickEndPose()
+    double ResolveAerialKickAirbornePoseTime()
+    {
+        if (currentAerialKickClip == null)
+            return 0d;
+
+        var poseTime = Mathf.Clamp(
+            currentAerialKickClip.length * AerialKickAirbornePoseNormalizedTime,
+            0f,
+            Mathf.Max(0f, currentAerialKickClip.length - AerialKickAirbornePoseLeadSeconds));
+        return poseTime;
+    }
+
+    void HoldAerialKickAirbornePose()
     {
         if (!aerialKickGraph.IsValid() || currentAerialKickClip == null)
             return;
 
-        var poseTime = Mathf.Max(0f, currentAerialKickClip.length - (1f / 60f));
+        var poseTime = ResolveAerialKickAirbornePoseTime();
         aerialKickPlayable.SetTime(poseTime);
         aerialKickPlayable.SetSpeed(0d);
     }
 
+    bool ShouldFreezeAerialKickAirbornePose()
+    {
+        if (isAerialKickAirbornePoseHeld || !aerialKickGraph.IsValid() || currentAerialKickClip == null)
+            return false;
+
+        var poseTime = ResolveAerialKickAirbornePoseTime();
+        if (aerialKickPlayable.GetTime() + (1d / 120d) < poseTime)
+            return false;
+
+        if (networkPlayer == null)
+            return true;
+
+        return !networkPlayer.ShouldEndAerialKickPresentation();
+    }
+
     bool ShouldKeepHoldingAerialKickPose()
     {
-        if (!isAerialKickEndPoseHeld)
+        if (!isAerialKickAirbornePoseHeld)
             return false;
 
-        if (Time.time >= aerialKickEndPoseForceReleaseTime)
-        {
-            if (networkPlayer != null && !networkPlayer.IsGroundedForPresentation())
-                return true;
+        if (networkPlayer == null)
+            return Time.time < aerialKickAirbornePoseMaxHoldUntilTime;
 
+        if (Time.time < aerialKickAirbornePoseMinHoldUntilTime)
+            return true;
+
+        if (networkPlayer.ShouldEndAerialKickPresentation())
             return false;
-        }
 
-        return networkPlayer == null || !networkPlayer.ShouldEndAerialKickPresentation();
+        // 에어리얼킥 프레젠테이션이 Launch/Fall 상태면 (아직 비행/낙하 중)
+        // maxHold 타임아웃과 무관하게 포즈를 유지한다.
+        // 타임아웃으로 강제 종료하면 공중에서 Idle 포즈가 보이는 버그가 발생한다.
+        var presState = networkPlayer.GetAerialKickPresentationState();
+        if (presState == NetworkPlayer.AerialKickPresentationState.Launch ||
+            presState == NetworkPlayer.AerialKickPresentationState.Fall)
+            return true;
+
+        return Time.time < aerialKickAirbornePoseMaxHoldUntilTime;
     }
 
     void TickAerialKickAnimation()
@@ -656,51 +751,48 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return;
         }
 
-        if (aerialKickPlayable.IsDone() && !isAerialKickEndPoseHeld)
+        if (ShouldFreezeAerialKickAirbornePose())
         {
-            isAerialKickEndPoseHeld = true;
-            aerialKickEndPoseForceReleaseTime = Time.time + AerialKickEndPoseHoldMaxDuration;
-            actionLockedUntil = Mathf.Max(actionLockedUntil, aerialKickEndPoseForceReleaseTime);
-            upperBodyStateVisibleUntil = Mathf.Max(upperBodyStateVisibleUntil, actionLockedUntil);
-            HoldAerialKickEndPose();
-            LogAerialKickAnimationEvent("HoldEndPose", $"forceReleaseAt={aerialKickEndPoseForceReleaseTime:F2}");
+            isAerialKickAirbornePoseHeld = true;
+            aerialKickAirbornePoseMinHoldUntilTime = Time.time + AerialKickAirbornePoseMinHoldDuration;
+            aerialKickAirbornePoseMaxHoldUntilTime = Time.time + AerialKickAirbornePoseHoldMaxDuration;
+            HoldAerialKickAirbornePose();
+            LogAerialKickAnimationEvent(
+                "HoldAirbornePose",
+                $"{DescribeAerialKickPresentationContext()} maxHoldUntil={aerialKickAirbornePoseMaxHoldUntilTime:F2}");
         }
 
-        if (!isAerialKickEndPoseHeld)
+        if (!isAerialKickAirbornePoseHeld)
             return;
-
-        if (Time.time >= aerialKickEndPoseForceReleaseTime &&
-            networkPlayer != null &&
-            !networkPlayer.IsGroundedForPresentation())
-        {
-            aerialKickEndPoseForceReleaseTime = Time.time + AerialKickEndPoseHoldExtensionDuration;
-            actionLockedUntil = Mathf.Max(actionLockedUntil, aerialKickEndPoseForceReleaseTime);
-            upperBodyStateVisibleUntil = Mathf.Max(upperBodyStateVisibleUntil, actionLockedUntil);
-            LogAerialKickAnimationEvent("ExtendHold", $"extendedUntil={aerialKickEndPoseForceReleaseTime:F2}");
-        }
 
         if (!ShouldKeepHoldingAerialKickPose())
         {
-            var reason = Time.time >= aerialKickEndPoseForceReleaseTime
-                ? "timeout"
-                : networkPlayer == null
-                    ? "network-player-missing"
-                    : networkPlayer.IsGroundedForPresentation()
-                        ? "presentation-grounded"
-                        : $"presentation-ended phase={networkPlayer.GetPhysicalPhase()}";
-            LogAerialKickAnimationEvent("Stop", reason);
+            var reason = "timeout";
+            if (networkPlayer != null)
+            {
+                if (networkPlayer.IsGroundedForPresentation())
+                    reason = "presentation-grounded";
+                else if (Time.time >= aerialKickAirbornePoseMaxHoldUntilTime)
+                    reason = "airborne-pose-timeout";
+                else
+                    reason = $"presentation-ended phase={networkPlayer.GetPhysicalPhase()}";
+            }
+            LogAerialKickAnimationEvent("Stop", $"{reason} {DescribeAerialKickPresentationContext()}");
             StopAerialKickAnimation();
             return;
         }
 
-        HoldAerialKickEndPose();
+        actionLockedUntil = Mathf.Max(actionLockedUntil, Time.time + 0.05f);
+        upperBodyStateVisibleUntil = Mathf.Max(upperBodyStateVisibleUntil, actionLockedUntil);
+        HoldAerialKickAirbornePose();
     }
 
     void StopAerialKickAnimation()
     {
         isAerialKickAnimationActive = false;
-        isAerialKickEndPoseHeld = false;
-        aerialKickEndPoseForceReleaseTime = float.NegativeInfinity;
+        isAerialKickAirbornePoseHeld = false;
+        aerialKickAirbornePoseMinHoldUntilTime = float.NegativeInfinity;
+        aerialKickAirbornePoseMaxHoldUntilTime = float.NegativeInfinity;
         currentAerialKickClip = null;
         RestoreAerialKickAnimatorRootPose();
         hasAerialKickAnimatorRootPose = false;
@@ -760,6 +852,17 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             : (Application.isEditor || Debug.isDebugBuild);
     }
 
+    string DescribeAerialKickPresentationContext()
+    {
+        var clipTime = aerialKickGraph.IsValid() ? aerialKickPlayable.GetTime() : 0d;
+        var poseTime = ResolveAerialKickAirbornePoseTime();
+        if (networkPlayer == null)
+            return $"clipTime={clipTime:F2} poseTime={poseTime:F2}";
+
+        return
+            $"clipTime={clipTime:F2} poseTime={poseTime:F2} grounded={networkPlayer.IsGroundedForPresentation()} pres={networkPlayer.GetAerialKickPresentationState()} shouldEnd={networkPlayer.ShouldEndAerialKickPresentation()} phase={networkPlayer.GetPhysicalPhase()}";
+    }
+
     void LogAerialKickAnimationEvent(string source, string note)
     {
         if (!ShouldLogAerialKickDiagnostics())
@@ -768,7 +871,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         var grounded = networkPlayer != null && networkPlayer.IsGroundedForPresentation();
         var phase = networkPlayer != null ? networkPlayer.GetPhysicalPhase().ToString() : "none";
         Debug.Log(
-            $"[AerialKickAnim] {name} {source} t={Time.time:F2} active={isAerialKickAnimationActive} hold={isAerialKickEndPoseHeld} grounded={grounded} phase={phase} note={note}",
+            $"[AerialKickAnim] {name} {source} t={Time.time:F2} active={isAerialKickAnimationActive} hold={isAerialKickAirbornePoseHeld} grounded={grounded} phase={phase} note={note}",
             this);
     }
 
@@ -879,12 +982,20 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         if (isLocalWithoutAuthority &&
             networkPlayer != null &&
-            Input.GetMouseButtonDown(1) &&
+            networkPlayer.ConsumeOwnerProxyAerialKickPredictionTrigger() &&
             Time.time >= nextOwnerProxyAerialKickPredictionAt &&
             networkPlayer.ShouldPredictOwnerProxyAerialKickPresentation())
         {
             nextOwnerProxyAerialKickPredictionAt = Time.time + networkPlayer.GetConfiguredAerialKickCooldown();
+            networkPlayer.NotifyLocalAerialKickPrediction();
             PlayAerialKick();
+        }
+
+        if (Input.GetMouseButtonDown(2) &&
+            !IsActionLocked() &&
+            (networkPlayer == null || networkPlayer.CanTriggerLocalHeadbuttPresentation()))
+        {
+            PlayHeadbutt();
         }
 
         if (Input.GetMouseButtonDown(0))

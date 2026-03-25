@@ -56,7 +56,7 @@ public sealed partial class NetworkPlayer
         }
 
         UpdateGrabHandlers();
-        UpdatePhysicalPhaseState(Runner.DeltaTime);
+        RefreshPhysicalPhaseAfterGrabHandlers();
         SynchronizeNetworkSimulationState();
         TraceMoveAuthorityState("FixedUpdateNetwork.AfterPhase");
         TraceMovePublish("FixedUpdateNetwork.Publish");
@@ -178,6 +178,7 @@ public sealed partial class NetworkPlayer
         _sandboxInput = Vector2.zero;
         _sandboxJump = false;
         _dropTriggered = false;
+        _throwTriggered = false;
         // Sync absolute hips position for remote grab / drag presentation.
         _leftClickUseTriggered = false;
         _leftMouseDown = false;
@@ -187,6 +188,18 @@ public sealed partial class NetworkPlayer
         _isLeftGrabActive = false;
         _isRightGrabActive = false;
         _isGrabActive = false;
+    }
+
+    internal bool ConsumeOwnerProxyAerialKickPredictionTrigger()
+    {
+        if (!IsNetworkReady || !HasInputAuthority || HasStateAuthority)
+            return false;
+
+        if (!_throwTriggered)
+            return false;
+
+        _throwTriggered = false;
+        return true;
     }
 
     private void SynchronizeNetworkSimulationState()
@@ -214,6 +227,7 @@ public sealed partial class NetworkPlayer
 
         NetworkedIsActiveRagdoll = _isActiveRagdoll;
         NetworkedIsGrounded = _isGrounded;
+        NetworkedAerialKickPresentationState = (byte)ResolveLocalAerialKickPresentationState();
         NetworkedPhysicalPhase = (byte)_localPhysicalPhase;
         NetworkedInstability = _localInstability;
         NetworkedIsDragged = _localIsDragged;
