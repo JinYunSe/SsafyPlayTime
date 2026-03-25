@@ -676,14 +676,33 @@ namespace SSAFYPlayTime
                 _netLeftMouseConsumedAsGrab = false;
             }
 
-            _netRightMouseDown = false;
-            _netRightMouseDownTime = 0f;
-            _netRightMouseConsumedAsGrab = false;
+            if (Input.GetMouseButtonDown(1))
+            {
+                _netRightMouseDown = true;
+                _netRightMouseDownTime = Time.time;
+                _netRightMouseConsumedAsGrab = false;
+            }
+
+            if (_netRightMouseDown && Input.GetMouseButton(1) &&
+                Time.time - _netRightMouseDownTime >= NET_GRAB_HOLD_THRESHOLD)
+            {
+                _netRightMouseConsumedAsGrab = true;
+            }
+
+            if (Input.GetMouseButtonUp(1))
+            {
+                if (_netRightMouseDown &&
+                    !_netRightMouseConsumedAsGrab &&
+                    Time.time - _netRightMouseDownTime < NET_GRAB_HOLD_THRESHOLD)
+                {
+                    _netThrowQueued = true;
+                }
+
+                _netRightMouseDown = false;
+                _netRightMouseConsumedAsGrab = false;
+            }
 
             // 우클릭 = 던지기 (잡고 있을 때)
-            if (Input.GetMouseButtonDown(1))
-                _netThrowQueued = true;
-
             if (Input.GetKeyDown(KeyCode.Space))
                 _netJumpQueued = true;
 
@@ -813,7 +832,7 @@ namespace SSAFYPlayTime
                 Drop = ConsumeLatchedNetworkFlag(ref _netDropQueued),
                 Throw = ConsumeLatchedNetworkFlag(ref _netThrowQueued),
                 LeftGrabHold = latchedLeftGrabHold,
-                RightGrabHold = false,
+                RightGrabHold = latchedRightGrabHold,
                 Headbutt = ConsumeLatchedNetworkFlag(ref _netHeadbuttQueued),
                 Sprint = _netSprintHeld
             };

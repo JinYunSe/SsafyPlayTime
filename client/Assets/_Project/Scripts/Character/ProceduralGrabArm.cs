@@ -1093,12 +1093,7 @@ public class ProceduralGrabArm : MonoBehaviour
         if (_grabController != null)
             return _grabController.CurrentHoldVariant;
 
-        return carryMode switch
-        {
-            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry => CharacterGrabController.HoldVariant.DualCarry,
-            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry => CharacterGrabController.HoldVariant.FrontCarry,
-            _ => CharacterGrabController.HoldVariant.None
-        };
+        return CharacterGrabController.ResolveCarryHoldVariant(carryMode);
     }
 
     internal bool IsOverheadCarryPoseActive(float threshold = 0.55f)

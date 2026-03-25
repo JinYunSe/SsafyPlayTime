@@ -89,10 +89,12 @@ public sealed partial class NetworkPlayer
         // This keeps PartyMonsterAnimationDriver.SyncGrabAnimation() in sync.
         if (Runner != null && HasInputAuthority && !HasStateAuthority)
         {
-            var unifiedGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab && !HasHeldRuntimeItem();
-            _isLeftGrabActive = unifiedGrabHold;
-            _isRightGrabActive = unifiedGrabHold;
-            _isGrabActive = unifiedGrabHold;
+            var canSendGrabHold = Time.time >= _grabDisabledUntilTime && !HasHeldRuntimeItem();
+            var leftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab && canSendGrabHold;
+            var rightGrabHold = _rightMouseDown && _rightMouseConsumedAsGrab && canSendGrabHold;
+            _isLeftGrabActive = leftGrabHold;
+            _isRightGrabActive = rightGrabHold;
+            _isGrabActive = leftGrabHold || rightGrabHold;
         }
     }
 
@@ -124,11 +126,25 @@ public sealed partial class NetworkPlayer
     {
         // 우클릭 = 던지기 (잡고 있을 때)
         if (Input.GetMouseButtonDown(1))
+        {
+            _rightMouseDown = true;
+            _rightMouseDownTime = Time.time;
+            _rightMouseConsumedAsGrab = false;
+        }
+
+        if (Input.GetMouseButton(1) && _rightMouseDown)
+        {
+            if (Time.time - _rightMouseDownTime >= GRAB_HOLD_THRESHOLD && !_rightMouseConsumedAsGrab)
+                _rightMouseConsumedAsGrab = true;
+        }
+
+        if (!Input.GetMouseButtonUp(1))
+            return;
+
+        if (!_rightMouseConsumedAsGrab && Time.time - _rightMouseDownTime < GRAB_HOLD_THRESHOLD)
             _throwTriggered = true;
 
         _rightMouseDown = false;
-        _rightMouseDownTime = 0f;
-        _rightMouseConsumedAsGrab = false;
     }
 
     private PlayerNetworkInput BuildSandboxInput()
@@ -144,7 +160,7 @@ public sealed partial class NetworkPlayer
             Drop = _dropTriggered,
             Throw = _throwTriggered,
             LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab && canSendGrabHold,
-            RightGrabHold = false,
+            RightGrabHold = _rightMouseDown && _rightMouseConsumedAsGrab && canSendGrabHold,
             Headbutt = Input.GetMouseButtonDown(2),
             Sprint = Input.GetKey(KeyCode.LeftShift)
         };

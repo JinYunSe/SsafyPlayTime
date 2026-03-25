@@ -109,6 +109,7 @@ public class HandGrabHandler : MonoBehaviour
     public bool UsesNearPlayerGrabProfile => _useNearPlayerJointProfile;
     public bool IsHoldingThrowableTarget => IsHolding && (_grabbedPlayer == null || !_grabbedPlayer.IsActiveRagdoll);
     public PuppetMaster GrabbedPuppet => _grabbedPuppet;
+    public bool IsHoldingTarget(NetworkPlayer targetPlayer) => IsHolding && _grabbedPlayer == targetPlayer;
 
     /// <summary>reach intent 중인 타겟 (아직 attach 전)</summary>
     public Rigidbody PendingReachTarget => _pendingReachTarget;
@@ -328,9 +329,23 @@ public class HandGrabHandler : MonoBehaviour
         itemRuntimeHost = runtimeHost;
     }
 
+    public bool ForceReleaseTarget(NetworkPlayer targetPlayer, string diagnosticsSource = "ForceReleaseTarget")
+    {
+        if (!IsHoldingTarget(targetPlayer))
+            return false;
+
+        ReleaseInPlace(diagnosticsSource);
+        return true;
+    }
+
     public void UpdateState()
     {
         if (networkPlayer == null) return;
+        if (IsHolding && _grabbedPlayer != null && _grabbedPlayer.IsDeadState)
+        {
+            ReleaseInPlace("TargetDeathRelease");
+            return;
+        }
 
         // 잡고 있는 동안 시간 경과에 따라 breakForce 약화 (weakening curve)
         // 기절자 잡기 시 약화 스킵 가능 (안정적 운반을 위해)
@@ -1058,6 +1073,9 @@ public class HandGrabHandler : MonoBehaviour
             AttachFixedJoint(jointTargetRb, localAnchor);
 
         _grabbedPlayer = targetPlayer;
+        var shouldTrackVictimGrabRelation = _characterGrabController != null
+            ? _characterGrabController.ShouldTrackVictimGrabRelation(_grabbedPlayer)
+            : ShouldTrackVictimGrabRelation(_grabbedPlayer);
         var applyVictimGrabState = _characterGrabController != null
             ? _characterGrabController.ShouldApplyVictimGrabState(_currentGrabTargetType)
             : ShouldApplyVictimGrabState(_currentGrabTargetType);
@@ -1077,7 +1095,7 @@ public class HandGrabHandler : MonoBehaviour
         }
 
         // 잡힌 상대에게 알림 (OwnerProxy 뼈 보간 전환용)
-        if (_grabbedPlayer != null && applyVictimGrabState)
+        if (_grabbedPlayer != null && shouldTrackVictimGrabRelation)
         {
             _grabbedPlayer.SetGrabbedByOther(true);
             _grabbedPlayer.OnGrabbed();
@@ -1415,14 +1433,19 @@ public class HandGrabHandler : MonoBehaviour
     {
         if (networkPlayer != null)
             networkPlayer.ReportGrabDetached(handSide);
-        var applyVictimGrabState = _characterGrabController != null
-            ? _characterGrabController.ShouldApplyVictimGrabState(_currentGrabTargetType)
-            : ShouldApplyVictimGrabState(_currentGrabTargetType);
-        if (_grabbedPlayer != null && applyVictimGrabState)
+        var shouldTrackVictimGrabRelation = _characterGrabController != null
+            ? _characterGrabController.ShouldTrackVictimGrabRelation(_grabbedPlayer)
+            : ShouldTrackVictimGrabRelation(_grabbedPlayer);
+        if (_grabbedPlayer != null && shouldTrackVictimGrabRelation)
         {
             _grabbedPlayer.SetGrabbedByOther(false);
             _grabbedPlayer.OnReleased();
         }
+    }
+
+    private static bool ShouldTrackVictimGrabRelation(NetworkPlayer targetPlayer)
+    {
+        return targetPlayer != null && !targetPlayer.IsDeadState;
     }
 
     private static bool ShouldApplyVictimGrabState(GrabDriveProfile.GrabTargetType targetType)

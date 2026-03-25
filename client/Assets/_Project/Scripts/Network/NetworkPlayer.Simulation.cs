@@ -431,6 +431,23 @@ public sealed partial class NetworkPlayer
         }
     }
 
+    private void InterruptRecoveryForInboundGrab(string source)
+    {
+        if (!_isRecovering && !_isRecoverStabilizing && !_hasPendingRecoveryStandUpHandoff)
+            return;
+
+        _isRecovering = false;
+        _isRecoverStabilizing = false;
+        _recoveringTimer = 0f;
+        _recoverStabilizeTimer = 0f;
+        _hasPendingRecoveryStandUpHandoff = false;
+        _recoverMinColliderY = float.NegativeInfinity;
+        _hasRecoverAnchorPose = false;
+        SetRecoveryAnimationVariant(RecoveryAnimationVariant.None);
+        SynchronizeStunPresentationPhase();
+        TraceCarryDebugSample("InterruptRecoveryForInboundGrab", $"source={source}", true);
+    }
+
     private void TickHitInstabilityBoost(float dt)
     {
         if (_hitInstabilityBoost <= 0f)
@@ -1419,8 +1436,10 @@ public sealed partial class NetworkPlayer
             _downedHitCooldownRemaining = Mathf.Max(0f, _downedHitCooldownRemaining - dt);
 
         // 잡혀서 운반 중이면 기절 타이머 정지 (운반 중 자동 회복 방지)
-        bool pauseStunTimer = _beingGrabbedRefCount > 0;
+        bool pauseStunTimer = stunnedPhase == PhysicalPhase.BeingCarriedStunned;
         var timerScale = pauseStunTimer ? 0f : GetCurrentDownedRecoverScale();
+        if (stunnedPhase == PhysicalPhase.DraggedStunned)
+            timerScale *= 0.35f;
         var remaining = GetStunTimeRemaining() - timerScale * dt;
         SetStunTimeRemaining(remaining);
 
@@ -1829,9 +1848,7 @@ public sealed partial class NetworkPlayer
                 candidateHoldVariant != CharacterGrabController.HoldVariant.OverheadCarry &&
                 candidateHoldVariant != CharacterGrabController.HoldVariant.DualCarry)
             {
-                candidateHoldVariant = candidateCarryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry
-                    ? CharacterGrabController.HoldVariant.DualCarry
-                    : CharacterGrabController.HoldVariant.FrontCarry;
+                candidateHoldVariant = CharacterGrabController.ResolveCarryHoldVariant(candidateCarryMode);
             }
 
             bestHolder = candidate;
@@ -2625,20 +2642,17 @@ public sealed partial class NetworkPlayer
 
     private PhysicalPhase ResolveAuthorityPhysicalPhase(bool anyHolding, bool beingGrabbed, bool dragged)
     {
+        if (beingGrabbed)
+            return dragged ? PhysicalPhase.Dragged : PhysicalPhase.BeingGrabbed;
+
         if (_isRecovering || _isRecoverStabilizing)
             return PhysicalPhase.Recovering;
-
-        if (dragged)
-            return PhysicalPhase.Dragged;
 
         var instabilityThreshold = _localPhysicalPhase == PhysicalPhase.Unstable
             ? UnstableExitThreshold
             : UnstableEnterThreshold;
         if (_localInstability >= instabilityThreshold)
             return PhysicalPhase.Unstable;
-
-        if (beingGrabbed)
-            return PhysicalPhase.BeingGrabbed;
 
         if (anyHolding)
         {
@@ -3296,6 +3310,8 @@ public sealed partial class NetworkPlayer
     {
         if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
             return;
+
+        ForceReleaseInboundGrabRelations("ForceRecover");
 
         if (!IsBeingCarriedWhileStunned(this))
             CaptureCollapseAnchorPose(transform.position, _targetRoot != null ? _targetRoot.rotation : transform.rotation);

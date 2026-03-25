@@ -542,6 +542,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     public void SetGrabbedByOther(bool grabbed)
     {
         var previousRefCount = _beingGrabbedRefCount;
+        if (grabbed && previousRefCount == 0)
+            InterruptRecoveryForInboundGrab("SetGrabbedByOther");
         _beingGrabbedRefCount += grabbed ? 1 : -1;
         _beingGrabbedRefCount = Mathf.Max(0, _beingGrabbedRefCount);
         if (IsNetworkReady && HasStateAuthority)
@@ -606,6 +608,71 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             "ReportGrabDetached",
             $"side={side} leftTarget={LeftGrabTargetId} rightTarget={RightGrabTargetId}",
             true);
+    }
+
+    private int CountActiveInboundGrabRelations()
+    {
+        var count = 0;
+        foreach (var candidate in RegisteredPlayers)
+        {
+            if (candidate == null || candidate == this)
+                continue;
+
+            var handlers = candidate._handGrabHandlers;
+            if (handlers == null || handlers.Length == 0)
+                handlers = candidate.GetComponentsInChildren<HandGrabHandler>(true);
+
+            for (var i = 0; i < handlers.Length; i++)
+            {
+                var handler = handlers[i];
+                if (handler != null && handler.IsHoldingTarget(this))
+                    count++;
+            }
+        }
+
+        return count;
+    }
+
+    private void ResetInboundGrabStateIfStale(string source)
+    {
+        if (CountActiveInboundGrabRelations() > 0)
+            return;
+
+        if (_beingGrabbedRefCount <= 0 && _grabbedByCount <= 0)
+            return;
+
+        _beingGrabbedRefCount = 0;
+        _grabbedByCount = 0;
+        if (IsNetworkReady && HasStateAuthority)
+            NetworkedIsBeingGrabbed = false;
+
+        ApplyGrabbedJointState(false);
+        TraceCarryDebugSample("ResetInboundGrabStateIfStale", $"source={source}", true);
+    }
+
+    internal void ForceReleaseInboundGrabRelations(string source)
+    {
+        if (IsNetworkReady && !HasStateAuthority)
+            return;
+
+        foreach (var candidate in RegisteredPlayers)
+        {
+            if (candidate == null || candidate == this)
+                continue;
+
+            var handlers = candidate._handGrabHandlers;
+            if (handlers == null || handlers.Length == 0)
+                handlers = candidate.GetComponentsInChildren<HandGrabHandler>(true);
+
+            for (var i = 0; i < handlers.Length; i++)
+            {
+                var handler = handlers[i];
+                if (handler != null)
+                    handler.ForceReleaseTarget(this, source);
+            }
+        }
+
+        ResetInboundGrabStateIfStale(source);
     }
 
     private bool TryGetNetworkHeldAnchorData(

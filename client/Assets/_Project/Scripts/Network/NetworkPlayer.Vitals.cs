@@ -313,6 +313,7 @@ public sealed partial class NetworkPlayer
         SetRecentStunHitCount(0);
         SetDeathFreezeRemaining(0f);
 
+        ForceReleaseInboundGrabRelations("Death");
         TryForceDropHeldContentOnDeath();
 
         // 레그돌/스턴 없이 즉시 입력·물리 상태 초기화
