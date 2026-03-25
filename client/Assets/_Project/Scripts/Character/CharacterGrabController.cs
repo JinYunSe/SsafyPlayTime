@@ -143,8 +143,17 @@ public sealed class CharacterGrabController : MonoBehaviour
 
     public static bool IsThrowableObjectState(GrabActionState actionState, HoldVariant holdVariant)
     {
-        return holdVariant == HoldVariant.Object &&
-               actionState == GrabActionState.HoldOneHandObject;
+        if (holdVariant == HoldVariant.Object)
+            return actionState == GrabActionState.HoldOneHandObject;
+
+        if (!IsStunnedHoldVariant(holdVariant))
+            return false;
+
+        return actionState == GrabActionState.HoldOneHandStunned ||
+               actionState == GrabActionState.HoldTwoHandStunned ||
+               actionState == GrabActionState.FrontCarry ||
+               actionState == GrabActionState.OverheadCarry ||
+               actionState == GrabActionState.DualCarry;
     }
 
     public HandHoldMode GetHandMode(HandGrabHandler.HandSide side)
@@ -414,7 +423,7 @@ public sealed class CharacterGrabController : MonoBehaviour
     {
         return carryMode switch
         {
-            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry => HoldVariant.OverheadCarry,
+            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry => HoldVariant.FrontCarry,
             SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry => HoldVariant.DualCarry,
             SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim => HoldVariant.CarriedVictim,
             _ => ResolveDirectHoldVariant()
@@ -462,7 +471,7 @@ public sealed class CharacterGrabController : MonoBehaviour
         switch (carryMode)
         {
             case SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry:
-                return GrabActionState.OverheadCarry;
+                return GrabActionState.FrontCarry;
             case SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry:
                 return GrabActionState.DualCarry;
         }
@@ -524,11 +533,7 @@ public sealed class CharacterGrabController : MonoBehaviour
 
     private static bool IsHoldingThrowableObject(HandGrabHandler handler)
     {
-        if (handler == null || !handler.IsHolding)
-            return false;
-
-        return handler.GrabbedTargetKind == SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.Object ||
-               handler.GrabbedTargetKind == SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.Weapon;
+        return handler != null && handler.IsHoldingThrowableTarget;
     }
 
     private bool TryGetReplicatedResolvedState(
