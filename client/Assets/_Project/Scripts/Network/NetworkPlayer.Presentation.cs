@@ -226,6 +226,11 @@ public sealed partial class NetworkPlayer
 
     private void LateUpdate()
     {
+        // 거리 기반 Physics LOD: 원격 플레이어의 PuppetMaster 모드를 매 프레임 갱신.
+        // 플레이어가 이동해 거리가 바뀌면 즉시 Kinematic ↔ Active/Disabled 전환.
+        if (!HasStateAuthority && !HasInputAuthority)
+            SyncPuppetMasterMode(_isActiveRagdoll);
+
         // 비주얼 상태를 먼저 갱신한 뒤 카메라 앵커를 갱신해야
         // 앵커가 최종 표시 비주얼 위치를 기준으로 추적한다.
         UpdateRemotePhysicsPresentationResetWindow();
