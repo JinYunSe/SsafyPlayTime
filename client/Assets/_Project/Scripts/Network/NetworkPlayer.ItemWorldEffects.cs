@@ -1160,7 +1160,8 @@ public sealed partial class NetworkPlayer
                     "Flamethrower",
                     0f,
                     pushForce,
-                    instigator: this);
+                    instigator: this,
+                    downedHitPolicy: DownedHitPolicy.RecoveryPenalty);
             }
 
             var body = hitCollider.attachedRigidbody;
@@ -1218,7 +1219,8 @@ public sealed partial class NetworkPlayer
                     "SatelliteStrike",
                     0f,
                     appliedExplosionForce,
-                    instigator: this);
+                    instigator: this,
+                    downedHitPolicy: DownedHitPolicy.RecoveryPenalty);
             }
 
             var body = ResolveSatelliteStrikeImpactBody(hitCollider, targetPlayer);
