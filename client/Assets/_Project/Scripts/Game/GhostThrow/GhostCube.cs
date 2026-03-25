@@ -166,23 +166,22 @@ namespace SSAFYPlayTime.Game.GhostThrow
             if (_hasExploded) return;
             _hasExploded = true;
 
-            // 폭발 위치·플래그를 네트워크 상태에 기록.
-            // Runner.Despawn() 시 Fusion이 최종 상태를 모든 클라이언트에 전달하며
-            // Despawned() 콜백에서 이펙트를 생성한다.
             NetworkedExplosionPos = transform.position;
             NetworkedHasExploded = true;
 
             ApplyExplosionKnockback(transform.position);
+            // 호스트는 Despawned()에서 hasState=false일 수 있으므로 여기서 직접 이펙트 생성
+            SpawnExplosionEffect(transform.position);
             Runner.Despawn(Object);
         }
 
         /// <summary>
         /// Despawn 시 Fusion이 최종 네트워크 상태와 함께 모든 클라이언트에서 호출.
-        /// NetworkedHasExploded가 true이면 파티클 이펙트를 로컬 생성한다.
+        /// 클라이언트만 이펙트를 생성한다 (호스트는 TriggerExplode에서 이미 생성).
         /// </summary>
         public override void Despawned(NetworkRunner runner, bool hasState)
         {
-            if (hasState && NetworkedHasExploded)
+            if (!HasStateAuthority && hasState && NetworkedHasExploded)
                 SpawnExplosionEffect(NetworkedExplosionPos);
         }
 
