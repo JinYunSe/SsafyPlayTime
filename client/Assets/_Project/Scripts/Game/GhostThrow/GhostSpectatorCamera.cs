@@ -9,8 +9,10 @@ namespace SSAFYPlayTime.Game.GhostThrow
         [Header("Orbit")]
         [Tooltip("맵 중앙 좌표 (X, Z 기준)")]
         public Vector3 mapCenter = Vector3.zero;
-        [Tooltip("맵 중앙으로부터의 공전 반지름")]
-        public float orbitRadius = 40f;
+        [Tooltip("X축 방향 공전 반지름 — 맵이 X 방향으로 길면 이 값을 작게 설정해 긴 면에서 카메라가 가까워짐")]
+        public float orbitRadiusX = 40f;
+        [Tooltip("Z축 방향 공전 반지름 — 맵이 Z 방향으로 길면 이 값을 작게 설정해 긴 면에서 카메라가 가까워짐")]
+        public float orbitRadiusZ = 40f;
         [Tooltip("카메라 높이 (mapCenter.y 기준 오프셋)")]
         public float orbitHeight = 15f;
         [Tooltip("A/D 키 공전 속도 (도/초)")]
@@ -53,7 +55,7 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
             var rad = _orbitAngle * Mathf.Deg2Rad;
             var targetPos = mapCenter
-                + new Vector3(Mathf.Sin(rad) * orbitRadius, orbitHeight, Mathf.Cos(rad) * orbitRadius);
+                + new Vector3(Mathf.Sin(rad) * orbitRadiusX, orbitHeight, Mathf.Cos(rad) * orbitRadiusZ);
 
             transform.position = Vector3.Lerp(transform.position, targetPos, Time.deltaTime * moveSpeed);
 

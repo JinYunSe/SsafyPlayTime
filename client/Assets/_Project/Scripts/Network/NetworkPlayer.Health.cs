@@ -43,6 +43,7 @@ public sealed partial class NetworkPlayer
 
     private bool TrySpawnGhostThrowOnStateAuthority(bool isBanana, Vector3 spawnPos, Vector3 direction)
     {
+        Debug.Log($"[GhostThrow] TrySpawnGhostThrowOnStateAuthority: player={gameObject.name} isBanana={isBanana} spawnPos={spawnPos}");
         var manager = GhostThrowManager.FindManagerForPlayer(this);
         if (manager == null)
         {
@@ -50,6 +51,7 @@ public sealed partial class NetworkPlayer
             return false;
         }
 
+        Debug.Log($"[GhostThrow] Found manager: {manager.gameObject.name} prefabOnlineValid={manager.cubePrefabOnline.IsValid}");
         return manager.TrySpawnOnlineFromRequest(isBanana, spawnPos, direction);
     }
 }
