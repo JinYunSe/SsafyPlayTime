@@ -12,6 +12,13 @@ public class ImmediateDeath : MonoBehaviour
     [SerializeField] private bool killPlayers = true;
     [SerializeField] private bool enableDebugLog = true;
 
+    private ItemRandomSpawnManager[] _spawnManagers;
+
+    private void Awake()
+    {
+        _spawnManagers = FindObjectsOfType<ItemRandomSpawnManager>(true);
+    }
+
     private void OnTriggerEnter(Collider other)
     {
         TryHandleCollider(other);
@@ -86,10 +93,9 @@ public class ImmediateDeath : MonoBehaviour
         if (networkObject != null && networkObject.Id.IsValid && !networkObject.HasStateAuthority)
             return;
 
-        var managers = FindObjectsOfType<ItemRandomSpawnManager>(true);
-        for (var i = 0; i < managers.Length; i++)
+        for (var i = 0; i < _spawnManagers.Length; i++)
         {
-            var manager = managers[i];
+            var manager = _spawnManagers[i];
             if (manager == null || !manager.IsManagedFieldDrop(drop))
                 continue;
 
