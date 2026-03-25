@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using RootMotion.Dynamics;
+using SSAFYPlayTime.Stage;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Character
@@ -123,6 +124,14 @@ namespace SSAFYPlayTime.Character
 
             ResolveNetworkPlayer();
             ResolveMotionReferences();
+
+            // Character 레이어 root Rigidbody를 MapTunnelGuard 레지스트리에 등록
+            MapTunnelGuard.Register(motionRigidbody);
+        }
+
+        private void OnDestroy()
+        {
+            MapTunnelGuard.Unregister(motionRigidbody);
         }
 
         private void OnValidate()

@@ -517,16 +517,12 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private static int CountActiveFieldDrops()
         {
-            var drops = FindObjectsOfType<ItemFieldDrop>(true);
+            // FindObjectsOfType 대신 static 레지스트리 사용 (ItemFieldDrop.Awake/OnDestroy 자가 등록)
             var count = 0;
-            for (var i = 0; i < drops.Length; i++)
+            foreach (var drop in ItemFieldDrop.AllDrops)
             {
-                var drop = drops[i];
                 if (drop == null || !drop.gameObject.activeInHierarchy || drop.IsPickedUp)
-                {
                     continue;
-                }
-
                 count++;
             }
 
