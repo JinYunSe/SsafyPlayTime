@@ -2665,8 +2665,8 @@ MonoBehaviour:
   throwLockDuration: 0.85
   aerialKickClip: {fileID: 7400000, guid: 2479957246e64435bcc1196b8b2e585b, type: 3}
   aerialKickLockDuration: 0.72
-  recoverySupineClip: {fileID: 0}
-  recoveryProneClip: {fileID: 0}
+  recoverySupineClip: {fileID: 7400000, guid: f3b358c04465c11499b3f39de5fca6c0, type: 3}
+  recoveryProneClip: {fileID: 7400000, guid: 9463f145213d9af4db986f0a8f17d603, type: 3}
 --- !u!54 &5945320000664910996
 Rigidbody:
   m_ObjectHideFlags: 0
