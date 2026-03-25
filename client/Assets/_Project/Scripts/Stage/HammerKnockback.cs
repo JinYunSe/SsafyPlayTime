@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 
 using Fusion;
@@ -26,6 +27,8 @@ namespace SSAFYPlayTime.Stage
         [Tooltip("스턴 대미지. knockout threshold(30)를 넘어야 래그돌로 전환되어 groundStickForce가 해제된다.")]
         [SerializeField] private float stunDamage = 35f;
         [SerializeField] private float healthDamage = 0f;
+        [Tooltip("스턴이 적용되기 전까지의 대기 시간 (캐릭터가 clamp 없이 날아가는 시간")]
+        [SerializeField] private float stunDelay = 0.15f;
 
         [Header("Tumble")]
         // [SerializeField, Range(0f, 0.3f)] private float yawTorqueScale = 0.1f;
@@ -121,33 +124,21 @@ namespace SSAFYPlayTime.Stage
                 pushDir = (away.normalized + Vector3.up * verticalLift).normalized;
             }
 
-            var forceScale = 1f;
-            if (networkPlayer != null)
-            {
-                if (networkPlayer.IsStunned)
-                    forceScale = stunnedKnockbackScale;
-                else if (networkPlayer.IsRecovering)
-                    forceScale = recoveringKnockbackScale;
-            }
+            var forceScale = (networkPlayer != null && networkPlayer.IsRecovering)
+                ? recoveringKnockbackScale
+                : 1f;
 
-            if (networkPlayer != null)
-            {
-                playerRb.transform.position += Vector3.up * 0.2f + pushDir * 0.1f;
-            }
+            StartCoroutine(DelayedStunRoutine(networkPlayer, healthDamage, stunDamage));
 
             // 1) 래그돌 전환
-            networkPlayer?.ApplyCombinedDamage(
-                healthDamage,
-                stunDamage,
-                "HammerKnockback",
-                _velocity.magnitude,
-                knockbackForce * forceScale,
-                1f,
-                false,
-                null,
-                0,
-                1f,
-                NetworkPlayer.DownedHitPolicy.RecoveryPenalty);
+            // networkPlayer?.ApplyCombinedDamage(healthDamage, stunDamage, "HammerKnockback");
+            networkPlayer?.ApplyCombinedDamage(healthDamage, stunDamage, "HammerKnockback", 0f, 0f, 1f, deferStunEntryDamping: true, null);
+
+            // 이동
+            if (networkPlayer != null)
+            {
+                playerRb.transform.position += Vector3.up * 1.0f + pushDir * 0.1f;
+            }
 
             var appliedForce = pushDir * knockbackForce * forceScale;
             var velocityBefore = playerRb.velocity;
@@ -174,6 +165,24 @@ namespace SSAFYPlayTime.Stage
                 playerRb.velocity,
                 true,
                 $"hammerSpeed={_velocity.magnitude:F2} forceScale={forceScale:F2}");
+        }
+
+        /// <summary>
+        /// 지정된 시간만큼 대기한 후 스턴 및 대미지를 적용합니다.
+        /// </summary>
+        private IEnumerator DelayedStunRoutine(NetworkPlayer player, float hDamage, float sDamage)
+        {
+            if (player == null)
+                yield break;
+
+            // 0.15초 동안 대기 (이 기간 동안 플레이어는 정상 상태라 강한 속도를 유지)
+            yield return new WaitForSeconds(stunDelay);
+
+            // 대기 후 플레이어가 여전히 존재하고 스턴 상태가 아니라면 스턴 적용
+            if (player != null)
+            {
+                player.ApplyCombinedDamage(hDamage, sDamage, "HammerKnockback", 0f, 0f, 1f, deferStunEntryDamping: true, null);
+            }
         }
     }
 }
