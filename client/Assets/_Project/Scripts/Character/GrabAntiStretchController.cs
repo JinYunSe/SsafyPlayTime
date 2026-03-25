@@ -35,12 +35,16 @@ namespace SSAFYPlayTime.Character
         [SerializeField] private float grabbedCoreDamperMultiplier = 1.35f;
         [SerializeField] private float carriedVictimCoreSpringMultiplier = 2.2f;
         [SerializeField] private float carriedVictimCoreDamperMultiplier = 1.35f;
+        [SerializeField] private float carriedVictimLimbSpringMultiplier = 1.5f;
+        [SerializeField] private float carriedVictimLimbDamperMultiplier = 1.3f;
         [SerializeField] private bool verboseWarnings;
 
         private RuntimeLink[] _links;
         private RuntimeDriveLink[] _coreDriveLinks;
+        private RuntimeDriveLink[] _limbDriveLinks;
         private bool _resolved;
         private bool _coreDriveResolved;
+        private bool _limbDriveResolved;
         private bool _active;
         private bool _warnedMissingTargets;
         private bool _warnedMissingCoreJoints;
@@ -88,8 +92,10 @@ namespace SSAFYPlayTime.Character
             ResolveReferences();
             BuildLinkDefinitions();
             BuildCoreDriveDefinitions();
+            BuildLimbDriveDefinitions();
             TryResolveLinkBodies();
             TryResolveCoreDriveJoints();
+            TryResolveLimbDriveJoints();
         }
 
         private void FixedUpdate()
@@ -125,6 +131,9 @@ namespace SSAFYPlayTime.Character
 
             if (!_coreDriveResolved)
                 TryResolveCoreDriveJoints();
+
+            if (!_limbDriveResolved)
+                TryResolveLimbDriveJoints();
 
             var shouldEnable = ShouldEnableAntiStretch();
             if (shouldEnable && !_active)
@@ -190,6 +199,20 @@ namespace SSAFYPlayTime.Character
             };
         }
 
+        private void BuildLimbDriveDefinitions()
+        {
+            if (_limbDriveLinks != null && _limbDriveLinks.Length == 4)
+                return;
+
+            _limbDriveLinks = new[]
+            {
+                CreateCoreDriveLink("LeftUpperArm", "LeftUpperArm", "LeftArm"),
+                CreateCoreDriveLink("RightUpperArm", "RightUpperArm", "RightArm"),
+                CreateCoreDriveLink("LeftUpperLeg", "LeftUpperLeg", "LeftThigh"),
+                CreateCoreDriveLink("RightUpperLeg", "RightUpperLeg", "RightThigh")
+            };
+        }
+
         private static RuntimeLink CreateLink(string label, string[] limbNames, string[] anchorNames, float slack)
         {
             return new RuntimeLink
@@ -232,6 +255,7 @@ namespace SSAFYPlayTime.Character
             {
                 case NetworkPlayer.PhysicalPhase.BeingGrabbed:
                 case NetworkPlayer.PhysicalPhase.Dragged:
+                case NetworkPlayer.PhysicalPhase.StunnedCollapse:
                 case NetworkPlayer.PhysicalPhase.Stunned:
                 case NetworkPlayer.PhysicalPhase.BeingCarriedStunned:
                     return true;
@@ -350,6 +374,36 @@ namespace SSAFYPlayTime.Character
                 Debug.LogWarning($"[GrabAntiStretchController] Missing core grab joints on {name}.");
                 _warnedMissingCoreJoints = true;
             }
+        }
+
+        private void TryResolveLimbDriveJoints()
+        {
+            if (_limbDriveLinks == null || _limbDriveLinks.Length == 0)
+                BuildLimbDriveDefinitions();
+
+            ResolveReferences();
+
+            var allJoints = GetComponentsInChildren<ConfigurableJoint>(true);
+            var usedJoints = new List<ConfigurableJoint>(_limbDriveLinks.Length);
+            var resolvedCount = 0;
+
+            for (var i = 0; i < _limbDriveLinks.Length; i++)
+            {
+                var link = _limbDriveLinks[i];
+                if (link == null)
+                    continue;
+
+                link.joint = FindBestNamedJoint(link.jointNames, allJoints, usedJoints);
+
+                if (link.joint == null)
+                    continue;
+
+                usedJoints.Add(link.joint);
+                CacheOriginalDrive(link);
+                resolvedCount++;
+            }
+
+            _limbDriveResolved = resolvedCount > 0;
         }
 
         private Transform FindBestNamedTransform(string[] candidateNames)
@@ -614,6 +668,21 @@ namespace SSAFYPlayTime.Character
                 link.joint.angularYZDrive = ScaleDrive(link.originalAngularYZDrive, springMultiplier, damperMultiplier);
             }
 
+            // CarriedVictim 모드에서 팔다리 관절도 보강
+            if (mode == CoreDriveMode.CarriedVictim && _limbDriveLinks != null && _limbDriveResolved)
+            {
+                for (var i = 0; i < _limbDriveLinks.Length; i++)
+                {
+                    var link = _limbDriveLinks[i];
+                    if (link == null || link.joint == null || !link.cachedOriginal)
+                        continue;
+
+                    link.joint.slerpDrive = ScaleDrive(link.originalSlerpDrive, carriedVictimLimbSpringMultiplier, carriedVictimLimbDamperMultiplier);
+                    link.joint.angularXDrive = ScaleDrive(link.originalAngularXDrive, carriedVictimLimbSpringMultiplier, carriedVictimLimbDamperMultiplier);
+                    link.joint.angularYZDrive = ScaleDrive(link.originalAngularYZDrive, carriedVictimLimbSpringMultiplier, carriedVictimLimbDamperMultiplier);
+                }
+            }
+
             _currentCoreDriveMode = mode;
         }
 
@@ -631,6 +700,21 @@ namespace SSAFYPlayTime.Character
                 link.joint.slerpDrive = link.originalSlerpDrive;
                 link.joint.angularXDrive = link.originalAngularXDrive;
                 link.joint.angularYZDrive = link.originalAngularYZDrive;
+            }
+
+            // 팔다리 관절도 복원
+            if (_limbDriveLinks != null)
+            {
+                for (var i = 0; i < _limbDriveLinks.Length; i++)
+                {
+                    var link = _limbDriveLinks[i];
+                    if (link == null || link.joint == null || !link.cachedOriginal)
+                        continue;
+
+                    link.joint.slerpDrive = link.originalSlerpDrive;
+                    link.joint.angularXDrive = link.originalAngularXDrive;
+                    link.joint.angularYZDrive = link.originalAngularYZDrive;
+                }
             }
 
             _currentCoreDriveMode = CoreDriveMode.Off;
