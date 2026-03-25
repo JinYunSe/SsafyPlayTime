@@ -460,13 +460,8 @@ public class HandGrabHandler : MonoBehaviour
 
         if (IsHolding)
         {
-            EmitGrabDiagnostics("InputRelease", true);
-            RestoreGrabbedPuppet();
-            NotifyGrabReleased();
-            ClearAnchorState();
-            DestroyActiveJoint();
-            _grabbedPlayer = null;
-            _grabbedPuppet = null;
+            ReleaseInPlace("InputRelease");
+            return;
         }
     }
 
@@ -642,6 +637,64 @@ public class HandGrabHandler : MonoBehaviour
         }
     }
 
+    private static void ZeroRigidbodyMotion(Rigidbody body)
+    {
+        if (body == null || body.isKinematic)
+            return;
+
+        body.velocity = Vector3.zero;
+        body.angularVelocity = Vector3.zero;
+    }
+
+    private Rigidbody PrepareHeldTargetForRelease(bool resetHeldMotion)
+    {
+        var connected = GetConnectedBody();
+        var isStunnedCarryRelease = _grabbedPlayer != null && !_grabbedPlayer.IsActiveRagdoll;
+        var shouldResetTargetMotion = resetHeldMotion &&
+                                      (_grabbedPlayer == null || isStunnedCarryRelease);
+
+        if (isStunnedCarryRelease)
+        {
+            networkPlayer?.SuppressNextCarryReleaseSettle();
+            _grabbedPlayer?.SuppressNextCarryReleaseSettle();
+        }
+
+        if (_grabbedPlayer != null)
+        {
+            if (shouldResetTargetMotion)
+                _grabbedPlayer.ResetPhysicsMotionForHeldRelease();
+        }
+        else if (shouldResetTargetMotion)
+        {
+            ZeroRigidbodyMotion(connected);
+        }
+
+        return connected;
+    }
+
+    private void CompleteHeldTargetRelease()
+    {
+        RestoreGrabbedPuppet();
+        NotifyGrabReleased();
+        ClearAnchorState();
+        DestroyActiveJoint();
+        _grabbedPlayer = null;
+        _grabbedPuppet = null;
+    }
+
+    private void ReleaseInPlace(string diagnosticsSource)
+    {
+        if (!IsHolding)
+            return;
+
+        if (debugLog)
+            Debug.Log($"[Grab] {handSide} {diagnosticsSource} release in place, target={(_grabbedPlayer != null ? _grabbedPlayer.name : "object")}", this);
+
+        EmitGrabDiagnostics(diagnosticsSource, true);
+        PrepareHeldTargetForRelease(resetHeldMotion: true);
+        CompleteHeldTargetRelease();
+    }
+
     public void Drop()
     {
         if (!IsHolding) return;
@@ -651,23 +704,21 @@ public class HandGrabHandler : MonoBehaviour
 
         EmitGrabDiagnostics("Drop", true);
 
-        Rigidbody connected = GetConnectedBody();
-        if (connected != null)
-            connected.AddForce(Vector3.up * 0.5f, ForceMode.Impulse);
+        var connected = PrepareHeldTargetForRelease(resetHeldMotion: true);
+        var shouldApplyDropImpulse = connected != null && _grabbedPlayer == null;
+        CompleteHeldTargetRelease();
 
-        RestoreGrabbedPuppet();
-        NotifyGrabReleased();
-        ClearAnchorState();
-        DestroyActiveJoint();
-        _grabbedPlayer = null;
-        _grabbedPuppet = null;
+        if (shouldApplyDropImpulse)
+            connected.AddForce(Vector3.up * 0.5f, ForceMode.Impulse);
     }
 
     public void Throw()
     {
         if (!IsHolding) return;
 
-        Rigidbody connected = GetConnectedBody();
+        EmitGrabDiagnostics("Throw", true);
+
+        Rigidbody connected = PrepareHeldTargetForRelease(resetHeldMotion: true);
         bool isConsciousPlayer = _grabbedPlayer != null && _grabbedPlayer.IsActiveRagdoll;
         bool isStunnedPlayer = _grabbedPlayer != null && !_grabbedPlayer.IsActiveRagdoll;
 
@@ -694,12 +745,7 @@ public class HandGrabHandler : MonoBehaviour
             throwUp = grabProfile != null ? grabProfile.throwUpComponent : 0.4f;
         }
 
-        RestoreGrabbedPuppet();
-        NotifyGrabReleased();
-        ClearAnchorState();
-        DestroyActiveJoint();
-        _grabbedPlayer = null;
-        _grabbedPuppet = null;
+        CompleteHeldTargetRelease();
 
         if (connected != null)
         {

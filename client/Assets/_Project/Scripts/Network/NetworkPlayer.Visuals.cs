@@ -40,7 +40,7 @@ public sealed partial class NetworkPlayer
     private const float HardPhysicsPoseBlendOutSpeed = 12f;
     private const float CarryVisualPoseBlendInSpeed = 14f;
     private const float CarryVisualPoseBlendOutSpeed = 10f;
-    private const float CarryVisualPoseTargetWeight = 0.82f;
+    private const float CarryVisualPoseTargetWeight = 0.60f;
     private const float AnimatorRestoreBlendThreshold = 0.06f;
 
     private void ConfigureAnimatedVisualMode()
@@ -482,31 +482,31 @@ public sealed partial class NetworkPlayer
         var boneName = visualTransform.name;
         if (boneName.IndexOf("Hips", StringComparison.OrdinalIgnoreCase) >= 0 ||
             boneName.IndexOf("Pelvis", StringComparison.OrdinalIgnoreCase) >= 0)
-            return 1f;
+            return 0.85f;
 
         if (boneName.IndexOf("Spine", StringComparison.OrdinalIgnoreCase) >= 0 ||
             boneName.IndexOf("Chest", StringComparison.OrdinalIgnoreCase) >= 0 ||
             boneName.IndexOf("Neck", StringComparison.OrdinalIgnoreCase) >= 0 ||
             boneName.IndexOf("Head", StringComparison.OrdinalIgnoreCase) >= 0)
-            return 0.95f;
+            return 0.75f;
 
         if (boneName.IndexOf("Shoulder", StringComparison.OrdinalIgnoreCase) >= 0 ||
             boneName.IndexOf("UpperArm", StringComparison.OrdinalIgnoreCase) >= 0 ||
             boneName.IndexOf("LowerArm", StringComparison.OrdinalIgnoreCase) >= 0)
-            return 0.82f;
+            return 0.55f;
 
         if (boneName.IndexOf("Hand", StringComparison.OrdinalIgnoreCase) >= 0)
-            return 0.68f;
+            return 0.40f;
 
         if (boneName.IndexOf("UpperLeg", StringComparison.OrdinalIgnoreCase) >= 0 ||
             boneName.IndexOf("LowerLeg", StringComparison.OrdinalIgnoreCase) >= 0)
-            return 0.35f;
+            return 0.25f;
 
         if (boneName.IndexOf("Foot", StringComparison.OrdinalIgnoreCase) >= 0 ||
             boneName.IndexOf("Toe", StringComparison.OrdinalIgnoreCase) >= 0)
-            return 0.2f;
+            return 0.15f;
 
-        return 0.45f;
+        return 0.30f;
     }
 
     // =========================================================

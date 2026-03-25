@@ -1096,7 +1096,7 @@ public class ProceduralGrabArm : MonoBehaviour
         return carryMode switch
         {
             SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry => CharacterGrabController.HoldVariant.DualCarry,
-            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry => CharacterGrabController.HoldVariant.OverheadCarry,
+            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry => CharacterGrabController.HoldVariant.FrontCarry,
             _ => CharacterGrabController.HoldVariant.None
         };
     }
