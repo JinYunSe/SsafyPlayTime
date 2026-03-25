@@ -39,10 +39,14 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
     private readonly HashSet<int> _allRegisteredPlayerIds = new();
     // PlayerId → CharacterTypeIndex 캐시 (퇴장 후에도 캐릭터 인덱스 보존)
     private readonly Dictionary<int, int> _cachedCharIndexByPlayerId = new();
+    // 게임 도중 퇴장(탈주)한 플레이어 ID 목록 — GameEndPanel에 "(탈주)" 표시용
+    private readonly HashSet<int> _leftPlayerIds = new();
 
     private bool _triggered;
     private const float SubscribeCheckInterval = 0.5f;
     private float _subscribeCheckTimer = SubscribeCheckInterval;
+    // 모든 플레이어 구독 완료 시 true → 주기 탐색(FindObjectsByType) 중단
+    private bool _allPlayersSubscribed;
 
     public override void Spawned()
     {
@@ -68,6 +72,9 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
         // LobbyCanvasUIController에서 이미 방장 이탈 처리가 시작된 경우 게임 종료를 발동하지 않는다.
         var lobby = FindAnyObjectByType<LobbyCanvasUIController>();
         if (lobby != null && lobby.IsShowingGameEndOrReturningToLobby) return;
+
+        // 탈주 기록 (GameEndPanel에 "(탈주)" 표시)
+        _leftPlayerIds.Add(player.PlayerId);
 
         // 캐시 기반 aliveCount 계산: NetworkObject 상태에 의존하지 않는다.
         var deadOrLeft = new HashSet<int>(_deathOrder) { player.PlayerId };
@@ -103,7 +110,7 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
             return;
         }
 
-        if (!HasStateAuthority || _triggered)
+        if (!HasStateAuthority || _triggered || _allPlayersSubscribed)
             return;
 
         _subscribeCheckTimer -= Time.deltaTime;
@@ -162,6 +169,14 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
 
             _subscribedPlayers.Add(player);
             player.OnNetworkPlayerDied += OnNetworkPlayerDied;
+        }
+
+        // 등록된 모든 플레이어가 구독 완료되면 주기 탐색 중단
+        if (_allRegisteredPlayerIds.Count > 0 &&
+            _subscribedPlayers.Count >= _allRegisteredPlayerIds.Count)
+        {
+            _allPlayersSubscribed = true;
+            Debug.Log("[GameEnd] 모든 플레이어 구독 완료 → FindObjectsByType 주기 탐색 중단");
         }
     }
 
@@ -312,7 +327,8 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
     }
 
     // ─── 랭킹 직렬화 / 역직렬화 ──────────────────────────────────
-    // 형식: "count|playerId0,charIdx0|playerId1,charIdx1|..."
+    // 형식: "count|playerId0,charIdx0,isLeft0|playerId1,charIdx1,isLeft1|..."
+    // isLeft: 1=게임 도중 탈주, 0=정상 종료
 
     private string BuildRankingPayload(int count)
     {
@@ -320,10 +336,13 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
         sb.Append(count);
         for (var i = 0; i < count && i < 8; i++)
         {
+            var pid = RankedPlayerIds[i];
             sb.Append('|');
-            sb.Append(RankedPlayerIds[i]);
+            sb.Append(pid);
             sb.Append(',');
             sb.Append(RankedCharIndices[i]);
+            sb.Append(',');
+            sb.Append(_leftPlayerIds.Contains(pid) ? 1 : 0);
         }
         return sb.ToString();
     }
@@ -367,9 +386,11 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
             if (entry.Length < 2) continue;
             if (!int.TryParse(entry[0], out var playerId)) continue;
             if (!int.TryParse(entry[1], out var charIndex)) continue;
+            var isLeft = entry.Length >= 3 && entry[2] == "1";
 
             var rank = i + 1;
             var nickname = lobby != null ? lobby.GetParticipantNickname(playerId) : $"Player{playerId}";
+            if (isLeft) nickname += " (탈주)";
             GameResultData.AddEntry(playerId, nickname, rank, charIndex);
         }
 

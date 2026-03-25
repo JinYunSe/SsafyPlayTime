@@ -122,7 +122,9 @@ public sealed partial class NetworkPlayer
         // ── 플레이어 타입별 3분기 ──
         if (HasStateAuthority)
         {
-            // AuthorityOwner: 물리 시뮬레이션이 직접 뼈를 구동 → 보간 불필요
+            // AuthorityOwner: 클라이언트(OwnerProxy)와 동일한 루트 보간을 적용해
+            // 호스트 캐릭터의 시각적 부드러움을 맞춘다.
+            UpdateProxyPresentationRoot();
             UpdateCharacterPresentationEffects();
             return;
         }
