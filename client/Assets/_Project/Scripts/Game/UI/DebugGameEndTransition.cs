@@ -282,11 +282,18 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
         runner ??= Runner ?? FindAnyObjectByType<NetworkRunner>();
         if (runner != null && runner.IsRunning)
         {
-            // Networked 배열 동기화 타이밍 의존을 제거하기 위해
             // 랭킹 데이터를 직렬화해 RPC 파라미터로 직접 전달한다.
+            // (Networked 배열 동기화 타이밍 의존 제거)
             var count = NetworkedPlayerCount;
             var payload = BuildRankingPayload(count);
             RPC_BroadcastRankings(payload);
+
+            // RPC가 클라이언트에 도달할 시간을 준 뒤 runner.LoadScene으로 씬 전환한다.
+            // runner.LoadScene은 Fusion이 모든 클라이언트를 동기적으로 전환하고
+            // OnSceneLoadDone을 발동시켜 초기화 로직(ResetCharacterSlotState 등)이 실행된다.
+            yield return null;
+            yield return null;
+            runner.LoadScene(gameEndSceneName, LoadSceneMode.Single);
             yield break;
         }
 
@@ -328,16 +335,14 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
         SaveRankingsToGameResultData(runner, lobby, rankingPayload);
 
         // 2) _pendingGameEndPanel 플래그 세우기
-        //    씬 전환 중 OnShutdown/OnDisconnectedFromServer가 TriggerHostExitAndReturnToLobby를 잘못 발동하지 않도록 보호
+        //    씬 전환 중 OnShutdown/OnDisconnectedFromServer가 TriggerHostExitAndReturnToLobby를 잘못 발동하지 않도록 보호.
+        //    씬 전환 완료 후 OnSceneLoadDone에서 _pendingGameEndPanel을 확인해 ShowGameEndPanel을 호출한다.
         lobby?.NotifyGameEndTransition();
 
         Debug.Log($"[GameEnd] RPC_BroadcastRankings complete. payload={rankingPayload}");
-
-        // 3) 각 클라이언트가 직접 씬 전환 (데이터 저장 보장 후)
-        if (lobby != null)
-            lobby.LoadSceneAndShowGameEndPanel(gameEndSceneName);
-        else
-            SceneManager.LoadScene(gameEndSceneName);
+        // 씬 전환은 호스트의 runner.LoadScene이 Fusion을 통해 모든 클라이언트에 전달한다.
+        // SceneManager.LoadScene을 직접 호출하면 OnSceneLoadDone이 발동하지 않아
+        // ResetCharacterSlotState 등 초기화 로직이 누락되므로 여기서 씬 전환하지 않는다.
     }
 
     private static void SaveRankingsToGameResultData(NetworkRunner runner, LobbyCanvasUIController lobby, string payload)
