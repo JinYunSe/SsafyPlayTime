@@ -1419,6 +1419,13 @@ namespace SSAFYPlayTime
 
         private IEnumerator CoLoadSceneAndShowGameEndPanel(string sceneName)
         {
+            // 호스트가 SceneManager.LoadScene을 즉시 실행하면 Fusion runner 연결 해제 신호가
+            // 클라이언트의 RPC 수신보다 먼저 도달해 "방장 이탈" 모달이 오발동된다.
+            // 호스트에 한해 100ms 대기 → 클라이언트가 RPC를 받아 _pendingGameEndPanel=true를
+            // 세운 뒤 씬 전환이 시작되므로 경쟁 조건이 해소된다.
+            if (_runner != null && _runner.IsRunning && _runner.IsServer)
+                yield return new WaitForSecondsRealtime(0.1f);
+
             SceneManager.LoadScene(sceneName);
             while (SceneManager.GetActiveScene().name != sceneName)
                 yield return null;
