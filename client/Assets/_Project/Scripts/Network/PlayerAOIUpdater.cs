@@ -20,6 +20,10 @@ namespace SSAFYPlayTime.Network
         [Tooltip("각 플레이어의 관심 반경 (m). 이 범위 밖의 AreaOfInterest 오브젝트는 해당 클라이언트에 복제되지 않는다.")]
         [SerializeField] private float interestRadius = 80f;
 
+        // AOI는 10Hz(0.1초마다)로만 갱신한다.
+        // 플레이어 이동 속도 대비 80m 반경은 충분히 여유가 있어 매 프레임 갱신이 불필요하다.
+        private const float UpdateInterval = 0.1f;
+        private float _nextUpdateTime;
         private NetworkRunner _runner;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -35,6 +39,10 @@ namespace SSAFYPlayTime.Network
 
         private void Update()
         {
+            if (Time.unscaledTime < _nextUpdateTime)
+                return;
+            _nextUpdateTime = Time.unscaledTime + UpdateInterval;
+
             // Runner가 없거나 세션 종료 시 재탐색
             if (_runner == null || !_runner.IsRunning)
                 _runner = FindAnyObjectByType<NetworkRunner>();

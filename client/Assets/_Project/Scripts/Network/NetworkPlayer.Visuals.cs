@@ -372,9 +372,22 @@ public sealed partial class NetworkPlayer
     private const float PhysicsLodDistanceSqr = 35f * 35f;
     private bool _wasPuppetMasterLODDistant;
 
+    // Camera.main 프레임당 1회 조회 (플레이어 수와 무관하게 비용 고정)
+    private static Camera s_lodCam;
+    private static int s_lodCamFrame = -1;
+    private static Camera GetLODCamera()
+    {
+        if (s_lodCamFrame != Time.frameCount)
+        {
+            s_lodCamFrame = Time.frameCount;
+            s_lodCam = Camera.main;
+        }
+        return s_lodCam;
+    }
+
     private bool IsDistantForPhysicsLOD()
     {
-        var cam = Camera.main;
+        var cam = GetLODCamera();
         if (cam == null) return false;
         return (transform.position - cam.transform.position).sqrMagnitude > PhysicsLodDistanceSqr;
     }
