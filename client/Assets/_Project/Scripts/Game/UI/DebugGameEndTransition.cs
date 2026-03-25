@@ -63,6 +63,12 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
         // 이 상태에서 aliveCount를 계산하면 0이 나와 게임이 오발동된다.
         if (_allRegisteredPlayerIds.Count == 0) return;
 
+        // Host migration 후 새 방장이 됐을 때 PlayerLeft(구 방장)가 발동해
+        // TriggerGameEnd와 TriggerHostExitAndReturnToLobby가 동시에 실행되는 레이스를 방지한다.
+        // LobbyCanvasUIController에서 이미 방장 이탈 처리가 시작된 경우 게임 종료를 발동하지 않는다.
+        var lobby = FindAnyObjectByType<LobbyCanvasUIController>();
+        if (lobby != null && lobby.IsShowingGameEndOrReturningToLobby) return;
+
         // 캐시 기반 aliveCount 계산: NetworkObject 상태에 의존하지 않는다.
         var deadOrLeft = new HashSet<int>(_deathOrder) { player.PlayerId };
         var aliveCount = _allRegisteredPlayerIds.Count(id => !deadOrLeft.Contains(id));
