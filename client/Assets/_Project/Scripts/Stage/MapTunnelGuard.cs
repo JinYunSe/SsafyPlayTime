@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Stage
@@ -37,6 +36,7 @@ namespace SSAFYPlayTime.Stage
 
         private LayerMask _mapMask;
         private Rigidbody[] _tracked = new Rigidbody[0];
+        private int _trackedCount;
         private float _nextRefreshTime;
 
         // ──────────────────────────────────────────────
@@ -74,14 +74,19 @@ namespace SSAFYPlayTime.Stage
         private void RefreshRigidbodies()
         {
             var all = FindObjectsOfType<Rigidbody>();
-            var list = new List<Rigidbody>(all.Length);
-            foreach (var rb in all)
+
+            // List + ToArray 이중 할당 대신 배열을 재사용해 GC 부하를 줄인다.
+            if (_tracked.Length < all.Length)
+                _tracked = new Rigidbody[all.Length];
+
+            _trackedCount = 0;
+            for (var i = 0; i < all.Length; i++)
             {
+                var rb = all[i];
                 var layer = rb.gameObject.layer;
                 if ((layer == LayerCharacter || layer == LayerRagdoll) && !rb.isKinematic)
-                    list.Add(rb);
+                    _tracked[_trackedCount++] = rb;
             }
-            _tracked = list.ToArray();
         }
 
         /// <summary>
@@ -90,8 +95,9 @@ namespace SSAFYPlayTime.Stage
         /// </summary>
         private void CorrectTunneledBodies()
         {
-            foreach (var rb in _tracked)
+            for (var i = 0; i < _trackedCount; i++)
             {
+                var rb = _tracked[i];
                 if (rb == null || rb.isKinematic) continue;
 
                 var pos = rb.position;

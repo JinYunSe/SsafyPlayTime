@@ -20,9 +20,12 @@ public class WaterDamageZone : MonoBehaviour
     private float initialDelay;
 
     private readonly Dictionary<NetworkPlayer, Coroutine> _damageCoroutines = new();
+    private ItemRandomSpawnManager[] _spawnManagers;
 
     private void Awake()
     {
+        _spawnManagers = FindObjectsOfType<ItemRandomSpawnManager>(true);
+
         if (mapData != null)
         {
             damageAmount = mapData.DamageAmount;
@@ -132,14 +135,11 @@ public class WaterDamageZone : MonoBehaviour
             return;
         }
 
-        var managers = FindObjectsOfType<ItemRandomSpawnManager>(true);
-        for (var i = 0; i < managers.Length; i++)
+        for (var i = 0; i < _spawnManagers.Length; i++)
         {
-            var manager = managers[i];
+            var manager = _spawnManagers[i];
             if (manager == null || !manager.IsManagedFieldDrop(drop))
-            {
                 continue;
-            }
 
             manager.HandleManagedFieldDropEnteredWater(drop);
             return;
