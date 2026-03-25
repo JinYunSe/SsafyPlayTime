@@ -68,7 +68,8 @@ public sealed partial class NetworkPlayer
     [SerializeField] private float replicatedBlackholeTargetOutlineScaleMultiplier = 1.045f;
     [SerializeField] private float satelliteProjectileTravelSec = 0.35f;
     [SerializeField] private float satelliteBeamHeight = 24f;
-    [SerializeField] private float satelliteWarningAdvanceSeconds = 2f;
+    [SerializeField] private float satelliteEffectiveRadiusMultiplier = 0.42f;
+    [SerializeField] private float satelliteWarningAdvanceSeconds = 0f;
     [SerializeField] private float satelliteDefaultHealthDamage = 50f;
     [SerializeField] private float satelliteDefaultStunDamage = 50f;
     [SerializeField] private float satelliteDefaultExplosionForce = 8f;
@@ -274,6 +275,8 @@ public sealed partial class NetworkPlayer
             return;
         }
 
+        var effectiveRadius = ResolveSatelliteStrikeEffectiveRadius(request.Radius);
+
         NetworkedSatelliteStrikeCenter = request.Center;
         NetworkedSatelliteStrikeOrigin = request.Origin;
         NetworkedSatelliteStrikeForward = request.Forward;
@@ -284,7 +287,7 @@ public sealed partial class NetworkPlayer
         NetworkedSatelliteStrikeBaseDamage = request.BaseDamage;
         NetworkedSatelliteStrikeStunDamage = request.StunDamage;
         NetworkedSatelliteStrikeSeq++;
-        ItemRuntimeLog.Info(ItemIds.SatelliteStrike, $"Satellite strike request replicated: seq={NetworkedSatelliteStrikeSeq}, center={request.Center}, radius={request.Radius:0.00}", this);
+        ItemRuntimeLog.Info(ItemIds.SatelliteStrike, $"Satellite strike request replicated: seq={NetworkedSatelliteStrikeSeq}, center={request.Center}, radius={request.Radius:0.00}, hitRadius={effectiveRadius:0.00}", this);
 
         StartReplicatedSatelliteStrike(request, applyGameplay: true);
     }
@@ -626,6 +629,8 @@ public sealed partial class NetworkPlayer
             yield break;
         }
 
+        var effectiveRadius = ResolveSatelliteStrikeEffectiveRadius(request.Radius);
+
         var center = ResolveSatelliteGroundCenter(request.Center);
         var throwForward = ResolveReplicatedThrowForward(request.Forward, request.Center);
         var launchOrigin = request.Origin + Vector3.up * blackholeLaunchHeightOffset + throwForward * blackholeLaunchForwardOffset;
@@ -634,6 +639,7 @@ public sealed partial class NetworkPlayer
         var gravity = Physics.gravity;
         var travelStartTime = Time.time;
         var current = launchOrigin;
+        const float satelliteProjectileCastRadius = 0.18f;
 
         DespawnNetworkedItemEffectProxy(ref _activeSatelliteProjectileEffectProxy);
         _activeSatelliteProjectileEffectProxy = SpawnNetworkedItemEffectProxy(
@@ -667,14 +673,15 @@ public sealed partial class NetworkPlayer
             if (distance > 0.0001f &&
                 Physics.SphereCast(
                     current,
-                    0.18f,
+                    satelliteProjectileCastRadius,
                     move.normalized,
                     out var hit,
                     distance,
                     itemWorldEffectMask,
                     QueryTriggerInteraction.Ignore))
             {
-                center = hit.point + hit.normal.normalized * 0.02f;
+                var projectileCenter = projectile != null ? projectile.transform.position : current + move.normalized * hit.distance;
+                center = ResolveSatelliteGroundCenter(projectileCenter);
                 if (projectile != null)
                 {
                     projectile.transform.position = center;
@@ -709,7 +716,7 @@ public sealed partial class NetworkPlayer
             Quaternion.identity,
             proxy => proxy.InitializeSatelliteCharge(request.Radius));
 
-        var effectiveWarningSec = Mathf.Max(0f, request.WarningSec - Mathf.Max(0f, satelliteWarningAdvanceSeconds));
+        var effectiveWarningSec = Mathf.Max(0f, request.WarningSec);
         if (effectiveWarningSec > 0f)
         {
             yield return new WaitForSeconds(effectiveWarningSec);
@@ -724,37 +731,27 @@ public sealed partial class NetworkPlayer
             proxy => proxy.InitializeSatelliteBeam(request.Radius));
         PlaySatelliteImpactSfx(center);
 
-        var duration = Mathf.Max(0.1f, request.DurationSec);
-        var tickInterval = 0.25f;
-        var elapsed = 0f;
-        while (elapsed < duration)
+        if (applyGameplay)
         {
-            if (applyGameplay)
-            {
-                ApplySatelliteStrikeGameplay(
-                    center,
-                    Mathf.Max(0.1f, request.Radius),
-                    request.BaseDamage,
-                    request.StunDamage,
-                    request.Force,
-                    tickInterval,
-                    duration);
-            }
-
-            var waitSec = Mathf.Min(tickInterval, duration - elapsed);
-            elapsed += waitSec;
-            if (waitSec > 0f)
-            {
-                yield return new WaitForSeconds(waitSec);
-            }
-            else
-            {
-                yield return null;
-            }
+            ApplySatelliteStrikeGameplay(
+                center,
+                Mathf.Max(0.1f, effectiveRadius),
+                request.BaseDamage,
+                request.StunDamage,
+                request.Force);
         }
+
+        var duration = Mathf.Max(0.1f, request.DurationSec);
+        yield return new WaitForSeconds(duration);
 
         DespawnNetworkedItemEffectProxy(ref _activeSatelliteBeamEffectProxy);
         _activeReplicatedSatelliteRoutine = null;
+    }
+
+    private float ResolveSatelliteStrikeEffectiveRadius(float requestedRadius)
+    {
+        var scaledRadius = requestedRadius * Mathf.Max(0.01f, satelliteEffectiveRadiusMultiplier);
+        return Mathf.Clamp(scaledRadius, 2.5f, 6.5f);
     }
 
     private static void PlaySatelliteImpactSfx(Vector3 worldPosition)
@@ -1266,16 +1263,11 @@ public sealed partial class NetworkPlayer
         float radius,
         float totalHealthDamage,
         float totalStunDamage,
-        float explosionForce,
-        float tickInterval,
-        float duration)
+        float explosionForce)
     {
         var totalHealth = totalHealthDamage > 0f ? totalHealthDamage : Mathf.Max(0f, satelliteDefaultHealthDamage);
         var totalStun = totalStunDamage > 0f ? totalStunDamage : Mathf.Max(0f, satelliteDefaultStunDamage);
         var appliedExplosionForce = explosionForce > 0f ? explosionForce : Mathf.Max(0f, satelliteDefaultExplosionForce);
-        var tickCount = Mathf.Max(1, Mathf.CeilToInt(Mathf.Max(0.1f, duration) / Mathf.Max(0.01f, tickInterval)));
-        var damagePerTick = totalHealth / tickCount;
-        var stunPerTick = totalStun / tickCount;
         var capsuleOffset = Mathf.Max(0f, (satelliteBeamHeight * 0.5f) - radius);
         var bottom = center + Vector3.down * capsuleOffset;
         var top = center + Vector3.up * capsuleOffset;
@@ -1287,8 +1279,8 @@ public sealed partial class NetworkPlayer
             top,
             radius,
             _replicatedSatelliteOverlapBuffer,
-            itemWorldEffectMask,
-            QueryTriggerInteraction.Ignore);
+            ~0,
+            QueryTriggerInteraction.Collide);
 
         for (var i = 0; i < overlapCount; i++)
         {
@@ -1303,8 +1295,8 @@ public sealed partial class NetworkPlayer
                 damagedPlayerIds.Add(targetPlayer.GetInstanceID()))
             {
                 targetPlayer.ApplyCombinedDamage(
-                    damagePerTick,
-                    stunPerTick,
+                    totalHealth,
+                    totalStun,
                     "SatelliteStrike",
                     0f,
                     appliedExplosionForce,
