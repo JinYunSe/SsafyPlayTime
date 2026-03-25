@@ -940,13 +940,22 @@ public class HandGrabHandler : MonoBehaviour
                 singleFallback = host;
 
             if (IsHostForCharacter(host, root))
+            {
+                itemRuntimeHost = host; // 다음 호출부터 캐시 사용 (FindObjectsOfType 재실행 방지)
                 return host;
+            }
         }
 
         if (direct != null)
+        {
+            itemRuntimeHost = direct;
             return direct;
+        }
 
-        return hostCount == 1 ? singleFallback : null;
+        var result = hostCount == 1 ? singleFallback : null;
+        if (result != null)
+            itemRuntimeHost = result;
+        return result;
     }
 
     private static bool IsHostForCharacter(ItemRuntimeHost host, Transform characterRoot)

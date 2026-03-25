@@ -164,7 +164,9 @@ namespace SSAFYPlayTime
             }
 
             // GameScene에서 방장 강제 종료 감지 → 즉시 게임 종료 처리
-            if (!_isShowingGameEndPanel && IsActiveSceneNamed(gameplaySceneName))
+            // _pendingGameEndPanel이 true이면 RPC_BroadcastRankings가 이미 씬 전환을 시작한 것이므로
+            // TriggerHostExitAndReturnToLobby를 발동하지 않는다.
+            if (!_isShowingGameEndPanel && !_pendingGameEndPanel && IsActiveSceneNamed(gameplaySceneName))
             {
                 Debug.Log("[Lobby] Host exited during gameplay → returning to lobby.");
                 TriggerHostExitAndReturnToLobby();
@@ -193,7 +195,8 @@ namespace SSAFYPlayTime
             }
 
             // GameScene에서 서버 연결 끊김 = 방장 강제 종료 → 즉시 게임 종료 처리
-            if (!_isShowingGameEndPanel && IsActiveSceneNamed(gameplaySceneName))
+            // _pendingGameEndPanel이 true이면 정상 게임 종료 흐름으로 씬 전환 중이므로 무시한다.
+            if (!_isShowingGameEndPanel && !_pendingGameEndPanel && IsActiveSceneNamed(gameplaySceneName))
             {
                 Debug.Log("[Lobby] Disconnected from host during gameplay → returning to lobby.");
                 TriggerHostExitAndReturnToLobby();
