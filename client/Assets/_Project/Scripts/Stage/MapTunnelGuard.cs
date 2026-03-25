@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Stage
@@ -8,9 +9,10 @@ namespace SSAFYPlayTime.Stage
     ///
     /// [동작 방식]
     /// 1) Awake: Map 하위 Collider의 contactOffset을 키워 충돌 조기 감지 범위를 확보한다.
-    /// 2) FixedUpdate: Character·Ragdoll 레이어의 비-kinematic Rigidbody를 주기적으로 수집한다.
-    ///    각 Rigidbody 위에서 SphereCast를 아래로 쏘아 Map 표면 Y를 구한 뒤,
+    /// 2) FixedUpdate: s_registry(SyncPhysicsObject·BodyPartPhysicsManager에서 자가 등록)의
+    ///    비-kinematic Rigidbody에 SphereCast를 내리쏴 Map 표면 Y를 구한 뒤,
     ///    Rigidbody가 그 면 아래에 있으면 위치와 하강 속도를 복원한다.
+    ///    → FindObjectsOfType 주기 탐색을 레지스트리로 대체해 GC·CPU 부하 제거.
     /// </summary>
     [DefaultExecutionOrder(200)]
     public class MapTunnelGuard : MonoBehaviour
@@ -20,8 +22,6 @@ namespace SSAFYPlayTime.Stage
         [SerializeField] private float mapContactOffset = 0.12f;
 
         [Header("Tunnel Detection")]
-        [Tooltip("비-kinematic Rigidbody 목록 갱신 주기 (초)")]
-        [SerializeField] private float refreshInterval = 2f;
         [Tooltip("SphereCast 시작 높이: Rigidbody.position 기준 위 방향 오프셋 (m)")]
         [SerializeField] private float castStartOffset = 1.5f;
         [Tooltip("SphereCast 반지름. 캐릭터 캡슐 반지름 근사값.")]
@@ -29,15 +29,25 @@ namespace SSAFYPlayTime.Stage
         [Tooltip("복원 시 Map 표면 위로 띄울 추가 여유 (m)")]
         [SerializeField] private float recoverOffset = 0.08f;
 
-        // Layer 인덱스 (TagManager.asset 기준)
-        private const int LayerCharacter = 8;
-        private const int LayerRagdoll   = 9;
-        private const int LayerMap       = 3;
+        // Character(8)·Ragdoll(9) 레이어 Rigidbody 레지스트리.
+        // SyncPhysicsObject(Ragdoll)와 BodyPartPhysicsManager(Character root)에서 자가 등록한다.
+        // FindObjectsOfType<Rigidbody> 주기 탐색을 대체한다.
+        private static readonly List<Rigidbody> s_registry = new();
 
+        public static void Register(Rigidbody rb)
+        {
+            if (rb != null && !s_registry.Contains(rb))
+                s_registry.Add(rb);
+        }
+
+        public static void Unregister(Rigidbody rb)
+        {
+            if (rb != null) s_registry.Remove(rb);
+        }
+
+        private const int LayerMap = 3;
         private LayerMask _mapMask;
-        private Rigidbody[] _tracked = new Rigidbody[0];
-        private int _trackedCount;
-        private float _nextRefreshTime;
+        private int _fixedFrameCounter;
 
         // ──────────────────────────────────────────────
 
@@ -61,32 +71,10 @@ namespace SSAFYPlayTime.Stage
 
         private void FixedUpdate()
         {
-            if (Time.fixedTime >= _nextRefreshTime)
-            {
-                RefreshRigidbodies();
-                _nextRefreshTime = Time.fixedTime + refreshInterval;
-            }
-
+            // SphereCast 비용 절감: 2 FixedUpdate마다 1회 실행 (50Hz → 25Hz)
+            // 터널링 감지 주기가 40ms로 늘어나도 일반 플레이에서 체감 불가
+            if ((_fixedFrameCounter++ & 1) != 0) return;
             CorrectTunneledBodies();
-        }
-
-        /// <summary>씬 내 Character·Ragdoll 레이어의 비-kinematic Rigidbody를 수집한다.</summary>
-        private void RefreshRigidbodies()
-        {
-            var all = FindObjectsOfType<Rigidbody>();
-
-            // List + ToArray 이중 할당 대신 배열을 재사용해 GC 부하를 줄인다.
-            if (_tracked.Length < all.Length)
-                _tracked = new Rigidbody[all.Length];
-
-            _trackedCount = 0;
-            for (var i = 0; i < all.Length; i++)
-            {
-                var rb = all[i];
-                var layer = rb.gameObject.layer;
-                if ((layer == LayerCharacter || layer == LayerRagdoll) && !rb.isKinematic)
-                    _tracked[_trackedCount++] = rb;
-            }
         }
 
         /// <summary>
@@ -95,9 +83,9 @@ namespace SSAFYPlayTime.Stage
         /// </summary>
         private void CorrectTunneledBodies()
         {
-            for (var i = 0; i < _trackedCount; i++)
+            for (var i = 0; i < s_registry.Count; i++)
             {
-                var rb = _tracked[i];
+                var rb = s_registry[i];
                 if (rb == null || rb.isKinematic) continue;
 
                 var pos = rb.position;
