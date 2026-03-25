@@ -324,19 +324,19 @@ namespace SSAFYPlayTime
                 }
 
                 // GameScene에서 방장이 나간 경우 → Migration 대신 게임 종료 처리
-                // _isShowingGameEndPanel=true는 PlayerLeft에서 이미 TriggerHostExitAndReturnToLobby가
-                // 호출된 상태를 의미한다. 이 경우 migration을 진행하면 CoReturnToLobbyOnHostExit와
-                // ShutdownRunnerAsync/StartGame이 충돌하므로 Runner만 종료하고 즉시 반환한다.
+                // _isShowingGameEndPanel=true 또는 _pendingGameEndPanel=true이면 이미 처리 중이므로
+                // Runner만 종료하고 즉시 반환한다.
+                // _pendingGameEndPanel=true: RPC_BroadcastRankings가 이미 씬 전환을 시작한 상태 (정상 게임 종료 중)
                 if (IsActiveGameplayScene())
                 {
-                    if (!_isShowingGameEndPanel)
+                    if (!_isShowingGameEndPanel && !_pendingGameEndPanel)
                     {
                         Debug.Log("[Lobby] Host exited during gameplay → returning to lobby.");
                         TriggerHostExitAndReturnToLobby();
                     }
                     else
                     {
-                        Debug.Log("[Lobby] Host exited during gameplay, already returning to lobby → shutdown runner only.");
+                        Debug.Log("[Lobby] Host exited during gameplay, already handling end → shutdown runner only.");
                         _ = ShutdownRunnerAsync();
                     }
                     return;

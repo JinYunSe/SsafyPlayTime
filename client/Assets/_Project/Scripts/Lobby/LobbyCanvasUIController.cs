@@ -1477,6 +1477,12 @@ namespace SSAFYPlayTime
 
         // DebugGameEndTransition.PlayerLeft 및 OnShutdown/OnDisconnectedFromServer/OnHostMigration에서 호출.
         // _isShowingGameEndPanel 플래그를 먼저 세워 중복 진입을 방지하고 코루틴을 시작한다.
+        /// <summary>
+        /// 방장 이탈 처리 또는 게임 종료 패널 표시가 이미 진행 중인지 여부.
+        /// DebugGameEndTransition.PlayerLeft에서 TriggerGameEnd 오발동 방지에 사용한다.
+        /// </summary>
+        public bool IsShowingGameEndOrReturningToLobby => _isShowingGameEndPanel;
+
         public void TriggerHostExitAndReturnToLobby()
         {
             if (_isShowingGameEndPanel)
