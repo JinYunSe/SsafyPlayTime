@@ -393,6 +393,8 @@ public sealed partial class NetworkPlayer
         var phase = GetPhysicalPhase();
         if (phase == PhysicalPhase.Stunned ||
             phase == PhysicalPhase.StunnedCollapse ||
+            phase == PhysicalPhase.SettledStunned ||
+            phase == PhysicalPhase.DraggedStunned ||
             phase == PhysicalPhase.BeingCarriedStunned ||
             phase == PhysicalPhase.CarryingStunned)
         {
@@ -1475,7 +1477,7 @@ public sealed partial class NetworkPlayer
         _externalAnimationDriver.QueueRecoveryAnimation(variant);
     }
 
-    private const float PM_PunchAnimSpeed = 1.6f;
+    private const float PM_PunchAnimSpeed = 1.2f;
     private const float PM_PunchAnimStartOffset = 0.08f;
     private bool _pmPunchSpeedActive;
 
