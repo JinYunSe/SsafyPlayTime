@@ -3,10 +3,10 @@ using UnityEngine;
 
 public sealed partial class NetworkPlayer
 {
-    private const float PunchFollowThroughScale = 0.16f;
-    private const float PunchFollowThroughMin = 1.4f;
-    private const float PunchFollowThroughMax = 4.8f;
-    private const float PunchFollowThroughTorqueScale = 0.1f;
+    private const float PunchFollowThroughScale = 0.10f;
+    private const float PunchFollowThroughMin = 0.8f;
+    private const float PunchFollowThroughMax = 3.1f;
+    private const float PunchFollowThroughTorqueScale = 0.06f;
     private const float AttackCameraKickMin = 0.28f;
     private const float AttackCameraKickMax = 0.52f;
     private const float KnockoutCameraKickMin = 0.5f;
