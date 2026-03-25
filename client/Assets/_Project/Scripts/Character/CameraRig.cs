@@ -57,6 +57,8 @@ public class CameraRig : MonoBehaviour
     private float _yawClampWeight;
     private float _yawClampCenterYaw;
     private float _yawClampHalfAngle = 180f;
+    // TryAutoFindTarget: 매 프레임 FindObjectsByType 방지용 쓰로틀
+    private float _autoFindNextTime;
 
     public void SetTarget(Transform newTarget)
     {
@@ -133,6 +135,12 @@ public class CameraRig : MonoBehaviour
     {
         if (!autoFindTargetWhenNull || target != null)
             return;
+
+        // 탐색이 실패하는 동안 매 프레임 FindObjectsByType을 호출하지 않도록 쓰로틀을 적용한다.
+        // 0.2초마다 재시도하므로 플레이어 스폰 후 즉시(200ms 이내) 감지된다.
+        if (Time.unscaledTime < _autoFindNextTime)
+            return;
+        _autoFindNextTime = Time.unscaledTime + 0.2f;
 
         var localNetworkPlayer = ResolveLocalNetworkPlayer();
         if (localNetworkPlayer != null)

@@ -110,13 +110,9 @@ public sealed partial class NetworkPlayer
         if (string.IsNullOrWhiteSpace(dropInstanceId))
             return null;
 
-        var drops = FindObjectsOfType<ItemFieldDrop>(true);
-        for (var i = 0; i < drops.Length; i++)
+        foreach (var drop in ItemFieldDrop.AllDrops)
         {
-            var drop = drops[i];
-            if (drop == null)
-                continue;
-
+            if (drop == null) continue;
             if (string.Equals(drop.InstanceId, dropInstanceId, System.StringComparison.Ordinal))
                 return drop;
         }
@@ -129,19 +125,16 @@ public sealed partial class NetworkPlayer
         if (string.IsNullOrWhiteSpace(itemId))
             return null;
 
-        var drops = FindObjectsOfType<ItemFieldDrop>(true);
         ItemFieldDrop best = null;
         var bestSqr = maxDistance * maxDistance;
 
-        for (var i = 0; i < drops.Length; i++)
+        foreach (var drop in ItemFieldDrop.AllDrops)
         {
-            var drop = drops[i];
             if (drop == null || !string.Equals(drop.ItemId, itemId, System.StringComparison.Ordinal))
                 continue;
 
             var sqr = (drop.transform.position - origin).sqrMagnitude;
-            if (sqr > bestSqr)
-                continue;
+            if (sqr > bestSqr) continue;
 
             bestSqr = sqr;
             best = drop;

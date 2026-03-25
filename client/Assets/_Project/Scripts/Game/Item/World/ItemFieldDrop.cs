@@ -16,6 +16,11 @@ namespace SSAFYPlayTime.Gameplay.Items
     [DisallowMultipleComponent]
     public sealed class ItemFieldDrop : MonoBehaviour
     {
+        // 씬 내 모든 ItemFieldDrop을 빠르게 탐색하기 위한 static 레지스트리
+        // (FindObjectsOfType 대체용 — inactive 포함, Awake/OnDestroy 기준)
+        private static readonly System.Collections.Generic.HashSet<ItemFieldDrop> s_allDrops = new();
+        public static System.Collections.Generic.IReadOnlyCollection<ItemFieldDrop> AllDrops => s_allDrops;
+
         [SerializeField] private string itemId = string.Empty;
         [SerializeField] private string instanceId = string.Empty;
         [SerializeField] private bool destroyOnPickup = true;
@@ -32,6 +37,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private void Awake()
         {
+            s_allDrops.Add(this);
             EnsureInstanceId();
             if (ShouldInitializeRuntimeOnAwake())
             {
@@ -41,6 +47,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         private void OnDestroy()
         {
+            s_allDrops.Remove(this);
             if (!ShouldReleaseVisualOnDestroy())
             {
                 return;

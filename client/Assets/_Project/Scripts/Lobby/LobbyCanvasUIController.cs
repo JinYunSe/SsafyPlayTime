@@ -1447,6 +1447,7 @@ namespace SSAFYPlayTime
             Cursor.visible = true;
 
             _isShowingGameEndPanel = true;
+            _pendingGameEndPanel = false;
             _gameEndReturnTransitionStarted = false;
 
             DisplayRankings();

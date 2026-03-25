@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Linq;
 using Fusion;
 using SSAFYPlayTime.Game.GhostThrow;
 using UnityEngine;
@@ -685,19 +684,21 @@ public sealed partial class NetworkPlayer
 
     private Vector3 ResolveGhostFocusPoint()
     {
-        var alivePlayers = FindObjectsOfType<PlayerStats>(true)
-            .Where(stats => stats != null && stats.currentHealth > 0)
-            .Select(stats => stats.transform.position)
-            .ToArray();
+        var center = Vector3.zero;
+        var count = 0;
+        var all = PlayerStats.All;
+        for (var i = 0; i < all.Count; i++)
+        {
+            var stats = all[i];
+            if (stats == null || stats.currentHealth <= 0) continue;
+            center += stats.transform.position;
+            count++;
+        }
 
-        if (alivePlayers.Length == 0)
+        if (count == 0)
             return transform.position + Vector3.up * 1.5f;
 
-        var center = Vector3.zero;
-        for (var i = 0; i < alivePlayers.Length; i++)
-            center += alivePlayers[i];
-
-        return center / alivePlayers.Length;
+        return center / count;
     }
 
     private bool HasLocalPresentationAuthority()
