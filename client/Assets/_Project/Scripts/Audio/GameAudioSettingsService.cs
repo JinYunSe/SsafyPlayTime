@@ -174,8 +174,12 @@ namespace SSAFYPlayTime
         private void ReapplyRegisteredSources()
         {
             var staleSources = ListPool<AudioSource>.Get();
-            foreach (var pair in _registeredSources)
+            var snapshot = ListPool<KeyValuePair<AudioSource, RegisteredSource>>.Get();
+            snapshot.AddRange(_registeredSources);
+
+            for (var i = 0; i < snapshot.Count; i++)
             {
+                var pair = snapshot[i];
                 if (pair.Key == null)
                 {
                     staleSources.Add(pair.Key);
@@ -190,6 +194,7 @@ namespace SSAFYPlayTime
                 _registeredSources.Remove(stale);
             }
 
+            ListPool<KeyValuePair<AudioSource, RegisteredSource>>.Release(snapshot);
             ListPool<AudioSource>.Release(staleSources);
         }
 
