@@ -4,6 +4,9 @@ using Fusion;
 using SSAFYPlayTime.Gameplay.Items;
 using UnityEngine;
 using UnityEngine.Rendering;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public sealed partial class NetworkPlayer
 {
@@ -37,6 +40,12 @@ public sealed partial class NetworkPlayer
         "Assets/Polygon Arsenal/Prefabs/Interactive/BeamUp/Cylinder/BeamupCylinderBlue.prefab";
     private const string SatelliteCylinderResourcePath =
         "Polygon Arsenal/Prefabs/Interactive/BeamUp/Cylinder/BeamupCylinderBlue";
+    private const string SatelliteImpactSfxAssetPath = "Assets/Resources/_Project/Sounds/Item/SatelliteStrike.wav";
+    private const string SatelliteImpactSfxResourcePath = "_Project/Sounds/Item/SatelliteStrike";
+    private const string GrowthUseSfxAssetPath = "Assets/Resources/_Project/Sounds/Item/GrowthItemSound.WAV";
+    private const string GrowthUseSfxResourcePath = "_Project/Sounds/Item/GrowthItemSound";
+    private const string ShrinkUseSfxAssetPath = "Assets/Resources/_Project/Sounds/Item/ShrinkItemSound.mp3";
+    private const string ShrinkUseSfxResourcePath = "_Project/Sounds/Item/ShrinkItemSound";
 
     [Header("Item World Effects")]
     [SerializeField] private LayerMask itemWorldEffectMask = ~0;
@@ -76,6 +85,9 @@ public sealed partial class NetworkPlayer
     private readonly HashSet<int> _replicatedFlamethrowerUniqueTargets = new();
     private readonly DefaultItemFieldPrefabResolver _replicatedEffectPrefabResolver = new();
     private static PhysicMaterial s_blackholeProjectileLowFrictionMaterial;
+    private static AudioClip s_satelliteImpactSfx;
+    private static AudioClip s_growthUseSfx;
+    private static AudioClip s_shrinkUseSfx;
 
     private bool _itemWorldEffectNetworkReady;
     private bool _itemWorldEffectEventsBound;
@@ -177,6 +189,7 @@ public sealed partial class NetworkPlayer
         _itemWorldEffectBoundHost.ItemConsumed += HandleItemConsumed;
         _itemWorldEffectBoundHost.ItemDropped += HandleRuntimeItemDropped;
         _itemWorldEffectBoundHost.MeleeSwingRequested += HandleMeleeSwingRequested;
+        _itemWorldEffectBoundHost.SfxRequested += HandleRuntimeSfxRequested;
         _itemWorldEffectEventsBound = true;
     }
 
@@ -197,8 +210,31 @@ public sealed partial class NetworkPlayer
         _itemWorldEffectBoundHost.ItemConsumed -= HandleItemConsumed;
         _itemWorldEffectBoundHost.ItemDropped -= HandleRuntimeItemDropped;
         _itemWorldEffectBoundHost.MeleeSwingRequested -= HandleMeleeSwingRequested;
+        _itemWorldEffectBoundHost.SfxRequested -= HandleRuntimeSfxRequested;
         _itemWorldEffectBoundHost = null;
         _itemWorldEffectEventsBound = false;
+    }
+
+    private void HandleRuntimeSfxRequested(string sfxId, Vector3 worldPosition, bool loop)
+    {
+        if (string.IsNullOrWhiteSpace(sfxId))
+            return;
+
+        AudioClip clip = null;
+        switch (sfxId)
+        {
+            case "SFX_ITEM_GROWTH":
+                clip = LoadEffectSfx(ref s_growthUseSfx, GrowthUseSfxAssetPath, GrowthUseSfxResourcePath);
+                break;
+            case "SFX_ITEM_SHRINK":
+                clip = LoadEffectSfx(ref s_shrinkUseSfx, ShrinkUseSfxAssetPath, ShrinkUseSfxResourcePath);
+                break;
+        }
+
+        if (clip == null)
+            return;
+
+        PlayEffectSfx(clip, worldPosition);
     }
 
     private bool CanWriteItemWorldEffectState()
@@ -686,6 +722,7 @@ public sealed partial class NetworkPlayer
             center,
             Quaternion.identity,
             proxy => proxy.InitializeSatelliteBeam(request.Radius));
+        PlaySatelliteImpactSfx(center);
 
         var duration = Mathf.Max(0.1f, request.DurationSec);
         var tickInterval = 0.25f;
@@ -718,6 +755,58 @@ public sealed partial class NetworkPlayer
 
         DespawnNetworkedItemEffectProxy(ref _activeSatelliteBeamEffectProxy);
         _activeReplicatedSatelliteRoutine = null;
+    }
+
+    private static void PlaySatelliteImpactSfx(Vector3 worldPosition)
+    {
+        var clip = LoadSatelliteImpactSfx();
+        if (clip == null)
+            return;
+
+        PlayEffectSfx(clip, worldPosition, "ItemSfx_SatelliteStrike");
+    }
+
+    private static void PlayEffectSfx(AudioClip clip, Vector3 worldPosition, string objectName = null)
+    {
+        if (clip == null)
+            return;
+
+        var go = new GameObject(string.IsNullOrWhiteSpace(objectName) ? $"ItemSfx_{clip.name}" : objectName);
+        go.transform.position = worldPosition;
+
+        var source = go.AddComponent<AudioSource>();
+        source.clip = clip;
+        source.loop = false;
+        source.playOnAwake = false;
+        source.volume = 1f;
+        source.spatialBlend = 0f;
+
+        var categorizedSource = go.AddComponent<global::SSAFYPlayTime.GameAudioSource>();
+        categorizedSource.SetCategory(global::SSAFYPlayTime.GameAudioCategory.EffectSound);
+        categorizedSource.RefreshBaseVolumeFromCurrentSource();
+
+        source.Play();
+        Destroy(go, clip.length + 0.1f);
+    }
+
+    private static AudioClip LoadEffectSfx(ref AudioClip cache, string assetPath, string resourcePath)
+    {
+        if (cache != null)
+            return cache;
+
+#if UNITY_EDITOR
+        cache = AssetDatabase.LoadAssetAtPath<AudioClip>(assetPath);
+        if (cache != null)
+            return cache;
+#endif
+
+        cache = Resources.Load<AudioClip>(resourcePath);
+        return cache;
+    }
+
+    private static AudioClip LoadSatelliteImpactSfx()
+    {
+        return LoadEffectSfx(ref s_satelliteImpactSfx, SatelliteImpactSfxAssetPath, SatelliteImpactSfxResourcePath);
     }
 
     private void ApplyBlackholeGameplay(
