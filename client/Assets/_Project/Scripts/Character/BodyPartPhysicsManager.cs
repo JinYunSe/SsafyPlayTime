@@ -79,8 +79,8 @@ namespace SSAFYPlayTime.Character
         // ─── Distance LOD ───
         // 원격 플레이어의 LateUpdate 실행 빈도를 거리에 따라 줄여 CPU를 절약한다.
         // StateAuthority·InputAuthority(로컬·호스트)는 항상 풀 업데이트.
+        // Camera.main을 매 프레임 직접 참조해 사망 시 카메라 교체를 자동 반영한다.
         private int _lodSkipCounter;
-        private Camera _mainCameraCache;
         private const float LodNearSqr = 20f * 20f;  // 20m 이내: 매 프레임
         private const float LodMidSqr  = 40f * 40f;  // 40m 이내: 2프레임마다
         // 40m 초과: 4프레임마다
@@ -126,10 +126,10 @@ namespace SSAFYPlayTime.Character
             if (networkPlayer.HasStateAuthority || networkPlayer.HasInputAuthority) return false;
 
             _lodSkipCounter++;
-            if (_mainCameraCache == null) _mainCameraCache = Camera.main;
-            if (_mainCameraCache == null) return false;
+            var cam = Camera.main;
+            if (cam == null) return false;
 
-            var distSqr = (transform.position - _mainCameraCache.transform.position).sqrMagnitude;
+            var distSqr = (transform.position - cam.transform.position).sqrMagnitude;
             if (distSqr < LodNearSqr) return false;
             if (distSqr < LodMidSqr)  return (_lodSkipCounter & 1) != 0;  // 2프레임마다
             return (_lodSkipCounter % 4) != 0;                              // 4프레임마다
