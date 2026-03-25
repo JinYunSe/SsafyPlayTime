@@ -360,8 +360,11 @@ namespace SSAFYPlayTime.Gameplay.Items
             for (var i = 0; i < bodies.Length; i++)
             {
                 var body = bodies[i];
-                body.velocity = Vector3.zero;
-                body.angularVelocity = Vector3.zero;
+                if (!body.isKinematic)
+                {
+                    body.velocity = Vector3.zero;
+                    body.angularVelocity = Vector3.zero;
+                }
                 body.isKinematic = true;
                 body.useGravity = false;
             }
