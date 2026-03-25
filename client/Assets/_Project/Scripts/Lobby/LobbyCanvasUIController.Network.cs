@@ -811,7 +811,7 @@ namespace SSAFYPlayTime
             var latchedRightGrabHold = _netRightMouseDown && _netRightMouseConsumedAsGrab;
             var payload = new PlayerNetworkInput
             {
-                Move = _netMoveInput,
+                Move = _netMoveInputRaw, // GetAxis(스무딩) → GetAxisRaw(FPS 독립적)로 변경 — 호스트·비호스트 이동속도 형평성 확보
                 CameraYaw = _netCameraYaw,
                 Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
                 Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),
