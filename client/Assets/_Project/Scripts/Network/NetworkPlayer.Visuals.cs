@@ -370,12 +370,25 @@ public sealed partial class NetworkPlayer
     /// </summary>
     // 거리 기반 Physics LOD: 원격 플레이어가 이 거리(m) 이상이면 Kinematic 전환
     private const float PhysicsLodDistanceSqr = 35f * 35f;
+    private bool _wasPuppetMasterLODDistant;
 
     private bool IsDistantForPhysicsLOD()
     {
         var cam = Camera.main;
         if (cam == null) return false;
         return (transform.position - cam.transform.position).sqrMagnitude > PhysicsLodDistanceSqr;
+    }
+
+    /// <summary>
+    /// 35m 경계를 넘을 때만 PuppetMaster 모드를 갱신한다.
+    /// ShouldUseHardPhysicsVisualMode()를 사용해 올바른 usingPhysicsPresentation 값 전달.
+    /// </summary>
+    private void UpdatePuppetMasterDistanceLOD()
+    {
+        var isDistant = IsDistantForPhysicsLOD();
+        if (isDistant == _wasPuppetMasterLODDistant) return;
+        _wasPuppetMasterLODDistant = isDistant;
+        SyncPuppetMasterMode(ShouldUseHardPhysicsVisualMode());
     }
 
     private void SyncPuppetMasterMode(bool usingPhysicsPresentation)
