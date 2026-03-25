@@ -1,5 +1,6 @@
 using Fusion;
 using RootMotion.Dynamics;
+using SSAFYPlayTime.Gameplay.Items;
 using UnityEngine;
 
 public sealed partial class NetworkPlayer
@@ -2652,7 +2653,9 @@ public sealed partial class NetworkPlayer
             return PhysicalPhase.GrabIntent;
 
         // 장비 아이템(수박칼, 화염방사기 등) 장착 중
-        if (_itemRuntimeHost != null && _itemRuntimeHost.IsHeldItemEquipment)
+        if (_itemRuntimeHost != null &&
+            _itemRuntimeHost.IsHeldItemEquipment &&
+            !IsHoldingRuntimeItem(ItemIds.Flamethrower))
             return PhysicalPhase.WeaponEquipped;
 
         if (IsGroggyActive())
