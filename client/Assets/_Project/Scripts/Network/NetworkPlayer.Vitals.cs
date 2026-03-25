@@ -557,6 +557,16 @@ public sealed partial class NetworkPlayer
             {
                 throwManager.enabled = true;
                 throwManager.ForceEnableGhostThrow($"{name} death");
+
+                // 씬에 배치된 다른 GhostThrowManager의 입력 처리를 비활성화한다.
+                // ShouldHandleInput()이 controlEnabled를 체크해 중복 투척을 방지한다.
+                var allManagers = FindObjectsByType<SSAFYPlayTime.Game.GhostThrow.GhostThrowManager>(FindObjectsSortMode.None);
+                for (var mi = 0; mi < allManagers.Length; mi++)
+                {
+                    var m = allManagers[mi];
+                    if (m != null && m != throwManager)
+                        m.SetGhostControlEnabled(false);
+                }
             }
 
             // 프리팹 카메라를 재사용하므로 Destroy하지 않도록 _localGhostCamera는 null 유지
