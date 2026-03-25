@@ -13,7 +13,7 @@ public sealed partial class NetworkPlayer
         characterGrabController?.RefreshNow();
 
         // Block combat actions while the recovery gate is active.
-        if (_isRecovering)
+        if (_isRecovering || _isRecoverStabilizing)
             return;
 
         var dropRequested = input.Drop || _dropTriggered;
@@ -55,6 +55,16 @@ public sealed partial class NetworkPlayer
             {
                 _isLeftGrabActive = false;
                 _isGrabActive = _isRightGrabActive;
+            }
+        }
+
+        if (!isHoldingFlamethrower && input.Headbutt)
+        {
+            if (TryProcessHeadbutt(anyHolding, hasHeldRuntimeItem))
+            {
+                ResetInteractionTriggers();
+                UpdateGrabbingAnimatorFlag();
+                return;
             }
         }
 
@@ -250,14 +260,190 @@ public sealed partial class NetworkPlayer
         return didThrow;
     }
 
-    private void BeginGrabDisableWindow()
+    private void BeginGrabDisableWindow(float duration = 1f)
     {
-        _grabDisabledUntilTime = Mathf.Max(_grabDisabledUntilTime, Time.time + 1f);
+        _grabDisabledUntilTime = Mathf.Max(_grabDisabledUntilTime, Time.time + Mathf.Max(0f, duration));
     }
 
     private static bool ShouldAllowKickFallback(bool anyHolding, bool hasHeldRuntimeItem)
     {
         return !anyHolding && !hasHeldRuntimeItem;
+    }
+
+    private bool TryProcessHeadbutt(bool anyHolding, bool hasHeldRuntimeItem)
+    {
+        var hasReachPending = false;
+        var hasAttachPending = false;
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            hasReachPending = characterGrabController.IsAnyReachActive;
+            hasAttachPending = characterGrabController.CurrentActionState ==
+                               CharacterGrabController.GrabActionState.AttachPending;
+        }
+
+        var canPerformHeadbuttActions = _isActiveRagdoll && !_isRecovering && !_isRecoverStabilizing && !GetIsDeadState();
+        var beingGrabbed = _beingGrabbedRefCount > 0 || IsGrabbedByOther || NetworkedIsBeingGrabbed;
+        var dragged = _localIsDragged || (IsNetworkReady && !HasStateAuthority && NetworkedIsDragged);
+        if (!ShouldAllowHeadbuttDecision(
+                anyHolding,
+                hasHeldRuntimeItem,
+                _isGrabActive,
+                hasReachPending,
+                hasAttachPending,
+                canPerformHeadbuttActions,
+                beingGrabbed,
+                dragged,
+                _localInstability,
+                GetPhysicalPhase()))
+        {
+            return false;
+        }
+
+        if (!TryBeginHeadbuttHitDetection())
+            return false;
+
+        BeginGrabDisableWindow(0.35f);
+        RaiseAnimationEvent(AnimationEventType.Headbutt, 0);
+        return true;
+    }
+
+    private bool ShouldAllowAerialKickDecision(bool anyHolding, bool hasHeldRuntimeItem)
+    {
+        var hasReachPending = false;
+        var hasAttachPending = false;
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            hasReachPending = characterGrabController.IsAnyReachActive;
+            hasAttachPending = characterGrabController.CurrentActionState ==
+                               CharacterGrabController.GrabActionState.AttachPending;
+        }
+
+        if (!ShouldAllowAerialKickDecision(
+                _isGrounded,
+                anyHolding,
+                hasHeldRuntimeItem,
+                _isGrabActive,
+                hasReachPending,
+                hasAttachPending,
+                CanPerformCombatActions,
+                GetPhysicalPhase()))
+        {
+            return false;
+        }
+
+        return ShouldAllowAerialKickAirborneStart(
+            _isGrounded,
+            Time.time - _lastGroundedTime,
+            _coyoteTimeRemaining,
+            AreFeetClearForAerialKickStart(),
+            _isAerialKickMomentumActive || _activeAerialKickBallisticFallActive || _aerialKickSpringRestoreTimer > 0f);
+    }
+
+    private static bool ShouldAllowAerialKickDecision(
+        bool isGrounded,
+        bool anyHolding,
+        bool hasHeldRuntimeItem,
+        bool isGrabActive,
+        bool hasReachPending,
+        bool hasAttachPending,
+        bool canPerformCombatActions,
+        PhysicalPhase phase)
+    {
+        if (!canPerformCombatActions ||
+            isGrounded ||
+            anyHolding ||
+            hasHeldRuntimeItem ||
+            isGrabActive ||
+            hasReachPending ||
+            hasAttachPending)
+        {
+            return false;
+        }
+
+        switch (phase)
+        {
+            case PhysicalPhase.GrabIntent:
+            case PhysicalPhase.Holding:
+            case PhysicalPhase.BeingGrabbed:
+            case PhysicalPhase.Dragged:
+            case PhysicalPhase.Recovering:
+            case PhysicalPhase.CarryingStunned:
+            case PhysicalPhase.WeaponEquipped:
+            case PhysicalPhase.BeingCarriedStunned:
+            case PhysicalPhase.StunnedCollapse:
+            case PhysicalPhase.DraggedStunned:
+            case PhysicalPhase.SettledStunned:
+            case PhysicalPhase.Stunned:
+                return false;
+            default:
+                return true;
+        }
+    }
+
+    private static bool ShouldAllowAerialKickAirborneStart(
+        bool isGrounded,
+        float airborneElapsed,
+        float coyoteTimeRemaining,
+        bool feetClear,
+        bool hasActiveAerialKickState)
+    {
+        if (isGrounded ||
+            coyoteTimeRemaining > 0f ||
+            !feetClear ||
+            hasActiveAerialKickState)
+        {
+            return false;
+        }
+
+        return airborneElapsed >= AerialKickMinimumAirborneTriggerTime;
+    }
+
+    private static bool ShouldAllowHeadbuttDecision(
+        bool anyHolding,
+        bool hasHeldRuntimeItem,
+        bool isGrabActive,
+        bool hasReachPending,
+        bool hasAttachPending,
+        bool canPerformHeadbuttActions,
+        bool beingGrabbed,
+        bool dragged,
+        float instability,
+        PhysicalPhase phase)
+    {
+        if (!canPerformHeadbuttActions ||
+            anyHolding ||
+            hasHeldRuntimeItem ||
+            isGrabActive ||
+            hasReachPending ||
+            hasAttachPending ||
+            beingGrabbed ||
+            dragged ||
+            instability >= UnstableEnterThreshold)
+        {
+            return false;
+        }
+
+        switch (phase)
+        {
+            case PhysicalPhase.GrabIntent:
+            case PhysicalPhase.Holding:
+            case PhysicalPhase.BeingGrabbed:
+            case PhysicalPhase.Dragged:
+            case PhysicalPhase.Unstable:
+            case PhysicalPhase.Recovering:
+            case PhysicalPhase.CarryingStunned:
+            case PhysicalPhase.WeaponEquipped:
+            case PhysicalPhase.BeingCarriedStunned:
+            case PhysicalPhase.StunnedCollapse:
+            case PhysicalPhase.DraggedStunned:
+            case PhysicalPhase.SettledStunned:
+            case PhysicalPhase.Stunned:
+                return false;
+            default:
+                return true;
+        }
     }
 
     private void TryProcessSecondaryAction(bool anyHolding, bool hasHeldRuntimeItem)
@@ -293,7 +479,9 @@ public sealed partial class NetworkPlayer
 
     private bool TryProcessAerialKick()
     {
-        if (_isGrounded)
+        var anyHolding = IsAnyHandHoldingObject();
+        var hasHeldRuntimeItem = HasHeldRuntimeItem();
+        if (!ShouldAllowAerialKickDecision(anyHolding, hasHeldRuntimeItem))
             return false;
 
         if (!TryBeginAerialKickHitDetection())

@@ -168,6 +168,11 @@ public sealed partial class NetworkPlayer
         }
     }
 
+    internal bool UsesAnimatedVisualPresentationRig()
+    {
+        return ShouldDisablePhysicsAnimationSync;
+    }
+
     internal bool ShouldUseHardPhysicsVisualMode()
     {
         if (!ShouldUseHardPhysicsPresentation())
@@ -181,7 +186,8 @@ public sealed partial class NetworkPlayer
         // 복원했으므로 하드 물리 본 복사를 끄지 않으면 래그돌 포즈가 일어서기 애니메이션을 덮어쓴다.
         // 호스트는 stabilization 완료까지 물리 비주얼을 유지해야 하므로 호스트만 true.
         if (!HasStateAuthority &&
-            GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing)
+            GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing &&
+            !ShouldUseProxyPlainStunPoseAuthority())
             return false;
 
         return true;
@@ -347,13 +353,26 @@ public sealed partial class NetworkPlayer
         if (usingPhysicsPresentation == _wasUsingPhysicsPresentation)
             return;
 
+        var previousPhysicsPresentation = _wasUsingPhysicsPresentation;
         _wasUsingPhysicsPresentation = usingPhysicsPresentation;
+
+        if (usingPhysicsPresentation && IsStunDiagnosticsRelevantPhase(GetPhysicalPhase()))
+        {
+            ArmStunDiagnosticsWindow(
+                "Visuals.PhysicsPresentation",
+                $"usingPhysicsPresentation={previousPhysicsPresentation}->{usingPhysicsPresentation}");
+        }
 
         SyncPuppetMasterMode(usingPhysicsPresentation);
 
         SetPhysicsPresentationVisualMode(usingPhysicsPresentation);
         MarkPhysicsPoseBindingsDirty();
         MarkPresentationEffectsDirty();
+
+        TraceStunDiagnosticSnapshot(
+            "Visuals.PhysicsPresentationChanged",
+            $"usingPhysicsPresentation={previousPhysicsPresentation}->{usingPhysicsPresentation}",
+            force: true);
 
         if (!usingPhysicsPresentation)
         {
@@ -378,6 +397,12 @@ public sealed partial class NetworkPlayer
             // 비호스트: physics presentation 전환 시 PuppetMaster mode 토글.
             // Active → Map()이 muscle→target 매핑 실행 (기절/잡힘 물리 포즈 필요)
             // Disabled → Map() 스킵, Animator가 target skeleton 단독 구동
+            if (UsesAnimatedVisualPresentationRig())
+            {
+                _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Disabled;
+                return;
+            }
+
             _puppetMaster.mode = usingPhysicsPresentation
                 ? RootMotion.Dynamics.PuppetMaster.Mode.Active
                 : RootMotion.Dynamics.PuppetMaster.Mode.Disabled;
@@ -410,7 +435,13 @@ public sealed partial class NetworkPlayer
             _hardPhysicsVisualPoseCopyWeight > AnimatorRestoreBlendThreshold)
         {
             if (!_recoveryRestoreBlockedLogged)
+            {
+                TraceStunDiagnosticSnapshot(
+                    "Visuals.AnimatorRestoreBlocked",
+                    $"hardVisual={ShouldUseHardPhysicsVisualMode()} hardWeight={_hardPhysicsVisualPoseCopyWeight:F2}",
+                    force: true);
                 _recoveryRestoreBlockedLogged = true;
+            }
             return;
         }
 
@@ -432,6 +463,7 @@ public sealed partial class NetworkPlayer
         if (!animator.isInitialized)
             animator.Rebind();
         animator.Update(0f);
+        TraceStunDiagnosticSnapshot("Visuals.AnimatorRestored", force: true);
     }
 
     private void EnsurePhysicsPoseBindings(Transform presentationRoot)
@@ -652,7 +684,15 @@ public sealed partial class NetworkPlayer
         if (_isStunVisualMode == usePhysicsPresentation)
             return;
 
+        var previousVisualMode = _isStunVisualMode;
         _isStunVisualMode = usePhysicsPresentation;
+
+        if (usePhysicsPresentation && IsStunDiagnosticsRelevantPhase(GetPhysicalPhase()))
+        {
+            ArmStunDiagnosticsWindow(
+                "Visuals.SetPhysicsPresentationVisualMode",
+                $"stunVisual={previousVisualMode}->{usePhysicsPresentation}");
+        }
 
         if (usePhysicsPresentation)
         {
@@ -670,6 +710,11 @@ public sealed partial class NetworkPlayer
             // 원래 상태 복원: 애니메이션 비주얼만 보이게
             SetVisibleRendererState(_animatedVisualRoot);
         }
+
+        TraceStunDiagnosticSnapshot(
+            "Visuals.SetPhysicsPresentationVisualMode",
+            $"stunVisual={previousVisualMode}->{usePhysicsPresentation}",
+            force: true);
     }
 
     private void SetStunVisualMode(bool stunned)
