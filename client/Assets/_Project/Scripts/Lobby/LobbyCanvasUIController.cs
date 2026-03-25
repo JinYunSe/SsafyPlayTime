@@ -287,6 +287,10 @@ namespace SSAFYPlayTime
         // SemaphoreSlim(1, 1) : 최대 1개의 코루틴만 동시에 러너를 조작할 수 있도록 제한한다.
         private readonly SemaphoreSlim _runnerLock = new(1, 1);
         private readonly Dictionary<int, ParticipantPresence> _roomParticipantsByPlayerId = new();
+        // 퇴장 후에도 닉네임을 보존하기 위한 별도 캐시.
+        // _roomParticipantsByPlayerId는 OnPlayerLeft에서 즉시 제거되지만
+        // GameEndPanel에서 퇴장 플레이어 닉네임을 올바르게 표시하려면 유지가 필요하다.
+        private readonly Dictionary<int, string> _cachedNicknamesByPlayerId = new();
         private readonly int[] _selectedCharacterIndexBySlot = { -1, -1, -1, -1 };
         private readonly int[] _playerIdBySlot = { -1, -1, -1, -1 };
         private readonly Dictionary<int, int> _selectedCharacterIndexByPlayerId = new();
@@ -2679,6 +2683,9 @@ namespace SSAFYPlayTime
                 Nickname = safeName,
                 CharacterIndex = selectedCharacter
             };
+
+            // 퇴장 후에도 닉네임을 유지하도록 별도 캐시에 저장한다.
+            _cachedNicknamesByPlayerId[player.PlayerId] = safeName;
         }
 
         // 연결 토큰에서 닉네임을 추출해 플레이어를 등록한다.

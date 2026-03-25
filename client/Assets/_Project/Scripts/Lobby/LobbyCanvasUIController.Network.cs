@@ -608,6 +608,9 @@ namespace SSAFYPlayTime
         {
             if (_roomParticipantsByPlayerId.TryGetValue(playerId, out var p) && p != null && !string.IsNullOrEmpty(p.Nickname))
                 return p.Nickname;
+            // 퇴장 플레이어는 _roomParticipantsByPlayerId에서 제거됐으므로 별도 캐시로 폴백한다.
+            if (_cachedNicknamesByPlayerId.TryGetValue(playerId, out var cached) && !string.IsNullOrEmpty(cached))
+                return cached;
             return $"Player{playerId}";
         }
 
