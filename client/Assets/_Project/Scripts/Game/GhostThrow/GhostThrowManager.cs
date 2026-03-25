@@ -11,7 +11,8 @@ namespace SSAFYPlayTime.Game.GhostThrow
         [SerializeField] private Transform manualLocalTarget;
 
         [Header("Settings")]
-        public float cooldown = 1f;
+        public float bombCooldown = 30f;
+        public float bananaCooldown = 10f;
         public float throwForce = 15f;
         public float spawnForwardOffset = 2f;
         [Tooltip("스폰 위치의 타겟 기준 높이 (m) — 너무 높으면 카메라 위로 올라감")]
@@ -50,20 +51,23 @@ namespace SSAFYPlayTime.Game.GhostThrow
         private Transform _cachedSpawnPoint;
         private Camera _cachedMainCamera;
         private float _spawnPointRefreshTime;
-        // RayCastManager BoxCollider — 수평 감지 평면으로 사용 (Start에서 캐시)
-        private BoxCollider _rayCastManagerCollider;
+        // RayCastManager Transform Y — 수평 감지 Plane 구성에 사용 (BoxCollider 불필요)
+        private float _rayCastPlaneY = float.MinValue;
+        private static readonly int MapLayerMask = 1 << 3;
 
         public bool IsGhostThrowEnabled => _isGhostThrowEnabled;
 
         private void Start()
         {
             BindLocalPlayer();
-            _isGhostThrowEnabled = !enableOnlyAfterDeath;
+            // ForceEnableGhostThrow()가 이미 true로 설정했으면 덮어쓰지 않는다.
+            if (!_isGhostThrowEnabled)
+                _isGhostThrowEnabled = !enableOnlyAfterDeath;
 
-            // RayCastManager BoxCollider 캐시 — 마우스 클릭 → 맵 평면 좌표 변환에 사용
+            // RayCastManager Transform Y → 수평 감지 Plane 높이 캐시
             var rayCastManagerObj = GameObject.Find("RayCastManager");
             if (rayCastManagerObj != null)
-                _rayCastManagerCollider = rayCastManagerObj.GetComponent<BoxCollider>();
+                _rayCastPlaneY = rayCastManagerObj.transform.position.y;
             else
                 Debug.LogWarning("[GhostThrow] RayCastManager를 찾을 수 없습니다.");
         }
@@ -231,9 +235,10 @@ namespace SSAFYPlayTime.Game.GhostThrow
         private void TryThrow(bool isBanana)
         {
             ref var lastThrowTime = ref (isBanana ? ref _lastBananaThrowTime : ref _lastBombThrowTime);
-            if (Time.time < lastThrowTime + cooldown)
+            var currentCooldown = isBanana ? bananaCooldown : bombCooldown;
+            if (Time.time < lastThrowTime + currentCooldown)
             {
-                var remain = lastThrowTime + cooldown - Time.time;
+                var remain = lastThrowTime + currentCooldown - Time.time;
                 Debug.Log($"GhostThrow [{(isBanana ? "banana" : "bomb")}]: cooldown {remain:F1}s");
                 return;
             }
@@ -246,13 +251,27 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
             var ray = Camera.main.ScreenPointToRay(Input.mousePosition);
 
-            // RayCastManager BoxCollider(맵 상단 평면)에 레이를 쏴 hit.point를 목표 좌표로 사용.
-            // 카메라가 측면을 봐도 콜라이더 평면과의 교차점이 맵 상단 XYZ를 정확히 반환한다.
+            // [1단계] RayCastManager Transform Y로 수평 Plane → 카메라 레이 XZ 교차점 획득
+            // [2단계] 그 XZ에서 수직 하향 레이 → Map 정확한 표면 Y 획득
+            // BoxCollider 없이 Transform.position.y만으로 동일한 정확도를 제공한다.
             Vector3 targetPoint;
-            if (_rayCastManagerCollider != null && _rayCastManagerCollider.Raycast(ray, out RaycastHit rcHit, 1000f))
-                targetPoint = rcHit.point;
+            if (_rayCastPlaneY > float.MinValue)
+            {
+                var plane = new Plane(Vector3.up, Vector3.up * _rayCastPlaneY);
+                if (plane.Raycast(ray, out float enter))
+                {
+                    var xzRef = ray.GetPoint(enter);
+                    var castOrigin = new Vector3(xzRef.x, _rayCastPlaneY, xzRef.z);
+                    if (Physics.Raycast(castOrigin, Vector3.down, out RaycastHit surfaceHit, 200f, MapLayerMask))
+                        targetPoint = surfaceHit.point;
+                    else
+                        targetPoint = xzRef;
+                }
+                else
+                    targetPoint = ResolveMapPlaneTarget(ray);
+            }
             else
-                targetPoint = ResolveMapPlaneTarget(ray); // 폴백
+                targetPoint = ResolveMapPlaneTarget(ray);
 
             lastThrowTime = Time.time;
 
@@ -375,9 +394,6 @@ namespace SSAFYPlayTime.Game.GhostThrow
             // 너무 낮으면 1m 보장 (속도 제약이 별도로 하한을 맞춤)
             return Mathf.Max(1f, maxArc);
         }
-
-        // Map 레이어 마스크 (MapTunnelGuard와 동일: Layer 3)
-        private static readonly int MapLayerMask = 1 << 3;
 
         /// <summary>
         /// 레이를 Map 레이어에만 쏴 첫 번째 충돌 지점을 반환한다.
