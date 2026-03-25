@@ -197,6 +197,7 @@ public sealed partial class NetworkPlayer
         var hipsUpdatedThisFrame = previousNetworkedHipsPosition != NetworkedHipsPosition;
 
         NetworkedIsActiveRagdoll = _isActiveRagdoll;
+        NetworkedIsGrounded = _isGrounded;
         NetworkedPhysicalPhase = (byte)_localPhysicalPhase;
         NetworkedInstability = _localInstability;
         NetworkedIsDragged = _localIsDragged;

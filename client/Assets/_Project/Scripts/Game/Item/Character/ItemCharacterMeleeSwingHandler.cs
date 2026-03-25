@@ -363,7 +363,8 @@ namespace SSAFYPlayTime.Gameplay.Items
                     stunValue,
                     "WaterMelonSword",
                     attackerVelocity,
-                    0f);
+                    0f,
+                    downedHitPolicy: NetworkPlayer.DownedHitPolicy.RecoveryPenalty);
                 return;
             }
 
