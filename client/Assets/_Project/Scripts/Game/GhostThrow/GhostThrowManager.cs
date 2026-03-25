@@ -43,6 +43,7 @@ namespace SSAFYPlayTime.Game.GhostThrow
         private bool _hasLoggedMissingLocalPlayer;
         private bool controlEnabled = true;
         private bool enableOutOfBoundsKillCheck;
+        private NetworkRunner _cachedRunner;
 
         public bool IsGhostThrowEnabled => _isGhostThrowEnabled;
 
@@ -234,7 +235,9 @@ namespace SSAFYPlayTime.Game.GhostThrow
             var spawnPos = targetPoint + Vector3.up * spawnHeight + camHorizontalDir * spawnLaunchOffset;
             var initialVelocity = CalculateParabolicVelocity(spawnPos, targetPoint);
 
-            var runner = FindAnyObjectByType<NetworkRunner>();
+            if (_cachedRunner == null || !_cachedRunner.IsRunning)
+                _cachedRunner = FindAnyObjectByType<NetworkRunner>();
+            var runner = _cachedRunner;
             if (runner != null && runner.IsRunning)
             {
                 // ── 온라인 경로 ──────────────────────────────────────────────
@@ -385,7 +388,9 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
         internal bool TrySpawnOnlineFromRequest(bool isBanana, Vector3 spawnPos, Vector3 velocity)
         {
-            var runner = FindAnyObjectByType<NetworkRunner>();
+            if (_cachedRunner == null || !_cachedRunner.IsRunning)
+                _cachedRunner = FindAnyObjectByType<NetworkRunner>();
+            var runner = _cachedRunner;
             if (runner == null || !runner.IsRunning || !runner.IsServer)
                 return false;
 
