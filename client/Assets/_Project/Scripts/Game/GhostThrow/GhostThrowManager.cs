@@ -11,7 +11,8 @@ namespace SSAFYPlayTime.Game.GhostThrow
         [SerializeField] private Transform manualLocalTarget;
 
         [Header("Settings")]
-        public float cooldown = 1f;
+        public float bombCooldown = 30f;
+        public float bananaCooldown = 10f;
         public float throwForce = 15f;
         public float spawnForwardOffset = 2f;
         [Tooltip("스폰 위치의 타겟 기준 높이 (m) — 너무 높으면 카메라 위로 올라감")]
@@ -44,13 +45,31 @@ namespace SSAFYPlayTime.Game.GhostThrow
         private bool controlEnabled = true;
         private bool enableOutOfBoundsKillCheck;
         private NetworkRunner _cachedRunner;
+        // BindLocalPlayer 실패 시 매 프레임 FindObjectsByType 방지용 쓰로틀
+        private float _bindNextTime;
+        // GhostThrowSpawnPoint 캐시 — Camera.main 변경(사망 시) 감지 후 갱신
+        private Transform _cachedSpawnPoint;
+        private Camera _cachedMainCamera;
+        private float _spawnPointRefreshTime;
+        // RayCastManager Transform Y — 수평 감지 Plane 구성에 사용 (BoxCollider 불필요)
+        private float _rayCastPlaneY = float.MinValue;
+        private static readonly int MapLayerMask = 1 << 3;
 
         public bool IsGhostThrowEnabled => _isGhostThrowEnabled;
 
         private void Start()
         {
             BindLocalPlayer();
-            _isGhostThrowEnabled = !enableOnlyAfterDeath;
+            // ForceEnableGhostThrow()가 이미 true로 설정했으면 덮어쓰지 않는다.
+            if (!_isGhostThrowEnabled)
+                _isGhostThrowEnabled = !enableOnlyAfterDeath;
+
+            // RayCastManager Transform Y → 수평 감지 Plane 높이 캐시
+            var rayCastManagerObj = GameObject.Find("RayCastManager");
+            if (rayCastManagerObj != null)
+                _rayCastPlaneY = rayCastManagerObj.transform.position.y;
+            else
+                Debug.LogWarning("[GhostThrow] RayCastManager를 찾을 수 없습니다.");
         }
 
         private void OnDestroy()
@@ -72,7 +91,27 @@ namespace SSAFYPlayTime.Game.GhostThrow
         private void Update()
         {
             if (_localPlayerStats == null && _localNetworkPlayer == null)
-                BindLocalPlayer();
+            {
+                if (Time.unscaledTime >= _bindNextTime)
+                {
+                    _bindNextTime = Time.unscaledTime + 0.2f;
+                    BindLocalPlayer();
+                }
+            }
+
+            // 0.2s마다 Camera.main 변경 감지 → GhostThrowSpawnPoint 재탐색
+            if (Time.unscaledTime >= _spawnPointRefreshTime)
+            {
+                _spawnPointRefreshTime = Time.unscaledTime + 0.2f;
+                var cam = Camera.main;
+                if (cam != _cachedMainCamera)
+                {
+                    _cachedMainCamera = cam;
+                    _cachedSpawnPoint = cam != null
+                        ? cam.transform.Find("GhostThrowSpawnPoint")
+                        : null;
+                }
+            }
 
             RefreshGhostThrowStateFromLocalPlayer();
 
@@ -91,7 +130,9 @@ namespace SSAFYPlayTime.Game.GhostThrow
 
         private bool ShouldHandleInput()
         {
-            return true;
+            // controlEnabled=false이면 다른 매니저(프리팹 카메라 전용)가 우선권을 갖는다.
+            // SetGhostControlEnabled(false)로 중복 투척을 방지한다.
+            return controlEnabled;
         }
 
         private void BindLocalPlayer()
@@ -194,9 +235,10 @@ namespace SSAFYPlayTime.Game.GhostThrow
         private void TryThrow(bool isBanana)
         {
             ref var lastThrowTime = ref (isBanana ? ref _lastBananaThrowTime : ref _lastBombThrowTime);
-            if (Time.time < lastThrowTime + cooldown)
+            var currentCooldown = isBanana ? bananaCooldown : bombCooldown;
+            if (Time.time < lastThrowTime + currentCooldown)
             {
-                var remain = lastThrowTime + cooldown - Time.time;
+                var remain = lastThrowTime + currentCooldown - Time.time;
                 Debug.Log($"GhostThrow [{(isBanana ? "banana" : "bomb")}]: cooldown {remain:F1}s");
                 return;
             }
@@ -208,31 +250,37 @@ namespace SSAFYPlayTime.Game.GhostThrow
             }
 
             var ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+
+            // [1단계] RayCastManager Transform Y로 수평 Plane → 카메라 레이 XZ 교차점 획득
+            // [2단계] 그 XZ에서 수직 하향 레이 → Map 정확한 표면 Y 획득
+            // BoxCollider 없이 Transform.position.y만으로 동일한 정확도를 제공한다.
             Vector3 targetPoint;
-            if (Physics.Raycast(ray, out RaycastHit hit, 1000f, hitLayer))
+            if (_rayCastPlaneY > float.MinValue)
             {
-                targetPoint = hit.point;
-            }
-            else if (TryRaycastMapTag(ray, out var mapPoint))
-            {
-                targetPoint = mapPoint;
+                var plane = new Plane(Vector3.up, Vector3.up * _rayCastPlaneY);
+                if (plane.Raycast(ray, out float enter))
+                {
+                    var xzRef = ray.GetPoint(enter);
+                    var castOrigin = new Vector3(xzRef.x, _rayCastPlaneY, xzRef.z);
+                    if (Physics.Raycast(castOrigin, Vector3.down, out RaycastHit surfaceHit, 200f, MapLayerMask))
+                        targetPoint = surfaceHit.point;
+                    else
+                        targetPoint = xzRef;
+                }
+                else
+                    targetPoint = ResolveMapPlaneTarget(ray);
             }
             else
-            {
                 targetPoint = ResolveMapPlaneTarget(ray);
-            }
 
             lastThrowTime = Time.time;
 
-            // 카메라→타겟 방향의 수평 성분만 사용한다.
-            // 수직 성분을 포함하면 카메라가 위에서 내려다볼수록 camDir.xz → 0 이 되어
-            // dx → 0, 포물선이 수직 낙하로 퇴화하거나 arcHeight에 비해 너무 작아진다.
-            var camToTargetH = Camera.main.transform.position - targetPoint;
-            camToTargetH.y = 0f;
-            var camHorizontalDir = camToTargetH.sqrMagnitude > 0.01f
-                ? camToTargetH.normalized
-                : Vector3.forward; // 카메라가 타겟 바로 위에 있을 때 폴백
-            var spawnPos = targetPoint + Vector3.up * spawnHeight + camHorizontalDir * spawnLaunchOffset;
+            // GhostThrowSpawnPoint(Camera.main 하위 자식)에서 발사.
+            // 카메라가 이동해도 자식이므로 항상 최신 위치를 반환한다.
+            // 스폰 포인트가 없으면 Camera.main 위치로 폴백.
+            var spawnPos = _cachedSpawnPoint != null
+                ? _cachedSpawnPoint.position
+                : Camera.main.transform.position;
             var initialVelocity = CalculateParabolicVelocity(spawnPos, targetPoint);
 
             if (_cachedRunner == null || !_cachedRunner.IsRunning)
@@ -348,19 +396,14 @@ namespace SSAFYPlayTime.Game.GhostThrow
         }
 
         /// <summary>
-        /// 레이를 모든 레이어에 쏜 뒤 "Map" 태그 콜라이더에 닿은 첫 번째 지점을 반환한다.
+        /// 레이를 Map 레이어에만 쏴 첫 번째 충돌 지점을 반환한다.
         /// </summary>
-        private static bool TryRaycastMapTag(Ray ray, out Vector3 point)
+        private static bool TryRaycastMapLayer(Ray ray, out Vector3 point)
         {
-            var hits = Physics.RaycastAll(ray, 1000f);
-            System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-            foreach (var h in hits)
+            if (Physics.Raycast(ray, out RaycastHit hit, 1000f, MapLayerMask))
             {
-                if (h.collider.CompareTag("Map"))
-                {
-                    point = h.point;
-                    return true;
-                }
+                point = hit.point;
+                return true;
             }
 
             point = Vector3.zero;
@@ -368,20 +411,15 @@ namespace SSAFYPlayTime.Game.GhostThrow
         }
 
         /// <summary>
-        /// hitLayer와 Map 태그 레이캐스트 모두 실패했을 때(허공 클릭 등)
-        /// 레이 전방 지점에서 수직 하향 레이캐스트로 Map 태그 바닥을 찾는다.
+        /// Map 레이어 레이캐스트 실패 시(허공 클릭 등)
+        /// 레이 전방 지점에서 수직 하향으로 Map 레이어 바닥을 찾는다.
         /// 그래도 없으면 ray.GetPoint(50f)를 사용한다.
         /// </summary>
         private static Vector3 ResolveMapPlaneTarget(Ray ray)
         {
             var sampleOrigin = ray.GetPoint(50f) + Vector3.up * 100f;
-            var downHits = Physics.RaycastAll(sampleOrigin, Vector3.down, 200f);
-            System.Array.Sort(downHits, (a, b) => a.distance.CompareTo(b.distance));
-            foreach (var h in downHits)
-            {
-                if (h.collider.CompareTag("Map"))
-                    return h.point;
-            }
+            if (Physics.Raycast(sampleOrigin, Vector3.down, out RaycastHit hit, 200f, MapLayerMask))
+                return hit.point;
 
             return ray.GetPoint(50f);
         }
