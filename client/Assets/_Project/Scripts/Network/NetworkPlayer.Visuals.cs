@@ -368,6 +368,42 @@ public sealed partial class NetworkPlayer
     /// - 호스트(authority): mode는 건드리지 않되, 회복 시 로컬 비주얼 래치를 켜서
     ///   Map()이 visual pose를 덮어쓰지 않게 한다.
     /// </summary>
+    // 거리 기반 Physics LOD: 원격 플레이어가 이 거리(m) 이상이면 Kinematic 전환
+    private const float PhysicsLodDistanceSqr = 35f * 35f;
+    private bool _wasPuppetMasterLODDistant;
+
+    // Camera.main 프레임당 1회 조회 (플레이어 수와 무관하게 비용 고정)
+    private static Camera s_lodCam;
+    private static int s_lodCamFrame = -1;
+    private static Camera GetLODCamera()
+    {
+        if (s_lodCamFrame != Time.frameCount)
+        {
+            s_lodCamFrame = Time.frameCount;
+            s_lodCam = Camera.main;
+        }
+        return s_lodCam;
+    }
+
+    private bool IsDistantForPhysicsLOD()
+    {
+        var cam = GetLODCamera();
+        if (cam == null) return false;
+        return (transform.position - cam.transform.position).sqrMagnitude > PhysicsLodDistanceSqr;
+    }
+
+    /// <summary>
+    /// 35m 경계를 넘을 때만 PuppetMaster 모드를 갱신한다.
+    /// ShouldUseHardPhysicsVisualMode()를 사용해 올바른 usingPhysicsPresentation 값 전달.
+    /// </summary>
+    private void UpdatePuppetMasterDistanceLOD()
+    {
+        var isDistant = IsDistantForPhysicsLOD();
+        if (isDistant == _wasPuppetMasterLODDistant) return;
+        _wasPuppetMasterLODDistant = isDistant;
+        SyncPuppetMasterMode(ShouldUseHardPhysicsVisualMode());
+    }
+
     private void SyncPuppetMasterMode(bool usingPhysicsPresentation)
     {
         if (_puppetMaster == null)
@@ -375,6 +411,15 @@ public sealed partial class NetworkPlayer
 
         if (!HasStateAuthority)
         {
+            // 거리 기반 LOD: 원격 플레이어가 멀면 Kinematic으로 전환
+            // → ConfigurableJoint 시뮬레이션 없이 보간 포즈만 사용, CPU 절약
+            if (!HasInputAuthority && IsDistantForPhysicsLOD())
+            {
+                if (_puppetMaster.mode != RootMotion.Dynamics.PuppetMaster.Mode.Kinematic)
+                    _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Kinematic;
+                return;
+            }
+
             // 비호스트: physics presentation 전환 시 PuppetMaster mode 토글.
             // Active → Map()이 muscle→target 매핑 실행 (기절/잡힘 물리 포즈 필요)
             // Disabled → Map() 스킵, Animator가 target skeleton 단독 구동
