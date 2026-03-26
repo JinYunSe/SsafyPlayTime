@@ -15,7 +15,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         [Header("Test")]
         [SerializeField] private bool enableTestSpawnLoop = true;
-        [SerializeField] private float spawnIntervalSec = 3f;
+        [SerializeField] private float spawnIntervalSec = 10f;
         [SerializeField] private bool keepSpawnedItemStatic;
         [SerializeField] private bool enableDebugLog = true;
         [SerializeField] private int maxActiveFieldDropCount = DefaultMaxActiveFieldDropCount;

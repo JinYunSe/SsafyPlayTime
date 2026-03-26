@@ -201,7 +201,7 @@ public sealed partial class NetworkPlayer
 
     public bool ApplyCombinedDamage(float healthDamage, float stunDamage, string source)
     {
-        return ApplyCombinedDamage(healthDamage, stunDamage, source, 0f, 0f, 1f, false, null, 0, 1f, DownedHitPolicy.Ignore);
+        return ApplyCombinedDamage(healthDamage, stunDamage, source, 0f, 0f, 1f, false, null, 0, 1f, DownedHitPolicy.Ignore, false);
     }
 
     public bool ApplyCombinedDamage(
@@ -215,7 +215,8 @@ public sealed partial class NetworkPlayer
         NetworkPlayer instigator = null,
         int hitCountToStun = 0,
         float groggyVulnerabilityMultiplier = 1f,
-        DownedHitPolicy downedHitPolicy = DownedHitPolicy.Ignore)
+        DownedHitPolicy downedHitPolicy = DownedHitPolicy.Ignore,
+        bool forceGroundedStunCollapse = false)
     {
         var applied = false;
         if (healthDamage > 0f)
@@ -232,7 +233,8 @@ public sealed partial class NetworkPlayer
                 instigator,
                 hitCountToStun,
                 groggyVulnerabilityMultiplier,
-                downedHitPolicy);
+                downedHitPolicy,
+                forceGroundedStunCollapse);
             applied = true;
         }
 
@@ -312,6 +314,7 @@ public sealed partial class NetworkPlayer
         SetRecentStunHitCount(0);
         SetDeathFreezeRemaining(0f);
 
+        ForceReleaseInboundGrabRelations("Death");
         TryForceDropHeldContentOnDeath();
 
         // 레그돌/스턴 없이 즉시 입력·물리 상태 초기화
@@ -352,8 +355,12 @@ public sealed partial class NetworkPlayer
     {
         if (rigidbody3D != null)
         {
-            rigidbody3D.velocity = Vector3.zero;
-            rigidbody3D.angularVelocity = Vector3.zero;
+            if (!rigidbody3D.isKinematic)
+            {
+                rigidbody3D.velocity = Vector3.zero;
+                rigidbody3D.angularVelocity = Vector3.zero;
+            }
+
             rigidbody3D.isKinematic = true;
             rigidbody3D.position = Vector3.zero;
             rigidbody3D.rotation = Quaternion.identity;
@@ -386,8 +393,13 @@ public sealed partial class NetworkPlayer
         {
             var body = bodies[i];
             if (body == null) continue;
-            body.velocity = Vector3.zero;
-            body.angularVelocity = Vector3.zero;
+
+            if (!body.isKinematic)
+            {
+                body.velocity = Vector3.zero;
+                body.angularVelocity = Vector3.zero;
+            }
+
             body.isKinematic = true;
         }
 

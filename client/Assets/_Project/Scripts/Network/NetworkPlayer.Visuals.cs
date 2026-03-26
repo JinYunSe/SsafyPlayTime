@@ -21,9 +21,16 @@ public sealed partial class NetworkPlayer
     private readonly List<PhysicsPoseBinding> _physicsPoseBindings = new();
     private bool _physicsPoseBindingsDirty = true;
     private bool _wasUsingPhysicsPresentation;
+    private bool _isAuthorityAnimatedPlainStunVisualMeshActive;
     private int _lastPhysicsPresentationSyncFrame = -1;
     private bool _pendingAnimatorDrivenPoseReset;
     private bool _recoveryRestoreBlockedLogged;
+    private readonly List<Rigidbody> _proxyLocalSoftFlopBodies = new();
+    private bool[] _proxyLocalSoftFlopBodyKinematicStates;
+    private bool _proxyLocalSoftFlopActive;
+    private float _proxyLocalSoftFlopSavedMappingWeight = 1f;
+    private float _proxyLocalSoftFlopSavedMainJointSpring = -1f;
+    internal bool IsProxyLocalSoftFlopActive => _proxyLocalSoftFlopActive;
     private const float HitReactionBoneCopyThreshold = 0.58f;
     private const float HitReactionBoneCopyFullThreshold = 0.88f;
 
@@ -168,9 +175,17 @@ public sealed partial class NetworkPlayer
         }
     }
 
+    internal bool UsesAnimatedVisualPresentationRig()
+    {
+        return ShouldDisablePhysicsAnimationSync;
+    }
+
     internal bool ShouldUseHardPhysicsVisualMode()
     {
         if (!ShouldUseHardPhysicsPresentation())
+            return false;
+
+        if (ShouldUseProxyLocalSoftFlopPresentation())
             return false;
 
         // Carry keeps the animated visual rig visible and blends only key bones toward physics.
@@ -181,7 +196,8 @@ public sealed partial class NetworkPlayer
         // 복원했으므로 하드 물리 본 복사를 끄지 않으면 래그돌 포즈가 일어서기 애니메이션을 덮어쓴다.
         // 호스트는 stabilization 완료까지 물리 비주얼을 유지해야 하므로 호스트만 true.
         if (!HasStateAuthority &&
-            GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing)
+            GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing &&
+            !ShouldUseProxyPlainStunPoseAuthority())
             return false;
 
         return true;
@@ -223,6 +239,177 @@ public sealed partial class NetworkPlayer
     }
 
     // ─── 기절/회복 비주얼 모드 전환 ───
+    private void TickProxyLocalSoftFlopPresentation()
+    {
+        if (HasStateAuthority || !UsesAnimatedVisualPresentationRig())
+        {
+            SetProxyLocalSoftFlopActive(false);
+            return;
+        }
+
+        var shouldActivate = ShouldUseProxyLocalSoftFlopPresentation();
+        if (shouldActivate && !_proxyLocalSoftFlopActive && _externalAnimationDriver != null)
+            _externalAnimationDriver.InterruptAerialKickAnimationForPresentationHandoff("proxy-soft-flop");
+
+        SetProxyLocalSoftFlopActive(shouldActivate);
+
+        if (shouldActivate)
+            ApplyProxyLocalSoftFlopSpringState();
+    }
+
+    private void EnsureProxyLocalSoftFlopBodies()
+    {
+        if (_proxyLocalSoftFlopBodyKinematicStates != null)
+            return;
+
+        _proxyLocalSoftFlopBodies.Clear();
+        if (_puppetMaster?.muscles == null)
+        {
+            _proxyLocalSoftFlopBodyKinematicStates = Array.Empty<bool>();
+            return;
+        }
+
+        var uniqueBodies = new HashSet<Rigidbody>();
+        for (var i = 0; i < _puppetMaster.muscles.Length; i++)
+        {
+            var joint = _puppetMaster.muscles[i].joint;
+            var body = joint != null ? joint.GetComponent<Rigidbody>() : null;
+            if (body != null && uniqueBodies.Add(body))
+                _proxyLocalSoftFlopBodies.Add(body);
+        }
+
+        _proxyLocalSoftFlopBodyKinematicStates = new bool[_proxyLocalSoftFlopBodies.Count];
+    }
+
+    private void SetProxyLocalSoftFlopActive(bool active)
+    {
+        if (_proxyLocalSoftFlopActive == active)
+            return;
+
+        if (_puppetMaster == null)
+            return;
+
+        EnsureProxyLocalSoftFlopBodies();
+
+        if (active)
+        {
+            if (_puppetMaster.mappingWeight > 0.001f)
+                _proxyLocalSoftFlopSavedMappingWeight = _puppetMaster.mappingWeight;
+            else if (_proxyLocalSoftFlopSavedMappingWeight <= 0.001f)
+                _proxyLocalSoftFlopSavedMappingWeight = 1f;
+
+            _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Active;
+            _puppetMaster.mappingWeight = _proxyLocalSoftFlopSavedMappingWeight;
+
+            if (mainJoint != null)
+            {
+                if (_proxyLocalSoftFlopSavedMainJointSpring < 0f)
+                    _proxyLocalSoftFlopSavedMainJointSpring = mainJoint.slerpDrive.positionSpring;
+
+                var drive = mainJoint.slerpDrive;
+                var relaxedSpring = _startSlerpPositionSpring > 0f
+                    ? Mathf.Max(1f, _startSlerpPositionSpring * 0.08f)
+                    : 1f;
+                drive.positionSpring = relaxedSpring;
+                mainJoint.slerpDrive = drive;
+            }
+
+            for (var i = 0; i < _proxyLocalSoftFlopBodies.Count; i++)
+            {
+                var body = _proxyLocalSoftFlopBodies[i];
+                if (body == null)
+                    continue;
+
+                _proxyLocalSoftFlopBodyKinematicStates[i] = body.isKinematic;
+                body.isKinematic = false;
+                body.velocity = Vector3.down * 0.35f;
+                body.angularVelocity = Vector3.zero;
+                body.WakeUp();
+            }
+        }
+        else
+        {
+            for (var i = 0; i < _proxyLocalSoftFlopBodies.Count; i++)
+            {
+                var body = _proxyLocalSoftFlopBodies[i];
+                if (body == null)
+                    continue;
+
+                var restoreKinematic = _proxyLocalSoftFlopBodyKinematicStates != null &&
+                                       i < _proxyLocalSoftFlopBodyKinematicStates.Length
+                    ? _proxyLocalSoftFlopBodyKinematicStates[i]
+                    : true;
+
+                if (restoreKinematic)
+                {
+                    if (!body.isKinematic)
+                    {
+                        body.velocity = Vector3.zero;
+                        body.angularVelocity = Vector3.zero;
+                    }
+
+                    body.isKinematic = true;
+                }
+                else
+                {
+                    if (body.isKinematic)
+                        body.isKinematic = false;
+
+                    body.velocity = Vector3.zero;
+                    body.angularVelocity = Vector3.zero;
+                }
+            }
+
+            _puppetMaster.mappingWeight = 0f;
+
+            if (mainJoint != null && _proxyLocalSoftFlopSavedMainJointSpring >= 0f)
+            {
+                var drive = mainJoint.slerpDrive;
+                drive.positionSpring = _proxyLocalSoftFlopSavedMainJointSpring;
+                mainJoint.slerpDrive = drive;
+            }
+
+            RestoreProxyLocalSoftFlopSpringState();
+        }
+
+        _proxyLocalSoftFlopActive = active;
+        MarkPhysicsPoseBindingsDirty();
+        MarkPresentationEffectsDirty();
+    }
+
+    private void ApplyProxyLocalSoftFlopSpringState()
+    {
+        if (syncPhysicsObjects == null)
+            return;
+
+        for (var i = 0; i < syncPhysicsObjects.Length; i++)
+        {
+            var sync = syncPhysicsObjects[i];
+            if (sync == null)
+                continue;
+
+            sync.MakeRagdoll();
+        }
+    }
+
+    private void RestoreProxyLocalSoftFlopSpringState()
+    {
+        if (syncPhysicsObjects == null)
+            return;
+
+        for (var i = 0; i < syncPhysicsObjects.Length; i++)
+        {
+            var sync = syncPhysicsObjects[i];
+            if (sync == null)
+                continue;
+
+            if (_isActiveRagdoll)
+                sync.MakeActiveRagdoll();
+            else
+                sync.MakeRagdoll();
+        }
+    }
+
     private void MarkPhysicsPoseBindingsDirty()
     {
         _physicsPoseBindingsDirty = true;
@@ -230,6 +417,7 @@ public sealed partial class NetworkPlayer
 
     private void UpdatePhysicsDrivenVisualPose()
     {
+        TickProxyLocalSoftFlopPresentation();
         SynchronizePhysicsPresentationState();
         TickAuthorityAnimatorVisualLatch();
         TickVisualPoseBlendWeights();
@@ -344,16 +532,39 @@ public sealed partial class NetworkPlayer
         _lastPhysicsPresentationSyncFrame = Time.frameCount;
 
         var usingPhysicsPresentation = ShouldUseHardPhysicsVisualMode();
-        if (usingPhysicsPresentation == _wasUsingPhysicsPresentation)
+        var keepAuthorityAnimatedVisualMesh = usingPhysicsPresentation &&
+                                             ShouldKeepAuthorityAnimatedVisualMeshForPlainStun();
+        if (usingPhysicsPresentation == _wasUsingPhysicsPresentation &&
+            keepAuthorityAnimatedVisualMesh == _isAuthorityAnimatedPlainStunVisualMeshActive)
             return;
 
+        var previousPhysicsPresentation = _wasUsingPhysicsPresentation;
+        var previousAuthorityAnimatedVisualMesh = _isAuthorityAnimatedPlainStunVisualMeshActive;
         _wasUsingPhysicsPresentation = usingPhysicsPresentation;
+
+        if (usingPhysicsPresentation && IsStunDiagnosticsRelevantPhase(GetPhysicalPhase()))
+        {
+            ArmStunDiagnosticsWindow(
+                "Visuals.PhysicsPresentation",
+                $"usingPhysicsPresentation={previousPhysicsPresentation}->{usingPhysicsPresentation} authorityAnimatedMesh={previousAuthorityAnimatedVisualMesh}->{keepAuthorityAnimatedVisualMesh}");
+        }
+
+        if (usingPhysicsPresentation && !previousPhysicsPresentation && _externalAnimationDriver != null)
+        {
+            _externalAnimationDriver.InterruptAerialKickAnimationForPresentationHandoff(
+                $"physics-presentation phase={GetPhysicalPhase()}");
+        }
 
         SyncPuppetMasterMode(usingPhysicsPresentation);
 
         SetPhysicsPresentationVisualMode(usingPhysicsPresentation);
         MarkPhysicsPoseBindingsDirty();
         MarkPresentationEffectsDirty();
+
+        TraceStunDiagnosticSnapshot(
+            "Visuals.PhysicsPresentationChanged",
+            $"usingPhysicsPresentation={previousPhysicsPresentation}->{usingPhysicsPresentation} authorityAnimatedMesh={previousAuthorityAnimatedVisualMesh}->{keepAuthorityAnimatedVisualMesh}",
+            force: true);
 
         if (!usingPhysicsPresentation)
         {
@@ -368,42 +579,6 @@ public sealed partial class NetworkPlayer
     /// - 호스트(authority): mode는 건드리지 않되, 회복 시 로컬 비주얼 래치를 켜서
     ///   Map()이 visual pose를 덮어쓰지 않게 한다.
     /// </summary>
-    // 거리 기반 Physics LOD: 원격 플레이어가 이 거리(m) 이상이면 Kinematic 전환
-    private const float PhysicsLodDistanceSqr = 35f * 35f;
-    private bool _wasPuppetMasterLODDistant;
-
-    // Camera.main 프레임당 1회 조회 (플레이어 수와 무관하게 비용 고정)
-    private static Camera s_lodCam;
-    private static int s_lodCamFrame = -1;
-    private static Camera GetLODCamera()
-    {
-        if (s_lodCamFrame != Time.frameCount)
-        {
-            s_lodCamFrame = Time.frameCount;
-            s_lodCam = Camera.main;
-        }
-        return s_lodCam;
-    }
-
-    private bool IsDistantForPhysicsLOD()
-    {
-        var cam = GetLODCamera();
-        if (cam == null) return false;
-        return (transform.position - cam.transform.position).sqrMagnitude > PhysicsLodDistanceSqr;
-    }
-
-    /// <summary>
-    /// 35m 경계를 넘을 때만 PuppetMaster 모드를 갱신한다.
-    /// ShouldUseHardPhysicsVisualMode()를 사용해 올바른 usingPhysicsPresentation 값 전달.
-    /// </summary>
-    private void UpdatePuppetMasterDistanceLOD()
-    {
-        var isDistant = IsDistantForPhysicsLOD();
-        if (isDistant == _wasPuppetMasterLODDistant) return;
-        _wasPuppetMasterLODDistant = isDistant;
-        SyncPuppetMasterMode(ShouldUseHardPhysicsVisualMode());
-    }
-
     private void SyncPuppetMasterMode(bool usingPhysicsPresentation)
     {
         if (_puppetMaster == null)
@@ -411,18 +586,28 @@ public sealed partial class NetworkPlayer
 
         if (!HasStateAuthority)
         {
-            // 거리 기반 LOD: 원격 플레이어가 멀면 Kinematic으로 전환
-            // → ConfigurableJoint 시뮬레이션 없이 보간 포즈만 사용, CPU 절약
-            if (!HasInputAuthority && IsDistantForPhysicsLOD())
-            {
-                if (_puppetMaster.mode != RootMotion.Dynamics.PuppetMaster.Mode.Kinematic)
-                    _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Kinematic;
-                return;
-            }
-
             // 비호스트: physics presentation 전환 시 PuppetMaster mode 토글.
             // Active → Map()이 muscle→target 매핑 실행 (기절/잡힘 물리 포즈 필요)
             // Disabled → Map() 스킵, Animator가 target skeleton 단독 구동
+            if (UsesAnimatedVisualPresentationRig())
+            {
+                _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Active;
+
+                if (_proxyLocalSoftFlopActive)
+                {
+                    if (_puppetMaster.mappingWeight <= 0.001f)
+                        _puppetMaster.mappingWeight = _proxyLocalSoftFlopSavedMappingWeight > 0.001f
+                            ? _proxyLocalSoftFlopSavedMappingWeight
+                            : 1f;
+                }
+                else if (_puppetMaster.mappingWeight > 0.001f)
+                {
+                    _puppetMaster.mappingWeight = 0f;
+                }
+
+                return;
+            }
+
             _puppetMaster.mode = usingPhysicsPresentation
                 ? RootMotion.Dynamics.PuppetMaster.Mode.Active
                 : RootMotion.Dynamics.PuppetMaster.Mode.Disabled;
@@ -455,7 +640,13 @@ public sealed partial class NetworkPlayer
             _hardPhysicsVisualPoseCopyWeight > AnimatorRestoreBlendThreshold)
         {
             if (!_recoveryRestoreBlockedLogged)
+            {
+                TraceStunDiagnosticSnapshot(
+                    "Visuals.AnimatorRestoreBlocked",
+                    $"hardVisual={ShouldUseHardPhysicsVisualMode()} hardWeight={_hardPhysicsVisualPoseCopyWeight:F2}",
+                    force: true);
                 _recoveryRestoreBlockedLogged = true;
+            }
             return;
         }
 
@@ -477,6 +668,7 @@ public sealed partial class NetworkPlayer
         if (!animator.isInitialized)
             animator.Rebind();
         animator.Update(0f);
+        TraceStunDiagnosticSnapshot("Visuals.AnimatorRestored", force: true);
     }
 
     private void EnsurePhysicsPoseBindings(Transform presentationRoot)
@@ -682,6 +874,11 @@ public sealed partial class NetworkPlayer
 
     private bool _isStunVisualMode;
 
+    private bool ShouldKeepAuthorityAnimatedVisualMeshForPlainStun()
+    {
+        return ShouldUseAuthorityAnimatedPlainStunPresentation();
+    }
+
     /// <summary>
     /// 기절 시: PuppetMaster 타겟 스켈레톤(물리 매핑 대상)의 메시를 보여주고
     ///          애니메이션 비주얼 루트의 메시를 숨긴다.
@@ -694,27 +891,53 @@ public sealed partial class NetworkPlayer
         if (!ShouldDisablePhysicsAnimationSync || _animatedVisualRoot == null || !_hasAlternateVisualSwapTargets)
             return;
 
-        if (_isStunVisualMode == usePhysicsPresentation)
+        var keepAuthorityAnimatedVisualMesh = usePhysicsPresentation &&
+                                             ShouldKeepAuthorityAnimatedVisualMeshForPlainStun();
+
+        if (_isStunVisualMode == usePhysicsPresentation &&
+            _isAuthorityAnimatedPlainStunVisualMeshActive == keepAuthorityAnimatedVisualMesh)
             return;
 
+        var previousVisualMode = _isStunVisualMode;
+        var previousAuthorityAnimatedVisualMesh = _isAuthorityAnimatedPlainStunVisualMeshActive;
         _isStunVisualMode = usePhysicsPresentation;
+        _isAuthorityAnimatedPlainStunVisualMeshActive = keepAuthorityAnimatedVisualMesh;
+
+        if (usePhysicsPresentation && IsStunDiagnosticsRelevantPhase(GetPhysicalPhase()))
+        {
+            ArmStunDiagnosticsWindow(
+                "Visuals.SetPhysicsPresentationVisualMode",
+                $"stunVisual={previousVisualMode}->{usePhysicsPresentation} authorityAnimatedMesh={previousAuthorityAnimatedVisualMesh}->{keepAuthorityAnimatedVisualMesh}");
+        }
 
         if (usePhysicsPresentation)
         {
             // 물리 타겟 스켈레톤의 렌더러를 보이게, 애니메이션 비주얼 렌더러를 숨기기
-            var skinnedMeshRenderers = GetComponentsInChildren<SkinnedMeshRenderer>(true);
-            for (var i = 0; i < skinnedMeshRenderers.Length; i++)
-                skinnedMeshRenderers[i].enabled = !IsUnderVisualRoot(skinnedMeshRenderers[i].transform, _animatedVisualRoot);
+            if (keepAuthorityAnimatedVisualMesh)
+            {
+                SetVisibleRendererState(_animatedVisualRoot);
+            }
+            else
+            {
+                var skinnedMeshRenderers = GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                for (var i = 0; i < skinnedMeshRenderers.Length; i++)
+                    skinnedMeshRenderers[i].enabled = !IsUnderVisualRoot(skinnedMeshRenderers[i].transform, _animatedVisualRoot);
 
-            var meshRenderers = GetComponentsInChildren<MeshRenderer>(true);
-            for (var i = 0; i < meshRenderers.Length; i++)
-                meshRenderers[i].enabled = !IsUnderVisualRoot(meshRenderers[i].transform, _animatedVisualRoot);
+                var meshRenderers = GetComponentsInChildren<MeshRenderer>(true);
+                for (var i = 0; i < meshRenderers.Length; i++)
+                    meshRenderers[i].enabled = !IsUnderVisualRoot(meshRenderers[i].transform, _animatedVisualRoot);
+            }
         }
         else
         {
             // 원래 상태 복원: 애니메이션 비주얼만 보이게
             SetVisibleRendererState(_animatedVisualRoot);
         }
+
+        TraceStunDiagnosticSnapshot(
+            "Visuals.SetPhysicsPresentationVisualMode",
+            $"stunVisual={previousVisualMode}->{usePhysicsPresentation} authorityAnimatedMesh={previousAuthorityAnimatedVisualMesh}->{keepAuthorityAnimatedVisualMesh}",
+            force: true);
     }
 
     private void SetStunVisualMode(bool stunned)
