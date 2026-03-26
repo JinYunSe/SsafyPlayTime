@@ -287,6 +287,10 @@ namespace SSAFYPlayTime
         // SemaphoreSlim(1, 1) : 최대 1개의 코루틴만 동시에 러너를 조작할 수 있도록 제한한다.
         private readonly SemaphoreSlim _runnerLock = new(1, 1);
         private readonly Dictionary<int, ParticipantPresence> _roomParticipantsByPlayerId = new();
+        // 퇴장 후에도 닉네임을 보존하기 위한 별도 캐시.
+        // _roomParticipantsByPlayerId는 OnPlayerLeft에서 즉시 제거되지만
+        // GameEndPanel에서 퇴장 플레이어 닉네임을 올바르게 표시하려면 유지가 필요하다.
+        private readonly Dictionary<int, string> _cachedNicknamesByPlayerId = new();
         private readonly int[] _selectedCharacterIndexBySlot = { -1, -1, -1, -1 };
         private readonly int[] _playerIdBySlot = { -1, -1, -1, -1 };
         private readonly Dictionary<int, int> _selectedCharacterIndexByPlayerId = new();
@@ -1419,6 +1423,8 @@ namespace SSAFYPlayTime
 
         private IEnumerator CoLoadSceneAndShowGameEndPanel(string sceneName)
         {
+            // 오프라인(로컬 테스트) 전용 경로 — 네트워크 없이 직접 씬 전환.
+            // 온라인 플레이에서는 runner.LoadScene → OnSceneLoadDone 경로를 사용한다.
             SceneManager.LoadScene(sceneName);
             while (SceneManager.GetActiveScene().name != sceneName)
                 yield return null;
@@ -1447,6 +1453,7 @@ namespace SSAFYPlayTime
             Cursor.visible = true;
 
             _isShowingGameEndPanel = true;
+            _pendingGameEndPanel = false;
             _gameEndReturnTransitionStarted = false;
 
             DisplayRankings();
@@ -1474,6 +1481,12 @@ namespace SSAFYPlayTime
 
         // DebugGameEndTransition.PlayerLeft 및 OnShutdown/OnDisconnectedFromServer/OnHostMigration에서 호출.
         // _isShowingGameEndPanel 플래그를 먼저 세워 중복 진입을 방지하고 코루틴을 시작한다.
+        /// <summary>
+        /// 방장 이탈 처리 또는 게임 종료 패널 표시가 이미 진행 중인지 여부.
+        /// DebugGameEndTransition.PlayerLeft에서 TriggerGameEnd 오발동 방지에 사용한다.
+        /// </summary>
+        public bool IsShowingGameEndOrReturningToLobby => _isShowingGameEndPanel;
+
         public void TriggerHostExitAndReturnToLobby()
         {
             if (_isShowingGameEndPanel)
@@ -2670,6 +2683,9 @@ namespace SSAFYPlayTime
                 Nickname = safeName,
                 CharacterIndex = selectedCharacter
             };
+
+            // 퇴장 후에도 닉네임을 유지하도록 별도 캐시에 저장한다.
+            _cachedNicknamesByPlayerId[player.PlayerId] = safeName;
         }
 
         // 연결 토큰에서 닉네임을 추출해 플레이어를 등록한다.

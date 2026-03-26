@@ -50,7 +50,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   SortKey: 767978767
-  ObjectInterest: 1
+  ObjectInterest: 2
   Flags: 262145
   NestedObjects: []
   NetworkedBehaviours:
@@ -151,3 +151,4 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6b8c40f9d12c1ec4e8ab43c8ccfc83a5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  enableDebugLog: 0

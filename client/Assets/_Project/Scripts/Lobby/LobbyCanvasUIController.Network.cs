@@ -164,7 +164,9 @@ namespace SSAFYPlayTime
             }
 
             // GameScene에서 방장 강제 종료 감지 → 즉시 게임 종료 처리
-            if (!_isShowingGameEndPanel && IsActiveSceneNamed(gameplaySceneName))
+            // _pendingGameEndPanel이 true이면 RPC_BroadcastRankings가 이미 씬 전환을 시작한 것이므로
+            // TriggerHostExitAndReturnToLobby를 발동하지 않는다.
+            if (!_isShowingGameEndPanel && !_pendingGameEndPanel && IsActiveSceneNamed(gameplaySceneName))
             {
                 Debug.Log("[Lobby] Host exited during gameplay → returning to lobby.");
                 TriggerHostExitAndReturnToLobby();
@@ -193,7 +195,8 @@ namespace SSAFYPlayTime
             }
 
             // GameScene에서 서버 연결 끊김 = 방장 강제 종료 → 즉시 게임 종료 처리
-            if (!_isShowingGameEndPanel && IsActiveSceneNamed(gameplaySceneName))
+            // _pendingGameEndPanel이 true이면 정상 게임 종료 흐름으로 씬 전환 중이므로 무시한다.
+            if (!_isShowingGameEndPanel && !_pendingGameEndPanel && IsActiveSceneNamed(gameplaySceneName))
             {
                 Debug.Log("[Lobby] Disconnected from host during gameplay → returning to lobby.");
                 TriggerHostExitAndReturnToLobby();
@@ -321,19 +324,19 @@ namespace SSAFYPlayTime
                 }
 
                 // GameScene에서 방장이 나간 경우 → Migration 대신 게임 종료 처리
-                // _isShowingGameEndPanel=true는 PlayerLeft에서 이미 TriggerHostExitAndReturnToLobby가
-                // 호출된 상태를 의미한다. 이 경우 migration을 진행하면 CoReturnToLobbyOnHostExit와
-                // ShutdownRunnerAsync/StartGame이 충돌하므로 Runner만 종료하고 즉시 반환한다.
+                // _isShowingGameEndPanel=true 또는 _pendingGameEndPanel=true이면 이미 처리 중이므로
+                // Runner만 종료하고 즉시 반환한다.
+                // _pendingGameEndPanel=true: RPC_BroadcastRankings가 이미 씬 전환을 시작한 상태 (정상 게임 종료 중)
                 if (IsActiveGameplayScene())
                 {
-                    if (!_isShowingGameEndPanel)
+                    if (!_isShowingGameEndPanel && !_pendingGameEndPanel)
                     {
                         Debug.Log("[Lobby] Host exited during gameplay → returning to lobby.");
                         TriggerHostExitAndReturnToLobby();
                     }
                     else
                     {
-                        Debug.Log("[Lobby] Host exited during gameplay, already returning to lobby → shutdown runner only.");
+                        Debug.Log("[Lobby] Host exited during gameplay, already handling end → shutdown runner only.");
                         _ = ShutdownRunnerAsync();
                     }
                     return;
@@ -605,6 +608,9 @@ namespace SSAFYPlayTime
         {
             if (_roomParticipantsByPlayerId.TryGetValue(playerId, out var p) && p != null && !string.IsNullOrEmpty(p.Nickname))
                 return p.Nickname;
+            // 퇴장 플레이어는 _roomParticipantsByPlayerId에서 제거됐으므로 별도 캐시로 폴백한다.
+            if (_cachedNicknamesByPlayerId.TryGetValue(playerId, out var cached) && !string.IsNullOrEmpty(cached))
+                return cached;
             return $"Player{playerId}";
         }
 
@@ -805,7 +811,7 @@ namespace SSAFYPlayTime
             var latchedRightGrabHold = _netRightMouseDown && _netRightMouseConsumedAsGrab;
             var payload = new PlayerNetworkInput
             {
-                Move = _netMoveInput,
+                Move = _netMoveInputRaw, // GetAxis(스무딩) → GetAxisRaw(FPS 독립적)로 변경 — 호스트·비호스트 이동속도 형평성 확보
                 CameraYaw = _netCameraYaw,
                 Jump = ConsumeLatchedNetworkFlag(ref _netJumpQueued),
                 Punch = ConsumeLatchedNetworkFlag(ref _netPunchQueued),

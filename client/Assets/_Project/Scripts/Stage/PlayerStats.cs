@@ -4,6 +4,10 @@ using UnityEngine;
 
 public class PlayerStats : MonoBehaviour
 {
+    // FindObjectsOfType<PlayerStats> 대체용 static 레지스트리 (inactive 포함)
+    private static readonly System.Collections.Generic.List<PlayerStats> s_all = new();
+    public static System.Collections.Generic.IReadOnlyList<PlayerStats> All => s_all;
+
     [Header("Offline Fallback")]
     [SerializeField] private int offlineStartingHealth = 260;
 
@@ -24,8 +28,14 @@ public class PlayerStats : MonoBehaviour
 
     private void Awake()
     {
+        s_all.Add(this);
         _networkPlayer = GetComponent<NetworkPlayer>();
         _standaloneCurrentHealth = Mathf.Max(1, offlineStartingHealth);
+    }
+
+    private void OnDestroy()
+    {
+        s_all.Remove(this);
     }
 
     private void Start()
