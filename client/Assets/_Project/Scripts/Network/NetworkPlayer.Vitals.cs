@@ -569,6 +569,19 @@ public sealed partial class NetworkPlayer
             {
                 throwManager.enabled = true;
                 throwManager.ForceEnableGhostThrow($"{name} death");
+
+                // 씬에 배치된 독립 GhostThrowManager(캐릭터 자식이 아닌 것)만 비활성화한다.
+                // 캐릭터 프리팹 카메라에 붙은 매니저는 건드리지 않아
+                // 2명 이상 사망 시 이전 사망자의 투척이 막히는 문제를 방지한다.
+                var allManagers = FindObjectsByType<SSAFYPlayTime.Game.GhostThrow.GhostThrowManager>(FindObjectsSortMode.None);
+                for (var mi = 0; mi < allManagers.Length; mi++)
+                {
+                    var m = allManagers[mi];
+                    if (m == null || m == throwManager) continue;
+                    // NetworkPlayer의 자식이 아닌 씬 독립 매니저만 비활성화
+                    if (m.GetComponentInParent<NetworkPlayer>() == null)
+                        m.SetGhostControlEnabled(false);
+                }
             }
 
             // 프리팹 카메라를 재사용하므로 Destroy하지 않도록 _localGhostCamera는 null 유지
