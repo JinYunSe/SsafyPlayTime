@@ -25,6 +25,7 @@ public class LookAtTargetTracker : MonoBehaviour
     [Header("Settings")]
     [Tooltip("Set to 0 to disable look-at.")]
     [SerializeField] private float maxLookDistance = 5.5f;
+    [SerializeField, Range(0f, 1f)] private float maxTargetWeight = 0.85f;
     [SerializeField] private float weightBlendSpeed = 2.2f;
     [SerializeField] private float lookAtHeightOffset = 0.8f;
     [SerializeField] private float scanInterval = 0.2f;
@@ -79,7 +80,7 @@ public class LookAtTargetTracker : MonoBehaviour
             FindNearestOpponent();
         }
 
-        var desired = _currentTarget != null ? 1f : 0f;
+        var desired = _currentTarget != null ? Mathf.Clamp01(maxTargetWeight) : 0f;
 
         if (_rootRigidbody != null)
         {

@@ -27,11 +27,21 @@ namespace SSAFYPlayTime
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
+            if (!RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            {
+                return;
+            }
+
             EnsureInstance();
         }
 
         public static void EnsureInstance()
         {
+            if (!RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            {
+                return;
+            }
+
             if (_instance != null || FindObjectOfType<RuntimeLogOverlay>() != null)
             {
                 return;
@@ -44,6 +54,12 @@ namespace SSAFYPlayTime
 
         private void Awake()
         {
+            if (!RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
             if (_instance != null && _instance != this)
             {
                 Destroy(gameObject);
@@ -60,6 +76,11 @@ namespace SSAFYPlayTime
 
         private void OnEnable()
         {
+            if (!RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            {
+                return;
+            }
+
             Application.logMessageReceived += OnUnityLogReceived;
             AppendLine("Runtime log overlay initialized. Press F6 to show/hide.");
         }

@@ -14,6 +14,8 @@ public sealed partial class NetworkPlayer
     private const string PM_DefaultAerialKickState = "Attack02";
     private const float PM_LocomotionThreshold = 0.1f;
     private const float PM_DefaultPunchPredictionWindow = 0.35f;
+    private const float PM_DefaultHeadbuttPredictionWindow = 0.30f;
+    private const float PM_DefaultAerialKickPredictionWindow = 0.30f;
     private const float PM_ThrowLockDuration = 0.85f;
     private const float OwnerRecoveringHipsLerpScale = 0.35f;
     private const float OwnerRecoveringHipsDeadzone = 0.12f;
@@ -34,10 +36,15 @@ public sealed partial class NetworkPlayer
     private const float CarryReleaseSettleEmergencySnapDistance = 2.25f;
     private const float CarryProxyTargetCacheWindow = 0.18f;
     private const float CarryProxyMinimumHipsAlpha = 0.72f;
+    private const float ProxyNonCarryHipsReseedRootGap = 1.5f;
+    private const float ProxyNonCarryHipsReseedVerticalGap = 1.25f;
     private const float RemoteStablePresentationRootFollowSpeed = 10f;
     private const float RemoteBufferedPresentationRootFollowSpeed = 7f;
     private const float OwnerBufferedPresentationRootFollowSpeed = 9f;
     private const float ProxyPresentationRootSnapDistance = 2.75f;
+    private const float ProxyStartupPresentationSnapWindow = 0.35f;
+    private const float ProxyStartupPresentationGapThreshold = 0.08f;
+    private const float ProxyStartupPresentationVerticalSnapThreshold = 0.03f;
     private const float IncomingHeldVictimStableRootOffset = 0.1f;
     private const float IncomingHeldVictimRecoveringRootOffset = 0.16f;
     private const float IncomingHeldVictimStableBoneBlendWeight = 0.42f;
@@ -49,6 +56,8 @@ public sealed partial class NetworkPlayer
     // OwnerProxy 로컬 예측 reconcile
     private float _localPunchPredictionTime = -1f;
     private float _localThrowPredictionTime = -1f;
+    private float _localHeadbuttPredictionTime = -1f;
+    private float _localAerialKickPredictionTime = -1f;
     private bool _localPredictedPunchIsLeft; // 로컬 예측 시 어느 손을 재생했는지
 
     /// <summary>
@@ -66,9 +75,24 @@ public sealed partial class NetworkPlayer
         _localThrowPredictionTime = Time.time;
     }
 
+    internal void NotifyLocalHeadbuttPrediction()
+    {
+        _localHeadbuttPredictionTime = Time.time;
+    }
+
+    internal void NotifyLocalAerialKickPrediction()
+    {
+        _localAerialKickPredictionTime = Time.time;
+    }
+
     internal void PlayProceduralKickPresentation(bool isLeft)
     {
         TriggerProceduralKick(isLeft);
+    }
+
+    internal bool PlayProceduralHeadbuttPresentation()
+    {
+        return TriggerProceduralHeadbutt();
     }
 
     internal float ResolveKickPresentationLockDuration()
@@ -76,6 +100,13 @@ public sealed partial class NetworkPlayer
         var kickLeg = GetOrCreateProceduralKickLeg();
         var proceduralDuration = kickLeg != null ? kickLeg.TotalKickDuration : 0f;
         return Mathf.Max(GetConfiguredKickCooldown(), proceduralDuration > 0f ? proceduralDuration : 0.45f);
+    }
+
+    internal float ResolveHeadbuttPresentationLockDuration()
+    {
+        var headbutt = GetOrCreateProceduralHeadbutt();
+        var proceduralDuration = headbutt != null ? headbutt.TotalHeadbuttDuration : 0f;
+        return Mathf.Max(GetConfiguredHeadbuttCooldown(), proceduralDuration > 0f ? proceduralDuration : 0.34f);
     }
 
     // ─── 스냅샷 보간 버퍼 ───
@@ -87,6 +118,8 @@ public sealed partial class NetworkPlayer
     private Vector3 _hipsSnapshotTo;
     private bool _snapshotBufferInitialized;
     private bool _proxyPresentationRootSmoothingActive;
+    private bool _pendingProxySpawnPresentationSnap;
+    private float _proxySpawnPresentationSnapUntilTime = float.NegativeInfinity;
 
     // CarrySolveFrame: carry 진입/종료 시 snapshot 재시드용
     private bool _wasCarryPhaseLastFrame;
@@ -119,12 +152,13 @@ public sealed partial class NetworkPlayer
         if (Object == null || !Object.IsValid)
             return;
 
+        if (!HasStateAuthority)
+            TraceUnownedRootMotion("Render.ProxyRootMotion");
+
         // ── 플레이어 타입별 3분기 ──
         if (HasStateAuthority)
         {
-            // AuthorityOwner: 클라이언트(OwnerProxy)와 동일한 루트 보간을 적용해
-            // 호스트 캐릭터의 시각적 부드러움을 맞춘다.
-            UpdateProxyPresentationRoot();
+            // AuthorityOwner: 물리 시뮬레이션이 직접 뼈를 구동 → 보간 불필요
             UpdateCharacterPresentationEffects();
             return;
         }
@@ -213,7 +247,7 @@ public sealed partial class NetworkPlayer
         // 이미 false를 반환하여 TryRestoreAnimatorDrivenPresentation이 먼저 실행된다.
         // 이 시점에 recoveryQueued가 false이면 스탠드업 애니메이션이 누락되므로
         // NetworkedRecoveryAnimationVariant(ForceRecover에서 동일 틱에 설정됨)를 사용해 미리 큐잉한다.
-        if (isRecovering)
+        if (isRecovering && GetStunPresentationPhase() != StunPresentationPhase.RecoverStabilizing)
             QueueRecoveryAnimationForVisuals();
 
         // 로컬 플레이어(OwnerProxy)가 기절 진입 시 슬로우모션 연출
@@ -228,11 +262,6 @@ public sealed partial class NetworkPlayer
 
     private void LateUpdate()
     {
-        // 거리 기반 Physics LOD: 원격 플레이어가 35m 경계를 넘을 때만 PuppetMaster 모드 갱신.
-        // (매 프레임 SyncPuppetMasterMode를 호출하지 않고, 거리 카테고리 변화 시에만 실행)
-        if (!HasStateAuthority && !HasInputAuthority)
-            UpdatePuppetMasterDistanceLOD();
-
         // 비주얼 상태를 먼저 갱신한 뒤 카메라 앵커를 갱신해야
         // 앵커가 최종 표시 비주얼 위치를 기준으로 추적한다.
         UpdateRemotePhysicsPresentationResetWindow();
@@ -273,9 +302,44 @@ public sealed partial class NetworkPlayer
 
     private bool ShouldUseBufferedProxyPoseInterpolation()
     {
+        if (ShouldUseProxyLocalSoftFlopPresentation())
+            return false;
+
         return GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing ||
                UsesBufferedProxyPosePhase(GetPhysicalPhase()) ||
                IsRemotePhysicsPresentationResetLocked();
+    }
+
+    private bool ShouldUseProxyPlainStunPoseAuthority()
+    {
+        return ShouldUseProxyAuthoritativeStunRecoveryPose(
+            GetPhysicalPhase(),
+            GetStunPresentationPhase(),
+            HasStateAuthority,
+            ShouldUseProxyLocalSoftFlopPresentation());
+    }
+
+    internal static bool ShouldUseProxyAuthoritativeStunRecoveryPose(
+        PhysicalPhase phase,
+        StunPresentationPhase presentationPhase,
+        bool hasStateAuthority,
+        bool useLocalSoftFlopPresentation)
+    {
+        if (hasStateAuthority || useLocalSoftFlopPresentation)
+            return false;
+
+        if (IsCarryPhysicalPhase(phase) ||
+            phase == PhysicalPhase.BeingGrabbed ||
+            phase == PhysicalPhase.Dragged ||
+            phase == PhysicalPhase.DraggedStunned)
+        {
+            return false;
+        }
+
+        return phase == PhysicalPhase.StunnedCollapse ||
+               phase == PhysicalPhase.Stunned ||
+               phase == PhysicalPhase.SettledStunned ||
+               presentationPhase == StunPresentationPhase.RecoverStabilizing;
     }
 
     private bool ShouldSmoothProxyPresentationRoot(Transform presentationRoot)
@@ -283,7 +347,7 @@ public sealed partial class NetworkPlayer
         if (presentationRoot == null || presentationRoot == transform)
             return false;
 
-        if (HasStateAuthority || ShouldUseHardPhysicsVisualMode())
+        if (HasStateAuthority || ShouldUseHardPhysicsVisualMode() || ShouldUseProxyPlainStunPoseAuthority())
             return false;
 
         if (!HasInputAuthority)
@@ -304,12 +368,69 @@ public sealed partial class NetworkPlayer
         return OwnerBufferedPresentationRootFollowSpeed;
     }
 
+    private void ArmProxyStartupPresentationSnap()
+    {
+        if (HasStateAuthority)
+            return;
+
+        _pendingProxySpawnPresentationSnap = true;
+        _proxySpawnPresentationSnapUntilTime = Time.time + ProxyStartupPresentationSnapWindow;
+        _proxyPresentationRootSmoothingActive = false;
+
+        var seedHips = NetworkedHipsPosition != Vector3.zero ? NetworkedHipsPosition : transform.position;
+        _hipsSnapshotFrom = seedHips;
+        _hipsSnapshotTo = seedHips;
+    }
+
+    private bool TryApplyProxyStartupPresentationSnap(
+        Transform presentationRoot,
+        Vector3 targetPosition,
+        Vector3 pelvisBefore,
+        Vector3 visualBefore)
+    {
+        if (HasStateAuthority || !_pendingProxySpawnPresentationSnap || presentationRoot == null)
+            return false;
+
+        if (Time.time > _proxySpawnPresentationSnapUntilTime)
+        {
+            _pendingProxySpawnPresentationSnap = false;
+            return false;
+        }
+
+        var currentGap = presentationRoot.position - targetPosition;
+        var shouldSnap =
+            Mathf.Abs(currentGap.y) >= ProxyStartupPresentationVerticalSnapThreshold ||
+            currentGap.sqrMagnitude >= ProxyStartupPresentationGapThreshold * ProxyStartupPresentationGapThreshold;
+
+        _pendingProxySpawnPresentationSnap = false;
+        if (!shouldSnap)
+            return false;
+
+        presentationRoot.SetPositionAndRotation(targetPosition, transform.rotation);
+        _proxyPresentationRootSmoothingActive = false;
+
+        TraceStunTransformWriter(
+            "Writer.UpdateProxyPresentationRoot",
+            transform.position,
+            transform.position,
+            pelvisBefore: pelvisBefore,
+            pelvisAfter: ResolveStartupLaunchPelvisPosition(out _),
+            visualBefore: visualBefore,
+            visualAfter: presentationRoot.position,
+            note: $"actualRoot=0 mode=startupSnap targetY={targetPosition.y:F2}",
+            force: true);
+
+        return true;
+    }
+
     private void UpdateProxyPresentationRoot()
     {
         var presentationRoot = GetPresentationRootTransform();
         if (presentationRoot == null || presentationRoot == transform)
             return;
 
+        var visualBefore = presentationRoot.position;
+        var pelvisBefore = ResolveStartupLaunchPelvisPosition(out _);
         var targetPosition = transform.position;
         var hasIncomingHeldVictimPresentation = TryResolveIncomingHeldVictimPresentation(
             out var incomingHeldRootOffset,
@@ -317,16 +438,59 @@ public sealed partial class NetworkPlayer
         if (hasIncomingHeldVictimPresentation && incomingHeldRootOffset.sqrMagnitude > 0.0001f)
             targetPosition += incomingHeldRootOffset;
 
+        if (TryApplyProxyStartupPresentationSnap(presentationRoot, targetPosition, pelvisBefore, visualBefore))
+            return;
+
+        if (ShouldUseProxyPlainStunPoseAuthority() &&
+            (ShouldUseHardPhysicsVisualMode() || ShouldUseProxyLocalSoftFlopPresentation()))
+        {
+            var targetRotation = transform.rotation;
+            if ((presentationRoot.position - targetPosition).sqrMagnitude > 0.0001f ||
+                Quaternion.Angle(presentationRoot.rotation, targetRotation) > 0.1f)
+            {
+                presentationRoot.SetPositionAndRotation(targetPosition, targetRotation);
+                TraceStunTransformWriter(
+                    "Writer.UpdateProxyPresentationRoot",
+                    transform.position,
+                    transform.position,
+                    pelvisBefore: pelvisBefore,
+                    pelvisAfter: ResolveStartupLaunchPelvisPosition(out _),
+                    visualBefore: visualBefore,
+                    visualAfter: presentationRoot.position,
+                    note: $"actualRoot=0 mode=plainStunSnap targetY={targetPosition.y:F2}",
+                    force: Mathf.Abs(presentationRoot.position.y - visualBefore.y) > 0.25f);
+            }
+
+            _proxyPresentationRootSmoothingActive = false;
+            return;
+        }
+
         var shouldSmoothPresentationRoot =
             ShouldSmoothProxyPresentationRoot(presentationRoot) ||
             hasIncomingHeldVictimPresentation;
 
         if (!shouldSmoothPresentationRoot)
         {
+            if (ShouldUseProxyPlainStunPoseAuthority())
+            {
+                _proxyPresentationRootSmoothingActive = false;
+                return;
+            }
+
             if (_proxyPresentationRootSmoothingActive &&
                 (presentationRoot.position - targetPosition).sqrMagnitude > 0.0001f)
             {
                 presentationRoot.position = targetPosition;
+                TraceStunTransformWriter(
+                    "Writer.UpdateProxyPresentationRoot",
+                    transform.position,
+                    transform.position,
+                    pelvisBefore: pelvisBefore,
+                    pelvisAfter: ResolveStartupLaunchPelvisPosition(out _),
+                    visualBefore: visualBefore,
+                    visualAfter: presentationRoot.position,
+                    note: $"actualRoot=0 mode=reset targetY={targetPosition.y:F2} carryIncoming={(hasIncomingHeldVictimPresentation ? 1 : 0)}",
+                    force: Mathf.Abs(presentationRoot.position.y - visualBefore.y) > 0.25f);
             }
 
             _proxyPresentationRootSmoothingActive = false;
@@ -339,6 +503,16 @@ public sealed partial class NetworkPlayer
         {
             presentationRoot.position = targetPosition;
             _proxyPresentationRootSmoothingActive = true;
+            TraceStunTransformWriter(
+                "Writer.UpdateProxyPresentationRoot",
+                transform.position,
+                transform.position,
+                pelvisBefore: pelvisBefore,
+                pelvisAfter: ResolveStartupLaunchPelvisPosition(out _),
+                visualBefore: visualBefore,
+                visualAfter: presentationRoot.position,
+                note: $"actualRoot=0 mode=snap targetY={targetPosition.y:F2} carryIncoming={(hasIncomingHeldVictimPresentation ? 1 : 0)}",
+                force: Mathf.Abs(presentationRoot.position.y - visualBefore.y) > 0.25f);
             return;
         }
 
@@ -349,6 +523,16 @@ public sealed partial class NetworkPlayer
         var alpha = 1f - Mathf.Exp(-followSpeed * Time.deltaTime);
         presentationRoot.position = Vector3.Lerp(presentationRoot.position, targetPosition, alpha);
         _proxyPresentationRootSmoothingActive = true;
+        TraceStunTransformWriter(
+            "Writer.UpdateProxyPresentationRoot",
+            transform.position,
+            transform.position,
+            pelvisBefore: pelvisBefore,
+            pelvisAfter: ResolveStartupLaunchPelvisPosition(out _),
+            visualBefore: visualBefore,
+            visualAfter: presentationRoot.position,
+            note: $"actualRoot=0 mode=lerp targetY={targetPosition.y:F2} alpha={alpha:F2} carryIncoming={(hasIncomingHeldVictimPresentation ? 1 : 0)}",
+            force: Mathf.Abs(presentationRoot.position.y - visualBefore.y) > 0.25f);
     }
 
     private void ClearIncomingHeldVictimPresentation()
@@ -486,11 +670,33 @@ public sealed partial class NetworkPlayer
 
     private void ApplyProxyCarryRootPosition(Vector3 nextRootPosition, bool isSettling = false)
     {
+        var rootBefore = transform.position;
+        var bodyBefore = rigidbody3D != null ? rigidbody3D.position : rootBefore;
+        var pelvisBefore = ResolveStartupLaunchPelvisPosition(out _);
+        var visualRoot = GetPresentationRootTransform();
+        var visualBefore = visualRoot != null ? visualRoot.position : rootBefore;
+
         // settle 중에는 rigidbody position을 건드리지 않음 — 물리 velocity 기반 이동 보존
         if (!isSettling && !HasStateAuthority && rigidbody3D != null && !rigidbody3D.isKinematic)
             rigidbody3D.position = nextRootPosition;
 
         transform.position = nextRootPosition;
+        var rootAfter = transform.position;
+        var bodyAfter = rigidbody3D != null ? rigidbody3D.position : rootAfter;
+        var pelvisAfter = ResolveStartupLaunchPelvisPosition(out _);
+        var visualAfter = visualRoot != null ? visualRoot.position : rootAfter;
+        TraceStunTransformWriter(
+            "Writer.ApplyProxyCarryRootPosition",
+            rootBefore,
+            rootAfter,
+            bodyBefore,
+            bodyAfter,
+            pelvisBefore,
+            pelvisAfter,
+            visualBefore,
+            visualAfter,
+            $"settling={(isSettling ? 1 : 0)}",
+            force: Mathf.Abs(rootAfter.y - rootBefore.y) > 0.25f);
     }
 
     private void CacheProxyCarryTargets(PhysicalPhase phase, Vector3 carryAnchorTarget, Vector3 carryRootTarget)
@@ -725,6 +931,32 @@ public sealed partial class NetworkPlayer
             _wasCarryPhaseLastFrame = false;
     }
 
+    private void ReseedNonCarryProxyHipsSnapshot(Vector3 latestHips)
+    {
+        var currentHips = latestHips;
+        if (syncPhysicsObjects != null && syncPhysicsObjects.Length > 0 && syncPhysicsObjects[0] != null)
+            currentHips = syncPhysicsObjects[0].transform.position;
+
+        _hipsSnapshotFrom = currentHips;
+        _hipsSnapshotTo = latestHips;
+    }
+
+    private bool ShouldReseedNonCarryProxyHips(PhysicalPhase phase, Vector3 desiredHipsPosition, Vector3 latestHips)
+    {
+        if (HasStateAuthority || IsCarryPhysicalPhase(phase))
+            return false;
+
+        if (ShouldUseProxyPlainStunPoseAuthority())
+            return false;
+
+        var desiredRootGap = Vector3.Distance(transform.position, desiredHipsPosition);
+        var latestRootGap = Vector3.Distance(transform.position, latestHips);
+        return desiredRootGap > ProxyNonCarryHipsReseedRootGap ||
+               latestRootGap > ProxyNonCarryHipsReseedRootGap ||
+               Mathf.Abs(desiredHipsPosition.y - transform.position.y) > ProxyNonCarryHipsReseedVerticalGap ||
+               Mathf.Abs(latestHips.y - transform.position.y) > ProxyNonCarryHipsReseedVerticalGap;
+    }
+
     private void InterpolateRemoteBoneRotations()
     {
         if (syncPhysicsObjects == null || syncPhysicsObjects.Length == 0)
@@ -733,8 +965,22 @@ public sealed partial class NetworkPlayer
         var interpolator = new NetworkBehaviourBufferInterpolator(this);
         int boneCount = syncPhysicsObjects.Length;
         var phase = GetPhysicalPhase();
+        var useLocalSoftFlopPresentation = ShouldUseProxyLocalSoftFlopPresentation();
         var isCarryPhase = IsCarryPhysicalPhase(phase);
+        var useAuthoritativeStunRecoveryPose = ShouldUseProxyAuthoritativeStunRecoveryPose(
+            phase,
+            GetStunPresentationPhase(),
+            HasStateAuthority,
+            useLocalSoftFlopPresentation);
         var phaseChanged = phase != _lastInterpolatedPhase;
+        if (useLocalSoftFlopPresentation)
+        {
+            if (_wasCarryPhaseLastFrame)
+                ResetProxyCarryPresentationState(resetCarryTracking: true);
+
+            _lastInterpolatedPhase = phase;
+            return;
+        }
 
         // ── 스냅샷 버퍼 초기화 ──
         if (!_snapshotBufferInitialized || _boneSnapshotFrom == null || _boneSnapshotFrom.Length != boneCount)
@@ -868,6 +1114,9 @@ public sealed partial class NetworkPlayer
         // ── Hips(muscles[0]) 절대 위치 — from→to 스냅샷 보간 ──
         if (boneCount > 0 && syncPhysicsObjects[0] != null)
         {
+            if (!HasStateAuthority && !isCarryPhase && phaseChanged)
+                ReseedNonCarryProxyHipsSnapshot(latestHips);
+
             var hipsFrom = _hipsSnapshotFrom;
             var hipsTo = _hipsSnapshotTo;
             var hipsCurrent = syncPhysicsObjects[0].transform.position;
@@ -877,6 +1126,7 @@ public sealed partial class NetworkPlayer
                 : 15f;
             var hipsAlpha = 1f;
             var didHipsSnap = false;
+            var didNonCarryHipsReseed = false;
             var desiredHipsPosition = hipsCurrent;
 
             // 텔레포트 방지: 거리가 너무 크면 즉시 스냅 (HFF 방식, sqrMag > 15)
@@ -898,6 +1148,21 @@ public sealed partial class NetworkPlayer
                     desiredHipsPosition = hipsCurrent;
                 else
                     desiredHipsPosition = interpolatedHips;
+            }
+
+            if (useAuthoritativeStunRecoveryPose)
+            {
+                desiredHipsPosition = latestHips;
+                hipsAlpha = 1f;
+                didHipsSnap = true;
+            }
+            else if (ShouldReseedNonCarryProxyHips(phase, desiredHipsPosition, latestHips))
+            {
+                ReseedNonCarryProxyHipsSnapshot(latestHips);
+                desiredHipsPosition = latestHips;
+                hipsAlpha = 1f;
+                didHipsSnap = true;
+                didNonCarryHipsReseed = true;
             }
 
             var rootBeforeCorrection = transform.position;
@@ -989,10 +1254,23 @@ public sealed partial class NetworkPlayer
                     _carryExitSnapshotAnchor = Vector3.zero;
             }
 
+            var hipsBefore = syncPhysicsObjects[0].transform.position;
+            var visualRootBeforeHips = GetPresentationRootTransform();
+            var visualBeforeHips = visualRootBeforeHips != null ? visualRootBeforeHips.position : transform.position;
             syncPhysicsObjects[0].transform.position = desiredHipsPosition;
 
             var appliedHips = syncPhysicsObjects[0].transform.position;
             var rootGap = Vector3.Distance(appliedHips, transform.position);
+            TraceStunTransformWriter(
+                "Writer.ProxyHipsPosition",
+                transform.position,
+                transform.position,
+                pelvisBefore: hipsBefore,
+                pelvisAfter: appliedHips,
+                visualBefore: visualBeforeHips,
+                visualAfter: visualRootBeforeHips != null ? visualRootBeforeHips.position : transform.position,
+                note: $"actualRoot=0 carryPhase={(isCarryPhase ? 1 : 0)} settle={(!HasStateAuthority && _carryReleaseSettleRemaining > 0f ? 1 : 0)} rootGap={rootGap:F2} nonCarryReseed={(didNonCarryHipsReseed ? 1 : 0)}",
+                force: Mathf.Abs(appliedHips.y - hipsBefore.y) > 0.25f);
             if (isCarryPhase)
             {
                 if (rootGap > CarryResidualRootGapThreshold || rootGapBeforeCorrection > CarryResidualRootGapThreshold)
@@ -1032,7 +1310,9 @@ public sealed partial class NetworkPlayer
         }
 
         // ── 뼈 회전 — from→to 스냅샷 보간 ──
-        var rotationAlpha = ResolveBoneRotationInterpolationAlpha(interpolator.Alpha) * slowMoAlphaScale;
+        var rotationAlpha = useAuthoritativeStunRecoveryPose
+            ? Mathf.Clamp01(Mathf.Max(interpolator.Alpha, 0.9f))
+            : ResolveBoneRotationInterpolationAlpha(interpolator.Alpha) * slowMoAlphaScale;
         for (int i = 0; i < boneCount; i++)
         {
             if (syncPhysicsObjects[i] == null) continue;
@@ -1150,7 +1430,7 @@ public sealed partial class NetworkPlayer
 
     private void ApplyProxyPresentationRotation()
     {
-        if (HasStateAuthority || ShouldUseHardPhysicsPresentation())
+        if (HasStateAuthority || ShouldUseHardPhysicsPresentation() || ShouldUseProxyLocalSoftFlopPresentation())
             return;
 
         var presentationRoot = GetPresentationRootTransform();
@@ -1328,10 +1608,20 @@ public sealed partial class NetworkPlayer
                 if (Time.time - _localThrowPredictionTime < PM_ThrowLockDuration)
                     return;
             }
+            else if (eventType == AnimationEventType.Headbutt)
+            {
+                if (Time.time - _localHeadbuttPredictionTime < ResolvePMHeadbuttPredictionWindow())
+                    return;
+            }
+            else if (eventType == AnimationEventType.AerialKick)
+            {
+                if (Time.time - _localAerialKickPredictionTime < PM_DefaultAerialKickPredictionWindow)
+                    return;
+            }
         }
 
-        // 원격 클라이언트에서 GetHit 수신 시 카메라 킥 + 히트 VFX 연출
-        if (eventType == AnimationEventType.GetHit && !HasStateAuthority)
+        // 원격 클라이언트에서 GetHit / HitVFXOnly 수신 시 카메라 킥 + 히트 VFX 연출
+        if ((eventType == AnimationEventType.GetHit || eventType == AnimationEventType.HitVFXOnly) && !HasStateAuthority)
         {
             // 비호스트: 정확한 hitPoint가 없으므로 캐릭터 중심 + 전방 오프셋으로 근사
             var approxHitPoint = transform.position + Vector3.up * 0.8f + ResolveCombatForward() * 0.2f;
@@ -1374,6 +1664,9 @@ public sealed partial class NetworkPlayer
             case AnimationEventType.KickRight:
                 TriggerProceduralKick(false);
                 break;
+            case AnimationEventType.Headbutt:
+                TriggerProceduralHeadbutt();
+                break;
             case AnimationEventType.AerialKick:
                 TriggerFallbackAerialKickAnimation();
                 break;
@@ -1382,6 +1675,9 @@ public sealed partial class NetworkPlayer
                 break;
             case AnimationEventType.GetHit:
                 animator.SetTrigger(H_GetHit);
+                break;
+            case AnimationEventType.HitVFXOnly:
+                // VFX 전용: 스태거 애니메이션 없이 VFX만 재생 (위의 공통 VFX 로직에서 처리됨)
                 break;
             case AnimationEventType.StunFall:
                 animator.SetTrigger(H_StunFall);
@@ -1403,7 +1699,17 @@ public sealed partial class NetworkPlayer
                 _localPredictedPunchIsLeft = (eventType == AnimationEventType.PunchLeft);
             }
             else if (eventType == AnimationEventType.Throw)
+            {
                 _localThrowPredictionTime = Time.time;
+            }
+            else if (eventType == AnimationEventType.Headbutt)
+            {
+                _localHeadbuttPredictionTime = Time.time;
+            }
+            else if (eventType == AnimationEventType.AerialKick)
+            {
+                _localAerialKickPredictionTime = Time.time;
+            }
         }
 
         // PartyMonsterAnimationDriver가 있으면 애니메이션은 거기서 직접 제어
@@ -1422,6 +1728,10 @@ public sealed partial class NetworkPlayer
                 ApplyPuppetMasterAnimationEvent(eventType);
             else if (eventType == AnimationEventType.AerialKick)
                 TriggerFallbackAerialKickAnimation();
+            else if (eventType == AnimationEventType.Headbutt)
+                TriggerProceduralHeadbutt();
+            else if (eventType == AnimationEventType.HitVFXOnly)
+            { /* VFX 전용: Animator 트리거 없음 */ }
             else
                 animator.SetTrigger(triggerHash);
         }
@@ -1456,11 +1766,17 @@ public sealed partial class NetworkPlayer
             case AnimationEventType.KickRight:
                 _externalAnimationDriver.PlayKickRight();
                 break;
+            case AnimationEventType.Headbutt:
+                _externalAnimationDriver.PlayHeadbuttFromNetwork();
+                break;
             case AnimationEventType.AerialKick:
                 _externalAnimationDriver.PlayAerialKick();
                 break;
             case AnimationEventType.GetHit:
                 ApplyPuppetMasterAnimationEvent(eventType);
+                break;
+            case AnimationEventType.HitVFXOnly:
+                // VFX 전용: 스태거/래그돌 없이 VFX만 재생
                 break;
             case AnimationEventType.StunFall:
                 _externalAnimationDriver.CancelRecoveryAnimation();
@@ -1518,6 +1834,10 @@ public sealed partial class NetworkPlayer
                 _pmActionLockedUntil = Time.time + ResolvePMKickLockDuration();
                 TriggerProceduralKick(false);
                 break;
+            case AnimationEventType.Headbutt:
+                if (TriggerProceduralHeadbutt())
+                    _pmActionLockedUntil = Time.time + ResolvePMHeadbuttLockDuration();
+                break;
             case AnimationEventType.AerialKick:
                 PlayPMAerialKick();
                 break;
@@ -1526,6 +1846,9 @@ public sealed partial class NetworkPlayer
                 break;
             case AnimationEventType.GetHit:
                 if (animator != null) animator.SetTrigger(H_GetHit);
+                break;
+            case AnimationEventType.HitVFXOnly:
+                // VFX 전용: 스태거 애니메이션 트리거 없음
                 break;
             case AnimationEventType.StunFall:
                 if (animator != null) animator.SetTrigger(H_StunFall);
@@ -1561,6 +1884,16 @@ public sealed partial class NetworkPlayer
             kickLeg.TriggerRightKick(forward);
     }
 
+    private bool TriggerProceduralHeadbutt()
+    {
+        var headbutt = GetOrCreateProceduralHeadbutt();
+        if (headbutt == null)
+            return false;
+
+        var forward = _targetRoot != null ? _targetRoot.forward : transform.forward;
+        return headbutt.TryTriggerHeadbutt(forward);
+    }
+
     private ProceduralKickLeg GetOrCreateProceduralKickLeg()
     {
         var kickLeg = GetComponent<ProceduralKickLeg>();
@@ -1568,6 +1901,15 @@ public sealed partial class NetworkPlayer
             return kickLeg;
 
         return gameObject.AddComponent<ProceduralKickLeg>();
+    }
+
+    private ProceduralHeadbutt GetOrCreateProceduralHeadbutt()
+    {
+        var headbutt = GetComponent<ProceduralHeadbutt>();
+        if (headbutt != null || !Application.isPlaying)
+            return headbutt;
+
+        return gameObject.AddComponent<ProceduralHeadbutt>();
     }
 
     private string ResolveConfiguredAerialKickStateName()
@@ -1622,11 +1964,21 @@ public sealed partial class NetworkPlayer
         return Mathf.Max(PM_DefaultPunchPredictionWindow, GetConfiguredPunchCooldown());
     }
 
+    private float ResolvePMHeadbuttPredictionWindow()
+    {
+        return Mathf.Max(PM_DefaultHeadbuttPredictionWindow, GetConfiguredHeadbuttCooldown());
+    }
+
     private float ResolvePMPunchLockDuration()
     {
         var punchArm = GetComponent<ProceduralPunchArm>();
         var proceduralDuration = punchArm != null ? punchArm.TotalPunchDuration : 0f;
         return Mathf.Max(GetConfiguredPunchCooldown(), proceduralDuration);
+    }
+
+    private float ResolvePMHeadbuttLockDuration()
+    {
+        return ResolveHeadbuttPresentationLockDuration();
     }
 
     private float ResolvePMKickLockDuration()
