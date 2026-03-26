@@ -122,8 +122,18 @@ public class PlayerStats : MonoBehaviour
         }
 
         if (!_lastObservedDead && dead)
+        {
             OnDied?.Invoke(this);
 
+            var networkObject = GetComponent<NetworkObject>();
+            bool isLocalPlayer = networkObject == null || networkObject.HasInputAuthority;
+
+            if (isLocalPlayer)
+            {
+                GameHUD.FindOrCreate().ShowAfterPanel();
+            }
+        }
+            
         _lastObservedDead = dead;
     }
 
