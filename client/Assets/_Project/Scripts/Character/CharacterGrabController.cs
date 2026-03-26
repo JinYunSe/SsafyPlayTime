@@ -141,6 +141,27 @@ public sealed class CharacterGrabController : MonoBehaviour
                ShouldUseCarryPresentationState(actionState, holdVariant);
     }
 
+    public static HoldVariant ResolveCarryHoldVariant(SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode carryMode)
+    {
+        return carryMode switch
+        {
+            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry => HoldVariant.OverheadCarry,
+            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry => HoldVariant.DualCarry,
+            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim => HoldVariant.CarriedVictim,
+            _ => HoldVariant.None
+        };
+    }
+
+    public static GrabActionState ResolveCarryActionState(SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode carryMode)
+    {
+        return carryMode switch
+        {
+            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry => GrabActionState.OverheadCarry,
+            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry => GrabActionState.DualCarry,
+            _ => GrabActionState.Idle
+        };
+    }
+
     public static bool IsThrowableObjectState(GrabActionState actionState, HoldVariant holdVariant)
     {
         if (holdVariant == HoldVariant.Object)
@@ -269,6 +290,11 @@ public sealed class CharacterGrabController : MonoBehaviour
     public bool ShouldApplyVictimGrabState(SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType targetType)
     {
         return targetType != SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.Player;
+    }
+
+    public bool ShouldTrackVictimGrabRelation(NetworkPlayer targetPlayer)
+    {
+        return targetPlayer != null && !targetPlayer.IsDeadState;
     }
 
     public void ResolveAttachTarget(
@@ -421,13 +447,10 @@ public sealed class CharacterGrabController : MonoBehaviour
 
     private HoldVariant ResolveHoldVariant(SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode carryMode)
     {
-        return carryMode switch
-        {
-            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry => HoldVariant.FrontCarry,
-            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry => HoldVariant.DualCarry,
-            SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim => HoldVariant.CarriedVictim,
-            _ => ResolveDirectHoldVariant()
-        };
+        var carryHoldVariant = ResolveCarryHoldVariant(carryMode);
+        return carryHoldVariant != HoldVariant.None
+            ? carryHoldVariant
+            : ResolveDirectHoldVariant();
     }
 
     private HoldVariant ResolveDirectHoldVariant()
@@ -448,33 +471,52 @@ public sealed class CharacterGrabController : MonoBehaviour
         return HoldVariant.Object;
     }
 
-    private GrabActionState ResolveActionState(SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode carryMode)
+    private static bool TryResolvePhaseDrivenActionState(
+        NetworkPlayer.PhysicalPhase phase,
+        GrabActionState previousActionState,
+        HoldVariant previousHoldVariant,
+        out GrabActionState actionState)
     {
-        var phase = networkPlayer.GetPhysicalPhase();
         switch (phase)
         {
             case NetworkPlayer.PhysicalPhase.BeingGrabbed:
             case NetworkPlayer.PhysicalPhase.Dragged:
+            case NetworkPlayer.PhysicalPhase.DraggedStunned:
             case NetworkPlayer.PhysicalPhase.BeingCarriedStunned:
-                return GrabActionState.Struggle;
+                actionState = GrabActionState.Struggle;
+                return true;
             case NetworkPlayer.PhysicalPhase.Recovering:
-                if (_previousActionState == GrabActionState.FrontCarry ||
-                    _previousActionState == GrabActionState.OverheadCarry ||
-                    _previousActionState == GrabActionState.DualCarry ||
-                    _previousHoldVariant == HoldVariant.CarriedVictim)
+                if (previousActionState == GrabActionState.FrontCarry ||
+                    previousActionState == GrabActionState.OverheadCarry ||
+                    previousActionState == GrabActionState.DualCarry ||
+                    previousHoldVariant == HoldVariant.CarriedVictim)
                 {
-                    return GrabActionState.RecoverFromCarry;
+                    actionState = GrabActionState.RecoverFromCarry;
+                    return true;
                 }
+
                 break;
         }
 
-        switch (carryMode)
+        actionState = GrabActionState.Idle;
+        return false;
+    }
+
+    private GrabActionState ResolveActionState(SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode carryMode)
+    {
+        var phase = networkPlayer.GetPhysicalPhase();
+        if (TryResolvePhaseDrivenActionState(
+                phase,
+                _previousActionState,
+                _previousHoldVariant,
+                out var phaseDrivenActionState))
         {
-            case SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry:
-                return GrabActionState.FrontCarry;
-            case SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry:
-                return GrabActionState.DualCarry;
+            return phaseDrivenActionState;
         }
+
+        var carryActionState = ResolveCarryActionState(carryMode);
+        if (carryActionState != GrabActionState.Idle)
+            return carryActionState;
 
         var leftHolding = leftHand != null && leftHand.IsHolding;
         var rightHolding = rightHand != null && rightHand.IsHolding;
