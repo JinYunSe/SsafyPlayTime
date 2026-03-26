@@ -117,6 +117,39 @@ public sealed class NetworkPlayerInteractionDecisionTests
             });
     }
 
+    private static bool InvokeShouldUseProxyAuthoritativeStunRecoveryPose(
+        object phase,
+        object presentationPhase,
+        bool hasStateAuthority,
+        bool useLocalSoftFlopPresentation)
+    {
+        var physicalPhaseType = ResolvePhysicalPhaseType();
+        var stunPresentationPhaseType = ResolveStunPresentationPhaseType();
+        var method = typeof(NetworkPlayer).GetMethod(
+            "ShouldUseProxyAuthoritativeStunRecoveryPose",
+            BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static,
+            null,
+            new[]
+            {
+                physicalPhaseType,
+                stunPresentationPhaseType,
+                typeof(bool),
+                typeof(bool)
+            },
+            null);
+
+        Assert.That(method, Is.Not.Null);
+        return (bool)method.Invoke(
+            null,
+            new object[]
+            {
+                phase,
+                presentationPhase,
+                hasStateAuthority,
+                useLocalSoftFlopPresentation
+            });
+    }
+
     private static bool InvokeShouldAllowAerialKickDecision(
         bool isGrounded,
         bool anyHolding,
@@ -963,6 +996,50 @@ public sealed class NetworkPlayerInteractionDecisionTests
                 ResolveStunPresentationPhase("Active"),
                 usesAnimatedVisualPresentationRig: true,
                 hasStateAuthority: true),
+            Is.False);
+    }
+
+    [Test]
+    public void ProxyAuthoritativeStunRecoveryPose_CoversRecoverStabilizingButExcludesCarryAndSoftFlop()
+    {
+        Assert.That(
+            InvokeShouldUseProxyAuthoritativeStunRecoveryPose(
+                ResolvePhysicalPhase("Recovering"),
+                ResolveStunPresentationPhase("RecoverStabilizing"),
+                hasStateAuthority: false,
+                useLocalSoftFlopPresentation: false),
+            Is.True);
+
+        Assert.That(
+            InvokeShouldUseProxyAuthoritativeStunRecoveryPose(
+                ResolvePhysicalPhase("Stunned"),
+                ResolveStunPresentationPhase("Stunned"),
+                hasStateAuthority: false,
+                useLocalSoftFlopPresentation: false),
+            Is.True);
+
+        Assert.That(
+            InvokeShouldUseProxyAuthoritativeStunRecoveryPose(
+                ResolvePhysicalPhase("BeingCarriedStunned"),
+                ResolveStunPresentationPhase("RecoverStabilizing"),
+                hasStateAuthority: false,
+                useLocalSoftFlopPresentation: false),
+            Is.False);
+
+        Assert.That(
+            InvokeShouldUseProxyAuthoritativeStunRecoveryPose(
+                ResolvePhysicalPhase("Recovering"),
+                ResolveStunPresentationPhase("RecoverStabilizing"),
+                hasStateAuthority: false,
+                useLocalSoftFlopPresentation: true),
+            Is.False);
+
+        Assert.That(
+            InvokeShouldUseProxyAuthoritativeStunRecoveryPose(
+                ResolvePhysicalPhase("Recovering"),
+                ResolveStunPresentationPhase("RecoverStabilizing"),
+                hasStateAuthority: true,
+                useLocalSoftFlopPresentation: false),
             Is.False);
     }
 
