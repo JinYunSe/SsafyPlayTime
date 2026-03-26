@@ -327,7 +327,10 @@ namespace SSAFYPlayTime.Character
             CarryPhysicsProfile.CarryMode mode,
             CharacterGrabController.HoldVariant holdVariant)
         {
-            var variantAnchor = ResolveHoldVariantAnchor(holdVariant);
+            var resolvedHoldVariant = holdVariant != CharacterGrabController.HoldVariant.None
+                ? holdVariant
+                : CharacterGrabController.ResolveCarryHoldVariant(mode);
+            var variantAnchor = ResolveHoldVariantAnchor(resolvedHoldVariant);
             if (variantAnchor != null)
                 return variantAnchor;
 
@@ -354,7 +357,10 @@ namespace SSAFYPlayTime.Character
             CarryPhysicsProfile.CarryMode mode,
             CharacterGrabController.HoldVariant holdVariant)
         {
-            return holdVariant switch
+            var resolvedHoldVariant = holdVariant != CharacterGrabController.HoldVariant.None
+                ? holdVariant
+                : CharacterGrabController.ResolveCarryHoldVariant(mode);
+            return resolvedHoldVariant switch
             {
                 CharacterGrabController.HoldVariant.FrontCarry => frontCarryVictimRootLocalOffset,
                 CharacterGrabController.HoldVariant.OverheadCarry => overheadCarryVictimRootLocalOffset + StunnedSingleVictimRootLift,
@@ -393,7 +399,10 @@ namespace SSAFYPlayTime.Character
             CarryPhysicsProfile.CarryMode mode,
             CharacterGrabController.HoldVariant holdVariant)
         {
-            return holdVariant switch
+            var resolvedHoldVariant = holdVariant != CharacterGrabController.HoldVariant.None
+                ? holdVariant
+                : CharacterGrabController.ResolveCarryHoldVariant(mode);
+            return resolvedHoldVariant switch
             {
                 CharacterGrabController.HoldVariant.OverheadCarry => StunnedSingleCarrierAnchorLift,
                 CharacterGrabController.HoldVariant.DualCarry => StunnedDualCarrierAnchorLift,

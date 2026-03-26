@@ -4,6 +4,7 @@ using SSAFYPlayTime.Character;
 using SSAFYPlayTime.Gameplay.Items;
 using System.Collections;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 
 // CarrySolveFrame: carry 중 손/victim root/proxy hips/presentation root가
@@ -97,6 +98,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [Networked] public NetworkBool NetworkedIsActiveRagdoll { get; set; }
     [Networked] private NetworkBool NetworkedIsGrounded { get; set; }
     [Networked] private byte NetworkedStunPresentationPhase { get; set; }
+    [Networked] private byte NetworkedAerialKickPresentationState { get; set; }
 
     // 그랩 상태 동기화
     [Networked] public NetworkBool NetworkedLeftGrabHolding { get; set; }
@@ -163,8 +165,16 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [SerializeField, Range(1f, 8f)] private float startupLaunchDiagnosticsWindow = 4f;
 
     [Header("Aerial Kick Diagnostics")]
-    [SerializeField] private bool enableAerialKickDiagnostics = true;
+    [SerializeField] private bool enableAerialKickDiagnostics = false;
     [SerializeField, Range(0.03f, 0.5f)] private float aerialKickDiagnosticsSampleInterval = 0.12f;
+
+    [Header("Stun Diagnostics")]
+    [SerializeField] private bool enableStunDiagnostics = false;
+    [SerializeField, Range(0.03f, 0.5f)] private float stunDiagnosticsSampleInterval = 0.12f;
+    [SerializeField, Range(1f, 8f)] private float stunDiagnosticsWindow = 6f;
+    private const float RootGapAnomalyAlertThreshold = 1.4f;
+    private const float NetPelvisGapAnomalyAlertThreshold = 1.0f;
+    private const float UntrackedRootMotionAlertThreshold = 0.35f;
 
     // ─── 로컬 변수 ───
     private float _localMoveSpeed;
@@ -187,6 +197,22 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     private bool _isGrounded;
     private float _startupLaunchDiagnosticsUntilTime = float.NegativeInfinity;
     private float _startupLaunchDiagnosticsLastSampleTime = float.NegativeInfinity;
+    private float _stunDiagnosticsUntilTime = float.NegativeInfinity;
+    private float _nextStunDiagnosticsSampleTime = float.NegativeInfinity;
+    private float _stunDiagnosticsBurstUntilTime = float.NegativeInfinity;
+    private string _lastStunTransformWriterSource;
+    private float _lastStunTransformWriterTime = float.NegativeInfinity;
+    private float _lastStunTransformWriterRootDeltaY;
+    private float _lastStunTransformWriterPelvisDeltaY;
+    private float _lastStunTransformWriterVisualDeltaY;
+    private float _lastStunTransformWriterRootGapAfter;
+    private string _lastStunTransformWriterNote;
+    private int _lastStunTransformWriterFrame = -1;
+    private bool _hasTrackedUnownedRootMotion;
+    private float _lastUnownedRootMotionTraceTime = float.NegativeInfinity;
+    private Vector3 _lastTrackedUnownedRootPosition;
+    private Vector3 _lastTrackedUnownedBodyPosition;
+    private Vector3 _lastTrackedUnownedPelvisPosition;
     private HandGrabHandler[] _handGrabHandlers;
     private ItemRuntimeHost _itemRuntimeHost;
     private ItemFieldInteractionService _itemFieldInteractionService;
@@ -347,20 +373,75 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     internal bool ShouldEndAerialKickPresentation()
     {
-        if (IsGroundedForPresentation())
-            return true;
+        var isGrounded = IsGroundedForPresentation();
+        var aerialKickPresentationState = GetAerialKickPresentationState();
+        var phase = GetPhysicalPhase();
 
         if (IsNetworkReady && !HasStateAuthority)
         {
-            var phase = GetPhysicalPhase();
-            return phase == PhysicalPhase.Recovering ||
-                   phase == PhysicalPhase.StunnedCollapse ||
-                   phase == PhysicalPhase.Stunned ||
-                   phase == PhysicalPhase.SettledStunned ||
-                   phase == PhysicalPhase.DraggedStunned;
+            return ShouldEndAerialKickProxyPresentation(
+                isGrounded,
+                aerialKickPresentationState,
+                Time.time - _localAerialKickPredictionTime,
+                phase);
         }
 
-        return false;
+        return ShouldEndAerialKickLocalPresentation(
+            isGrounded,
+            aerialKickPresentationState,
+            phase);
+    }
+
+    private static bool ShouldEndAerialKickLocalPresentation(
+        bool isGrounded,
+        AerialKickPresentationState aerialKickPresentationState,
+        PhysicalPhase phase)
+    {
+        if (isGrounded)
+            return true;
+
+        if (aerialKickPresentationState == AerialKickPresentationState.None)
+            return true;
+
+        if (aerialKickPresentationState == AerialKickPresentationState.Restoring)
+            return true;
+
+        return IsAerialKickPresentationTerminatingPhase(phase);
+    }
+
+    private static bool ShouldEndAerialKickProxyPresentation(
+        bool isGrounded,
+        AerialKickPresentationState aerialKickPresentationState,
+        float predictionAge,
+        PhysicalPhase phase)
+    {
+        if (isGrounded)
+            return true;
+
+        if (aerialKickPresentationState == AerialKickPresentationState.None)
+            return predictionAge >= PM_DefaultAerialKickPredictionWindow ||
+                   IsAerialKickPresentationTerminatingPhase(phase);
+
+        if (aerialKickPresentationState == AerialKickPresentationState.Restoring)
+            return true;
+
+        return IsAerialKickPresentationTerminatingPhase(phase);
+    }
+
+    private static bool IsAerialKickPresentationTerminatingPhase(PhysicalPhase phase)
+    {
+        return phase == PhysicalPhase.GrabIntent ||
+               phase == PhysicalPhase.Holding ||
+               phase == PhysicalPhase.BeingGrabbed ||
+               phase == PhysicalPhase.Dragged ||
+               phase == PhysicalPhase.Recovering ||
+               phase == PhysicalPhase.StunnedCollapse ||
+               phase == PhysicalPhase.Stunned ||
+               phase == PhysicalPhase.SettledStunned ||
+               phase == PhysicalPhase.DraggedStunned ||
+               phase == PhysicalPhase.CarryingStunned ||
+               phase == PhysicalPhase.BeingCarriedStunned ||
+               phase == PhysicalPhase.WeaponEquipped;
     }
 
     internal bool ShouldPredictOwnerProxyAerialKickPresentation()
@@ -368,23 +449,513 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (!IsNetworkReady || !HasInputAuthority || HasStateAuthority)
             return false;
 
-        if (!CanPerformCombatActions || IsGroundedForPresentation())
+        var anyHolding = IsAnyHandHoldingObject();
+        var hasHeldRuntimeItem = HasHeldRuntimeItem();
+        if (!ShouldAllowAerialKickDecision(anyHolding, hasHeldRuntimeItem))
             return false;
 
-        var phase = GetPhysicalPhase();
-        return phase == PhysicalPhase.Stable ||
-               phase == PhysicalPhase.GrabIntent ||
-               phase == PhysicalPhase.WeaponEquipped;
+        return true;
+    }
+
+    internal bool CanTriggerLocalHeadbuttPresentation()
+    {
+        var anyHolding = IsAnyHandHoldingObject();
+        var hasHeldRuntimeItem = HasHeldRuntimeItem();
+        var hasReachPending = false;
+        var hasAttachPending = false;
+        if (characterGrabController != null)
+        {
+            characterGrabController.RefreshNow();
+            hasReachPending = characterGrabController.IsAnyReachActive;
+            hasAttachPending = characterGrabController.CurrentActionState ==
+                               CharacterGrabController.GrabActionState.AttachPending;
+        }
+
+        var canPerformHeadbuttActions = _isActiveRagdoll && !_isRecovering && !_isRecoverStabilizing && !GetIsDeadState();
+        var beingGrabbed = _beingGrabbedRefCount > 0 || IsGrabbedByOther || NetworkedIsBeingGrabbed;
+        var dragged = _localIsDragged || (IsNetworkReady && !HasStateAuthority && NetworkedIsDragged);
+        return ShouldAllowHeadbuttDecision(
+            anyHolding,
+            hasHeldRuntimeItem,
+            _isGrabActive,
+            hasReachPending,
+            hasAttachPending,
+            canPerformHeadbuttActions,
+            beingGrabbed,
+            dragged,
+            _localInstability,
+            GetPhysicalPhase());
+    }
+
+    internal AerialKickPresentationState GetAerialKickPresentationState()
+    {
+        if (IsNetworkReady && !HasStateAuthority)
+            return (AerialKickPresentationState)NetworkedAerialKickPresentationState;
+
+        return ResolveLocalAerialKickPresentationState();
     }
 
     internal bool ShouldLogAerialKickDiagnostics()
     {
-        return enableAerialKickDiagnostics && (Application.isEditor || Debug.isDebugBuild);
+        return SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled
+               && enableAerialKickDiagnostics
+               && (Application.isEditor || Debug.isDebugBuild);
+    }
+
+    internal bool ShouldLogStunDiagnostics()
+    {
+        return SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled
+               && enableStunDiagnostics
+               && (Application.isEditor || Debug.isDebugBuild);
     }
 
     internal float GetAerialKickDiagnosticsSampleInterval()
     {
         return Mathf.Max(0.03f, aerialKickDiagnosticsSampleInterval);
+    }
+
+    internal bool IsStunDiagnosticsWindowActive()
+    {
+        return ShouldLogStunDiagnostics() && Time.time <= _stunDiagnosticsUntilTime;
+    }
+
+    internal void ArmStunDiagnosticsWindow(string source, string note = null)
+    {
+        if (!ShouldLogStunDiagnostics())
+            return;
+
+        _stunDiagnosticsUntilTime = Mathf.Max(
+            _stunDiagnosticsUntilTime,
+            Time.time + Mathf.Max(1f, stunDiagnosticsWindow));
+        _stunDiagnosticsBurstUntilTime = Mathf.Max(
+            _stunDiagnosticsBurstUntilTime,
+            Time.time + 0.35f);
+        _nextStunDiagnosticsSampleTime = Time.time;
+        TraceStunDiagnosticSnapshot(source, note, force: true);
+    }
+
+    internal bool ShouldEmitStunDiagnostics(bool allowOutsideWindow = false)
+    {
+        if (!ShouldLogStunDiagnostics())
+            return false;
+
+        return allowOutsideWindow || IsStunDiagnosticsWindowActive();
+    }
+
+    internal void TraceStunDiagnosticSnapshot(string source, string note = null, bool force = false)
+    {
+        if (!ShouldEmitStunDiagnostics(force))
+            return;
+
+        if (!force)
+        {
+            if (Time.time < _nextStunDiagnosticsSampleTime)
+                return;
+
+            _nextStunDiagnosticsSampleTime = Time.time + ResolveStunDiagnosticsSampleInterval();
+        }
+
+        var phase = GetPhysicalPhase();
+        var presentationPhase = GetStunPresentationPhase();
+        var hardPhysicsPresentation = ShouldUseHardPhysicsPresentation();
+        var hardPhysicsVisualMode = ShouldUseHardPhysicsVisualMode();
+        var usesAnimatedVisualRig = UsesAnimatedVisualPresentationRig();
+        var rootY = transform.position.y;
+        var rigidbodyY = rigidbody3D != null ? rigidbody3D.position.y : rootY;
+        var velocity = rigidbody3D != null && !rigidbody3D.isKinematic
+            ? rigidbody3D.velocity
+            : Vector3.zero;
+        var planarSpeed = new Vector2(velocity.x, velocity.z).magnitude;
+        var angularSpeed = rigidbody3D != null && !rigidbody3D.isKinematic
+            ? rigidbody3D.angularVelocity.magnitude
+            : 0f;
+        var pelvisPosition = ResolveStartupLaunchPelvisPosition(out var pelvisVelocity);
+        var presentationRoot = GetPresentationRootTransform();
+        var hasPresentationRoot = presentationRoot != null;
+        var visualY = hasPresentationRoot ? presentationRoot.position.y : 0f;
+        var visualRootName = hasPresentationRoot ? presentationRoot.name : "None";
+        var hasNetworkedHips = IsNetworkReady;
+        var networkedHipsY = hasNetworkedHips ? NetworkedHipsPosition.y : 0f;
+        var rootGap = ResolveStunDiagnosticsRootGap();
+        var puppetMode = _puppetMaster != null ? _puppetMaster.mode.ToString() : "None";
+        var puppetState = _puppetMaster != null ? _puppetMaster.state.ToString() : "None";
+        var puppetPin = _puppetMaster != null ? _puppetMaster.pinWeight : -1f;
+        var puppetMuscle = _puppetMaster != null ? _puppetMaster.muscleWeight : -1f;
+        var puppetMapping = _puppetMaster != null ? _puppetMaster.mappingWeight : -1f;
+        var antiStretchSummary = _grabAntiStretchController != null
+            ? _grabAntiStretchController.BuildCoreDriveDiagnosticsSummary()
+            : "antiStretch=none";
+        var bodySummary = _bodyPartPhysicsManager != null
+            ? _bodyPartPhysicsManager.BuildStunDiagnosticsSummary()
+            : "body=none";
+
+        var message = new StringBuilder(768);
+        message.Append("[StunDiag] ")
+            .Append(name)
+            .Append(' ')
+            .Append(source)
+            .Append(" t=").Append(Time.time.ToString("F2"))
+            .Append(" auth=").Append(HasStateAuthority ? 1 : 0)
+            .Append(" input=").Append(HasInputAuthority ? 1 : 0)
+            .Append(" phase=").Append(phase)
+            .Append(" present=").Append(presentationPhase)
+            .Append(" active=").Append(_isActiveRagdoll ? 1 : 0)
+            .Append(" recover=").Append(_isRecovering ? 1 : 0)
+            .Append(" stabilize=").Append(_isRecoverStabilizing ? 1 : 0)
+            .Append(" grounded=").Append(_isGrounded ? 1 : 0)
+            .Append(" grabbedRef=").Append(_beingGrabbedRefCount)
+            .Append(" grabbedNet=").Append(NetworkedIsBeingGrabbed ? 1 : 0)
+            .Append(" dragged=").Append(_localIsDragged ? 1 : 0)
+            .Append(" hardPres=").Append(hardPhysicsPresentation ? 1 : 0)
+            .Append(" hardVisual=").Append(hardPhysicsVisualMode ? 1 : 0)
+            .Append(" stunVisual=").Append(_isStunVisualMode ? 1 : 0)
+            .Append(" visualOnly=").Append(usesAnimatedVisualRig ? 1 : 0)
+            .Append(" animator=").Append(animator != null && animator.enabled ? 1 : 0)
+            .Append(" forceLatch=").Append(_forceAnimatorVisualLatch ? 1 : 0)
+            .Append(" pendingReset=").Append(_pendingAnimatorDrivenPoseReset ? 1 : 0)
+            .Append(" hardW=").Append(_hardPhysicsVisualPoseCopyWeight.ToString("F2"))
+            .Append(" carryW=").Append(_carryVisualPoseCopyWeight.ToString("F2"))
+            .Append(" stunLeft=").Append(GetStunTimeRemaining().ToString("F2"))
+            .Append(" collapse=").Append(_stunCollapseTimer.ToString("F2"))
+            .Append(" floor=").Append(_stunnedFloorSettleTimer.ToString("F2"))
+            .Append(" recoverT=").Append(_recoveringTimer.ToString("F2"))
+            .Append(" accum=").Append(GetAccumulatedStun().ToString("F2"))
+            .Append(" planar=").Append(planarSpeed.ToString("F2"))
+            .Append(" vy=").Append(velocity.y.ToString("F2"))
+            .Append(" pelvisVy=").Append(pelvisVelocity.y.ToString("F2"))
+            .Append(" ang=").Append(angularSpeed.ToString("F2"))
+            .Append(" rootY=").Append(rootY.ToString("F2"))
+            .Append(" rbY=").Append(rigidbodyY.ToString("F2"))
+            .Append(" pelvisY=").Append(pelvisPosition.y.ToString("F2"))
+            .Append(" visualY=").Append(hasPresentationRoot ? visualY.ToString("F2") : "n/a")
+            .Append(" netHipsY=").Append(hasNetworkedHips ? networkedHipsY.ToString("F2") : "n/a")
+            .Append(" dy(rootPelvis)=").Append((rootY - pelvisPosition.y).ToString("F2"))
+            .Append(" dy(visualPelvis)=").Append(hasPresentationRoot ? (visualY - pelvisPosition.y).ToString("F2") : "n/a")
+            .Append(" dy(netPelvis)=").Append(hasNetworkedHips ? (networkedHipsY - pelvisPosition.y).ToString("F2") : "n/a")
+            .Append(" rootGap=").Append(rootGap.ToString("F2"))
+            .Append(" visualRoot=").Append(visualRootName)
+            .Append(" puppet(mode=").Append(puppetMode)
+            .Append(",state=").Append(puppetState)
+            .Append(",pin=").Append(puppetPin.ToString("F2"))
+            .Append(",muscle=").Append(puppetMuscle.ToString("F2"))
+            .Append(",map=").Append(puppetMapping.ToString("F2"))
+            .Append(')')
+            .Append(' ')
+            .Append(antiStretchSummary)
+            .Append(' ')
+            .Append(bodySummary)
+            .Append(" note=").Append(string.IsNullOrWhiteSpace(note) ? "-" : note);
+
+        var logLine = message.ToString();
+        if (SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            Debug.Log(logLine, this);
+        else
+            SSAFYPlayTime.RuntimeLoggingSettings.AppendTargetedRuntimeLine(logLine);
+    }
+
+    internal void TraceStunTransformWriter(
+        string source,
+        Vector3 rootBefore,
+        Vector3 rootAfter,
+        Vector3? bodyBefore = null,
+        Vector3? bodyAfter = null,
+        Vector3? pelvisBefore = null,
+        Vector3? pelvisAfter = null,
+        Vector3? visualBefore = null,
+        Vector3? visualAfter = null,
+        string note = null,
+        bool force = false)
+    {
+        if (!ShouldEmitStunDiagnostics(force))
+            return;
+
+        var rootDelta = rootAfter - rootBefore;
+        var hasBody = bodyBefore.HasValue && bodyAfter.HasValue;
+        var hasPelvis = pelvisBefore.HasValue && pelvisAfter.HasValue;
+        var hasVisual = visualBefore.HasValue && visualAfter.HasValue;
+        var bodyDeltaY = hasBody ? bodyAfter.Value.y - bodyBefore.Value.y : 0f;
+        var pelvisDeltaY = hasPelvis ? pelvisAfter.Value.y - pelvisBefore.Value.y : 0f;
+        var visualDeltaY = hasVisual ? visualAfter.Value.y - visualBefore.Value.y : 0f;
+        var rootGapAfter = hasPelvis ? Vector3.Distance(rootAfter, pelvisAfter.Value) : 0f;
+
+        if (ShouldLogStunDiagnostics() &&
+            (force ||
+             rootDelta.sqrMagnitude > 0.0004f ||
+             Mathf.Abs(bodyDeltaY) > 0.02f ||
+             Mathf.Abs(pelvisDeltaY) > 0.02f ||
+             Mathf.Abs(visualDeltaY) > 0.02f))
+        {
+            _lastStunTransformWriterSource = source;
+            _lastStunTransformWriterTime = Time.time;
+            _lastStunTransformWriterRootDeltaY = rootAfter.y - rootBefore.y;
+            _lastStunTransformWriterPelvisDeltaY = pelvisDeltaY;
+            _lastStunTransformWriterVisualDeltaY = visualDeltaY;
+            _lastStunTransformWriterRootGapAfter = rootGapAfter;
+            _lastStunTransformWriterNote = note;
+            _lastStunTransformWriterFrame = Time.frameCount;
+        }
+
+        if (!force &&
+            rootDelta.sqrMagnitude <= 0.0004f &&
+            Mathf.Abs(bodyDeltaY) <= 0.02f &&
+            Mathf.Abs(pelvisDeltaY) <= 0.02f &&
+            Mathf.Abs(visualDeltaY) <= 0.02f)
+        {
+            return;
+        }
+
+        var writerNote = new StringBuilder(256);
+        writerNote.Append("writer rootY=")
+            .Append(rootBefore.y.ToString("F2"))
+            .Append("->")
+            .Append(rootAfter.y.ToString("F2"))
+            .Append(" dRootY=")
+            .Append((rootAfter.y - rootBefore.y).ToString("F2"));
+
+        if (hasBody)
+        {
+            writerNote.Append(" rbY=")
+                .Append(bodyBefore.Value.y.ToString("F2"))
+                .Append("->")
+                .Append(bodyAfter.Value.y.ToString("F2"))
+                .Append(" dRbY=")
+                .Append(bodyDeltaY.ToString("F2"));
+        }
+
+        if (hasPelvis)
+        {
+            writerNote.Append(" pelvisY=")
+                .Append(pelvisBefore.Value.y.ToString("F2"))
+                .Append("->")
+                .Append(pelvisAfter.Value.y.ToString("F2"))
+                .Append(" dPelvisY=")
+                .Append(pelvisDeltaY.ToString("F2"));
+        }
+
+        if (hasVisual)
+        {
+            writerNote.Append(" visualY=")
+                .Append(visualBefore.Value.y.ToString("F2"))
+                .Append("->")
+                .Append(visualAfter.Value.y.ToString("F2"))
+                .Append(" dVisualY=")
+                .Append(visualDeltaY.ToString("F2"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(note))
+            writerNote.Append(' ').Append(note);
+
+        TraceStunDiagnosticSnapshot(source, writerNote.ToString(), force: force);
+    }
+
+    internal string BuildRecentTransformWriterSummary()
+    {
+        if (string.IsNullOrWhiteSpace(_lastStunTransformWriterSource) ||
+            float.IsNaN(_lastStunTransformWriterTime) ||
+            float.IsInfinity(_lastStunTransformWriterTime))
+        {
+            return "lastWriter=-";
+        }
+
+        var summary = new StringBuilder(192);
+        summary.Append("lastWriter=")
+            .Append(_lastStunTransformWriterSource)
+            .Append('@')
+            .Append(_lastStunTransformWriterTime.ToString("F2"))
+            .Append(" age=")
+            .Append(Mathf.Max(0f, Time.time - _lastStunTransformWriterTime).ToString("F2"))
+            .Append(" dRootY=")
+            .Append(_lastStunTransformWriterRootDeltaY.ToString("F2"))
+            .Append(" dPelvisY=")
+            .Append(_lastStunTransformWriterPelvisDeltaY.ToString("F2"))
+            .Append(" dVisualY=")
+            .Append(_lastStunTransformWriterVisualDeltaY.ToString("F2"))
+            .Append(" gapAfter=")
+            .Append(_lastStunTransformWriterRootGapAfter.ToString("F2"));
+
+        if (!string.IsNullOrWhiteSpace(_lastStunTransformWriterNote))
+            summary.Append(" note=").Append(_lastStunTransformWriterNote);
+
+        return summary.ToString();
+    }
+
+    internal void TraceRootGapAnomaly(string source, string note = null, bool force = false)
+    {
+        if (!ShouldLogStunDiagnostics())
+            return;
+
+        var pelvisPosition = ResolveStartupLaunchPelvisPosition(out _);
+        var rootGap = ResolveStunDiagnosticsRootGap();
+        var netPelvisGap = IsNetworkReady
+            ? Mathf.Abs(NetworkedHipsPosition.y - pelvisPosition.y)
+            : 0f;
+
+        if (!force &&
+            rootGap < RootGapAnomalyAlertThreshold &&
+            netPelvisGap < NetPelvisGapAnomalyAlertThreshold)
+        {
+            return;
+        }
+
+        var anomalyNote = new StringBuilder(320);
+        anomalyNote.Append("rootGapAlert=1 rootGap=")
+            .Append(rootGap.ToString("F2"))
+            .Append(" netPelvisGap=")
+            .Append(netPelvisGap.ToString("F2"))
+            .Append(" ")
+            .Append(BuildRecentTransformWriterSummary());
+
+        if (!string.IsNullOrWhiteSpace(note))
+            anomalyNote.Append(" note=").Append(note);
+
+        ArmStunDiagnosticsWindow(source, anomalyNote.ToString());
+    }
+
+    internal void TraceUnownedRootMotion(string source, string note = null, bool force = false)
+    {
+        if (!ShouldLogStunDiagnostics())
+            return;
+
+        var phase = GetPhysicalPhase();
+        if (!IsStunDiagnosticsRelevantPhase(phase))
+        {
+            _hasTrackedUnownedRootMotion = false;
+            return;
+        }
+
+        var rootNow = transform.position;
+        var bodyNow = rigidbody3D != null ? rigidbody3D.position : rootNow;
+        var pelvisNow = ResolveStartupLaunchPelvisPosition(out _);
+        if (!_hasTrackedUnownedRootMotion)
+        {
+            _lastTrackedUnownedRootPosition = rootNow;
+            _lastTrackedUnownedBodyPosition = bodyNow;
+            _lastTrackedUnownedPelvisPosition = pelvisNow;
+            _hasTrackedUnownedRootMotion = true;
+            return;
+        }
+
+        var rootDeltaY = rootNow.y - _lastTrackedUnownedRootPosition.y;
+        var bodyDeltaY = bodyNow.y - _lastTrackedUnownedBodyPosition.y;
+        var pelvisDeltaY = pelvisNow.y - _lastTrackedUnownedPelvisPosition.y;
+        var hasTrackedWriterThisFrame = _lastStunTransformWriterFrame == Time.frameCount;
+        var significantMotion =
+            Mathf.Abs(rootDeltaY) >= UntrackedRootMotionAlertThreshold ||
+            Mathf.Abs(bodyDeltaY) >= UntrackedRootMotionAlertThreshold;
+
+        if ((force || significantMotion) &&
+            !hasTrackedWriterThisFrame &&
+            Time.time >= _lastUnownedRootMotionTraceTime + 0.05f)
+        {
+            _lastUnownedRootMotionTraceTime = Time.time;
+
+            var motionNote = new StringBuilder(320);
+            motionNote.Append("unownedRootMotion=1 dRootY=")
+                .Append(rootDeltaY.ToString("F2"))
+                .Append(" dRbY=")
+                .Append(bodyDeltaY.ToString("F2"))
+                .Append(" dPelvisY=")
+                .Append(pelvisDeltaY.ToString("F2"))
+                .Append(" writerThisFrame=0 ")
+                .Append(BuildRecentTransformWriterSummary());
+
+            if (!string.IsNullOrWhiteSpace(note))
+                motionNote.Append(" note=").Append(note);
+
+            ArmStunDiagnosticsWindow(source, motionNote.ToString());
+        }
+
+        _lastTrackedUnownedRootPosition = rootNow;
+        _lastTrackedUnownedBodyPosition = bodyNow;
+        _lastTrackedUnownedPelvisPosition = pelvisNow;
+        _hasTrackedUnownedRootMotion = true;
+    }
+
+    private float ResolveStunDiagnosticsSampleInterval()
+    {
+        var baseInterval = Mathf.Max(0.03f, stunDiagnosticsSampleInterval);
+        if (Time.time <= _stunDiagnosticsBurstUntilTime)
+            return Mathf.Min(baseInterval, 0.03f);
+
+        return baseInterval;
+    }
+
+    internal void TraceStunRootWrite(
+        string source,
+        Vector3 beforeRoot,
+        Vector3 afterRoot,
+        Vector3 beforeRigidbody,
+        Vector3 afterRigidbody,
+        Vector3 beforePelvis,
+        Vector3 afterPelvis,
+        string note = null,
+        bool force = false)
+    {
+        if (!ShouldEmitStunDiagnostics(force))
+            return;
+
+        var rootDelta = afterRoot - beforeRoot;
+        var rigidbodyDelta = afterRigidbody - beforeRigidbody;
+        var pelvisDelta = afterPelvis - beforePelvis;
+        var maxVerticalDelta = Mathf.Max(
+            Mathf.Abs(rootDelta.y),
+            Mathf.Abs(rigidbodyDelta.y),
+            Mathf.Abs(pelvisDelta.y));
+        var maxDistanceSq = Mathf.Max(
+            rootDelta.sqrMagnitude,
+            Mathf.Max(rigidbodyDelta.sqrMagnitude, pelvisDelta.sqrMagnitude));
+        if (!force && maxVerticalDelta < 0.05f && maxDistanceSq < 0.04f)
+            return;
+
+        TraceStunDiagnosticSnapshot(
+            source,
+            $"root={FormatStartupLaunchVector(beforeRoot)}->{FormatStartupLaunchVector(afterRoot)} " +
+            $"rb={FormatStartupLaunchVector(beforeRigidbody)}->{FormatStartupLaunchVector(afterRigidbody)} " +
+            $"pelvis={FormatStartupLaunchVector(beforePelvis)}->{FormatStartupLaunchVector(afterPelvis)} " +
+            $"rootDelta={FormatStartupLaunchVector(rootDelta)} " +
+            $"rbDelta={FormatStartupLaunchVector(rigidbodyDelta)} " +
+            $"pelvisDelta={FormatStartupLaunchVector(pelvisDelta)} " +
+            $"{(string.IsNullOrWhiteSpace(note) ? string.Empty : note)}".Trim(),
+            force: true);
+    }
+
+    internal void TraceStunTransformWrite(
+        string source,
+        Vector3 beforePosition,
+        Vector3 afterPosition,
+        string note = null,
+        bool force = false)
+    {
+        if (!ShouldEmitStunDiagnostics(force))
+            return;
+
+        var delta = afterPosition - beforePosition;
+        if (!force && Mathf.Abs(delta.y) < 0.05f && delta.sqrMagnitude < 0.04f)
+            return;
+
+        TraceStunDiagnosticSnapshot(
+            source,
+            $"before={FormatStartupLaunchVector(beforePosition)} " +
+            $"after={FormatStartupLaunchVector(afterPosition)} " +
+            $"delta={FormatStartupLaunchVector(delta)} " +
+            $"{(string.IsNullOrWhiteSpace(note) ? string.Empty : note)}".Trim(),
+            force: true);
+    }
+
+    private float ResolveStunDiagnosticsRootGap()
+    {
+        if (_puppetMaster != null &&
+            _puppetMaster.muscles != null &&
+            _puppetMaster.muscles.Length > 0 &&
+            _puppetMaster.muscles[0].joint != null)
+        {
+            return Vector3.Distance(transform.position, _puppetMaster.muscles[0].joint.transform.position);
+        }
+
+        if (rigidbody3D != null)
+            return Vector3.Distance(transform.position, rigidbody3D.position);
+
+        return 0f;
     }
 
     internal float GetPhysicalInstability()
@@ -405,6 +976,16 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     /// <summary>Spawned 이후에만 Networked 속성 접근 가능 여부.</summary>
     internal bool IsNetworkReady => Runner != null && Object != null && Object.IsValid;
+
+    private static bool IsStunDiagnosticsRelevantPhase(PhysicalPhase phase)
+    {
+        return phase == PhysicalPhase.StunnedCollapse ||
+               phase == PhysicalPhase.Stunned ||
+               phase == PhysicalPhase.SettledStunned ||
+               phase == PhysicalPhase.DraggedStunned ||
+               phase == PhysicalPhase.BeingCarriedStunned ||
+               phase == PhysicalPhase.Recovering;
+    }
 
     private void ArmStartupLaunchDiagnostics(string source, string note = null)
     {
@@ -487,6 +1068,14 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         SettledStunned = 13
     }
 
+    internal enum AerialKickPresentationState : byte
+    {
+        None = 0,
+        Launch = 1,
+        Fall = 2,
+        Restoring = 3
+    }
+
     private enum CameraAnchorSourceMode : byte
     {
         None = 0,
@@ -542,6 +1131,8 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     public void SetGrabbedByOther(bool grabbed)
     {
         var previousRefCount = _beingGrabbedRefCount;
+        if (grabbed && previousRefCount == 0)
+            InterruptRecoveryForInboundGrab("SetGrabbedByOther");
         _beingGrabbedRefCount += grabbed ? 1 : -1;
         _beingGrabbedRefCount = Mathf.Max(0, _beingGrabbedRefCount);
         if (IsNetworkReady && HasStateAuthority)
@@ -606,6 +1197,71 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             "ReportGrabDetached",
             $"side={side} leftTarget={LeftGrabTargetId} rightTarget={RightGrabTargetId}",
             true);
+    }
+
+    private int CountActiveInboundGrabRelations()
+    {
+        var count = 0;
+        foreach (var candidate in RegisteredPlayers)
+        {
+            if (candidate == null || candidate == this)
+                continue;
+
+            var handlers = candidate._handGrabHandlers;
+            if (handlers == null || handlers.Length == 0)
+                handlers = candidate.GetComponentsInChildren<HandGrabHandler>(true);
+
+            for (var i = 0; i < handlers.Length; i++)
+            {
+                var handler = handlers[i];
+                if (handler != null && handler.IsHoldingTarget(this))
+                    count++;
+            }
+        }
+
+        return count;
+    }
+
+    private void ResetInboundGrabStateIfStale(string source)
+    {
+        if (CountActiveInboundGrabRelations() > 0)
+            return;
+
+        if (_beingGrabbedRefCount <= 0 && _grabbedByCount <= 0)
+            return;
+
+        _beingGrabbedRefCount = 0;
+        _grabbedByCount = 0;
+        if (IsNetworkReady && HasStateAuthority)
+            NetworkedIsBeingGrabbed = false;
+
+        ApplyGrabbedJointState(false);
+        TraceCarryDebugSample("ResetInboundGrabStateIfStale", $"source={source}", true);
+    }
+
+    internal void ForceReleaseInboundGrabRelations(string source)
+    {
+        if (IsNetworkReady && !HasStateAuthority)
+            return;
+
+        foreach (var candidate in RegisteredPlayers)
+        {
+            if (candidate == null || candidate == this)
+                continue;
+
+            var handlers = candidate._handGrabHandlers;
+            if (handlers == null || handlers.Length == 0)
+                handlers = candidate.GetComponentsInChildren<HandGrabHandler>(true);
+
+            for (var i = 0; i < handlers.Length; i++)
+            {
+                var handler = handlers[i];
+                if (handler != null)
+                    handler.ForceReleaseTarget(this, source);
+            }
+        }
+
+        ResetInboundGrabStateIfStale(source);
     }
 
     private bool TryGetNetworkHeldAnchorData(
@@ -1420,7 +2076,27 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (!IsNetworkReady || !HasStateAuthority)
             return;
 
-        NetworkedStunPresentationPhase = (byte)ResolveLocalStunPresentationPhase();
+        var previousPhase = (StunPresentationPhase)NetworkedStunPresentationPhase;
+        var nextPhase = ResolveLocalStunPresentationPhase();
+        NetworkedStunPresentationPhase = (byte)nextPhase;
+
+        if (previousPhase == nextPhase)
+            return;
+
+        if (nextPhase == StunPresentationPhase.Stunned ||
+            nextPhase == StunPresentationPhase.RecoverStabilizing)
+        {
+            ArmStunDiagnosticsWindow(
+                "SynchronizeStunPresentationPhase",
+                $"presentation={previousPhase}->{nextPhase}");
+        }
+        else
+        {
+            TraceStunDiagnosticSnapshot(
+                "SynchronizeStunPresentationPhase",
+                $"presentation={previousPhase}->{nextPhase}",
+                force: true);
+        }
     }
 
     internal bool ShouldUsePhysicalPhasePresentation()
@@ -1440,6 +2116,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         if (GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing)
             return true;
+
+        if (ShouldUseProxyLocalSoftFlopPresentation())
+            return false;
 
         return GetPhysicalPhase() switch
         {
@@ -1464,6 +2143,62 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
                phase == PhysicalPhase.SettledStunned ||
                phase == PhysicalPhase.DraggedStunned ||
                phase == PhysicalPhase.BeingCarriedStunned;
+    }
+
+    internal static bool IsPlainStunPhase(PhysicalPhase phase)
+    {
+        return phase == PhysicalPhase.StunnedCollapse ||
+               phase == PhysicalPhase.Stunned ||
+               phase == PhysicalPhase.SettledStunned;
+    }
+
+    internal static bool ShouldUseProxyLocalSoftFlopPresentation(
+        PhysicalPhase phase,
+        StunPresentationPhase presentationPhase,
+        bool usesAnimatedVisualPresentationRig,
+        bool hasStateAuthority)
+    {
+        if (hasStateAuthority || !usesAnimatedVisualPresentationRig)
+            return false;
+
+        if (presentationPhase != StunPresentationPhase.Stunned)
+            return false;
+
+        return IsPlainStunPhase(phase);
+    }
+
+    internal bool ShouldUseProxyLocalSoftFlopPresentation()
+    {
+        return ShouldUseProxyLocalSoftFlopPresentation(
+            GetPhysicalPhase(),
+            GetStunPresentationPhase(),
+            UsesAnimatedVisualPresentationRig(),
+            HasStateAuthority);
+    }
+
+    internal static bool ShouldUseAuthorityAnimatedPlainStunPresentation(
+        PhysicalPhase phase,
+        StunPresentationPhase presentationPhase,
+        bool usesAnimatedVisualPresentationRig,
+        bool hasStateAuthority)
+    {
+        if (!hasStateAuthority || !usesAnimatedVisualPresentationRig)
+            return false;
+
+        if (presentationPhase != StunPresentationPhase.Stunned)
+            return false;
+
+        return phase == PhysicalPhase.Stunned ||
+               phase == PhysicalPhase.SettledStunned;
+    }
+
+    internal bool ShouldUseAuthorityAnimatedPlainStunPresentation()
+    {
+        return ShouldUseAuthorityAnimatedPlainStunPresentation(
+            GetPhysicalPhase(),
+            GetStunPresentationPhase(),
+            UsesAnimatedVisualPresentationRig(),
+            HasStateAuthority);
     }
 
     internal bool IsRemoteRecoveryPresentationResetWindowActive()
@@ -1497,6 +2232,17 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         _lastObservedPhysicsPresentationResetVersion = NetworkedPhysicsPresentationResetVersion;
         _remotePhysicsPresentationHoldUntilFrame = Time.frameCount + RemotePhysicsPresentationHoldFrameCount;
+
+        if (IsStunDiagnosticsRelevantPhase(GetPhysicalPhase()))
+        {
+            ArmStunDiagnosticsWindow(
+                "UpdateRemotePhysicsPresentationResetWindow",
+                $"resetVersion={_lastObservedPhysicsPresentationResetVersion} holdUntilFrame={_remotePhysicsPresentationHoldUntilFrame}");
+            TraceRootGapAnomaly(
+                "UpdateRemotePhysicsPresentationResetWindow.Gap",
+                $"resetVersion={_lastObservedPhysicsPresentationResetVersion} holdUntilFrame={_remotePhysicsPresentationHoldUntilFrame}",
+                force: true);
+        }
     }
 
     private bool IsRemotePhysicsPresentationResetLocked()
@@ -1511,6 +2257,14 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             return;
 
         NetworkedPhysicsPresentationResetVersion++;
+
+        if (IsStunDiagnosticsRelevantPhase(GetPhysicalPhase()) || !_isActiveRagdoll || _isRecovering || _isRecoverStabilizing)
+        {
+            TraceStunDiagnosticSnapshot(
+                "FlagPhysicsPresentationReset",
+                $"resetVersion={NetworkedPhysicsPresentationResetVersion}",
+                force: true);
+        }
     }
 
     // 기절 관련
@@ -1565,7 +2319,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         PunchRight = 7,
         KickLeft = 8,
         KickRight = 9,
-        AerialKick = 10
+        AerialKick = 10,
+        Headbutt = 11,
+        HitVFXOnly = 12
     }
 
     private void Awake()
@@ -1583,6 +2339,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     private void OnDestroy()
     {
+        SetProxyLocalSoftFlopActive(false);
         RegisteredPlayers.Remove(this);
         DestroyLocalGhostMode();
         CleanupDetachedCameraRoots();
@@ -1643,12 +2400,31 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             // 스폰 직후 한 프레임 동안 Animator 출력이 무효화되는 문제를 방지한다.
             // 기절/그랩 등 physics presentation 진입 전 Active로 복원한다.
             if (_puppetMaster != null)
-                _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Disabled;
+            {
+                if (UsesAnimatedVisualPresentationRig())
+                {
+                    _proxyLocalSoftFlopSavedMappingWeight = _puppetMaster.mappingWeight > 0.001f
+                        ? _puppetMaster.mappingWeight
+                        : 1f;
+                    _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Active;
+                    _puppetMaster.mappingWeight = 0f;
+                }
+                else
+                {
+                    _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Disabled;
+                }
+            }
         }
 
         ConfigureLocalOwnershipPresentation();
         InitializeAnimationEventState();
         InitializeAnimationDriverNetworkMode();
+
+        if (HasStateAuthority)
+            PublishInitialNetworkSimulationState();
+        else
+            ArmProxyStartupPresentationSnap();
+
         ArmStartupLaunchDiagnostics("Spawned");
 
         // 호스트 마이그레이션 이후 로컬 플레이어의 필드 아이템 위치를 다시 동기화한다.
