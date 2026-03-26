@@ -10,20 +10,15 @@ public class GameHUD : MonoBehaviour
     [Header("Game Start Timer")]
     [SerializeField] private TMP_Text gameStartTimerText;
 
-    [Header("Loading")]
-    [SerializeField] private Image loadingOverlay;
-
-    [Header("Death")]
-    [SerializeField] private Image deathOverlay;
-    [SerializeField] private Color deathOverlayColor = new(0.42f, 0.42f, 0.42f, 0.82f);
-
     [Header("Water")]
     [SerializeField] private Image waterOverlay;
     [SerializeField] private Color waterOverlayColor = new(0.0f, 0.25f, 0.75f, 0.38f);
 
-    private const float FadeOutDuration = 0.5f;
+    [Header("UI Panels")]
+    [SerializeField] private GameObject ingPanel;
+    [SerializeField] private GameObject afterPanel;
+
     private const float PulseDuration = 0.25f;
-    private const float DeathOverlayFadeDuration = 0.45f;
     private const float WaterOverlayFadeDuration = 0.35f;
 
     // 수중 오버레이 맥동 설정
@@ -37,7 +32,6 @@ public class GameHUD : MonoBehaviour
     private static GameHUD _instance;
 
     private Coroutine _pulseCoroutine;
-    private Coroutine _deathOverlayCoroutine;
     private Coroutine _waterOverlayCoroutine;
     private Coroutine _waterPulseCoroutine;
     private Coroutine _underwaterVolumeCoroutine;
@@ -69,7 +63,8 @@ public class GameHUD : MonoBehaviour
         _instance = this;
         EnsureRuntimeReferences();
         HideCountdown();
-        HideDeathOverlayImmediate();
+
+        ShowIngPanel();
     }
 
     private void OnDestroy()
@@ -81,15 +76,6 @@ public class GameHUD : MonoBehaviour
             Destroy(_underwaterVolume.gameObject);
         if (_underwaterProfile != null)
             Destroy(_underwaterProfile);
-    }
-
-    public void HideLoadingAndShow(string text, Color color)
-    {
-        EnsureRuntimeReferences();
-        if (loadingOverlay != null && loadingOverlay.gameObject.activeSelf)
-            StartCoroutine(FadeOutThenShow(text, color));
-        else
-            ShowWithPulse(text, color);
     }
 
     public void ShowWithPulse(string text, Color color)
@@ -108,18 +94,6 @@ public class GameHUD : MonoBehaviour
             gameStartTimerText.transform.localScale = Vector3.one;
             gameStartTimerText.gameObject.SetActive(false);
         }
-    }
-
-    public void PlayDeathOverlay()
-    {
-        EnsureRuntimeReferences();
-        if (deathOverlay == null)
-            return;
-
-        if (_deathOverlayCoroutine != null)
-            StopCoroutine(_deathOverlayCoroutine);
-
-        _deathOverlayCoroutine = StartCoroutine(FadeDeathOverlay());
     }
 
     public void ShowWaterOverlay()
@@ -152,37 +126,6 @@ public class GameHUD : MonoBehaviour
 
         if (_underwaterVolumeCoroutine != null) StopCoroutine(_underwaterVolumeCoroutine);
         _underwaterVolumeCoroutine = StartCoroutine(FadeUnderwaterVolume(show: false));
-    }
-
-    public void HideDeathOverlayImmediate()
-    {
-        EnsureRuntimeReferences();
-        if (deathOverlay == null)
-            return;
-
-        if (_deathOverlayCoroutine != null)
-        {
-            StopCoroutine(_deathOverlayCoroutine);
-            _deathOverlayCoroutine = null;
-        }
-
-        deathOverlay.gameObject.SetActive(false);
-        deathOverlay.color = WithAlpha(deathOverlayColor, 0f);
-    }
-
-    private IEnumerator FadeOutThenShow(string text, Color color)
-    {
-        float t = 0f;
-        var baseColor = loadingOverlay.color;
-        while (t < FadeOutDuration)
-        {
-            t += Time.deltaTime;
-            loadingOverlay.color = new Color(baseColor.r, baseColor.g, baseColor.b, Mathf.Clamp01(1f - t / FadeOutDuration));
-            yield return null;
-        }
-
-        loadingOverlay.gameObject.SetActive(false);
-        _pulseCoroutine = StartCoroutine(PulseText(text, color));
     }
 
     private IEnumerator PulseText(string text, Color color)
@@ -320,25 +263,6 @@ public class GameHUD : MonoBehaviour
         _underwaterVolumeCoroutine = null;
     }
 
-    private IEnumerator FadeDeathOverlay()
-    {
-        deathOverlay.gameObject.SetActive(true);
-        var startColor = deathOverlay.color;
-        var targetColor = deathOverlayColor;
-        targetColor.a = Mathf.Clamp01(targetColor.a);
-
-        float elapsed = 0f;
-        while (elapsed < DeathOverlayFadeDuration)
-        {
-            elapsed += Time.unscaledDeltaTime;
-            deathOverlay.color = Color.Lerp(startColor, targetColor, Mathf.Clamp01(elapsed / DeathOverlayFadeDuration));
-            yield return null;
-        }
-
-        deathOverlay.color = targetColor;
-        _deathOverlayCoroutine = null;
-    }
-
     private void StopPulse()
     {
         if (_pulseCoroutine == null)
@@ -354,14 +278,8 @@ public class GameHUD : MonoBehaviour
     {
         EnsureCanvas();
 
-        if (loadingOverlay == null)
-            loadingOverlay = CreateFullscreenImage("LoadingOverlay", new Color(0f, 0f, 0f, 0f), siblingIndex: 0);
-
         if (gameStartTimerText == null)
             gameStartTimerText = CreateCountdownText();
-
-        if (deathOverlay == null)
-            deathOverlay = CreateFullscreenImage("DeathOverlay", WithAlpha(deathOverlayColor, 0f), siblingIndex: 1);
 
         if (waterOverlay == null)
             waterOverlay = CreateFullscreenImage("WaterOverlay", WithAlpha(waterOverlayColor, 0f), siblingIndex: 2);
@@ -436,5 +354,23 @@ public class GameHUD : MonoBehaviour
     {
         color.a = alpha;
         return color;
+    }
+
+    public void ShowIngPanel()
+    {
+        if (ingPanel != null) ingPanel.SetActive(true);
+        if (afterPanel  != null) afterPanel.SetActive(false);
+    }
+
+    public void ShowAfterPanel()
+    {
+        if (ingPanel != null) ingPanel.SetActive(false);
+        if (afterPanel != null) afterPanel.SetActive(true);
+    }
+
+    public void HideAllPanels()
+    {
+        if (ingPanel != null) ingPanel.SetActive(false);
+        if (afterPanel != null) afterPanel.SetActive(false);
     }
 }
