@@ -15,6 +15,7 @@ MonoBehaviour:
   gimmickName: SeaLevelGimmick
   startDelay: 0
   sinkingSpeed: 0.05
-  maxWaterLevel: -3.5
+  maxWaterLevel: 5
   checkInterval: 1.8
   riseDuration: 0.5
+  maxRiseTotalDurationSec: 180
