@@ -12,21 +12,41 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         internal static void Info(string category, string message, Object context = null)
         {
+            if (!SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            {
+                return;
+            }
+
             Debug.Log(Format(category, message), context);
         }
 
         internal static void Warn(string category, string message, Object context = null)
         {
+            if (!SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            {
+                return;
+            }
+
             Debug.LogWarning(Format(category, message), context);
         }
 
         internal static void Error(string category, string message, Object context = null)
         {
+            if (!SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            {
+                return;
+            }
+
             Debug.LogError(Format(category, message), context);
         }
 
         internal static void InfoOnce(string key, string category, string message, Object context = null)
         {
+            if (!SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            {
+                return;
+            }
+
             if (!LoggedKeys.Add($"I:{key}"))
             {
                 return;
@@ -37,6 +57,11 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         internal static void WarnOnce(string key, string category, string message, Object context = null)
         {
+            if (!SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            {
+                return;
+            }
+
             if (!LoggedKeys.Add($"W:{key}"))
             {
                 return;

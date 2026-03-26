@@ -268,6 +268,9 @@ public class HandGrabHandler : MonoBehaviour
 
     void Awake()
     {
+        if (!SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            debugLog = false;
+
         networkPlayer = transform.root.GetComponent<NetworkPlayer>();
         _characterGrabController = networkPlayer != null
             ? networkPlayer.GetCharacterGrabController()
@@ -777,15 +780,31 @@ public class HandGrabHandler : MonoBehaviour
         TryCarryObject(collision);
     }
 
+    private static bool ShouldBlockCollisionCarry(NetworkPlayer player, HandSide side, bool isHolding)
+    {
+        if (player != null)
+        {
+            if (!player.IsActiveRagdoll)
+                return true;
+
+            if (player.IsGrabTemporarilyDisabled)
+                return true;
+
+            if (!player.IsHandGrabActive(side))
+                return true;
+        }
+
+        return isHolding;
+    }
+
     bool TryCarryObject(Collision collision)
     {
         if (networkPlayer != null && networkPlayer.Object != null
             && networkPlayer.Object.IsValid && !networkPlayer.HasStateAuthority)
             return false;
 
-        if (networkPlayer != null && !networkPlayer.IsActiveRagdoll) return false;
-        if (networkPlayer != null && !networkPlayer.IsHandGrabActive(handSide)) return false;
-        if (IsHolding) return false;
+        if (ShouldBlockCollisionCarry(networkPlayer, handSide, IsHolding))
+            return false;
 
         if (!collision.collider.TryGetComponent(out Rigidbody otherRb))
             return false;
@@ -1301,6 +1320,11 @@ public class HandGrabHandler : MonoBehaviour
 
     private void EmitGrabDiagnostics(string source, bool forceSample = false)
     {
+        if (!SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+        {
+            return;
+        }
+
         var details = BuildGrabDiagnosticsSummary();
 
         networkPlayer?.TraceCarryDebugSample($"Hand{handSide}-{source}", details, forceSample);
@@ -1619,6 +1643,10 @@ public class HandGrabHandler : MonoBehaviour
         if (networkPlayer == null)
             return false;
 
-        return targetRb.transform.root == networkPlayer.transform;
+        var targetRoot = targetRb.transform.root;
+        if (networkPlayer.ShouldIgnoreThrownTargetRegrab(targetRoot))
+            return true;
+
+        return targetRoot == networkPlayer.transform;
     }
 }

@@ -4,6 +4,12 @@ using UnityEngine;
 
 public sealed partial class NetworkPlayer
 {
+    private const float ThrowTargetRegrabIgnoreDuration = 0.25f;
+    private Transform _recentlyThrownTargetRootA;
+    private float _recentlyThrownTargetRootAUntilTime;
+    private Transform _recentlyThrownTargetRootB;
+    private float _recentlyThrownTargetRootBUntilTime;
+
     private void ProcessInteractions(PlayerNetworkInput input)
     {
         if (_handGrabHandlers == null || !_isActiveRagdoll)
@@ -246,6 +252,7 @@ public sealed partial class NetworkPlayer
 
             handler.Throw();
             didThrow = true;
+            RegisterThrownTargetRegrabIgnore(targetRoot);
 
             if (isStunnedTarget && targetRoot != null)
                 thrownStunnedTargetRoot = targetRoot;
@@ -263,6 +270,35 @@ public sealed partial class NetworkPlayer
     private void BeginGrabDisableWindow(float duration = 1f)
     {
         _grabDisabledUntilTime = Mathf.Max(_grabDisabledUntilTime, Time.time + Mathf.Max(0f, duration));
+        _isLeftGrabActive = false;
+        _isRightGrabActive = false;
+        _isGrabActive = false;
+    }
+
+    internal bool ShouldIgnoreThrownTargetRegrab(Transform targetRoot)
+    {
+        if (targetRoot == null)
+            return false;
+
+        return (_recentlyThrownTargetRootA == targetRoot && _recentlyThrownTargetRootAUntilTime > Time.time)
+               || (_recentlyThrownTargetRootB == targetRoot && _recentlyThrownTargetRootBUntilTime > Time.time);
+    }
+
+    private void RegisterThrownTargetRegrabIgnore(Transform targetRoot, float duration = ThrowTargetRegrabIgnoreDuration)
+    {
+        if (targetRoot == null || targetRoot.GetComponent<NetworkPlayer>() == null)
+            return;
+
+        var untilTime = Time.time + Mathf.Max(0f, duration);
+        if (_recentlyThrownTargetRootA == targetRoot || _recentlyThrownTargetRootA == null || _recentlyThrownTargetRootAUntilTime <= Time.time)
+        {
+            _recentlyThrownTargetRootA = targetRoot;
+            _recentlyThrownTargetRootAUntilTime = untilTime;
+            return;
+        }
+
+        _recentlyThrownTargetRootB = targetRoot;
+        _recentlyThrownTargetRootBUntilTime = untilTime;
     }
 
     private static bool ShouldAllowKickFallback(bool anyHolding, bool hasHeldRuntimeItem)

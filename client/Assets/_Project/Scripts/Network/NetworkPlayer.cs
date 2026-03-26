@@ -165,11 +165,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     [SerializeField, Range(1f, 8f)] private float startupLaunchDiagnosticsWindow = 4f;
 
     [Header("Aerial Kick Diagnostics")]
-    [SerializeField] private bool enableAerialKickDiagnostics = true;
+    [SerializeField] private bool enableAerialKickDiagnostics = false;
     [SerializeField, Range(0.03f, 0.5f)] private float aerialKickDiagnosticsSampleInterval = 0.12f;
 
     [Header("Stun Diagnostics")]
-    [SerializeField] private bool enableStunDiagnostics = true;
+    [SerializeField] private bool enableStunDiagnostics = false;
     [SerializeField, Range(0.03f, 0.5f)] private float stunDiagnosticsSampleInterval = 0.12f;
     [SerializeField, Range(1f, 8f)] private float stunDiagnosticsWindow = 6f;
     private const float RootGapAnomalyAlertThreshold = 1.4f;
@@ -374,17 +374,39 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     internal bool ShouldEndAerialKickPresentation()
     {
         var isGrounded = IsGroundedForPresentation();
+        var aerialKickPresentationState = GetAerialKickPresentationState();
+        var phase = GetPhysicalPhase();
+
+        if (IsNetworkReady && !HasStateAuthority)
+        {
+            return ShouldEndAerialKickProxyPresentation(
+                isGrounded,
+                aerialKickPresentationState,
+                Time.time - _localAerialKickPredictionTime,
+                phase);
+        }
+
+        return ShouldEndAerialKickLocalPresentation(
+            isGrounded,
+            aerialKickPresentationState,
+            phase);
+    }
+
+    private static bool ShouldEndAerialKickLocalPresentation(
+        bool isGrounded,
+        AerialKickPresentationState aerialKickPresentationState,
+        PhysicalPhase phase)
+    {
         if (isGrounded)
             return true;
 
-        if (!IsNetworkReady || HasStateAuthority)
-            return false;
+        if (aerialKickPresentationState == AerialKickPresentationState.None)
+            return true;
 
-        return ShouldEndAerialKickProxyPresentation(
-            isGrounded,
-            GetAerialKickPresentationState(),
-            Time.time - _localAerialKickPredictionTime,
-            GetPhysicalPhase());
+        if (aerialKickPresentationState == AerialKickPresentationState.Restoring)
+            return true;
+
+        return IsAerialKickPresentationTerminatingPhase(phase);
     }
 
     private static bool ShouldEndAerialKickProxyPresentation(
@@ -397,16 +419,29 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             return true;
 
         if (aerialKickPresentationState == AerialKickPresentationState.None)
-            return predictionAge >= PM_DefaultAerialKickPredictionWindow;
+            return predictionAge >= PM_DefaultAerialKickPredictionWindow ||
+                   IsAerialKickPresentationTerminatingPhase(phase);
 
         if (aerialKickPresentationState == AerialKickPresentationState.Restoring)
             return true;
 
-        return phase == PhysicalPhase.Recovering ||
+        return IsAerialKickPresentationTerminatingPhase(phase);
+    }
+
+    private static bool IsAerialKickPresentationTerminatingPhase(PhysicalPhase phase)
+    {
+        return phase == PhysicalPhase.GrabIntent ||
+               phase == PhysicalPhase.Holding ||
+               phase == PhysicalPhase.BeingGrabbed ||
+               phase == PhysicalPhase.Dragged ||
+               phase == PhysicalPhase.Recovering ||
                phase == PhysicalPhase.StunnedCollapse ||
                phase == PhysicalPhase.Stunned ||
                phase == PhysicalPhase.SettledStunned ||
-               phase == PhysicalPhase.DraggedStunned;
+               phase == PhysicalPhase.DraggedStunned ||
+               phase == PhysicalPhase.CarryingStunned ||
+               phase == PhysicalPhase.BeingCarriedStunned ||
+               phase == PhysicalPhase.WeaponEquipped;
     }
 
     internal bool ShouldPredictOwnerProxyAerialKickPresentation()
@@ -462,12 +497,16 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     internal bool ShouldLogAerialKickDiagnostics()
     {
-        return enableAerialKickDiagnostics && (Application.isEditor || Debug.isDebugBuild);
+        return SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled
+               && enableAerialKickDiagnostics
+               && (Application.isEditor || Debug.isDebugBuild);
     }
 
     internal bool ShouldLogStunDiagnostics()
     {
-        return enableStunDiagnostics && (Application.isEditor || Debug.isDebugBuild);
+        return SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled
+               && enableStunDiagnostics
+               && (Application.isEditor || Debug.isDebugBuild);
     }
 
     internal float GetAerialKickDiagnosticsSampleInterval()
@@ -607,7 +646,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             .Append(bodySummary)
             .Append(" note=").Append(string.IsNullOrWhiteSpace(note) ? "-" : note);
 
-        Debug.Log(message.ToString(), this);
+        var logLine = message.ToString();
+        if (SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            Debug.Log(logLine, this);
+        else
+            SSAFYPlayTime.RuntimeLoggingSettings.AppendTargetedRuntimeLine(logLine);
     }
 
     internal void TraceStunTransformWriter(
@@ -2074,6 +2117,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         if (GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing)
             return true;
 
+        if (ShouldUseProxyLocalSoftFlopPresentation())
+            return false;
+
         return GetPhysicalPhase() switch
         {
             PhysicalPhase.BeingGrabbed => true,
@@ -2104,6 +2150,55 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         return phase == PhysicalPhase.StunnedCollapse ||
                phase == PhysicalPhase.Stunned ||
                phase == PhysicalPhase.SettledStunned;
+    }
+
+    internal static bool ShouldUseProxyLocalSoftFlopPresentation(
+        PhysicalPhase phase,
+        StunPresentationPhase presentationPhase,
+        bool usesAnimatedVisualPresentationRig,
+        bool hasStateAuthority)
+    {
+        if (hasStateAuthority || !usesAnimatedVisualPresentationRig)
+            return false;
+
+        if (presentationPhase != StunPresentationPhase.Stunned)
+            return false;
+
+        return IsPlainStunPhase(phase);
+    }
+
+    internal bool ShouldUseProxyLocalSoftFlopPresentation()
+    {
+        return ShouldUseProxyLocalSoftFlopPresentation(
+            GetPhysicalPhase(),
+            GetStunPresentationPhase(),
+            UsesAnimatedVisualPresentationRig(),
+            HasStateAuthority);
+    }
+
+    internal static bool ShouldUseAuthorityAnimatedPlainStunPresentation(
+        PhysicalPhase phase,
+        StunPresentationPhase presentationPhase,
+        bool usesAnimatedVisualPresentationRig,
+        bool hasStateAuthority)
+    {
+        if (!hasStateAuthority || !usesAnimatedVisualPresentationRig)
+            return false;
+
+        if (presentationPhase != StunPresentationPhase.Stunned)
+            return false;
+
+        return phase == PhysicalPhase.Stunned ||
+               phase == PhysicalPhase.SettledStunned;
+    }
+
+    internal bool ShouldUseAuthorityAnimatedPlainStunPresentation()
+    {
+        return ShouldUseAuthorityAnimatedPlainStunPresentation(
+            GetPhysicalPhase(),
+            GetStunPresentationPhase(),
+            UsesAnimatedVisualPresentationRig(),
+            HasStateAuthority);
     }
 
     internal bool IsRemoteRecoveryPresentationResetWindowActive()
@@ -2244,6 +2339,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     private void OnDestroy()
     {
+        SetProxyLocalSoftFlopActive(false);
         RegisteredPlayers.Remove(this);
         DestroyLocalGhostMode();
         CleanupDetachedCameraRoots();
@@ -2304,12 +2400,31 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
             // 스폰 직후 한 프레임 동안 Animator 출력이 무효화되는 문제를 방지한다.
             // 기절/그랩 등 physics presentation 진입 전 Active로 복원한다.
             if (_puppetMaster != null)
-                _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Disabled;
+            {
+                if (UsesAnimatedVisualPresentationRig())
+                {
+                    _proxyLocalSoftFlopSavedMappingWeight = _puppetMaster.mappingWeight > 0.001f
+                        ? _puppetMaster.mappingWeight
+                        : 1f;
+                    _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Active;
+                    _puppetMaster.mappingWeight = 0f;
+                }
+                else
+                {
+                    _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Disabled;
+                }
+            }
         }
 
         ConfigureLocalOwnershipPresentation();
         InitializeAnimationEventState();
         InitializeAnimationDriverNetworkMode();
+
+        if (HasStateAuthority)
+            PublishInitialNetworkSimulationState();
+        else
+            ArmProxyStartupPresentationSnap();
+
         ArmStartupLaunchDiagnostics("Spawned");
 
         // 호스트 마이그레이션 이후 로컬 플레이어의 필드 아이템 위치를 다시 동기화한다.

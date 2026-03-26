@@ -18,8 +18,8 @@ public class ProceduralHeadbutt : MonoBehaviour
     [SerializeField] private float impactOvershoot = 0.10f;
     [SerializeField] private float windUpPullBack = 0.03f;
     [SerializeField] private float windUpForwardBias = 0.05f;
-    [SerializeField] private float windUpDrop = 0.05f;
-    [SerializeField] private float impactDownBias = 0.03f;
+    [SerializeField] private float windUpDrop = 0.07f;
+    [SerializeField] private float impactDownBias = 0.05f;
     [SerializeField] private float fallbackHeadHeight = 1.02f;
 
     [Header("Forces")]
@@ -30,10 +30,10 @@ public class ProceduralHeadbutt : MonoBehaviour
     [SerializeField] private float hipsCounterForce = 52f;
 
     [Header("Visual")]
-    [SerializeField] private float headWindUpAngle = -20f;
-    [SerializeField] private float headImpactAngle = -42f;
-    [SerializeField] private float neckImpactAngle = -18f;
-    [SerializeField] private float chestImpactAngle = -10f;
+    [SerializeField] private float headWindUpAngle = -24f;
+    [SerializeField] private float headImpactAngle = -48f;
+    [SerializeField] private float neckImpactAngle = -22f;
+    [SerializeField] private float chestImpactAngle = -14f;
 
     [Header("Presentation")]
     [SerializeField, Range(0f, 1f)] private float headPresentationBlend = 0.92f;
