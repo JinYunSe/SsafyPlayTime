@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using RootMotion.Dynamics;
+using SSAFYPlayTime.Stage;
 using UnityEngine;
 
 namespace SSAFYPlayTime.Character
@@ -76,6 +77,26 @@ namespace SSAFYPlayTime.Character
         private const float AnchorGrabDirectMuscleMultiplier = 0.55f;  // 잡힌 본 직접
         private const float AnchorGrabAdjacentMuscleMultiplier = 0.75f;  // 인접 본
 
+        // ─── Distance LOD ───
+        // 원격 플레이어의 LateUpdate 실행 빈도를 거리에 따라 줄여 CPU를 절약한다.
+        // StateAuthority·InputAuthority(로컬·호스트)는 항상 풀 업데이트.
+        // Camera.main은 프레임당 1회만 조회(static 캐시)해 플레이어 수가 늘어도 비용이 고정된다.
+        private int _lodSkipCounter;
+        private static Camera s_lodCam;
+        private static int s_lodCamFrame = -1;
+        private static Camera GetLODCamera()
+        {
+            if (s_lodCamFrame != Time.frameCount)
+            {
+                s_lodCamFrame = Time.frameCount;
+                s_lodCam = Camera.main;
+            }
+            return s_lodCam;
+        }
+        private const float LodNearSqr = 20f * 20f;  // 20m 이내: 매 프레임
+        private const float LodMidSqr  = 40f * 40f;  // 40m 이내: 2프레임마다
+        // 40m 초과: 4프레임마다
+
         // ─── Combat Flinch Overlay ───
         // 피격 시 방향성 per-muscle pin drop을 적용하는 임시 오버레이.
         // 상태 enum 추가 없이 multiplier 채널로 동작.
@@ -103,11 +124,35 @@ namespace SSAFYPlayTime.Character
 
             ResolveNetworkPlayer();
             ResolveMotionReferences();
+
+            // Character 레이어 root Rigidbody를 MapTunnelGuard 레지스트리에 등록
+            MapTunnelGuard.Register(motionRigidbody);
+        }
+
+        private void OnDestroy()
+        {
+            MapTunnelGuard.Unregister(motionRigidbody);
         }
 
         private void OnValidate()
         {
             EnsureDynamicDefaults();
+        }
+
+        private bool ShouldThrottleLOD()
+        {
+            if (networkPlayer == null || networkPlayer.Object == null) return false;
+            // 로컬 플레이어(InputAuthority) 또는 호스트(StateAuthority)는 항상 풀 업데이트
+            if (networkPlayer.HasStateAuthority || networkPlayer.HasInputAuthority) return false;
+
+            _lodSkipCounter++;
+            var cam = GetLODCamera();
+            if (cam == null) return false;
+
+            var distSqr = (transform.position - cam.transform.position).sqrMagnitude;
+            if (distSqr < LodNearSqr) return false;
+            if (distSqr < LodMidSqr)  return (_lodSkipCounter & 1) != 0;  // 2프레임마다
+            return (_lodSkipCounter % 4) != 0;                              // 4프레임마다
         }
 
         private void LateUpdate()
@@ -123,6 +168,9 @@ namespace SSAFYPlayTime.Character
 
             EnsureInitialized();
             if (!_initialized)
+                return;
+
+            if (ShouldThrottleLOD())
                 return;
 
             SyncStateFromNetworkPlayer();

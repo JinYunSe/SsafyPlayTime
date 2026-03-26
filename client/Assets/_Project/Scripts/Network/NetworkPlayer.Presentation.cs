@@ -122,7 +122,9 @@ public sealed partial class NetworkPlayer
         // ── 플레이어 타입별 3분기 ──
         if (HasStateAuthority)
         {
-            // AuthorityOwner: 물리 시뮬레이션이 직접 뼈를 구동 → 보간 불필요
+            // AuthorityOwner: 클라이언트(OwnerProxy)와 동일한 루트 보간을 적용해
+            // 호스트 캐릭터의 시각적 부드러움을 맞춘다.
+            UpdateProxyPresentationRoot();
             UpdateCharacterPresentationEffects();
             return;
         }
@@ -226,6 +228,11 @@ public sealed partial class NetworkPlayer
 
     private void LateUpdate()
     {
+        // 거리 기반 Physics LOD: 원격 플레이어가 35m 경계를 넘을 때만 PuppetMaster 모드 갱신.
+        // (매 프레임 SyncPuppetMasterMode를 호출하지 않고, 거리 카테고리 변화 시에만 실행)
+        if (!HasStateAuthority && !HasInputAuthority)
+            UpdatePuppetMasterDistanceLOD();
+
         // 비주얼 상태를 먼저 갱신한 뒤 카메라 앵커를 갱신해야
         // 앵커가 최종 표시 비주얼 위치를 기준으로 추적한다.
         UpdateRemotePhysicsPresentationResetWindow();
