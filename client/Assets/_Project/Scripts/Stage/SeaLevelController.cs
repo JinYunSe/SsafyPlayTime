@@ -28,10 +28,14 @@ public class SeaLevelController : NetworkBehaviour
     private float checkInterval;
     // 한 스텝을 부드럽게 올리는 시간
     private float riseDuration;
+    // 전체 상승 시간이 이 값을 넘지 않도록 단계 시간을 조정한다.
+    private float maxRiseTotalDurationSec;
+    private float _localEffectivePhaseDuration;
 
     [Networked] private int WaterPhase { get; set; }
     [Networked] private int PhaseStartTick { get; set; }
     [Networked] private float PhaseStartY { get; set; }
+    [Networked] private float EffectivePhaseDurationSec { get; set; }
     [Networked] private NetworkBool IsInitialized { get; set; }
 
     private float _localPhaseStartTime;
@@ -43,13 +47,25 @@ public class SeaLevelController : NetworkBehaviour
     // 복원값을 보관했다가 StateAuthority 확보 후 FixedUpdateNetwork()에서 적용한다.
     private float? _pendingRestoreY;
 
-    private float PhaseDuration => Mathf.Max(0f, riseDuration) + Mathf.Max(0f, checkInterval);
+    private float BasePhaseDuration => Mathf.Max(0f, riseDuration) + Mathf.Max(0f, checkInterval);
+
+    private float PhaseDuration
+    {
+        get
+        {
+            if (Runner != null && Object != null && Object.IsValid && IsInitialized)
+                return Mathf.Max(riseDuration, EffectivePhaseDurationSec);
+
+            return Mathf.Max(riseDuration, _localEffectivePhaseDuration);
+        }
+    }
 
     private void Awake()
     {
         _localPhaseStartTime = Time.time;
         _localPhaseStartY = transform.position.y;
         _localWaterPhase = transform.position.y >= maxWaterLevel ? PhaseCompleted : PhaseRising;
+        _localEffectivePhaseDuration = BasePhaseDuration;
 
         // 방장(StateAuthority)이 나가도 이 오브젝트가 제거되지 않도록 설정한다.
         // Fusion은 기본적으로 StateAuthority가 떠나면 오브젝트를 파괴할 수 있으므로
@@ -67,6 +83,7 @@ public class SeaLevelController : NetworkBehaviour
             maxWaterLevel = seaLevelData.maxWaterLevel;
             checkInterval = seaLevelData.checkInterval;
             riseDuration = seaLevelData.riseDuration;
+            maxRiseTotalDurationSec = seaLevelData.maxRiseTotalDurationSec;
         }
 
         if (HasStateAuthority)
@@ -144,6 +161,7 @@ public class SeaLevelController : NetworkBehaviour
         PhaseStartY = restoredY;
         PhaseStartTick = Runner.Tick;
         WaterPhase = restoredY >= maxWaterLevel ? PhaseCompleted : PhaseRising;
+        EffectivePhaseDurationSec = ResolveEffectivePhaseDuration(restoredY);
         IsInitialized = true;
 
         Debug.Log($"[{nameof(SeaLevelController)}] Applied pending migration restore on '{name}'. y={restoredY:F3}");
@@ -177,6 +195,7 @@ public class SeaLevelController : NetworkBehaviour
         PhaseStartY = startY;
         PhaseStartTick = Runner.Tick;
         WaterPhase = startY >= maxWaterLevel ? PhaseCompleted : PhaseRising;
+        EffectivePhaseDurationSec = ResolveEffectivePhaseDuration(startY);
         IsInitialized = true;
     }
 
@@ -262,6 +281,19 @@ public class SeaLevelController : NetworkBehaviour
         _localPhaseStartTime = Time.time;
         _localPhaseStartY = currentY;
         _localWaterPhase = currentY >= maxWaterLevel ? PhaseCompleted : PhaseRising;
+        _localEffectivePhaseDuration = ResolveEffectivePhaseDuration(currentY);
+    }
+
+    private float ResolveEffectivePhaseDuration(float startY)
+    {
+        var baseDuration = BasePhaseDuration;
+        if (maxRiseTotalDurationSec <= 0f || sinkingSpeed <= 0f || maxWaterLevel <= startY)
+            return baseDuration;
+
+        var remainingDistance = Mathf.Max(0f, maxWaterLevel - startY);
+        var stepCount = Mathf.Max(1, Mathf.CeilToInt(remainingDistance / sinkingSpeed));
+        var cappedPhaseDuration = maxRiseTotalDurationSec / stepCount;
+        return Mathf.Max(riseDuration, Mathf.Min(baseDuration, cappedPhaseDuration));
     }
 
     private static string BuildHierarchyPath(Transform target)
