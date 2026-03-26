@@ -1,3 +1,4 @@
+using Fusion;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -19,9 +20,17 @@ public sealed partial class NetworkPlayer
     private const float HitVFXScaleMin = 0.6f;
     private const float HitVFXScaleMax = 1.2f;
     private const float HitVFXLifetime = 1.5f;
+    private const float HitImpactFeedbackDuplicateWindow = 0.18f;
+    private const float HitImpactFeedbackDuplicateDistance = 1.1f;
+    private const float HitImpactFeedbackDuplicateDirectionDot = 0.45f;
+    private const float HitImpactFeedbackDuplicateForceRatioMax = 2.25f;
     private static GameObject s_hitVFXPrefab;
     private static readonly Stack<GameObject> s_hitVFXPool = new();
     private static Vector3 s_hitVFXBaseScale = Vector3.one;
+    private float _lastHitImpactFeedbackTime = float.NegativeInfinity;
+    private Vector3 _lastHitImpactFeedbackPosition;
+    private Vector3 _lastHitImpactFeedbackDirection = Vector3.forward;
+    private float _lastHitImpactFeedbackForce = float.NegativeInfinity;
 
     private void ApplyPunchFollowThrough(Vector3 knockbackDir, float punchForce)
     {
@@ -152,6 +161,103 @@ public sealed partial class NetworkPlayer
     private static float NormalizePunchImpact(float punchForce)
     {
         return Mathf.InverseLerp(8f, 18f, punchForce);
+    }
+
+    internal void PlayAuthoritativeHitImpactFeedback(Vector3 hitPoint, Vector3 knockbackDir, float punchForce)
+    {
+        PlayReplicatedHitImpactFeedback(hitPoint, knockbackDir, punchForce);
+
+        if (Runner == null || Object == null || !Object.IsValid || !HasStateAuthority)
+            return;
+
+        RPC_NotifyHitImpactFeedback(hitPoint, knockbackDir, punchForce);
+    }
+
+    internal void TryPlayDownedHitImpactFeedback(NetworkPlayer instigator, float stunDamage, float impactForce)
+    {
+        if (instigator == null)
+            return;
+
+        var knockbackDir = Vector3.ProjectOnPlane(transform.position - instigator.transform.position, Vector3.up);
+        if (knockbackDir.sqrMagnitude < 0.0001f)
+            knockbackDir = -ResolveCombatForward();
+        if (knockbackDir.sqrMagnitude < 0.0001f)
+            knockbackDir = Vector3.forward;
+
+        knockbackDir.Normalize();
+
+        var hitPoint = transform.position + Vector3.up * 0.8f - knockbackDir * 0.2f;
+        var feedbackForce = Mathf.Max(FallbackPunchKnockbackForce * 0.65f, Mathf.Max(stunDamage, impactForce));
+        PlayAuthoritativeHitImpactFeedback(hitPoint, knockbackDir, feedbackForce);
+    }
+
+    internal void PlayReplicatedHitImpactFeedback(Vector3 hitPoint, Vector3 knockbackDir, float punchForce)
+    {
+        if (ShouldSuppressDuplicateHitImpactFeedback(hitPoint, knockbackDir, punchForce))
+            return;
+
+        RegisterHitImpactFeedback(hitPoint, knockbackDir, punchForce);
+        SpawnHitImpactVFX(hitPoint, knockbackDir, punchForce);
+        TriggerVictimCameraKick(knockbackDir, punchForce);
+    }
+
+    internal static bool ShouldSuppressDuplicateHitImpactFeedback(
+        float elapsedTime,
+        float distanceSqr,
+        float directionDot,
+        float forceRatio)
+    {
+        return elapsedTime <= HitImpactFeedbackDuplicateWindow &&
+               distanceSqr <= HitImpactFeedbackDuplicateDistance * HitImpactFeedbackDuplicateDistance &&
+               directionDot >= HitImpactFeedbackDuplicateDirectionDot &&
+               forceRatio <= HitImpactFeedbackDuplicateForceRatioMax;
+    }
+
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_NotifyHitImpactFeedback(Vector3 hitPoint, Vector3 knockbackDir, float punchForce)
+    {
+        if (HasStateAuthority)
+            return;
+
+        PlayReplicatedHitImpactFeedback(hitPoint, knockbackDir, punchForce);
+    }
+
+    private bool ShouldSuppressDuplicateHitImpactFeedback(Vector3 hitPoint, Vector3 knockbackDir, float punchForce)
+    {
+        if (!float.IsFinite(_lastHitImpactFeedbackTime))
+            return false;
+
+        var direction = ResolveImpactFeedbackDirection(knockbackDir);
+        var elapsedTime = Time.unscaledTime - _lastHitImpactFeedbackTime;
+        var distanceSqr = (_lastHitImpactFeedbackPosition - hitPoint).sqrMagnitude;
+        var directionDot = Vector3.Dot(_lastHitImpactFeedbackDirection, direction);
+        var currentForce = Mathf.Max(0.01f, Mathf.Abs(punchForce));
+        var previousForce = Mathf.Max(0.01f, Mathf.Abs(_lastHitImpactFeedbackForce));
+        var forceRatio = currentForce >= previousForce
+            ? currentForce / previousForce
+            : previousForce / currentForce;
+
+        return ShouldSuppressDuplicateHitImpactFeedback(elapsedTime, distanceSqr, directionDot, forceRatio);
+    }
+
+    private void RegisterHitImpactFeedback(Vector3 hitPoint, Vector3 knockbackDir, float punchForce)
+    {
+        _lastHitImpactFeedbackTime = Time.unscaledTime;
+        _lastHitImpactFeedbackPosition = hitPoint;
+        _lastHitImpactFeedbackDirection = ResolveImpactFeedbackDirection(knockbackDir);
+        _lastHitImpactFeedbackForce = punchForce;
+    }
+
+    private Vector3 ResolveImpactFeedbackDirection(Vector3 knockbackDir)
+    {
+        if (knockbackDir.sqrMagnitude > 0.0001f)
+            return knockbackDir.normalized;
+
+        var fallbackDirection = ResolveCombatForward();
+        if (fallbackDirection.sqrMagnitude > 0.0001f)
+            return fallbackDirection.normalized;
+
+        return Vector3.forward;
     }
 
     // ─── 히트 VFX 스폰 ───

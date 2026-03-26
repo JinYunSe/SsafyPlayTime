@@ -63,7 +63,7 @@ public class CombatSettings : MonoBehaviour
     [Header("Grab/Throw")]
     public float grabThrowForceObject = 12f;
     public float grabThrowForceNormal = 10f;
-    public float grabThrowForceStunned = 15f;
+    public float grabThrowForceStunned = 10f;
     public float thrownObjectStunDamage = 20f;
     public float thrownPlayerStunDamage = 25f;
 

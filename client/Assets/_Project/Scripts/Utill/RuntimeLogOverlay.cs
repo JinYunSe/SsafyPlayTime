@@ -209,8 +209,7 @@ namespace SSAFYPlayTime
             CreateTopRightButton("CopyButton", "Copy", new Vector2(-48f, -8f), 72f, CopyLogsToClipboard);
             CreateTopRightButton("ClearButton", "Clear", new Vector2(-126f, -8f), 72f, ClearLogs);
 
-            // 기본적으로 숨김 상태 — F6으로 토글
-            _panel.SetActive(false);
+            _panel.SetActive(RuntimeLoggingSettings.ShowRuntimeLogOverlayOnStart);
         }
 
         private void CreateTopRightButton(string objectName, string labelText, Vector2 anchoredPosition, float width, UnityEngine.Events.UnityAction onClick)
@@ -251,8 +250,10 @@ namespace SSAFYPlayTime
         {
             try
             {
-                _logFilePath = Path.Combine(Application.persistentDataPath, "runtime-log.txt");
-                File.WriteAllText(_logFilePath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Runtime log started.{Environment.NewLine}");
+                _logFilePath = RuntimeLoggingSettings.ResolveRuntimeLogPath();
+                File.WriteAllText(
+                    _logFilePath,
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Runtime log started. pid={System.Diagnostics.Process.GetCurrentProcess().Id}{Environment.NewLine}");
                 AppendLine($"Log file: {_logFilePath}");
             }
             catch (Exception e)

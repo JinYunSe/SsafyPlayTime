@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace SSAFYPlayTime.Stage
 {
@@ -28,14 +29,17 @@ namespace SSAFYPlayTime.Stage
         [SerializeField] private float castRadius = 0.25f;
         [Tooltip("복원 시 Map 표면 위로 띄울 추가 여유 (m)")]
         [SerializeField] private float recoverOffset = 0.08f;
+        [SerializeField] private float minimumPenetrationDepth = 0.06f;
 
         // Character(8)·Ragdoll(9) 레이어 Rigidbody 레지스트리.
         // SyncPhysicsObject(Ragdoll)와 BodyPartPhysicsManager(Character root)에서 자가 등록한다.
         // FindObjectsOfType<Rigidbody> 주기 탐색을 대체한다.
         private static readonly List<Rigidbody> s_registry = new();
+        private static MapTunnelGuard s_activeInstance;
 
         public static void Register(Rigidbody rb)
         {
+            EnsureActiveInstance();
             if (rb != null && !s_registry.Contains(rb))
                 s_registry.Add(rb);
         }
@@ -53,8 +57,15 @@ namespace SSAFYPlayTime.Stage
 
         private void Awake()
         {
+            s_activeInstance = this;
             _mapMask = 1 << LayerMap;
             ApplyContactOffsets();
+        }
+
+        private void OnDestroy()
+        {
+            if (ReferenceEquals(s_activeInstance, this))
+                s_activeInstance = null;
         }
 
         /// <summary>Map 하위 콜라이더 전체의 contactOffset을 일괄 적용한다 (일회성).</summary>
@@ -100,12 +111,49 @@ namespace SSAFYPlayTime.Stage
                 var surfaceY = hit.point.y;
                 if (pos.y >= surfaceY) continue;
 
+                var penetrationDepth = surfaceY - pos.y;
+                if (penetrationDepth <= minimumPenetrationDepth)
+                    continue;
+
                 // 터널링 감지: 표면 위로 복원
                 rb.position = new Vector3(pos.x, surfaceY + recoverOffset, pos.z);
 
                 var vel = rb.velocity;
                 if (vel.y < 0f)
                     rb.velocity = new Vector3(vel.x, 0f, vel.z);
+            }
+        }
+
+        private static void EnsureActiveInstance()
+        {
+            if (s_activeInstance != null)
+                return;
+
+            s_activeInstance = Object.FindAnyObjectByType<MapTunnelGuard>();
+            if (s_activeInstance != null)
+                return;
+
+            var scene = SceneManager.GetActiveScene();
+            if (!scene.IsValid() || !scene.isLoaded)
+                return;
+
+            var mapLayer = LayerMask.NameToLayer("Map");
+            var roots = scene.GetRootGameObjects();
+            for (var i = 0; i < roots.Length; i++)
+            {
+                var root = roots[i];
+                if (root == null)
+                    continue;
+
+                if ((mapLayer >= 0 && root.layer == mapLayer) ||
+                    root.name.Equals("Map", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    s_activeInstance = root.GetComponent<MapTunnelGuard>();
+                    if (s_activeInstance == null)
+                        s_activeInstance = root.AddComponent<MapTunnelGuard>();
+
+                    return;
+                }
             }
         }
     }

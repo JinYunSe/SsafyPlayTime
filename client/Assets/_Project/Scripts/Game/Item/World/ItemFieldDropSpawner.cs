@@ -34,7 +34,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private bool useGroundRaycast = true;
 
         [Header("디버그")]
-        [SerializeField] private bool enableDebugLog = true;
+    [SerializeField] private bool enableDebugLog = false;
 
         private readonly ItemFieldCatalogProvider _catalogProvider = new();
         private readonly DefaultItemFieldPrefabResolver _prefabResolver = new();

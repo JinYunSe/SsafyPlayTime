@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Linq;
 using Fusion;
 using UnityEngine;
@@ -13,6 +14,22 @@ using GrabAnchorId = SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId;
 /// </summary>
 public class HandGrabHandler : MonoBehaviour
 {
+    internal readonly struct ThrowImpulseData
+    {
+        internal ThrowImpulseData(Rigidbody connectedBody, Transform targetRoot, Vector3 impulse, bool isStunnedPlayer)
+        {
+            ConnectedBody = connectedBody;
+            TargetRoot = targetRoot;
+            Impulse = impulse;
+            IsStunnedPlayer = isStunnedPlayer;
+        }
+
+        internal Rigidbody ConnectedBody { get; }
+        internal Transform TargetRoot { get; }
+        internal Vector3 Impulse { get; }
+        internal bool IsStunnedPlayer { get; }
+    }
+
     public enum HandSide { Left, Right }
 
     [Header("Hand Identity")]
@@ -83,6 +100,10 @@ public class HandGrabHandler : MonoBehaviour
     float _reachIntentTime;
     const float NearConsciousProfileDistance = 0.58f;
     const float RecoveringProfileDistance = 0.8f;
+    const float StunnedThrowMinPlanarSpeed = 1.0f;
+    const float StunnedThrowFullPlanarSpeed = 6.0f;
+    const float StunnedThrowStationaryForceFloorScale = 0.2f;
+    const float StunnedThrowStationaryUpComponent = 0.12f;
     const float ReachAttachRadius = 0.18f;  // 손바닥 근접 판정 거리
     const float ReachAttachRadiusStunned = 0.45f;  // 기절자는 넓은 판정 (손이 아래로 뻗으므로)
     const float ReachTimeout = 0.6f;        // reach intent 자동 만료
@@ -93,6 +114,7 @@ public class HandGrabHandler : MonoBehaviour
     float _originalPinWeight;
     float _originalMuscleWeight;
     float _nextHoldDiagnosticsTime;
+    Coroutine _restoreIgnoredCollisionsCoroutine;
 
     // 동일 PuppetMaster를 잡고 있는 핸들러 수 (양손 중복 약화 방지)
     static readonly System.Collections.Generic.Dictionary<PuppetMaster, int> _grabRefCounts
@@ -350,6 +372,12 @@ public class HandGrabHandler : MonoBehaviour
             return;
         }
 
+        if (ShouldForceReleaseStunnedGrabWithoutDualHandCoordination())
+        {
+            ReleaseInPlace("DualHandStunnedGrabRequired");
+            return;
+        }
+
         // 잡고 있는 동안 시간 경과에 따라 breakForce 약화 (weakening curve)
         // 기절자 잡기 시 약화 스킵 가능 (안정적 운반을 위해)
         if (IsHolding && _configurableJoint != null && grabProfile != null
@@ -414,6 +442,11 @@ public class HandGrabHandler : MonoBehaviour
                 _pendingReachTarget = null;
                 _pendingReachAnchor = null;
             }
+            else if (isReachStunned && !CanStartStunnedDualReach(_pendingReachTarget, reachTargetNp))
+            {
+                _pendingReachTarget = null;
+                _pendingReachAnchor = null;
+            }
             else if (_pendingReachTarget == null || (Time.time - _reachIntentTime) > timeout)
             {
                 if (debugLog && _pendingReachTarget != null)
@@ -445,7 +478,8 @@ public class HandGrabHandler : MonoBehaviour
                             $"sensorOverlap={sensorOverlap}, anchor={_pendingReachAnchor.Id}, " +
                             $"target={_pendingReachTarget.name}", this);
 
-                    if (sensorOverlap || dist <= attachRadius)
+                    if ((sensorOverlap || dist <= attachRadius) &&
+                        CanAttachStunnedDualGrab(_pendingReachTarget, reachTargetNp))
                     {
                         AttachGrab(_pendingReachTarget, gripPos);
                         _pendingReachTarget = null;
@@ -461,7 +495,8 @@ public class HandGrabHandler : MonoBehaviour
                         Debug.Log($"[Grab] {handSide} reaching → dist={dist:F3}, attachR={attachRadius:F2}, stunned={isReachStunned}, " +
                             $"target={_pendingReachTarget.name}", this);
 
-                    if (dist <= attachRadius)
+                    if (dist <= attachRadius &&
+                        CanAttachStunnedDualGrab(_pendingReachTarget, reachTargetNp))
                     {
                         AttachGrab(_pendingReachTarget, closestPoint);
                         _pendingReachTarget = null;
@@ -505,8 +540,8 @@ public class HandGrabHandler : MonoBehaviour
         var handPos = transform.position;
 
         // 반대 손이 기절자를 잡고 있으면 같은 캐릭터의 다른 부위에 보너스 부여
-        Transform otherHandStunnedRoot = GetOtherHandStunnedTargetRoot();
-        var otherHandStunnedAnchorId = GetOtherHandStunnedAnchorId();
+        Transform otherHandStunnedRoot = GetOtherHandStunnedTargetRoot(includePendingReach: true);
+        var otherHandStunnedAnchorId = GetOtherHandStunnedAnchorId(includePendingReach: true);
 
         // --- GrabHurtbox 레이어 우선 스캔 (앵커 기반 정밀 잡기) ---
         if (_grabHurtboxLayerMask != 0)
@@ -537,6 +572,8 @@ public class HandGrabHandler : MonoBehaviour
                 if (dist < 0.001f) dist = 0.001f;
 
                 bool isStunnedTarget = !ownerNp.IsActiveRagdoll;
+                if (isStunnedTarget && !CanStartStunnedDualReach(rb, ownerNp))
+                    continue;
                 if (!isStunnedTarget && dist > grabRadius) continue;
                 float effectiveRadius = isStunnedTarget ? stunnedGrabRadius : grabRadius;
 
@@ -597,6 +634,8 @@ public class HandGrabHandler : MonoBehaviour
                 if (ShouldSuppressSecondaryConsciousGrab(rb, targetNp))
                     continue;
                 bool isStunnedTarget = targetNp != null && !targetNp.IsActiveRagdoll;
+                if (isStunnedTarget && !CanStartStunnedDualReach(rb, targetNp))
+                    continue;
                 if (!isStunnedTarget && dist > grabRadius) continue;
                 float effectiveRadius = isStunnedTarget ? stunnedGrabRadius : grabRadius;
 
@@ -645,6 +684,13 @@ public class HandGrabHandler : MonoBehaviour
                     $"dist={Vector3.Distance(transform.position, bestTarget.position):F3}", this);
 
             // 즉시 attach하지 않고 reach intent만 설정 — 근접/접촉 시 실제 attach
+            if (foundStunned && !CanStartStunnedDualReach(bestTarget, foundNp))
+            {
+                _pendingReachTarget = null;
+                _pendingReachAnchor = null;
+                return;
+            }
+
             _pendingReachTarget = bestTarget;
             _pendingReachAnchor = bestAnchor;
             _reachIntentTime = Time.time;
@@ -691,13 +737,21 @@ public class HandGrabHandler : MonoBehaviour
     }
 
     private void CompleteHeldTargetRelease()
+        => CompleteHeldTargetRelease(delayCollisionRestore: false);
+
+    private void CompleteHeldTargetRelease(bool delayCollisionRestore)
     {
+        var releasedPlayer = _grabbedPlayer;
         RestoreGrabbedPuppet();
         NotifyGrabReleased();
-        ClearAnchorState();
+        ClearAnchorState(restoreIgnoredCollisions: !delayCollisionRestore);
         DestroyActiveJoint();
         _grabbedPlayer = null;
         _grabbedPuppet = null;
+        releasedPlayer?.RefreshGrabbedStateAfterRelease(
+            delayCollisionRestore ? "ThrowRelease" : "Release");
+        if (releasedPlayer != null && !releasedPlayer.IsActiveRagdoll)
+            releasedPlayer.ArmStunnedReleaseRecoveryGrace(delayCollisionRestore ? "ThrowRelease" : "Release");
     }
 
     private void ReleaseInPlace(string diagnosticsSource)
@@ -715,7 +769,8 @@ public class HandGrabHandler : MonoBehaviour
 
     public void Drop()
     {
-        if (!IsHolding) return;
+        if (!IsHolding)
+            return;
 
         if (debugLog)
             Debug.Log($"[Grab] {handSide} Drop() called, target={(_grabbedPlayer != null ? _grabbedPlayer.name : "object")}", this);
@@ -732,9 +787,13 @@ public class HandGrabHandler : MonoBehaviour
 
     public void Throw()
     {
-        if (!IsHolding) return;
+        if (!IsHolding)
+            return;
 
-        EmitGrabDiagnostics("Throw", true);
+        TryBuildThrowImpulse(out var throwData);
+        ReleaseHeldTargetForThrow();
+        ApplyThrowImpulse(throwData);
+        /*
 
         Rigidbody connected = PrepareHeldTargetForRelease(resetHeldMotion: true);
         bool isConsciousPlayer = _grabbedPlayer != null && _grabbedPlayer.IsActiveRagdoll;
@@ -773,6 +832,7 @@ public class HandGrabHandler : MonoBehaviour
 
             connected.AddForce(throwDir, ForceMode.Impulse);
         }
+        */
     }
 
     void OnCollisionEnter(Collision collision)
@@ -813,6 +873,9 @@ public class HandGrabHandler : MonoBehaviour
 
         var otherPlayer = otherRb.transform.root.GetComponent<NetworkPlayer>();
         if (ShouldSuppressSecondaryConsciousGrab(otherRb, otherPlayer))
+            return false;
+
+        if (!CanAttachStunnedDualGrab(otherRb, otherPlayer))
             return false;
 
         if (IsFieldItemRigidbody(otherRb))
@@ -1019,6 +1082,78 @@ public class HandGrabHandler : MonoBehaviour
         return otherHandRoot != null && targetRb.transform.root == otherHandRoot;
     }
 
+    private bool IsStunnedPlayerTarget(Rigidbody targetRb, NetworkPlayer targetPlayer = null)
+    {
+        if (targetRb == null)
+            return false;
+
+        targetPlayer ??= targetRb.transform.root.GetComponent<NetworkPlayer>();
+        return targetPlayer != null && !targetPlayer.IsActiveRagdoll;
+    }
+
+    private HandGrabHandler GetOtherHandHandler()
+    {
+        if (networkPlayer == null)
+            return null;
+
+        var handlers = networkPlayer.GetComponentsInChildren<HandGrabHandler>(true);
+        foreach (var handler in handlers)
+        {
+            if (handler != null && handler != this)
+                return handler;
+        }
+
+        return null;
+    }
+
+    private bool AreBothHandGrabInputsActive()
+    {
+        if (networkPlayer == null)
+            return false;
+
+        var otherHand = GetOtherHandHandler();
+        return otherHand != null &&
+               networkPlayer.IsHandGrabActive(handSide) &&
+               networkPlayer.IsHandGrabActive(otherHand.Side);
+    }
+
+    private bool CanStartStunnedDualReach(Rigidbody targetRb, NetworkPlayer targetPlayer)
+    {
+        if (!IsStunnedPlayerTarget(targetRb, targetPlayer))
+            return true;
+
+        if (!AreBothHandGrabInputsActive())
+            return false;
+
+        var coordinatedRoot = GetOtherHandStunnedTargetRoot(includePendingReach: true);
+        return coordinatedRoot == null || coordinatedRoot == targetRb.transform.root;
+    }
+
+    private bool CanAttachStunnedDualGrab(Rigidbody targetRb, NetworkPlayer targetPlayer)
+    {
+        if (!IsStunnedPlayerTarget(targetRb, targetPlayer))
+            return true;
+
+        if (!AreBothHandGrabInputsActive())
+            return false;
+
+        var coordinatedRoot = GetOtherHandStunnedTargetRoot(includePendingReach: true);
+        return coordinatedRoot != null && coordinatedRoot == targetRb.transform.root;
+    }
+
+    private bool ShouldForceReleaseStunnedGrabWithoutDualHandCoordination()
+    {
+        if (!IsHoldingStunnedPlayer)
+            return false;
+
+        if (!AreBothHandGrabInputsActive())
+            return true;
+
+        var coordinatedRoot = GetOtherHandStunnedTargetRoot(includePendingReach: true);
+        return coordinatedRoot == null || coordinatedRoot != GrabTargetRoot;
+    }
+
+
     // =========================================================
     // 조인트 생성 — 프로파일에 따라 FixedJoint / ConfigurableJoint
     // =========================================================
@@ -1039,6 +1174,9 @@ public class HandGrabHandler : MonoBehaviour
             _pendingReachAnchor = null;
             return;
         }
+
+        if (!CanAttachStunnedDualGrab(targetRb, targetPlayer))
+            return;
 
         Vector3 localAnchor = targetRb.transform.InverseTransformPoint(worldAnchorPoint);
 
@@ -1136,7 +1274,9 @@ public class HandGrabHandler : MonoBehaviour
 
             // 타겟의 AntiStretchController에 동적 링크 추가 (사지 스트레칭 방지)
             // 타겟의 BodyPartPhysicsManager에 앵커 그랩 오버레이 적용
-            if (_grabbedPlayer != null)
+            var shouldApplyVictimAnchorEffects =
+                _currentGrabTargetType != SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.Player;
+            if (_grabbedPlayer != null && shouldApplyVictimAnchorEffects)
             {
                 var targetAntiStretch = _grabbedPlayer.GetComponentInChildren<SSAFYPlayTime.Character.GrabAntiStretchController>(true);
                 if (targetAntiStretch != null)
@@ -1307,15 +1447,29 @@ public class HandGrabHandler : MonoBehaviour
     {
         if (_fixedJoint != null)
         {
-            Destroy(_fixedJoint);
+            DestroyJointImmediate(_fixedJoint);
             _fixedJoint = null;
         }
 
         if (_configurableJoint != null)
         {
-            Destroy(_configurableJoint);
+            DestroyJointImmediate(_configurableJoint);
             _configurableJoint = null;
         }
+    }
+
+    private static void DestroyJointImmediate(Joint joint)
+    {
+        if (joint == null)
+            return;
+
+        joint.connectedBody = null;
+        joint.enableCollision = false;
+
+        if (Application.isPlaying)
+            Object.Destroy(joint);
+        else
+            Object.DestroyImmediate(joint);
     }
 
     private void EmitGrabDiagnostics(string source, bool forceSample = false)
@@ -1335,6 +1489,16 @@ public class HandGrabHandler : MonoBehaviour
         return $"({value.x:F2},{value.y:F2},{value.z:F2})";
     }
 
+    private void EmitThrowRuntimeLog(string source, string details)
+    {
+        if (!SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            return;
+
+        Debug.Log(
+            $"[ThrowDiag] holder={(networkPlayer != null ? networkPlayer.name : name)} hand={handSide} {source} {details}",
+            this);
+    }
+
     // =========================================================
     // 던지기 힘 설정
     // =========================================================
@@ -1346,7 +1510,118 @@ public class HandGrabHandler : MonoBehaviour
 
     private float GetGrabThrowForceStunned()
     {
-        return CombatSettings.Instance != null ? CombatSettings.Instance.grabThrowForceStunned : 15f;
+        return CombatSettings.Instance != null ? CombatSettings.Instance.grabThrowForceStunned : 10f;
+    }
+
+    internal bool TryBuildThrowImpulse(out ThrowImpulseData throwData)
+    {
+        throwData = default;
+
+        if (!IsHolding)
+            return false;
+
+        var connected = GetConnectedBody();
+        var targetRoot = connected != null
+            ? connected.transform.root
+            : _grabbedPlayer != null ? _grabbedPlayer.transform.root : null;
+        var isConsciousPlayer = _grabbedPlayer != null && _grabbedPlayer.IsActiveRagdoll;
+        var isStunnedPlayer = _grabbedPlayer != null && !_grabbedPlayer.IsActiveRagdoll;
+
+        float force;
+        float throwUp;
+        var throwerPlanarSpeed = 0f;
+        var floorApplied = false;
+        if (isConsciousPlayer)
+        {
+            force = GetGrabThrowForceNormal() * (grabProfile != null ? grabProfile.consciousPushForceScale : 0.4f);
+            throwUp = grabProfile != null ? grabProfile.consciousPushUpComponent : 0.1f;
+        }
+        else if (isStunnedPlayer)
+        {
+            throwerPlanarSpeed = ResolveThrowerPlanarSpeed();
+            force = ResolveStunnedThrowForce(throwerPlanarSpeed, out floorApplied);
+            throwUp = grabProfile != null ? grabProfile.stunnedThrowUpComponent : 0.22f;
+            if (floorApplied)
+                throwUp = Mathf.Min(throwUp, StunnedThrowStationaryUpComponent);
+        }
+        else
+        {
+            force = 10f;
+            throwUp = grabProfile != null ? grabProfile.throwUpComponent : 0.4f;
+        }
+
+        var throwBasis = networkPlayer != null
+            ? networkPlayer.ResolveThrowFacingForwardPlanar()
+            : Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+        if (throwBasis.sqrMagnitude <= 0.0001f)
+            throwBasis = Vector3.forward;
+
+        var throwDirection = (throwBasis.normalized + Vector3.up * throwUp).normalized;
+        throwData = new ThrowImpulseData(
+            connected,
+            targetRoot,
+            throwDirection * Mathf.Max(0f, force),
+            isStunnedPlayer);
+
+        var targetPhase = _grabbedPlayer != null ? _grabbedPlayer.GetPhysicalPhase().ToString() : "None";
+        EmitThrowRuntimeLog(
+            "BuildImpulse",
+            $"target={(targetRoot != null ? targetRoot.name : "None")} phase={targetPhase} activeRagdoll={(_grabbedPlayer != null && _grabbedPlayer.IsActiveRagdoll ? 1 : 0)} " +
+            $"recovering={(_grabbedPlayer != null && _grabbedPlayer.IsRecovering ? 1 : 0)} throwable={(IsHoldingThrowableTarget ? 1 : 0)} " +
+            $"basis={FormatVector(throwBasis)} dir={FormatVector(throwDirection)} force={force:F2} up={throwUp:F2} planarSpeed={throwerPlanarSpeed:F2} floorApplied={(floorApplied ? 1 : 0)}");
+        return true;
+    }
+
+    internal void ReleaseHeldTargetForThrow()
+    {
+        if (!IsHolding)
+            return;
+
+        var targetPhase = _grabbedPlayer != null ? _grabbedPlayer.GetPhysicalPhase().ToString() : "None";
+        EmitThrowRuntimeLog(
+            "ReleaseForThrow",
+            $"target={(GrabTargetRoot != null ? GrabTargetRoot.name : "None")} phase={targetPhase} activeRagdoll={(_grabbedPlayer != null && _grabbedPlayer.IsActiveRagdoll ? 1 : 0)} " +
+            $"recovering={(_grabbedPlayer != null && _grabbedPlayer.IsRecovering ? 1 : 0)} throwable={(IsHoldingThrowableTarget ? 1 : 0)}");
+
+        EmitGrabDiagnostics("Throw", true);
+        PrepareHeldTargetForRelease(resetHeldMotion: true);
+        CompleteHeldTargetRelease(delayCollisionRestore: true);
+    }
+
+    internal static void ApplyThrowImpulse(ThrowImpulseData throwData)
+    {
+        if (throwData.ConnectedBody == null || throwData.Impulse.sqrMagnitude <= 0f)
+            return;
+
+        throwData.ConnectedBody.AddForce(throwData.Impulse, ForceMode.Impulse);
+    }
+
+    private float ResolveThrowerPlanarSpeed()
+    {
+        var throwerBody = networkPlayer != null ? networkPlayer.GetComponent<Rigidbody>() : null;
+        var velocity = throwerBody != null
+            ? throwerBody.velocity
+            : rigidbody3D != null ? rigidbody3D.velocity : Vector3.zero;
+        velocity.y = 0f;
+        return velocity.magnitude;
+    }
+
+    private float ResolveStunnedThrowForce(float planarSpeed, out bool floorApplied)
+    {
+        var baseForce = Mathf.Max(0f, GetGrabThrowForceStunned());
+        var scaledForce = baseForce * EvaluateStunnedThrowForceScale(planarSpeed);
+        var floorForce = baseForce * StunnedThrowStationaryForceFloorScale;
+        floorApplied = scaledForce < floorForce;
+        return floorApplied ? floorForce : scaledForce;
+    }
+
+    private static float EvaluateStunnedThrowForceScale(float planarSpeed)
+    {
+        var normalizedSpeed = Mathf.InverseLerp(
+            StunnedThrowMinPlanarSpeed,
+            StunnedThrowFullPlanarSpeed,
+            Mathf.Max(0f, planarSpeed));
+        return normalizedSpeed * normalizedSpeed;
     }
 
     // =========================================================
@@ -1524,37 +1799,43 @@ public class HandGrabHandler : MonoBehaviour
     /// 반대 손이 기절자를 잡고 있으면 해당 기절자의 루트 Transform 반환.
     /// 양손 잡기 유도에 사용.
     /// </summary>
-    private Transform GetOtherHandStunnedTargetRoot()
+    private Transform GetOtherHandStunnedTargetRoot(bool includePendingReach = false)
     {
-        if (networkPlayer == null) return null;
+        var otherHand = GetOtherHandHandler();
+        if (otherHand == null)
+            return null;
 
-        var handlers = networkPlayer.GetComponentsInChildren<HandGrabHandler>(true);
-        foreach (var h in handlers)
-        {
-            if (h == this || h == null) continue;
-            if (h.IsHoldingStunnedPlayer)
-                return h.GrabTargetRoot;
-        }
-        return null;
+        if (otherHand.IsHoldingStunnedPlayer)
+            return otherHand.GrabTargetRoot;
+
+        if (!includePendingReach || otherHand.PendingReachTarget == null)
+            return null;
+
+        var pendingPlayer = otherHand.PendingReachTarget.transform.root.GetComponent<NetworkPlayer>();
+        return pendingPlayer != null && !pendingPlayer.IsActiveRagdoll
+            ? otherHand.PendingReachTarget.transform.root
+            : null;
     }
 
-    private GrabAnchorPoint.AnchorId GetOtherHandStunnedAnchorId()
+    private GrabAnchorPoint.AnchorId GetOtherHandStunnedAnchorId(bool includePendingReach = false)
     {
-        if (networkPlayer == null)
+        var otherHand = GetOtherHandHandler();
+        if (otherHand == null)
             return GrabAnchorPoint.AnchorId.None;
 
-        var handlers = networkPlayer.GetComponentsInChildren<HandGrabHandler>(true);
-        foreach (var h in handlers)
+        if (otherHand.IsHoldingStunnedPlayer)
         {
-            if (h == null || h == this || !h.IsHoldingStunnedPlayer)
-                continue;
-
-            return h.AttachedAnchorPoint != null
-                ? h.AttachedAnchorPoint.Id
+            return otherHand.AttachedAnchorPoint != null
+                ? otherHand.AttachedAnchorPoint.Id
                 : GrabAnchorPoint.AnchorId.None;
         }
 
-        return GrabAnchorPoint.AnchorId.None;
+        if (!includePendingReach || otherHand.PendingReachTarget == null)
+            return GrabAnchorPoint.AnchorId.None;
+
+        return otherHand.PendingReachAnchor != null
+            ? otherHand.PendingReachAnchor.Id
+            : GrabAnchorPoint.AnchorId.None;
     }
 
     // =========================================================
@@ -1565,9 +1846,12 @@ public class HandGrabHandler : MonoBehaviour
     /// 앵커 상태 및 선택적 충돌 무시 쌍을 전부 정리.
     /// 모든 grab 해제 경로에서 호출.
     /// </summary>
-    private void ClearAnchorState()
+    private void ClearAnchorState(bool restoreIgnoredCollisions = true)
     {
-        RestoreIgnoredCollisions();
+        if (restoreIgnoredCollisions)
+            RestoreIgnoredCollisions();
+        else
+            DelayRestoreIgnoredCollisions();
 
         // 타겟의 동적 안티스트레치 링크 제거 + 앵커 그랩 오버레이 해제
         if (_attachedAnchorPoint != null && _grabbedPlayer != null)
@@ -1614,8 +1898,27 @@ public class HandGrabHandler : MonoBehaviour
     /// <summary>
     /// 선택적 충돌 무시를 복원 (모든 쌍의 Physics.IgnoreCollision을 false로).
     /// </summary>
+    private void DelayRestoreIgnoredCollisions()
+    {
+        if (_ignoredCollisionPairs.Count == 0)
+            return;
+
+        if (_restoreIgnoredCollisionsCoroutine != null)
+            StopCoroutine(_restoreIgnoredCollisionsCoroutine);
+
+        _restoreIgnoredCollisionsCoroutine = StartCoroutine(RestoreIgnoredCollisionsNextFixedUpdate());
+    }
+
+    private IEnumerator RestoreIgnoredCollisionsNextFixedUpdate()
+    {
+        yield return new WaitForFixedUpdate();
+        _restoreIgnoredCollisionsCoroutine = null;
+        RestoreIgnoredCollisions();
+    }
+
     private void RestoreIgnoredCollisions()
     {
+        _restoreIgnoredCollisionsCoroutine = null;
         for (int i = 0; i < _ignoredCollisionPairs.Count; i++)
         {
             var pair = _ignoredCollisionPairs[i];
