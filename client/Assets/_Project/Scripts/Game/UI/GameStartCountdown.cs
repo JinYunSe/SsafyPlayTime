@@ -60,8 +60,6 @@ public class GameStartCountdown : NetworkBehaviour
         switch (CountdownValue)
         {
             case 3:
-                hud.HideLoadingAndShow("3", Color.white);
-                break;
             case 2:
             case 1:
                 hud.ShowWithPulse(CountdownValue.ToString(), Color.white);
