@@ -5,10 +5,14 @@ using UnityEngine;
 /// <summary>
 /// 카메라로부터의 거리에 따라 PuppetMaster를 비활성화/활성화한다.
 /// 비활성화 시 Root Rigidbody를 kinematic으로 바꿔 낙하를 막는다.
+/// LOD 단계: Full(0~reducedDistance) → Reduced(~activeDistance) → Disabled(deactivateDistance+)
 /// </summary>
 public class PuppetMasterLOD : MonoBehaviour
 {
+    public enum LODLevel { Full = 0, Reduced = 1, Disabled = 2 }
+
     [Header("Settings")]
+    [SerializeField] float reducedDistance = 15f;
     [SerializeField] float activeDistance = 20f;
     [SerializeField] float deactivateDistance = 25f;
 
@@ -24,6 +28,9 @@ public class PuppetMasterLOD : MonoBehaviour
     bool _isDeactivated;
     bool _wasKinematic;
     Vector3 _lastSafePosition;
+    LODLevel _currentLOD;
+
+    public LODLevel CurrentLOD => _currentLOD;
 
     void Awake()
     {
@@ -77,6 +84,11 @@ public class PuppetMasterLOD : MonoBehaviour
                 lod.Activate();
             else if (!lod._isDeactivated && dist > lod.deactivateDistance)
                 lod.Deactivate();
+
+            if (!lod._isDeactivated)
+                lod._currentLOD = dist < lod.reducedDistance ? LODLevel.Full : LODLevel.Reduced;
+            else
+                lod._currentLOD = LODLevel.Disabled;
         }
     }
 

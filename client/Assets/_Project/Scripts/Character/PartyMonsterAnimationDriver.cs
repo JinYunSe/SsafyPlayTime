@@ -29,6 +29,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     const float AerialKickAirbornePoseHoldMaxDuration = 1.50f;
     const float AerialKickAirbornePoseNormalizedTime = 0.58f;
     const float AerialKickAirbornePoseLeadSeconds = 0.10f;
+    const double AerialKickClipCompletionGraceSeconds = 1d / 120d;
 
     [SerializeField]
     Animator animator;
@@ -158,7 +159,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         if (!canDriveAnimation)
         {
             if (isAerialKickAnimationActive)
-                CancelAerialKickAnimation();
+                InterruptAerialKickAnimationForPresentationHandoff("drive-disabled");
             if (isRecoveryAnimationActive)
                 CancelRecoveryAnimation();
 
@@ -195,7 +196,9 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
 
         // Handoff transition can occasionally miss the visual restore latch in player builds.
         // Keep the fallback strictly inside the actual recovery phase so it cannot affect normal combat.
-        if (recoveryQueued)
+        var canStartQueuedRecoveryAnimation = networkPlayer == null ||
+                                              networkPlayer.GetStunPresentationPhase() != NetworkPlayer.StunPresentationPhase.RecoverStabilizing;
+        if (recoveryQueued && canStartQueuedRecoveryAnimation)
         {
             RestoreAnimatorAfterPhysicsPresentation();
             if (isRecoveryAnimationActive)
@@ -334,6 +337,33 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         RestoreAerialKickAnimatorRootPose();
         hasAerialKickAnimatorRootPose = false;
         DestroyAerialKickGraph();
+    }
+
+    internal void InterruptAerialKickAnimationForPresentationHandoff(string reason)
+    {
+        if (!isAerialKickAnimationActive)
+            return;
+
+        LogAerialKickAnimationEvent("Interrupt", $"{reason} {DescribeAerialKickPresentationContext()}");
+        CancelAerialKickAnimation();
+        RestoreAnimatorAfterAerialKickStop(forceControllerRebind: false);
+    }
+
+    private void RestoreAnimatorAfterAerialKickStop(bool forceControllerRebind)
+    {
+        if (animator == null)
+            return;
+
+        animator.enabled = true;
+        if (forceControllerRebind || !animator.isInitialized)
+            animator.Rebind();
+        ResetActionState();
+        currentStateName = null;
+        currentUpperBodyStateName = null;
+        animator.SetLayerWeight(UpperBodyLayer, 0f);
+        animator.Update(0f);
+        UpdateCurrentLocomotion();
+        animator.Update(0f);
     }
 
     public void PlayAttack()
@@ -700,13 +730,36 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         aerialKickPlayable.SetSpeed(0d);
     }
 
+    static bool HasAerialKickAnimationReachedClipEnd(double clipTime, double clipLength)
+    {
+        if (clipLength <= 0d)
+            return true;
+
+        return clipTime + AerialKickClipCompletionGraceSeconds >= clipLength;
+    }
+
+    static bool ShouldContinueAerialKickPoseHold(
+        float currentTime,
+        float minHoldUntilTime,
+        float maxHoldUntilTime,
+        bool shouldEndPresentation)
+    {
+        if (currentTime < minHoldUntilTime)
+            return true;
+
+        if (shouldEndPresentation)
+            return false;
+
+        return currentTime < maxHoldUntilTime;
+    }
+
     bool ShouldFreezeAerialKickAirbornePose()
     {
         if (isAerialKickAirbornePoseHeld || !aerialKickGraph.IsValid() || currentAerialKickClip == null)
             return false;
 
         var poseTime = ResolveAerialKickAirbornePoseTime();
-        if (aerialKickPlayable.GetTime() + (1d / 120d) < poseTime)
+        if (aerialKickPlayable.GetTime() + AerialKickClipCompletionGraceSeconds < poseTime)
             return false;
 
         if (networkPlayer == null)
@@ -721,7 +774,13 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
             return false;
 
         if (networkPlayer == null)
-            return Time.time < aerialKickAirbornePoseMaxHoldUntilTime;
+        {
+            return ShouldContinueAerialKickPoseHold(
+                Time.time,
+                aerialKickAirbornePoseMinHoldUntilTime,
+                aerialKickAirbornePoseMaxHoldUntilTime,
+                shouldEndPresentation: false);
+        }
 
         if (Time.time < aerialKickAirbornePoseMinHoldUntilTime)
             return true;
@@ -732,12 +791,22 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         // 에어리얼킥 프레젠테이션이 Launch/Fall 상태면 (아직 비행/낙하 중)
         // maxHold 타임아웃과 무관하게 포즈를 유지한다.
         // 타임아웃으로 강제 종료하면 공중에서 Idle 포즈가 보이는 버그가 발생한다.
-        var presState = networkPlayer.GetAerialKickPresentationState();
-        if (presState == NetworkPlayer.AerialKickPresentationState.Launch ||
-            presState == NetworkPlayer.AerialKickPresentationState.Fall)
-            return true;
-
         return Time.time < aerialKickAirbornePoseMaxHoldUntilTime;
+    }
+
+    void ReleaseAerialKickAirbornePoseHold(string reason)
+    {
+        if (!isAerialKickAirbornePoseHeld)
+            return;
+
+        isAerialKickAirbornePoseHeld = false;
+        aerialKickAirbornePoseMinHoldUntilTime = float.NegativeInfinity;
+        aerialKickAirbornePoseMaxHoldUntilTime = float.NegativeInfinity;
+
+        if (aerialKickGraph.IsValid())
+            aerialKickPlayable.SetSpeed(1d);
+
+        LogAerialKickAnimationEvent("Resume", $"{reason} {DescribeAerialKickPresentationContext()}");
     }
 
     void TickAerialKickAnimation()
@@ -763,20 +832,38 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         }
 
         if (!isAerialKickAirbornePoseHeld)
+        {
+            if (HasAerialKickAnimationReachedClipEnd(aerialKickPlayable.GetTime(), currentAerialKickClip.length))
+            {
+                LogAerialKickAnimationEvent("Stop", $"clip-complete {DescribeAerialKickPresentationContext()}");
+                StopAerialKickAnimation();
+            }
+
             return;
+        }
 
         if (!ShouldKeepHoldingAerialKickPose())
         {
             var reason = "timeout";
+            var groundedForPresentation = false;
             if (networkPlayer != null)
             {
-                if (networkPlayer.IsGroundedForPresentation())
+                groundedForPresentation = networkPlayer.IsGroundedForPresentation();
+                if (groundedForPresentation)
                     reason = "presentation-grounded";
                 else if (Time.time >= aerialKickAirbornePoseMaxHoldUntilTime)
                     reason = "airborne-pose-timeout";
                 else
                     reason = $"presentation-ended phase={networkPlayer.GetPhysicalPhase()}";
             }
+
+            if (!groundedForPresentation &&
+                !HasAerialKickAnimationReachedClipEnd(aerialKickPlayable.GetTime(), currentAerialKickClip.length))
+            {
+                ReleaseAerialKickAirbornePoseHold(reason);
+                return;
+            }
+
             LogAerialKickAnimationEvent("Stop", $"{reason} {DescribeAerialKickPresentationContext()}");
             StopAerialKickAnimation();
             return;
@@ -797,13 +884,7 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
         RestoreAerialKickAnimatorRootPose();
         hasAerialKickAnimatorRootPose = false;
         DestroyAerialKickGraph();
-
-        if (animator == null)
-            return;
-
-        animator.enabled = true;
-        animator.SetLayerWeight(UpperBodyLayer, 0f);
-        UpdateCurrentLocomotion();
+        RestoreAnimatorAfterAerialKickStop(forceControllerRebind: true);
     }
 
     void DestroyAerialKickGraph()
@@ -1177,6 +1258,10 @@ public class PartyMonsterAnimationDriver : MonoBehaviour
     {
         // 기절 중이면 애니메이션 구동 불가 (래그돌이 대신 보임)
         if (networkPlayer != null && networkPlayer.ShouldUseHardPhysicsVisualMode())
+            return false;
+
+        // 프록시 plain stun local soft flop 동안에는 PuppetMaster mapping이 visible rig를 소유한다.
+        if (networkPlayer != null && networkPlayer.IsProxyLocalSoftFlopActive)
             return false;
 
         // 원격 프록시는 로컬 BehaviourPuppet 상태와 무관하게 항상 애니메이션 구동

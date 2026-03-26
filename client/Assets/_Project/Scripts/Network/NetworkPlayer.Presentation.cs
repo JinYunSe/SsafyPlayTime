@@ -42,6 +42,9 @@ public sealed partial class NetworkPlayer
     private const float RemoteBufferedPresentationRootFollowSpeed = 7f;
     private const float OwnerBufferedPresentationRootFollowSpeed = 9f;
     private const float ProxyPresentationRootSnapDistance = 2.75f;
+    private const float ProxyStartupPresentationSnapWindow = 0.35f;
+    private const float ProxyStartupPresentationGapThreshold = 0.08f;
+    private const float ProxyStartupPresentationVerticalSnapThreshold = 0.03f;
     private const float IncomingHeldVictimStableRootOffset = 0.1f;
     private const float IncomingHeldVictimRecoveringRootOffset = 0.16f;
     private const float IncomingHeldVictimStableBoneBlendWeight = 0.42f;
@@ -115,6 +118,8 @@ public sealed partial class NetworkPlayer
     private Vector3 _hipsSnapshotTo;
     private bool _snapshotBufferInitialized;
     private bool _proxyPresentationRootSmoothingActive;
+    private bool _pendingProxySpawnPresentationSnap;
+    private float _proxySpawnPresentationSnapUntilTime = float.NegativeInfinity;
 
     // CarrySolveFrame: carry 진입/종료 시 snapshot 재시드용
     private bool _wasCarryPhaseLastFrame;
@@ -242,7 +247,7 @@ public sealed partial class NetworkPlayer
         // 이미 false를 반환하여 TryRestoreAnimatorDrivenPresentation이 먼저 실행된다.
         // 이 시점에 recoveryQueued가 false이면 스탠드업 애니메이션이 누락되므로
         // NetworkedRecoveryAnimationVariant(ForceRecover에서 동일 틱에 설정됨)를 사용해 미리 큐잉한다.
-        if (isRecovering)
+        if (isRecovering && GetStunPresentationPhase() != StunPresentationPhase.RecoverStabilizing)
             QueueRecoveryAnimationForVisuals();
 
         // 로컬 플레이어(OwnerProxy)가 기절 진입 시 슬로우모션 연출
@@ -297,6 +302,9 @@ public sealed partial class NetworkPlayer
 
     private bool ShouldUseBufferedProxyPoseInterpolation()
     {
+        if (ShouldUseProxyLocalSoftFlopPresentation())
+            return false;
+
         return GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing ||
                UsesBufferedProxyPosePhase(GetPhysicalPhase()) ||
                IsRemotePhysicsPresentationResetLocked();
@@ -346,6 +354,61 @@ public sealed partial class NetworkPlayer
         return OwnerBufferedPresentationRootFollowSpeed;
     }
 
+    private void ArmProxyStartupPresentationSnap()
+    {
+        if (HasStateAuthority)
+            return;
+
+        _pendingProxySpawnPresentationSnap = true;
+        _proxySpawnPresentationSnapUntilTime = Time.time + ProxyStartupPresentationSnapWindow;
+        _proxyPresentationRootSmoothingActive = false;
+
+        var seedHips = NetworkedHipsPosition != Vector3.zero ? NetworkedHipsPosition : transform.position;
+        _hipsSnapshotFrom = seedHips;
+        _hipsSnapshotTo = seedHips;
+    }
+
+    private bool TryApplyProxyStartupPresentationSnap(
+        Transform presentationRoot,
+        Vector3 targetPosition,
+        Vector3 pelvisBefore,
+        Vector3 visualBefore)
+    {
+        if (HasStateAuthority || !_pendingProxySpawnPresentationSnap || presentationRoot == null)
+            return false;
+
+        if (Time.time > _proxySpawnPresentationSnapUntilTime)
+        {
+            _pendingProxySpawnPresentationSnap = false;
+            return false;
+        }
+
+        var currentGap = presentationRoot.position - targetPosition;
+        var shouldSnap =
+            Mathf.Abs(currentGap.y) >= ProxyStartupPresentationVerticalSnapThreshold ||
+            currentGap.sqrMagnitude >= ProxyStartupPresentationGapThreshold * ProxyStartupPresentationGapThreshold;
+
+        _pendingProxySpawnPresentationSnap = false;
+        if (!shouldSnap)
+            return false;
+
+        presentationRoot.SetPositionAndRotation(targetPosition, transform.rotation);
+        _proxyPresentationRootSmoothingActive = false;
+
+        TraceStunTransformWriter(
+            "Writer.UpdateProxyPresentationRoot",
+            transform.position,
+            transform.position,
+            pelvisBefore: pelvisBefore,
+            pelvisAfter: ResolveStartupLaunchPelvisPosition(out _),
+            visualBefore: visualBefore,
+            visualAfter: presentationRoot.position,
+            note: $"actualRoot=0 mode=startupSnap targetY={targetPosition.y:F2}",
+            force: true);
+
+        return true;
+    }
+
     private void UpdateProxyPresentationRoot()
     {
         var presentationRoot = GetPresentationRootTransform();
@@ -361,7 +424,11 @@ public sealed partial class NetworkPlayer
         if (hasIncomingHeldVictimPresentation && incomingHeldRootOffset.sqrMagnitude > 0.0001f)
             targetPosition += incomingHeldRootOffset;
 
-        if (ShouldUseProxyPlainStunPoseAuthority() && ShouldUseHardPhysicsVisualMode())
+        if (TryApplyProxyStartupPresentationSnap(presentationRoot, targetPosition, pelvisBefore, visualBefore))
+            return;
+
+        if (ShouldUseProxyPlainStunPoseAuthority() &&
+            (ShouldUseHardPhysicsVisualMode() || ShouldUseProxyLocalSoftFlopPresentation()))
         {
             var targetRotation = transform.rotation;
             if ((presentationRoot.position - targetPosition).sqrMagnitude > 0.0001f ||
@@ -884,9 +951,20 @@ public sealed partial class NetworkPlayer
         var interpolator = new NetworkBehaviourBufferInterpolator(this);
         int boneCount = syncPhysicsObjects.Length;
         var phase = GetPhysicalPhase();
+        var useLocalSoftFlopPresentation = ShouldUseProxyLocalSoftFlopPresentation();
         var isCarryPhase = IsCarryPhysicalPhase(phase);
-        var useAuthoritativePlainStunPose = !HasStateAuthority && IsPlainStunPhase(phase);
+        var useAuthoritativePlainStunPose = !useLocalSoftFlopPresentation &&
+                                            !HasStateAuthority &&
+                                            IsPlainStunPhase(phase);
         var phaseChanged = phase != _lastInterpolatedPhase;
+        if (useLocalSoftFlopPresentation)
+        {
+            if (_wasCarryPhaseLastFrame)
+                ResetProxyCarryPresentationState(resetCarryTracking: true);
+
+            _lastInterpolatedPhase = phase;
+            return;
+        }
 
         // ── 스냅샷 버퍼 초기화 ──
         if (!_snapshotBufferInitialized || _boneSnapshotFrom == null || _boneSnapshotFrom.Length != boneCount)
@@ -1336,7 +1414,7 @@ public sealed partial class NetworkPlayer
 
     private void ApplyProxyPresentationRotation()
     {
-        if (HasStateAuthority || ShouldUseHardPhysicsPresentation())
+        if (HasStateAuthority || ShouldUseHardPhysicsPresentation() || ShouldUseProxyLocalSoftFlopPresentation())
             return;
 
         var presentationRoot = GetPresentationRootTransform();
