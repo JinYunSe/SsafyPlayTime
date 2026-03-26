@@ -312,20 +312,34 @@ public sealed partial class NetworkPlayer
 
     private bool ShouldUseProxyPlainStunPoseAuthority()
     {
-        if (HasStateAuthority)
+        return ShouldUseProxyAuthoritativeStunRecoveryPose(
+            GetPhysicalPhase(),
+            GetStunPresentationPhase(),
+            HasStateAuthority,
+            ShouldUseProxyLocalSoftFlopPresentation());
+    }
+
+    internal static bool ShouldUseProxyAuthoritativeStunRecoveryPose(
+        PhysicalPhase phase,
+        StunPresentationPhase presentationPhase,
+        bool hasStateAuthority,
+        bool useLocalSoftFlopPresentation)
+    {
+        if (hasStateAuthority || useLocalSoftFlopPresentation)
             return false;
 
-        var phase = GetPhysicalPhase();
         if (IsCarryPhysicalPhase(phase) ||
             phase == PhysicalPhase.BeingGrabbed ||
             phase == PhysicalPhase.Dragged ||
             phase == PhysicalPhase.DraggedStunned)
+        {
             return false;
+        }
 
         return phase == PhysicalPhase.StunnedCollapse ||
                phase == PhysicalPhase.Stunned ||
                phase == PhysicalPhase.SettledStunned ||
-               GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing;
+               presentationPhase == StunPresentationPhase.RecoverStabilizing;
     }
 
     private bool ShouldSmoothProxyPresentationRoot(Transform presentationRoot)
@@ -953,9 +967,11 @@ public sealed partial class NetworkPlayer
         var phase = GetPhysicalPhase();
         var useLocalSoftFlopPresentation = ShouldUseProxyLocalSoftFlopPresentation();
         var isCarryPhase = IsCarryPhysicalPhase(phase);
-        var useAuthoritativePlainStunPose = !useLocalSoftFlopPresentation &&
-                                            !HasStateAuthority &&
-                                            IsPlainStunPhase(phase);
+        var useAuthoritativeStunRecoveryPose = ShouldUseProxyAuthoritativeStunRecoveryPose(
+            phase,
+            GetStunPresentationPhase(),
+            HasStateAuthority,
+            useLocalSoftFlopPresentation);
         var phaseChanged = phase != _lastInterpolatedPhase;
         if (useLocalSoftFlopPresentation)
         {
@@ -1134,7 +1150,7 @@ public sealed partial class NetworkPlayer
                     desiredHipsPosition = interpolatedHips;
             }
 
-            if (useAuthoritativePlainStunPose)
+            if (useAuthoritativeStunRecoveryPose)
             {
                 desiredHipsPosition = latestHips;
                 hipsAlpha = 1f;
@@ -1294,7 +1310,7 @@ public sealed partial class NetworkPlayer
         }
 
         // ── 뼈 회전 — from→to 스냅샷 보간 ──
-        var rotationAlpha = useAuthoritativePlainStunPose
+        var rotationAlpha = useAuthoritativeStunRecoveryPose
             ? Mathf.Clamp01(Mathf.Max(interpolator.Alpha, 0.9f))
             : ResolveBoneRotationInterpolationAlpha(interpolator.Alpha) * slowMoAlphaScale;
         for (int i = 0; i < boneCount; i++)
