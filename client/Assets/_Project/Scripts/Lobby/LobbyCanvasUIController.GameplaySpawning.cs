@@ -13,6 +13,10 @@ namespace SSAFYPlayTime
     // 서버(IsServer)에서만 동작하며 각 플레이어에게 선택한 캐릭터를 Fusion으로 생성한다.
     public sealed partial class LobbyCanvasUIController
     {
+        private const float GameplaySpawnGroundProbeUpOffset = 2.5f;
+        private const float GameplaySpawnGroundProbeDistance = 12f;
+        private const float GameplaySpawnGroundClearance = 0.01f;
+
         [Header("Gameplay Spawning")]
         // 캐릭터 인덱스 → 프리팹 매핑 에셋. 프리팹 교체 시 이 에셋만 수정하면 된다.
         [SerializeField] private CharacterRegistry characterRegistry;
@@ -486,6 +490,82 @@ namespace SSAFYPlayTime
             return _cachedSpawnPointGroup;
         }
 
+        private static bool TryGetPrefabRootBottomOffset(GameObject prefab, out float bottomOffset)
+        {
+            bottomOffset = 0f;
+            if (prefab == null)
+                return false;
+
+            var collider = prefab.GetComponent<Collider>();
+            if (collider == null)
+                return false;
+
+            var lossyScale = collider.transform.lossyScale;
+            switch (collider)
+            {
+                case SphereCollider sphere:
+                {
+                    var radius = sphere.radius * Mathf.Max(
+                        Mathf.Abs(lossyScale.x),
+                        Mathf.Abs(lossyScale.y),
+                        Mathf.Abs(lossyScale.z));
+                    bottomOffset = sphere.center.y * Mathf.Abs(lossyScale.y) - radius;
+                    return true;
+                }
+                case CapsuleCollider capsule:
+                {
+                    var scaleY = Mathf.Abs(lossyScale.y);
+                    var radiusScale = capsule.direction switch
+                    {
+                        0 => Mathf.Max(scaleY, Mathf.Abs(lossyScale.z)),
+                        1 => Mathf.Max(Mathf.Abs(lossyScale.x), Mathf.Abs(lossyScale.z)),
+                        2 => Mathf.Max(Mathf.Abs(lossyScale.x), scaleY),
+                        _ => Mathf.Max(Mathf.Abs(lossyScale.x), Mathf.Abs(lossyScale.z))
+                    };
+                    var heightScale = capsule.direction switch
+                    {
+                        0 => Mathf.Abs(lossyScale.x),
+                        1 => scaleY,
+                        2 => Mathf.Abs(lossyScale.z),
+                        _ => scaleY
+                    };
+                    var centerY = capsule.center.y * scaleY;
+                    var radius = capsule.radius * radiusScale;
+                    var halfHeight = capsule.height * heightScale * 0.5f;
+                    bottomOffset = centerY - Mathf.Max(radius, halfHeight);
+                    return true;
+                }
+                case BoxCollider box:
+                    bottomOffset = (box.center.y - box.size.y * 0.5f) * Mathf.Abs(lossyScale.y);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool TryResolveGroundedSpawnPosition(GameObject prefab, Vector3 requestedPosition, out Vector3 groundedPosition)
+        {
+            groundedPosition = requestedPosition;
+
+            var rayOrigin = requestedPosition + Vector3.up * GameplaySpawnGroundProbeUpOffset;
+            if (!Physics.Raycast(
+                    rayOrigin,
+                    Vector3.down,
+                    out var hit,
+                    GameplaySpawnGroundProbeUpOffset + GameplaySpawnGroundProbeDistance,
+                    Physics.DefaultRaycastLayers,
+                    QueryTriggerInteraction.Ignore))
+            {
+                return false;
+            }
+
+            if (!TryGetPrefabRootBottomOffset(prefab, out var bottomOffset))
+                bottomOffset = 0f;
+
+            groundedPosition.y = hit.point.y - bottomOffset + GameplaySpawnGroundClearance;
+            return true;
+        }
+
         // 특정 플레이어의 캐릭터를 SpawnPointGroup 랜덤 포인트에 서버에서 스폰한다.
         // 이미 스폰됐거나 서버가 아닌 경우 즉시 반환한다.
         // 호스트 마이그레이션 진행 중(_isMigrating)에는 스폰을 건너뛴다.
@@ -662,6 +742,18 @@ namespace SSAFYPlayTime
                     {
                         Debug.LogWarning($"[Lobby] SpawnPointGroup not found and no fallback points set. player={player.PlayerId}, using default position.");
                     }
+                }
+
+                if (TryResolveGroundedSpawnPosition(prefab, spawnPosition, out var groundedSpawnPosition))
+                {
+                    if (Mathf.Abs(groundedSpawnPosition.y - spawnPosition.y) > 0.01f)
+                    {
+                        Debug.Log(
+                            $"[Lobby] Ground-snapped spawn. player={player.PlayerId}, prefab={prefab.name}, " +
+                            $"requestedY={spawnPosition.y:F2}, groundedY={groundedSpawnPosition.y:F2}");
+                    }
+
+                    spawnPosition = groundedSpawnPosition;
                 }
             }
 

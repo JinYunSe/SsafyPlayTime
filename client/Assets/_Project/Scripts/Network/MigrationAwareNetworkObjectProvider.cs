@@ -151,8 +151,12 @@ public class MigrationAwareNetworkObjectProvider : NetworkObjectProviderDefault
         var body = instance.GetComponent<Rigidbody>();
         if (body != null)
         {
-            body.velocity = Vector3.zero;
-            body.angularVelocity = Vector3.zero;
+            if (!body.isKinematic)
+            {
+                body.velocity = Vector3.zero;
+                body.angularVelocity = Vector3.zero;
+            }
+
             body.isKinematic = true;
             body.useGravity = false;
         }

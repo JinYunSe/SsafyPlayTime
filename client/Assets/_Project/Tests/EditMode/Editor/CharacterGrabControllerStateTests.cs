@@ -1,7 +1,42 @@
+using System.Reflection;
 using NUnit.Framework;
 
 public sealed class CharacterGrabControllerStateTests
 {
+    private static System.Type ResolvePhysicalPhaseType()
+    {
+        var type = typeof(NetworkPlayer).GetNestedType("PhysicalPhase", BindingFlags.Public | BindingFlags.NonPublic);
+        Assert.That(type, Is.Not.Null);
+        return type;
+    }
+
+    private static object ResolvePhysicalPhase(string name)
+    {
+        return System.Enum.Parse(ResolvePhysicalPhaseType(), name);
+    }
+
+    private static (bool handled, CharacterGrabController.GrabActionState actionState) InvokeTryResolvePhaseDrivenActionState(
+        object phase,
+        CharacterGrabController.GrabActionState previousActionState,
+        CharacterGrabController.HoldVariant previousHoldVariant)
+    {
+        var method = typeof(CharacterGrabController).GetMethod(
+            "TryResolvePhaseDrivenActionState",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.That(method, Is.Not.Null);
+        var parameters = new object[]
+        {
+            phase,
+            previousActionState,
+            previousHoldVariant,
+            CharacterGrabController.GrabActionState.Idle
+        };
+
+        var handled = (bool)method.Invoke(null, parameters);
+        return (handled, (CharacterGrabController.GrabActionState)parameters[3]);
+    }
+
     [Test]
     public void CarryPresentationState_MatchesCarryVariantsAndVictim()
     {
@@ -116,5 +151,74 @@ public sealed class CharacterGrabControllerStateTests
                 CharacterGrabController.GrabActionState.Idle,
                 CharacterGrabController.HoldVariant.CarriedVictim),
             Is.False);
+    }
+
+    [Test]
+    public void PhaseDrivenActionState_MapsDraggedStunnedToStruggle()
+    {
+        var result = InvokeTryResolvePhaseDrivenActionState(
+            ResolvePhysicalPhase("DraggedStunned"),
+            CharacterGrabController.GrabActionState.Idle,
+            CharacterGrabController.HoldVariant.None);
+
+        Assert.That(result.handled, Is.True);
+        Assert.That(result.actionState, Is.EqualTo(CharacterGrabController.GrabActionState.Struggle));
+    }
+
+    [Test]
+    public void PhaseDrivenActionState_MapsGrabVictimStunStatesToStruggle()
+    {
+        var grabbed = InvokeTryResolvePhaseDrivenActionState(
+            ResolvePhysicalPhase("BeingGrabbed"),
+            CharacterGrabController.GrabActionState.Idle,
+            CharacterGrabController.HoldVariant.None);
+
+        var dragged = InvokeTryResolvePhaseDrivenActionState(
+            ResolvePhysicalPhase("Dragged"),
+            CharacterGrabController.GrabActionState.Idle,
+            CharacterGrabController.HoldVariant.None);
+
+        var carriedStunned = InvokeTryResolvePhaseDrivenActionState(
+            ResolvePhysicalPhase("BeingCarriedStunned"),
+            CharacterGrabController.GrabActionState.Idle,
+            CharacterGrabController.HoldVariant.None);
+
+        Assert.That(grabbed.handled, Is.True);
+        Assert.That(grabbed.actionState, Is.EqualTo(CharacterGrabController.GrabActionState.Struggle));
+        Assert.That(dragged.handled, Is.True);
+        Assert.That(dragged.actionState, Is.EqualTo(CharacterGrabController.GrabActionState.Struggle));
+        Assert.That(carriedStunned.handled, Is.True);
+        Assert.That(carriedStunned.actionState, Is.EqualTo(CharacterGrabController.GrabActionState.Struggle));
+    }
+
+    [Test]
+    public void PhaseDrivenActionState_OnlyUsesCarryRecoveryWhenCarryContextStillExists()
+    {
+        var neutralRecovering = InvokeTryResolvePhaseDrivenActionState(
+            ResolvePhysicalPhase("Recovering"),
+            CharacterGrabController.GrabActionState.Idle,
+            CharacterGrabController.HoldVariant.None);
+
+        var carryRecovering = InvokeTryResolvePhaseDrivenActionState(
+            ResolvePhysicalPhase("Recovering"),
+            CharacterGrabController.GrabActionState.FrontCarry,
+            CharacterGrabController.HoldVariant.CarriedVictim);
+
+        Assert.That(neutralRecovering.handled, Is.False);
+        Assert.That(neutralRecovering.actionState, Is.EqualTo(CharacterGrabController.GrabActionState.Idle));
+        Assert.That(carryRecovering.handled, Is.True);
+        Assert.That(carryRecovering.actionState, Is.EqualTo(CharacterGrabController.GrabActionState.RecoverFromCarry));
+    }
+
+    [Test]
+    public void PhaseDrivenActionState_KeepsCarryRecoveryTransition()
+    {
+        var result = InvokeTryResolvePhaseDrivenActionState(
+            ResolvePhysicalPhase("Recovering"),
+            CharacterGrabController.GrabActionState.FrontCarry,
+            CharacterGrabController.HoldVariant.CarriedVictim);
+
+        Assert.That(result.handled, Is.True);
+        Assert.That(result.actionState, Is.EqualTo(CharacterGrabController.GrabActionState.RecoverFromCarry));
     }
 }
