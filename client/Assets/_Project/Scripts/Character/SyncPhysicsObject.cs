@@ -52,6 +52,14 @@ public class SyncPhysicsObject : MonoBehaviour
         // ConfigurableJoint가 있는 경우에만 스프링 값 기록
         if (joint != null)
             startSlerpPositionSpring = joint.slerpDrive.positionSpring;
+
+        // MapTunnelGuard 레지스트리에 등록 (FindObjectsOfType<Rigidbody> 대체)
+        SSAFYPlayTime.Stage.MapTunnelGuard.Register(rigidbody3D);
+    }
+
+    void OnDestroy()
+    {
+        SSAFYPlayTime.Stage.MapTunnelGuard.Unregister(rigidbody3D);
     }
 
     // 애니메이션 Rigidbody의 현재 회전을 읽어 ConfigurableJoint의 targetRotation에 적용한다.
