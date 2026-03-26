@@ -170,8 +170,7 @@ public sealed class CharacterGrabController : MonoBehaviour
         if (!IsStunnedHoldVariant(holdVariant))
             return false;
 
-        return actionState == GrabActionState.HoldOneHandStunned ||
-               actionState == GrabActionState.HoldTwoHandStunned ||
+        return actionState == GrabActionState.HoldTwoHandStunned ||
                actionState == GrabActionState.FrontCarry ||
                actionState == GrabActionState.OverheadCarry ||
                actionState == GrabActionState.DualCarry;
@@ -208,8 +207,12 @@ public sealed class CharacterGrabController : MonoBehaviour
             return IsThrowableObjectState(replicatedActionState, replicatedHoldVariant);
 
         ResolveReferences();
-        return IsHoldingThrowableObject(leftHand) ||
-               IsHoldingThrowableObject(rightHand);
+        var carryMode = networkPlayer != null
+            ? networkPlayer.GetLocalCarryMode()
+            : SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None;
+        var localActionState = ResolveActionState(carryMode);
+        var localHoldVariant = ResolveHoldVariant(carryMode);
+        return IsThrowableObjectState(localActionState, localHoldVariant);
     }
 
     public bool HasAnyStunnedHold()
@@ -297,6 +300,28 @@ public sealed class CharacterGrabController : MonoBehaviour
         return targetPlayer != null && !targetPlayer.IsDeadState;
     }
 
+    private static bool TryResolveStablePlayerAttachBody(NetworkPlayer targetPlayer, out Rigidbody stableBody)
+    {
+        stableBody = null;
+        if (targetPlayer == null)
+            return false;
+
+        stableBody = targetPlayer.GetComponent<Rigidbody>();
+        if (stableBody != null)
+            return true;
+
+        var puppet = targetPlayer.GetComponentInChildren<PuppetMaster>(true);
+        if (puppet == null || puppet.muscles == null || puppet.muscles.Length == 0)
+            return false;
+
+        var hipsJoint = puppet.muscles[0].joint;
+        if (hipsJoint == null)
+            return false;
+
+        stableBody = hipsJoint.GetComponent<Rigidbody>();
+        return stableBody != null;
+    }
+
     public void ResolveAttachTarget(
         Rigidbody originalTargetBody,
         Vector3 originalAnchorWorld,
@@ -308,6 +333,17 @@ public sealed class CharacterGrabController : MonoBehaviour
     {
         jointTargetBody = originalTargetBody;
         jointAnchorWorld = originalAnchorWorld;
+
+        if (targetType == SSAFYPlayTime.Character.GrabDriveProfile.GrabTargetType.Player &&
+            targetPlayer != null &&
+            TryResolveStablePlayerAttachBody(targetPlayer, out var stablePlayerBody))
+        {
+            jointTargetBody = stablePlayerBody;
+            jointAnchorWorld = attachedAnchorPoint != null
+                ? attachedAnchorPoint.GetGripWorldPosition()
+                : stablePlayerBody.worldCenterOfMass;
+            return;
+        }
 
         if (attachedAnchorPoint != null && attachedAnchorPoint.ParentBoneRigidbody != null)
         {
@@ -427,8 +463,7 @@ public sealed class CharacterGrabController : MonoBehaviour
 
         if (handler.IsHoldingStunnedPlayer)
         {
-            return carryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry ||
-                   carryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry
+            return carryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry
                 ? HandHoldMode.CarrySupport
                 : HandHoldMode.StunnedPlayer;
         }
@@ -448,6 +483,8 @@ public sealed class CharacterGrabController : MonoBehaviour
     private HoldVariant ResolveHoldVariant(SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode carryMode)
     {
         var carryHoldVariant = ResolveCarryHoldVariant(carryMode);
+        if (carryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry)
+            carryHoldVariant = HoldVariant.None;
         return carryHoldVariant != HoldVariant.None
             ? carryHoldVariant
             : ResolveDirectHoldVariant();
@@ -515,6 +552,8 @@ public sealed class CharacterGrabController : MonoBehaviour
         }
 
         var carryActionState = ResolveCarryActionState(carryMode);
+        if (carryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry)
+            carryActionState = GrabActionState.Idle;
         if (carryActionState != GrabActionState.Idle)
             return carryActionState;
 

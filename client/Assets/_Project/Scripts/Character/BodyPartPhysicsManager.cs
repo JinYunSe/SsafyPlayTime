@@ -122,6 +122,7 @@ namespace SSAFYPlayTime.Character
         private float _lastMotionYaw;
         private float _wobbleAmount;
         private bool _motionSampleInitialized;
+        private Rigidbody _registeredTunnelGuardBody;
 
         private PuppetMasterLOD _lodComponent;
 
@@ -139,6 +140,15 @@ namespace SSAFYPlayTime.Character
             _lodComponent = GetComponentInParent<PuppetMasterLOD>(true);
             ResolveNetworkPlayer();
             ResolveMotionReferences();
+        }
+
+        private void OnDestroy()
+        {
+            if (_registeredTunnelGuardBody != null)
+            {
+                SSAFYPlayTime.Stage.MapTunnelGuard.Unregister(_registeredTunnelGuardBody);
+                _registeredTunnelGuardBody = null;
+            }
         }
 
         private void OnValidate()
@@ -164,6 +174,7 @@ namespace SSAFYPlayTime.Character
             var previousCurrentState = _currentState;
             var previousTargetState = _targetState;
             SyncStateFromNetworkPlayer();
+            RegisterMotionRigidbodyWithTunnelGuard();
 
             if (networkPlayer != null &&
                 previousTargetState != _targetState &&
@@ -234,10 +245,13 @@ namespace SSAFYPlayTime.Character
             if (!_initialized)
                 return;
 
+            RegisterMotionRigidbodyWithTunnelGuard();
+
             if (lerpSpeed <= 0f || ShouldApplyStateImmediately(newState))
             {
                 _currentState = newState;
                 ApplyImmediate(newState);
+                RegisterMotionRigidbodyWithTunnelGuard();
             }
         }
 
@@ -258,8 +272,10 @@ namespace SSAFYPlayTime.Character
             if (!_initialized)
                 return;
 
+            RegisterMotionRigidbodyWithTunnelGuard();
             _currentState = newState;
             ApplyImmediate(newState);
+            RegisterMotionRigidbodyWithTunnelGuard();
         }
 
         public void SetProfile(BodyPartPhysicsProfile newProfile)
@@ -315,6 +331,31 @@ namespace SSAFYPlayTime.Character
 
             if (motionRigidbody == null)
                 motionRigidbody = GetComponent<Rigidbody>();
+
+            RegisterMotionRigidbodyWithTunnelGuard();
+        }
+
+        private void RegisterMotionRigidbodyWithTunnelGuard()
+        {
+            var desiredBody = ShouldRegisterMotionRigidbodyWithTunnelGuard()
+                ? motionRigidbody
+                : null;
+
+            if (ReferenceEquals(_registeredTunnelGuardBody, desiredBody))
+                return;
+
+            if (_registeredTunnelGuardBody != null)
+                SSAFYPlayTime.Stage.MapTunnelGuard.Unregister(_registeredTunnelGuardBody);
+
+            _registeredTunnelGuardBody = desiredBody;
+
+            if (_registeredTunnelGuardBody != null)
+                SSAFYPlayTime.Stage.MapTunnelGuard.Register(_registeredTunnelGuardBody);
+        }
+
+        private bool ShouldRegisterMotionRigidbodyWithTunnelGuard()
+        {
+            return IsDownedState(_currentState) || IsDownedState(_targetState);
         }
 
         private void ResolveNetworkPlayer()

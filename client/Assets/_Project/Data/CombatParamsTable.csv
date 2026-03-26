@@ -40,7 +40,7 @@ BODY_PART_BODY_MULTIPLIER,Body multiplier,1.0,Torso hits use the default stun mu
 BODY_PART_LIMB_MULTIPLIER,Limb multiplier,0.7,Limb hits reduce stun.
 GRAB_THROW_FORCE_OBJECT,Object throw force,12,Impulse applied when throwing an object.
 GRAB_THROW_FORCE_PLAYER_NORMAL,Normal player throw force,10,Throw force for an active ragdoll player.
-GRAB_THROW_FORCE_PLAYER_STUNNED,Stunned player throw force,15,Throw force for a stunned player.
+GRAB_THROW_FORCE_PLAYER_STUNNED,Stunned player throw force,10,Throw force for a stunned player.
 THROWN_OBJECT_STUN_DAMAGE,Thrown object stun damage,20,Stun damage dealt by a thrown object.
 THROWN_PLAYER_STUN_DAMAGE,Thrown player stun damage,25,Stun damage dealt by a thrown player.
 DROP_WEAPON_KEY,Drop key,70,Keyboard key code used for drop in docs only.

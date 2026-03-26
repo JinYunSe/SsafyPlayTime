@@ -36,8 +36,11 @@ public sealed partial class NetworkPlayer
     private const float CarryReleaseSettleEmergencySnapDistance = 2.25f;
     private const float CarryProxyTargetCacheWindow = 0.18f;
     private const float CarryProxyMinimumHipsAlpha = 0.72f;
+    private const float ProxyCarryExitPresentationSettleDuration = 0.18f;
+    private const float ProxyCarryExitAnchorMinGap = 0.08f;
     private const float ProxyNonCarryHipsReseedRootGap = 1.5f;
     private const float ProxyNonCarryHipsReseedVerticalGap = 1.25f;
+    private const float ProxyStunRecoveryUpwardHipsStep = 0.08f;
     private const float RemoteStablePresentationRootFollowSpeed = 10f;
     private const float RemoteBufferedPresentationRootFollowSpeed = 7f;
     private const float OwnerBufferedPresentationRootFollowSpeed = 9f;
@@ -575,7 +578,9 @@ public sealed partial class NetworkPlayer
         rootOffset = Vector3.zero;
         isRecoveringTarget = false;
 
-        if (HasStateAuthority || ShouldUseHardPhysicsVisualMode())
+        if (HasStateAuthority ||
+            ShouldUseHardPhysicsVisualMode() ||
+            ShouldPreferAnimatedConsciousGrabVictimPresentation())
         {
             ClearIncomingHeldVictimPresentation();
             return false;
@@ -677,7 +682,7 @@ public sealed partial class NetworkPlayer
         var visualBefore = visualRoot != null ? visualRoot.position : rootBefore;
 
         // settle 중에는 rigidbody position을 건드리지 않음 — 물리 velocity 기반 이동 보존
-        if (!isSettling && !HasStateAuthority && rigidbody3D != null && !rigidbody3D.isKinematic)
+        if (!HasStateAuthority && rigidbody3D != null && !rigidbody3D.isKinematic)
             rigidbody3D.position = nextRootPosition;
 
         transform.position = nextRootPosition;
@@ -798,6 +803,123 @@ public sealed partial class NetworkPlayer
         var blend = Mathf.InverseLerp(CarryReleaseSettleHipsSoftAlignDistance, hardSnapDistance, exitAnchorGap);
         blend = Mathf.Lerp(0.45f, 1f, blend);
         return Vector3.Lerp(desiredHipsPosition, _carryExitSnapshotAnchor, blend);
+    }
+
+    private static Vector3 ResolveProxyCarriedVictimExitAnchor(
+        Vector3 latestHipsPosition,
+        Vector3 lastCarryAnchorPosition,
+        bool hasCachedCarryRootTarget,
+        Vector3 cachedCarryRootTarget,
+        bool hasNetworkedVictimCarryRoot,
+        Vector3 networkedVictimCarryRootPosition,
+        bool hasNetworkedVictimAnchor,
+        Vector3 networkedVictimAnchorPosition,
+        bool hasNetworkedVictimRootOffset,
+        Vector3 networkedVictimRootOffset)
+    {
+        if (hasNetworkedVictimCarryRoot)
+            return networkedVictimCarryRootPosition;
+
+        if (hasCachedCarryRootTarget && cachedCarryRootTarget.sqrMagnitude > 0.0001f)
+            return cachedCarryRootTarget;
+
+        if (lastCarryAnchorPosition.sqrMagnitude > 0.0001f)
+            return lastCarryAnchorPosition;
+
+        if (hasNetworkedVictimAnchor)
+        {
+            var anchor = networkedVictimAnchorPosition;
+            if (hasNetworkedVictimRootOffset)
+                anchor += networkedVictimRootOffset;
+            return anchor;
+        }
+
+        return latestHipsPosition;
+    }
+
+    private bool TrySeedProxyCarriedVictimExitPresentation(Vector3 latestHipsPosition)
+    {
+        if (HasStateAuthority ||
+            _lastObservedCarryMode != SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim)
+        {
+            return false;
+        }
+
+        var hasCachedCarryRootTarget =
+            _cachedProxyCarryTargetPhase == PhysicalPhase.BeingCarriedStunned &&
+            Time.time <= _cachedProxyCarryTargetUntilTime;
+        var canReadNetworkedCarryState = IsNetworkReady && Object != null && Object.IsValid;
+        var hasNetworkedVictimCarryRoot = false;
+        var networkedVictimCarryRootPosition = Vector3.zero;
+        var hasNetworkedVictimAnchor = false;
+        var networkedVictimAnchorPosition = Vector3.zero;
+        var hasNetworkedVictimRootOffset = false;
+        var networkedVictimRootOffset = Vector3.zero;
+        if (canReadNetworkedCarryState)
+        {
+            hasNetworkedVictimCarryRoot = (bool)NetworkedVictimCarryRootValid;
+            networkedVictimCarryRootPosition = NetworkedVictimCarryRootPosition;
+            hasNetworkedVictimAnchor = (bool)NetworkedVictimAnchorValid;
+            networkedVictimAnchorPosition = NetworkedVictimAnchorPosition;
+            hasNetworkedVictimRootOffset = (bool)NetworkedVictimRootOffsetValid;
+            networkedVictimRootOffset = NetworkedVictimRootOffset;
+        }
+
+        var exitAnchor = ResolveProxyCarriedVictimExitAnchor(
+            latestHipsPosition,
+            _lastCarryAnchorPosition,
+            hasCachedCarryRootTarget,
+            _cachedProxyCarryRootTarget,
+            hasNetworkedVictimCarryRoot,
+            networkedVictimCarryRootPosition,
+            hasNetworkedVictimAnchor,
+            networkedVictimAnchorPosition,
+            hasNetworkedVictimRootOffset,
+            networkedVictimRootOffset);
+
+        ClearProxyCarrySupportRootOffset();
+        ClearCachedProxyCarryTargets();
+
+        var currentHipsPosition = latestHipsPosition;
+        if (syncPhysicsObjects != null &&
+            syncPhysicsObjects.Length > 0 &&
+            syncPhysicsObjects[0] != null)
+        {
+            currentHipsPosition = syncPhysicsObjects[0].transform.position;
+        }
+
+        _hipsSnapshotFrom = currentHipsPosition;
+        _hipsSnapshotTo = exitAnchor;
+
+        var exitGap = Vector3.Distance(latestHipsPosition, exitAnchor);
+        if (exitGap <= ProxyCarryExitAnchorMinGap)
+        {
+            _carryExitSnapshotAnchor = Vector3.zero;
+            _carryReleaseSettleRemaining = 0f;
+            return false;
+        }
+
+        var settings = ResolveCarryModeSettings(SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.CarriedVictim);
+        _carryExitSnapshotAnchor = exitAnchor;
+        _carryReleaseSettleRemaining = Mathf.Min(
+            settings.carryReleaseSettleDuration,
+            ProxyCarryExitPresentationSettleDuration);
+
+        TraceCarryDebugSample(
+            "SeedProxyCarryExit",
+            $"latestHips={FormatCarryDebugVector(latestHipsPosition)} exitAnchor={FormatCarryDebugVector(exitAnchor)} " +
+            $"exitGap={exitGap:F2} cached={(hasCachedCarryRootTarget ? 1 : 0)} " +
+            $"netCarryRootValid={(hasNetworkedVictimCarryRoot ? 1 : 0)} " +
+            $"netAnchorValid={(hasNetworkedVictimAnchor ? 1 : 0)}",
+            forceSample: exitGap > CarryPresentationTraceGapThreshold);
+        return true;
+    }
+
+    private bool ShouldHoldProxyCarryExitPresentation()
+    {
+        return !HasStateAuthority &&
+               _carryReleaseSettleRemaining > 0f &&
+               _carryExitSnapshotAnchor != Vector3.zero;
     }
 
     private bool TryResolveProxyCarryTargets(
@@ -972,6 +1094,7 @@ public sealed partial class NetworkPlayer
             GetStunPresentationPhase(),
             HasStateAuthority,
             useLocalSoftFlopPresentation);
+        var holdCarryExitPresentation = ShouldHoldProxyCarryExitPresentation();
         var phaseChanged = phase != _lastInterpolatedPhase;
         if (useLocalSoftFlopPresentation)
         {
@@ -999,27 +1122,32 @@ public sealed partial class NetworkPlayer
         }
 
         // ── 네트워크 상태가 바뀌었으면 스냅샷 시프트: to → from, latest → to ──
-        bool changed = false;
+        bool hipsChanged = false;
         var latestHips = NetworkedHipsPosition;
-        if (latestHips != _hipsSnapshotTo)
-            changed = true;
+        if (!holdCarryExitPresentation && latestHips != _hipsSnapshotTo)
+            hipsChanged = true;
 
-        if (!changed)
+        var boneChanged = false;
+        if (!hipsChanged)
         {
             for (int i = 0; i < boneCount; i++)
             {
                 if (BoneRotations.Get(i) != _boneSnapshotTo[i])
                 {
-                    changed = true;
+                    boneChanged = true;
                     break;
                 }
             }
         }
 
+        var changed = hipsChanged || boneChanged;
         if (changed)
         {
-            _hipsSnapshotFrom = _hipsSnapshotTo;
-            _hipsSnapshotTo = latestHips;
+            if (hipsChanged)
+            {
+                _hipsSnapshotFrom = _hipsSnapshotTo;
+                _hipsSnapshotTo = latestHips;
+            }
             System.Array.Copy(_boneSnapshotTo, _boneSnapshotFrom, boneCount);
             for (int i = 0; i < boneCount; i++)
                 _boneSnapshotTo[i] = BoneRotations.Get(i);
@@ -1086,11 +1214,15 @@ public sealed partial class NetworkPlayer
             }
             else if (!isCarryNow && _wasCarryPhaseLastFrame)
             {
-                if (!HasStateAuthority && phase == PhysicalPhase.Recovering)
+                var seededProxyCarryExit = !HasStateAuthority &&
+                                           TrySeedProxyCarriedVictimExitPresentation(latestHips);
+                if (!seededProxyCarryExit &&
+                    !HasStateAuthority &&
+                    phase == PhysicalPhase.Recovering)
                 {
                     ResetProxyCarryPresentationState(resetCarryTracking: true);
                 }
-                else
+                else if (!seededProxyCarryExit)
                 {
                     _carryExitSnapshotAnchor = Vector3.zero;
                     ClearProxyCarrySupportRootOffset();
@@ -1106,6 +1238,8 @@ public sealed partial class NetworkPlayer
             _lastInterpolatedPhase = phase;
         }
 
+        holdCarryExitPresentation = ShouldHoldProxyCarryExitPresentation();
+
         // ── 슬로우모션 보간 스케일 ──
         // 비호스트에서 Time.timeScale은 Fusion 보간 alpha에 영향을 주지 않으므로
         // 슬로우모션 중에는 alpha를 직접 스케일해서 뼈 움직임도 느리게 보이게 한다.
@@ -1114,7 +1248,7 @@ public sealed partial class NetworkPlayer
         // ── Hips(muscles[0]) 절대 위치 — from→to 스냅샷 보간 ──
         if (boneCount > 0 && syncPhysicsObjects[0] != null)
         {
-            if (!HasStateAuthority && !isCarryPhase && phaseChanged)
+            if (!HasStateAuthority && !isCarryPhase && phaseChanged && !holdCarryExitPresentation)
                 ReseedNonCarryProxyHipsSnapshot(latestHips);
 
             var hipsFrom = _hipsSnapshotFrom;
@@ -1150,13 +1284,18 @@ public sealed partial class NetworkPlayer
                     desiredHipsPosition = interpolatedHips;
             }
 
-            if (useAuthoritativeStunRecoveryPose)
+            if (useAuthoritativeStunRecoveryPose && !holdCarryExitPresentation)
             {
                 desiredHipsPosition = latestHips;
+                // 호스트의 SyncRootToPhysicsBody와 동일하게 프레임당 상향 이동량 제한
+                // — 복구 애니메이션이 pelvis를 끌어올릴 때 프록시가 공중에 뜨는 현상 방지
+                if (desiredHipsPosition.y > hipsCurrent.y + ProxyStunRecoveryUpwardHipsStep)
+                    desiredHipsPosition.y = hipsCurrent.y + ProxyStunRecoveryUpwardHipsStep;
                 hipsAlpha = 1f;
                 didHipsSnap = true;
             }
-            else if (ShouldReseedNonCarryProxyHips(phase, desiredHipsPosition, latestHips))
+            else if (!holdCarryExitPresentation &&
+                     ShouldReseedNonCarryProxyHips(phase, desiredHipsPosition, latestHips))
             {
                 ReseedNonCarryProxyHipsSnapshot(latestHips);
                 desiredHipsPosition = latestHips;
@@ -1626,9 +1765,7 @@ public sealed partial class NetworkPlayer
             // 비호스트: 정확한 hitPoint가 없으므로 캐릭터 중심 + 전방 오프셋으로 근사
             var approxHitPoint = transform.position + Vector3.up * 0.8f + ResolveCombatForward() * 0.2f;
             var approxDir = -ResolveCombatForward();
-            SpawnHitImpactVFX(approxHitPoint, approxDir, FallbackPunchKnockbackForce);
-            if (HasInputAuthority)
-                TriggerVictimCameraKick(approxDir, FallbackPunchKnockbackForce);
+            PlayReplicatedHitImpactFeedback(approxHitPoint, approxDir, FallbackPunchKnockbackForce);
         }
 
         // 비호스트 로컬 플레이어: StunFall 수신 시 즉시 슬로우모션 발동
@@ -1717,7 +1854,7 @@ public sealed partial class NetworkPlayer
         {
             // Host-side proxies have state authority, so Render() will not replay their
             // replicated events. Apply the action immediately on that local copy.
-            if ((eventType == AnimationEventType.KickLeft || eventType == AnimationEventType.KickRight || eventType == AnimationEventType.AerialKick)
+            if ((eventType == AnimationEventType.KickLeft || eventType == AnimationEventType.KickRight || eventType == AnimationEventType.AerialKick || eventType == AnimationEventType.Headbutt)
                 ? (HasStateAuthority || Runner == null)
                 : (HasStateAuthority && !HasInputAuthority))
                 ApplyExternalDriverAnimationEvent(eventType);

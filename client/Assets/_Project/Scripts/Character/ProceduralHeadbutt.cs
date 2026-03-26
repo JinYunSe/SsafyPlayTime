@@ -26,18 +26,22 @@ public class ProceduralHeadbutt : MonoBehaviour
     [SerializeField] private float headDriveForce = 320f;
     [SerializeField] private float headReturnForce = 310f;
     [SerializeField] private float headDamping = 20f;
-    [SerializeField] private float upperChestAssistForce = 88f;
-    [SerializeField] private float hipsCounterForce = 52f;
+    [SerializeField] private float upperChestAssistForce = 104f;
+    [SerializeField] private float hipsCounterForce = 72f;
 
     [Header("Visual")]
     [SerializeField] private float headWindUpAngle = -24f;
     [SerializeField] private float headImpactAngle = -48f;
     [SerializeField] private float neckImpactAngle = -22f;
-    [SerializeField] private float chestImpactAngle = -14f;
+    [SerializeField] private float chestWindUpAngle = -8f;
+    [SerializeField] private float chestImpactAngle = -22f;
+    [SerializeField] private float hipsWindUpAngle = -5f;
+    [SerializeField] private float hipsImpactAngle = -12f;
 
     [Header("Presentation")]
     [SerializeField, Range(0f, 1f)] private float headPresentationBlend = 0.92f;
     [SerializeField, Range(0f, 1f)] private float chestPresentationBlend = 0.74f;
+    [SerializeField, Range(0f, 1f)] private float hipsPresentationBlend = 0.56f;
 
     private enum HeadbuttPhase
     {
@@ -59,6 +63,7 @@ public class ProceduralHeadbutt : MonoBehaviour
     private Transform _headVisual;
     private Transform _neckVisual;
     private Transform _chestVisual;
+    private Transform _hipsVisual;
     private Vector3 _headRestLocalOffset;
     private Vector3 _upperChestRestLocalOffset;
     private bool _hasHeadRestOffset;
@@ -66,6 +71,7 @@ public class ProceduralHeadbutt : MonoBehaviour
     private Quaternion _headRestRotation;
     private Quaternion _neckRestRotation;
     private Quaternion _chestRestRotation;
+    private Quaternion _hipsRestRotation;
     private bool _hasVisualRestPose;
     private bool _usingNetworkedBoneBlend;
 
@@ -140,9 +146,6 @@ public class ProceduralHeadbutt : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (!_hasVisualRestPose)
-            return;
-
         if (_phase != HeadbuttPhase.None && IsHeadbuttSuppressed())
         {
             CancelHeadbutt();
@@ -152,8 +155,19 @@ public class ProceduralHeadbutt : MonoBehaviour
         if (UsesPhysicsBindingPresentation())
         {
             TickPhysicsBindingPresentation();
+            // Bone-blend weights alone produce only a subtle flinch.
+            // Fall through to TickVisualHeadbutt so remote proxies also
+            // see the full head/neck/chest rotation.
+            if (_phase != HeadbuttPhase.None && _hasVisualRestPose)
+            {
+                TickVisualHeadbutt();
+                return;
+            }
             return;
         }
+
+        if (!_hasVisualRestPose)
+            return;
 
         if (_phase == HeadbuttPhase.None)
         {
@@ -166,6 +180,8 @@ public class ProceduralHeadbutt : MonoBehaviour
 
     private void FindReferences()
     {
+        FindVisualReferences();
+
         if (puppetMaster == null || puppetMaster.muscles == null)
             return;
 
@@ -205,8 +221,6 @@ public class ProceduralHeadbutt : MonoBehaviour
             _upperChestRestLocalOffset = bodyRoot.InverseTransformPoint(_upperChestRb.position);
             _hasUpperChestRestOffset = true;
         }
-
-        FindVisualReferences();
     }
 
     private void TickTimelineOnly()
@@ -246,6 +260,7 @@ public class ProceduralHeadbutt : MonoBehaviour
         _chestVisual = _visualAnimator.GetBoneTransform(HumanBodyBones.UpperChest)
             ?? _visualAnimator.GetBoneTransform(HumanBodyBones.Chest)
             ?? _visualAnimator.GetBoneTransform(HumanBodyBones.Spine);
+        _hipsVisual = _visualAnimator.GetBoneTransform(HumanBodyBones.Hips);
 
         if (_headVisual == null || _chestVisual == null)
             return;
@@ -253,6 +268,7 @@ public class ProceduralHeadbutt : MonoBehaviour
         _headRestRotation = _headVisual.localRotation;
         _neckRestRotation = _neckVisual != null ? _neckVisual.localRotation : Quaternion.identity;
         _chestRestRotation = _chestVisual.localRotation;
+        _hipsRestRotation = _hipsVisual != null ? _hipsVisual.localRotation : Quaternion.identity;
         _hasVisualRestPose = true;
     }
 
@@ -267,6 +283,15 @@ public class ProceduralHeadbutt : MonoBehaviour
                 ?? puppetMaster.targetRoot.GetComponentInChildren<Animator>(true);
             if (targetRootAnimator != null && targetRootAnimator.isHuman)
                 return targetRootAnimator;
+        }
+
+        var animationDriver = transform.Find("_AnimationDriver");
+        if (animationDriver != null)
+        {
+            var driverAnimator = animationDriver.GetComponent<Animator>()
+                ?? animationDriver.GetComponentInChildren<Animator>(true);
+            if (driverAnimator != null && driverAnimator.isHuman)
+                return driverAnimator;
         }
 
         var animators = GetComponentsInChildren<Animator>(true);
@@ -341,6 +366,7 @@ public class ProceduralHeadbutt : MonoBehaviour
         Quaternion headTarget = _headRestRotation;
         Quaternion neckTarget = _neckVisual != null ? _neckRestRotation : Quaternion.identity;
         Quaternion chestTarget = _chestRestRotation;
+        Quaternion hipsTarget = _hipsVisual != null ? _hipsRestRotation : Quaternion.identity;
         var elapsed = Time.time - _phaseStartTime;
 
         switch (_phase)
@@ -352,7 +378,9 @@ public class ProceduralHeadbutt : MonoBehaviour
                 headTarget = _headRestRotation * Quaternion.Euler(headAngle, 0f, 0f);
                 if (_neckVisual != null)
                     neckTarget = _neckRestRotation * Quaternion.Euler(headAngle * 0.45f, 0f, 0f);
-                chestTarget = _chestRestRotation * Quaternion.Euler(headAngle * 0.2f, 0f, 0f);
+                chestTarget = _chestRestRotation * Quaternion.Euler(Mathf.Lerp(0f, chestWindUpAngle, t), 0f, 0f);
+                if (_hipsVisual != null)
+                    hipsTarget = _hipsRestRotation * Quaternion.Euler(Mathf.Lerp(0f, hipsWindUpAngle, t), 0f, 0f);
                 break;
             }
 
@@ -362,7 +390,9 @@ public class ProceduralHeadbutt : MonoBehaviour
                 headTarget = _headRestRotation * Quaternion.Euler(Mathf.Lerp(headWindUpAngle, headImpactAngle, t), 0f, 0f);
                 if (_neckVisual != null)
                     neckTarget = _neckRestRotation * Quaternion.Euler(Mathf.Lerp(headWindUpAngle * 0.45f, neckImpactAngle, t), 0f, 0f);
-                chestTarget = _chestRestRotation * Quaternion.Euler(Mathf.Lerp(headWindUpAngle * 0.2f, chestImpactAngle, t), 0f, 0f);
+                chestTarget = _chestRestRotation * Quaternion.Euler(Mathf.Lerp(chestWindUpAngle, chestImpactAngle, t), 0f, 0f);
+                if (_hipsVisual != null)
+                    hipsTarget = _hipsRestRotation * Quaternion.Euler(Mathf.Lerp(hipsWindUpAngle, hipsImpactAngle, t), 0f, 0f);
                 break;
             }
 
@@ -374,6 +404,8 @@ public class ProceduralHeadbutt : MonoBehaviour
                 if (_neckVisual != null)
                     neckTarget = _neckRestRotation * Quaternion.Euler(Mathf.Lerp(neckImpactAngle, 0f, t) + spring * 4f, 0f, 0f);
                 chestTarget = _chestRestRotation * Quaternion.Euler(Mathf.Lerp(chestImpactAngle, 0f, t) + spring * 2f, 0f, 0f);
+                if (_hipsVisual != null)
+                    hipsTarget = _hipsRestRotation * Quaternion.Euler(Mathf.Lerp(hipsImpactAngle, 0f, t) + spring * 1.4f, 0f, 0f);
                 break;
             }
         }
@@ -382,6 +414,8 @@ public class ProceduralHeadbutt : MonoBehaviour
         if (_neckVisual != null)
             _neckVisual.localRotation = neckTarget;
         _chestVisual.localRotation = chestTarget;
+        if (_hipsVisual != null)
+            _hipsVisual.localRotation = hipsTarget;
     }
 
     private void RestoreVisualPose()
@@ -392,6 +426,8 @@ public class ProceduralHeadbutt : MonoBehaviour
             _neckVisual.localRotation = Quaternion.Slerp(_neckVisual.localRotation, _neckRestRotation, 0.50f);
         if (_chestVisual != null)
             _chestVisual.localRotation = Quaternion.Slerp(_chestVisual.localRotation, _chestRestRotation, 0.45f);
+        if (_hipsVisual != null)
+            _hipsVisual.localRotation = Quaternion.Slerp(_hipsVisual.localRotation, _hipsRestRotation, 0.40f);
     }
 
     private void ResetVisualPoseImmediate()
@@ -402,6 +438,8 @@ public class ProceduralHeadbutt : MonoBehaviour
             _neckVisual.localRotation = _neckRestRotation;
         if (_chestVisual != null)
             _chestVisual.localRotation = _chestRestRotation;
+        if (_hipsVisual != null)
+            _hipsVisual.localRotation = _hipsRestRotation;
     }
 
     private void TickPhysicsBindingPresentation()
@@ -418,6 +456,7 @@ public class ProceduralHeadbutt : MonoBehaviour
         var elapsed = Time.time - _phaseStartTime;
         float headWeight;
         float chestWeight;
+        float hipsWeight;
         switch (_phase)
         {
             case HeadbuttPhase.WindUp:
@@ -425,6 +464,7 @@ public class ProceduralHeadbutt : MonoBehaviour
                 var t = Mathf.Clamp01(elapsed / Mathf.Max(0.0001f, windUpDuration));
                 headWeight = Mathf.Lerp(headPresentationBlend * 0.45f, headPresentationBlend * 0.72f, t);
                 chestWeight = Mathf.Lerp(chestPresentationBlend * 0.35f, chestPresentationBlend * 0.6f, t);
+                hipsWeight = Mathf.Lerp(hipsPresentationBlend * 0.25f, hipsPresentationBlend * 0.48f, t);
                 break;
             }
             case HeadbuttPhase.Impact:
@@ -432,6 +472,7 @@ public class ProceduralHeadbutt : MonoBehaviour
                 var t = Mathf.Clamp01(elapsed / Mathf.Max(0.0001f, impactDuration));
                 headWeight = Mathf.Lerp(headPresentationBlend * 0.72f, headPresentationBlend, t);
                 chestWeight = Mathf.Lerp(chestPresentationBlend * 0.6f, chestPresentationBlend, t);
+                hipsWeight = Mathf.Lerp(hipsPresentationBlend * 0.48f, hipsPresentationBlend, t);
                 break;
             }
             case HeadbuttPhase.Recovery:
@@ -439,16 +480,19 @@ public class ProceduralHeadbutt : MonoBehaviour
                 var t = Mathf.Clamp01(elapsed / Mathf.Max(0.0001f, recoveryDuration));
                 headWeight = Mathf.Lerp(headPresentationBlend * 0.82f, 0f, t);
                 chestWeight = Mathf.Lerp(chestPresentationBlend * 0.7f, 0f, t);
+                hipsWeight = Mathf.Lerp(hipsPresentationBlend * 0.65f, 0f, t);
                 break;
             }
             default:
                 headWeight = 0f;
                 chestWeight = 0f;
+                hipsWeight = 0f;
                 break;
         }
 
         _networkPlayer.SetAnchorGrabBoneBlend(GrabAnchorPoint.AnchorId.Head, headWeight);
         _networkPlayer.SetAnchorGrabBoneBlend(GrabAnchorPoint.AnchorId.Chest, chestWeight);
+        _networkPlayer.SetAnchorGrabBoneBlend(GrabAnchorPoint.AnchorId.Hips, hipsWeight);
         _usingNetworkedBoneBlend = true;
     }
 
@@ -466,14 +510,14 @@ public class ProceduralHeadbutt : MonoBehaviour
     private Vector3 ResolveChestWindUpTarget(Vector3 forward)
     {
         return ResolveChestRestWorldPosition()
-             + forward * (windUpForwardBias * 0.45f)
-             - forward * (windUpPullBack * 0.2f)
-             - Vector3.up * (windUpDrop * 0.2f);
+             + forward * (windUpForwardBias * 0.62f)
+             - forward * (windUpPullBack * 0.28f)
+             - Vector3.up * (windUpDrop * 0.32f);
     }
 
     private Vector3 ResolveChestImpactTarget(Vector3 forward)
     {
-        return ResolveChestRestWorldPosition() + forward * (headbuttReach * 0.32f);
+        return ResolveChestRestWorldPosition() + forward * (headbuttReach * 0.44f);
     }
 
     private void ApplyHeadSteeringForce(Vector3 targetWorld, float driveForce)
@@ -562,12 +606,23 @@ public class ProceduralHeadbutt : MonoBehaviour
 
     private bool UsesPhysicsBindingPresentation()
     {
-        return _networkPlayer != null && _networkPlayer.UsesAnimatedVisualPresentationRig();
+        return HasAnimatedPresentationFallback();
     }
 
     private bool HasDriveTarget()
     {
-        return _headRb != null || _hasVisualRestPose;
+        return _headRb != null || _hasVisualRestPose || UsesPhysicsBindingPresentation();
+    }
+
+    private bool HasAnimatedPresentationFallback()
+    {
+        if (_networkPlayer == null)
+            return false;
+
+        if (_networkPlayer.UsesAnimatedVisualPresentationRig())
+            return true;
+
+        return !_networkPlayer.HasStateAuthority && _networkPlayer.GetPresentationRootTransform() != null;
     }
 
     private void ClearPresentationOverride()
@@ -577,6 +632,7 @@ public class ProceduralHeadbutt : MonoBehaviour
 
         _networkPlayer.ClearAnchorGrabBoneBlend(GrabAnchorPoint.AnchorId.Head);
         _networkPlayer.ClearAnchorGrabBoneBlend(GrabAnchorPoint.AnchorId.Chest);
+        _networkPlayer.ClearAnchorGrabBoneBlend(GrabAnchorPoint.AnchorId.Hips);
         _usingNetworkedBoneBlend = false;
     }
 
@@ -585,9 +641,16 @@ public class ProceduralHeadbutt : MonoBehaviour
         if (_networkPlayer == null)
             return false;
 
-        if (!_networkPlayer.IsActiveRagdoll ||
-            _networkPlayer.ShouldUsePhysicalPhasePresentation() ||
-            _networkPlayer.ShouldUseHardPhysicsVisualMode())
+        var usesPhysicsBindingPresentation = HasAnimatedPresentationFallback();
+        if (_networkPlayer.ShouldUseHardPhysicsVisualMode())
+        {
+            return true;
+        }
+
+        // Proxy/animated-visual rigs still need to play replicated headbutt presentation
+        // even when the local ragdoll-active flag is not yet established.
+        if (!usesPhysicsBindingPresentation &&
+            (!_networkPlayer.IsActiveRagdoll || _networkPlayer.ShouldUsePhysicalPhasePresentation()))
         {
             return true;
         }

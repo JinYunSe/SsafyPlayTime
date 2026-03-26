@@ -91,7 +91,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   enableTestSpawnLoop: 1
-  spawnIntervalSec: 3
+  spawnIntervalSec: 10
   keepSpawnedItemStatic: 0
   enableDebugLog: 1
   spawnZoneRoot: {fileID: 0}

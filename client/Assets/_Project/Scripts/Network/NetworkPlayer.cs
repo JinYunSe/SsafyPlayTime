@@ -1239,6 +1239,11 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
         TraceCarryDebugSample("ResetInboundGrabStateIfStale", $"source={source}", true);
     }
 
+    internal void RefreshGrabbedStateAfterRelease(string source)
+    {
+        ResetInboundGrabStateIfStale(source);
+    }
+
     internal void ForceReleaseInboundGrabRelations(string source)
     {
         if (IsNetworkReady && !HasStateAuthority)
@@ -1397,6 +1402,71 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
         anchorWorld /= count;
         return true;
+    }
+
+    private bool DoesIncomingConsciousHolderTargetSelf(NetworkPlayer holder, HandGrabHandler.HandSide side, NetworkId selfId)
+    {
+        if (holder == null || holder == this)
+            return false;
+
+        if (IsNetworkReady &&
+            Object != null &&
+            Object.IsValid &&
+            holder.IsNetworkReady &&
+            holder.Object != null &&
+            holder.Object.IsValid)
+        {
+            return holder.TryGetNetworkHeldAnchorData(side, out var targetId, out _, out _) &&
+                   targetId == selfId;
+        }
+
+        var handlers = holder._handGrabHandlers;
+        if (handlers == null || handlers.Length == 0)
+            handlers = holder.GetComponentsInChildren<HandGrabHandler>(true);
+
+        for (var i = 0; i < handlers.Length; i++)
+        {
+            var handler = handlers[i];
+            if (handler == null || handler.Side != side || !handler.IsHoldingTarget(this))
+                continue;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool HasIncomingConsciousGrabRelation()
+    {
+        var selfId = IsNetworkReady && Object != null && Object.IsValid
+            ? Object.Id
+            : default;
+
+        foreach (var candidate in RegisteredPlayers)
+        {
+            if (candidate == null || candidate == this)
+                continue;
+
+            if (candidate.ResolveCurrentOrReplicatedHoldVariant() != CharacterGrabController.HoldVariant.ConsciousPlayer)
+                continue;
+
+            if (DoesIncomingConsciousHolderTargetSelf(candidate, HandGrabHandler.HandSide.Left, selfId) ||
+                DoesIncomingConsciousHolderTargetSelf(candidate, HandGrabHandler.HandSide.Right, selfId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool ShouldPreferAnimatedConsciousGrabVictimPresentation()
+    {
+        var phase = GetPhysicalPhase();
+        if (phase != PhysicalPhase.BeingGrabbed && phase != PhysicalPhase.Dragged)
+            return false;
+
+        return HasIncomingConsciousGrabRelation();
     }
 
     private CharacterGrabController.HoldVariant ResolveCurrentOrReplicatedHoldVariant()
@@ -1729,6 +1799,41 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     public int GetNetworkedMotorState() => Runner != null && Object != null && Object.IsValid ? NetworkedMotorState : _localMotorState;
     public bool GetNetworkedIsSprinting() => Runner != null && Object != null && Object.IsValid ? (bool)NetworkedIsSprinting : false;
     internal float GetNetworkedVisualYaw() => Runner != null && Object != null && Object.IsValid ? NetworkedVisualYaw : _localVisualYaw;
+    internal Vector3 ResolveVisibleForwardPlanar()
+    {
+        var forward = Quaternion.Euler(0f, GetNetworkedVisualYaw(), 0f) * Vector3.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude > 0.0001f)
+            return forward.normalized;
+
+        forward = transform.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude > 0.0001f)
+            return forward.normalized;
+
+        return Vector3.forward;
+    }
+    internal Vector3 ResolveThrowFacingForwardPlanar()
+    {
+        var presentationRoot = GetPresentationRootTransform();
+        if (presentationRoot != null)
+        {
+            var forward = Vector3.ProjectOnPlane(presentationRoot.forward, Vector3.up);
+            if (forward.sqrMagnitude > 0.0001f)
+                return forward.normalized;
+        }
+
+        var rootForward = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+        if (rootForward.sqrMagnitude > 0.0001f)
+            return rootForward.normalized;
+
+        var visualForward = Quaternion.Euler(0f, GetNetworkedVisualYaw(), 0f) * Vector3.forward;
+        visualForward.y = 0f;
+        if (visualForward.sqrMagnitude > 0.0001f)
+            return visualForward.normalized;
+
+        return Vector3.forward;
+    }
     internal PresentationLocomotionState GetNetworkedLocomotionState() =>
         Runner != null && Object != null && Object.IsValid
             ? (PresentationLocomotionState)NetworkedLocomotionState
@@ -2101,6 +2206,9 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     internal bool ShouldUsePhysicalPhasePresentation()
     {
+        if (ShouldPreferAnimatedConsciousGrabVictimPresentation())
+            return false;
+
         return GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing ||
                UsesPhysicsPosePresentation(GetPhysicalPhase()) ||
                (IsRemotePhysicsPresentationResetLocked() && !ShouldSuppressRemoteRecoveryPresentationReset());
@@ -2292,6 +2400,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
     // 로컬 트리거
     private bool _dropTriggered;
     private bool _throwTriggered;
+    private bool _headbuttTriggered;
     private float _grabDisabledUntilTime;
     private float _nextRuntimeIntegrationRefreshTime;
 
@@ -2339,6 +2448,7 @@ public sealed partial class NetworkPlayer : NetworkBehaviour
 
     private void OnDestroy()
     {
+        CancelLocalSlowMotion();
         SetProxyLocalSoftFlopActive(false);
         RegisteredPlayers.Remove(this);
         DestroyLocalGhostMode();

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using UnityEngine;
+using Process = System.Diagnostics.Process;
 
 namespace SSAFYPlayTime
 {
@@ -11,11 +12,23 @@ namespace SSAFYPlayTime
     public static class RuntimeLoggingSettings
     {
         public const bool EnableRuntimeLogs = false;
+        public const bool ShowRuntimeLogOverlayOnStart = false;
 
         private static readonly object TargetedLogLock = new();
+        private static string _runtimeLogPath;
         private static string _targetedLogPath;
 
         public static bool AreRuntimeLogsEnabled => EnableRuntimeLogs;
+
+        public static string ResolveRuntimeLogPath()
+        {
+            if (!string.IsNullOrWhiteSpace(_runtimeLogPath))
+                return _runtimeLogPath;
+
+            var processId = Process.GetCurrentProcess().Id;
+            _runtimeLogPath = Path.Combine(Application.persistentDataPath, $"runtime-log-{processId}.txt");
+            return _runtimeLogPath;
+        }
 
         public static void AppendTargetedRuntimeLine(string line)
         {
@@ -26,7 +39,7 @@ namespace SSAFYPlayTime
             {
                 try
                 {
-                    _targetedLogPath ??= Path.Combine(Application.persistentDataPath, "runtime-log.txt");
+                    _targetedLogPath ??= ResolveRuntimeLogPath();
                     File.AppendAllText(_targetedLogPath, line + Environment.NewLine);
                 }
                 catch

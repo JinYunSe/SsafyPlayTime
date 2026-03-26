@@ -57,10 +57,10 @@ public sealed partial class NetworkPlayer
 
         UpdateGrabHandlers();
         RefreshPhysicalPhaseAfterGrabHandlers();
+        ClampOutOfBoundsCharacter();
         SynchronizeNetworkSimulationState();
         TraceMoveAuthorityState("FixedUpdateNetwork.AfterPhase");
         TraceMovePublish("FixedUpdateNetwork.Publish");
-        ClampOutOfBoundsCharacter();
     }
 
     private void PollLocalInputState()
@@ -80,6 +80,9 @@ public sealed partial class NetworkPlayer
 
         UpdatePrimaryClickState();
         UpdateSecondaryClickState();
+
+        if (Input.GetMouseButtonDown(2))
+            _headbuttTriggered = true;
 
         if (Input.GetKeyDown(KeyCode.F))
             _dropTriggered = true;
@@ -161,7 +164,7 @@ public sealed partial class NetworkPlayer
             Throw = _throwTriggered,
             LeftGrabHold = _leftMouseDown && _leftMouseConsumedAsGrab && canSendGrabHold,
             RightGrabHold = _rightMouseDown && _rightMouseConsumedAsGrab && canSendGrabHold,
-            Headbutt = Input.GetMouseButtonDown(2),
+            Headbutt = _headbuttTriggered,
             Sprint = Input.GetKey(KeyCode.LeftShift)
         };
     }
@@ -171,6 +174,7 @@ public sealed partial class NetworkPlayer
         _sandboxJump = false;
         _leftClickUseTriggered = false;
         _throwTriggered = false;
+        _headbuttTriggered = false;
     }
 
     private void ResetAllLocalInputState()
@@ -179,6 +183,7 @@ public sealed partial class NetworkPlayer
         _sandboxJump = false;
         _dropTriggered = false;
         _throwTriggered = false;
+        _headbuttTriggered = false;
         // Sync absolute hips position for remote grab / drag presentation.
         _leftClickUseTriggered = false;
         _leftMouseDown = false;
@@ -479,7 +484,14 @@ public sealed partial class NetworkPlayer
         if (GetIsDeadState())
             return;
 
-        if (transform.position.y >= -10)
+        var observedMinY = transform.position.y;
+        if (rigidbody3D != null)
+            observedMinY = Mathf.Min(observedMinY, rigidbody3D.position.y);
+
+        if (TryResolveRootSyncTargetPosition(out var rootSyncTarget))
+            observedMinY = Mathf.Min(observedMinY, rootSyncTarget.y);
+
+        if (observedMinY >= -10f)
             return;
 
         var now = Runner != null ? (float)Runner.SimulationTime : Time.time;
