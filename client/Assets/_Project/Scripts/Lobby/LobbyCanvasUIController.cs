@@ -2331,6 +2331,9 @@ namespace SSAFYPlayTime
             if (mainPanelNicknameText != null)
             {
                 mainPanelNicknameText.text = _nickname;
+
+                mainPanelNicknameText.SetLayoutDirty();
+                UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate(mainPanelNicknameText.rectTransform.parent.GetComponent<RectTransform>());
             }
         }
 
@@ -3411,6 +3414,9 @@ namespace SSAFYPlayTime
                 if(mainPanelNicknameText != null)
                 {
                     mainPanelNicknameText.text = _nickname;
+
+                    mainPanelNicknameText.SetLayoutDirty();
+                    UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate(mainPanelNicknameText.rectTransform.parent.GetComponent<RectTransform>());
                 }
 
                 if (editNicknameModal != null) editNicknameModal.SetActive(false);
