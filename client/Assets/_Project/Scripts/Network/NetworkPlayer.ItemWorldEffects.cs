@@ -10,6 +10,14 @@ using UnityEditor;
 
 public sealed partial class NetworkPlayer
 {
+    private enum ReplicatedItemSfxKind
+    {
+        None = 0,
+        GrowthUse = 1,
+        ShrinkUse = 2,
+        SatelliteImpact = 3
+    }
+
     private const string ReplicatedBlackholeVisualName = "Item_Blackhole_Replicated";
     private const string ReplicatedBlackholeFxName = "Item_BlackholeFx";
     private const string ReplicatedBlackholeShellName = "Item_BlackholeShell";
@@ -98,6 +106,7 @@ public sealed partial class NetworkPlayer
     private int _lastAppliedFlamethrowerTickSeq;
     private int _lastAppliedFlamethrowerStopSeq;
     private int _lastAppliedMeleeSwingSeq;
+    private int _lastAppliedItemSfxSeq;
     private Coroutine _activeReplicatedBlackholeRoutine;
     private Coroutine _activeReplicatedSatelliteRoutine;
     private GameObject _blackholeVisualPrefabCache;
@@ -147,6 +156,9 @@ public sealed partial class NetworkPlayer
     [Networked] private float NetworkedFlamethrowerRadius { get; set; }
     [Networked] private int NetworkedMeleeSwingSeq { get; set; }
     [Networked] private float NetworkedMeleeSwingDuration { get; set; }
+    [Networked] private int NetworkedItemSfxSeq { get; set; }
+    [Networked] private int NetworkedItemSfxKindValue { get; set; }
+    [Networked] private Vector3 NetworkedItemSfxPosition { get; set; }
 
     private sealed class ReplicatedBlackholeOutlineState
     {
@@ -221,21 +233,15 @@ public sealed partial class NetworkPlayer
         if (string.IsNullOrWhiteSpace(sfxId))
             return;
 
-        AudioClip clip = null;
         switch (sfxId)
         {
             case "SFX_ITEM_GROWTH":
-                clip = LoadEffectSfx(ref s_growthUseSfx, GrowthUseSfxAssetPath, GrowthUseSfxResourcePath);
+                BroadcastAndPlayItemSfx(ReplicatedItemSfxKind.GrowthUse, worldPosition);
                 break;
             case "SFX_ITEM_SHRINK":
-                clip = LoadEffectSfx(ref s_shrinkUseSfx, ShrinkUseSfxAssetPath, ShrinkUseSfxResourcePath);
+                BroadcastAndPlayItemSfx(ReplicatedItemSfxKind.ShrinkUse, worldPosition);
                 break;
         }
-
-        if (clip == null)
-            return;
-
-        PlayEffectSfx(clip, worldPosition);
     }
 
     private bool CanWriteItemWorldEffectState()
@@ -430,6 +436,12 @@ public sealed partial class NetworkPlayer
         {
             _lastAppliedFlamethrowerStopSeq = NetworkedFlamethrowerStopSeq;
             StopReplicatedFlamethrowerVisual();
+        }
+
+        if (NetworkedItemSfxSeq > 0 && _lastAppliedItemSfxSeq != NetworkedItemSfxSeq)
+        {
+            _lastAppliedItemSfxSeq = NetworkedItemSfxSeq;
+            PlayReplicatedItemSfx((ReplicatedItemSfxKind)NetworkedItemSfxKindValue, NetworkedItemSfxPosition);
         }
     }
 
@@ -729,7 +741,7 @@ public sealed partial class NetworkPlayer
             center,
             Quaternion.identity,
             proxy => proxy.InitializeSatelliteBeam(request.Radius));
-        PlaySatelliteImpactSfx(center);
+        BroadcastAndPlayItemSfx(ReplicatedItemSfxKind.SatelliteImpact, center);
 
         if (applyGameplay)
         {
@@ -754,13 +766,42 @@ public sealed partial class NetworkPlayer
         return Mathf.Clamp(scaledRadius, 2.5f, 6.5f);
     }
 
-    private static void PlaySatelliteImpactSfx(Vector3 worldPosition)
+    private void BroadcastAndPlayItemSfx(ReplicatedItemSfxKind kind, Vector3 worldPosition)
     {
-        var clip = LoadSatelliteImpactSfx();
-        if (clip == null)
+        if (kind == ReplicatedItemSfxKind.None)
+        {
             return;
+        }
 
-        PlayEffectSfx(clip, worldPosition, "ItemSfx_SatelliteStrike");
+        PlayReplicatedItemSfx(kind, worldPosition);
+
+        if (!CanWriteItemWorldEffectState())
+        {
+            return;
+        }
+
+        NetworkedItemSfxKindValue = (int)kind;
+        NetworkedItemSfxPosition = worldPosition;
+        NetworkedItemSfxSeq++;
+    }
+
+    private void PlayReplicatedItemSfx(ReplicatedItemSfxKind kind, Vector3 worldPosition)
+    {
+        var clip = LoadReplicatedItemSfx(kind);
+        if (clip == null)
+        {
+            return;
+        }
+
+        var objectName = kind switch
+        {
+            ReplicatedItemSfxKind.GrowthUse => "ItemSfx_Growth",
+            ReplicatedItemSfxKind.ShrinkUse => "ItemSfx_Shrink",
+            ReplicatedItemSfxKind.SatelliteImpact => "ItemSfx_SatelliteStrike",
+            _ => null
+        };
+
+        PlayEffectSfx(clip, worldPosition, objectName);
     }
 
     private static void PlayEffectSfx(AudioClip clip, Vector3 worldPosition, string objectName = null)
@@ -804,6 +845,21 @@ public sealed partial class NetworkPlayer
     private static AudioClip LoadSatelliteImpactSfx()
     {
         return LoadEffectSfx(ref s_satelliteImpactSfx, SatelliteImpactSfxAssetPath, SatelliteImpactSfxResourcePath);
+    }
+
+    private static AudioClip LoadReplicatedItemSfx(ReplicatedItemSfxKind kind)
+    {
+        switch (kind)
+        {
+            case ReplicatedItemSfxKind.GrowthUse:
+                return LoadEffectSfx(ref s_growthUseSfx, GrowthUseSfxAssetPath, GrowthUseSfxResourcePath);
+            case ReplicatedItemSfxKind.ShrinkUse:
+                return LoadEffectSfx(ref s_shrinkUseSfx, ShrinkUseSfxAssetPath, ShrinkUseSfxResourcePath);
+            case ReplicatedItemSfxKind.SatelliteImpact:
+                return LoadSatelliteImpactSfx();
+            default:
+                return null;
+        }
     }
 
     private void ApplyBlackholeGameplay(
