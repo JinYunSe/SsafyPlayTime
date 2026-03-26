@@ -29,7 +29,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private bool includeTriggerColliders = true;
 
         [Header("디버그")]
-        [SerializeField] private bool enableDebugLog = true;
+    [SerializeField] private bool enableDebugLog = false;
 
         private readonly Collider[] _overlapBuffer = new Collider[64];
 

@@ -87,6 +87,7 @@ namespace SSAFYPlayTime.Character
 
         [Header("Throw")]
         public float throwUpComponent = 0.4f;
+        public float stunnedThrowUpComponent = 0.22f;
 
         [Header("Conscious Player Push (정상 캐릭터 밀어내기)")]
         [Tooltip("정상 캐릭터를 던질 때 사용할 힘 배율 (약하게 — 밀어내기만)")]
