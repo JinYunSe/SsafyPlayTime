@@ -76,6 +76,7 @@ public sealed partial class NetworkPlayer
     private const float SettledStunnedMuscleAngularSpeedCap = 0.42f;
     private const float SettledStunnedGroundedPlanarDrag = 22.0f;
     private const float StunnedGroundContactMemory = 0.12f;
+    private const float StunnedTransportPhaseSwitchDelay = 0.06f;
     private const float DraggedStunnedRootPlanarSpeedCap = 0.78f;
     private const float DraggedStunnedMusclePlanarSpeedCap = 0.62f;
     private const float DraggedStunnedRootAngularSpeedCap = 2.4f;
@@ -162,7 +163,8 @@ public sealed partial class NetworkPlayer
         NetworkPlayer instigator = null,
         int hitCountToStun = 0,
         float groggyVulnerabilityMultiplier = 1f,
-        DownedHitPolicy downedHitPolicy = DownedHitPolicy.Ignore)
+        DownedHitPolicy downedHitPolicy = DownedHitPolicy.Ignore,
+        bool forceGroundedStunCollapse = false)
     {
         if (GetIsDeadState())
             return;
@@ -245,7 +247,8 @@ public sealed partial class NetworkPlayer
                 var overflow = Mathf.Max(0f, accumulated - threshold);
                 TriggerStun(
                     CalculateStunDuration(attackerVelocity, impulseMagnitude, overflow, threshold),
-                    applyEntryDamping: !deferStunEntryDamping);
+                    applyEntryDamping: !deferStunEntryDamping,
+                    forceGroundedStunCollapse: forceGroundedStunCollapse);
 
                 if (instigator != null && instigator != this)
                     instigator.TriggerKnockoutConfirm();
@@ -362,6 +365,7 @@ public sealed partial class NetworkPlayer
     private float _recoverStabilizeTimer;
     private const float RECOVER_STABILIZE_DURATION = 0.4f;
     private const float GroundedCollapseRootMinYOffset = -0.12f;
+    private const float GroundedCollapseRootMaxYOffset = 0.16f;
     private float _recoverMinColliderY = float.NegativeInfinity;
     private bool _hasRecoverAnchorPose;
     private Vector3 _recoverAnchorPosition;
@@ -370,6 +374,15 @@ public sealed partial class NetworkPlayer
     private bool _hasPendingRecoveryStandUpHandoff;
     private Vector3 _pendingRecoveryStandUpPosition;
     private Quaternion _pendingRecoveryStandUpRotation = Quaternion.identity;
+    private bool _suppressRecoveryUpwardCorrectionAfterHandoff;
+    private float _draggedStunnedCandidateTimer;
+    private float _beingCarriedStunnedCandidateTimer;
+
+    private bool ShouldSuppressRecoveryUpwardCorrection()
+    {
+        return _suppressRecoveryUpwardCorrectionAfterHandoff && _isRecovering && !_isRecoverStabilizing;
+    }
+
     private bool ShouldUseCollapseAnchor()
     {
         if (!_hasRecoverAnchorPose)
@@ -444,9 +457,11 @@ public sealed partial class NetworkPlayer
             return;
 
         // recover 중에도 root를 pelvis에 동기화 유지
+        var suppressRecoveryUpwardCorrection = ShouldSuppressRecoveryUpwardCorrection();
         MaintainRecoveringHorizontalAnchor();
         MaintainRecoveringUprightRotation();
-        MaintainRecoveringAboveGround();
+        if (!suppressRecoveryUpwardCorrection)
+            MaintainRecoveringAboveGround();
         SyncRootToPhysicsBody();
         TraceStunnedMotionSample("UpdateRecoveringWindow");
 
@@ -454,6 +469,7 @@ public sealed partial class NetworkPlayer
         if (_recoveringTimer <= 0f)
         {
             _isRecovering = false;
+            _suppressRecoveryUpwardCorrectionAfterHandoff = false;
             _recoverMinColliderY = float.NegativeInfinity;
             _hasRecoverAnchorPose = false;
             // 복구 완료 시 최종 root-to-pelvis 스냅
@@ -473,6 +489,7 @@ public sealed partial class NetworkPlayer
         _recoveringTimer = 0f;
         _recoverStabilizeTimer = 0f;
         _hasPendingRecoveryStandUpHandoff = false;
+        _suppressRecoveryUpwardCorrectionAfterHandoff = false;
         _recoverMinColliderY = float.NegativeInfinity;
         _hasRecoverAnchorPose = false;
         _recoverAnchorCapturedWhileGrounded = false;
@@ -1737,7 +1754,8 @@ public sealed partial class NetworkPlayer
             instigator: this,
             hitCountToStun: _activeAerialKickHitCountToStun,
             groggyVulnerabilityMultiplier: _activeAerialKickGroggyVulnerabilityMultiplier,
-            downedHitPolicy: DownedHitPolicy.RecoveryPenalty);
+            downedHitPolicy: DownedHitPolicy.RecoveryPenalty,
+            forceGroundedStunCollapse: true);
         var phaseAfterHit = victimPlayer.GetPhysicalPhase();
         var isStunnedAfterHit = !victimPlayer._isActiveRagdoll;
         var enteredStunThisHit = !wasAlreadyStunnedBeforeHit && isStunnedAfterHit;
@@ -1808,6 +1826,7 @@ public sealed partial class NetworkPlayer
         TriggerAttackCameraKick(forward, finalKnockback * 1.08f);
         victimPlayer.TriggerVictimCameraKick(knockbackDir, responseKnockback);
         SpawnHitImpactVFX(hitPoint, knockbackDir, responseKnockback);
+        BeginAerialKickSpringRestore("hit-confirm");
     }
 
     private void ResolveAerialKickImpactStats(
@@ -1862,16 +1881,17 @@ public sealed partial class NetworkPlayer
             "AerialKick.PreMissPenaltyStun",
             $"selfStunDuration={_activeAerialKickSelfStunDuration:F2} chance={_activeAerialKickSelfStunChance:F2} grounded={(_isGrounded ? 1 : 0)} rawGrounded={(_activeAerialKickRawGrounded ? 1 : 0)} nearGround={(_activeAerialKickNearGround ? 1 : 0)} leftGround={(_activeAerialKickHasLeftGround ? 1 : 0)}",
             force: true);
+        var footLandingSignal = HasAerialKickFootLandingSignal();
         var hasRecentGroundContact = Time.time - _activeAerialKickLastGroundContactTime <= AerialKickGroundContactMemory;
         var groundedPlop = ShouldUseGroundedAerialKickMissPlop(
             _isGrounded,
             _activeAerialKickRawGrounded,
-            _activeAerialKickNearGround,
+            footLandingSignal,
             hasRecentGroundContact);
         var missPenaltyDuration = ResolveAerialKickMissPenaltyDuration(_activeAerialKickSelfStunDuration, groundedPlop);
         LogAerialKickDiagnostic(
             "MissPenaltyResolved",
-            $"resolvedDuration={missPenaltyDuration:F2} groundedPlop={(groundedPlop ? 1 : 0)} nearGround={(_activeAerialKickNearGround ? 1 : 0)} recentGround={(hasRecentGroundContact ? 1 : 0)}");
+            $"resolvedDuration={missPenaltyDuration:F2} groundedPlop={(groundedPlop ? 1 : 0)} foot={footLandingSignal} nearGround={(_activeAerialKickNearGround ? 1 : 0)} recentGround={(hasRecentGroundContact ? 1 : 0)}");
         TriggerStun(
             missPenaltyDuration,
             applyEntryDamping: false,
@@ -1898,10 +1918,12 @@ public sealed partial class NetworkPlayer
     private static bool ShouldUseGroundedAerialKickMissPlop(
         bool isGrounded,
         bool rawGrounded,
-        bool nearGround,
+        bool footLandingSignal,
         bool hasRecentGroundContact)
     {
-        return isGrounded || rawGrounded || nearGround || hasRecentGroundContact;
+        return rawGrounded ||
+               (isGrounded && hasRecentGroundContact) ||
+               HasConfirmedAerialKickLandingContact(rawGrounded, footLandingSignal, hasRecentGroundContact);
     }
 
     private static float ResolveAerialKickMissPenaltyDuration(float configuredSelfStunDuration, bool groundedPlop)
@@ -2094,10 +2116,11 @@ public sealed partial class NetworkPlayer
         TickStunnedGroundContactMemory(dt);
         var collapsePhase = TickStunCollapseTimer(dt);
         TickStunnedFloorSettleTimer(dt, collapsePhase);
+        TickStunnedTransportPhaseTimers(dt);
         var stunnedPhase = ResolveCurrentStunnedPhase(collapsePhase);
         SetLocalPhysicalPhase(stunnedPhase, 1f, false);
         UpdateLocalCarryMode();
-        TickCarryReleaseSettle(dt);
+        ClearCarryReleaseSettle("TryTickStunnedState");
         ApplyStunCollapseSpringState(collapsePhase, stunnedPhase);
         if (_downedHitCooldownRemaining > 0f)
             _downedHitCooldownRemaining = Mathf.Max(0f, _downedHitCooldownRemaining - dt);
@@ -2171,11 +2194,15 @@ public sealed partial class NetworkPlayer
 
     private PhysicalPhase ResolveCurrentStunnedPhase(bool collapsePhase)
     {
-        if (ShouldUseDraggedStunnedPhase())
-            return PhysicalPhase.DraggedStunned;
-
         if (_beingGrabbedRefCount > 0)
-            return PhysicalPhase.BeingCarriedStunned;
+        {
+            return ResolveStunnedGrabTransportPhase(
+                _localPhysicalPhase,
+                _beingGrabbedRefCount,
+                _isGrounded,
+                _draggedStunnedCandidateTimer >= StunnedTransportPhaseSwitchDelay,
+                _beingCarriedStunnedCandidateTimer >= StunnedTransportPhaseSwitchDelay);
+        }
 
         if (ShouldUseSettledStunnedPhase(collapsePhase))
             return PhysicalPhase.SettledStunned;
@@ -2183,6 +2210,42 @@ public sealed partial class NetworkPlayer
         return collapsePhase
             ? PhysicalPhase.StunnedCollapse
             : PhysicalPhase.Stunned;
+    }
+
+    private void TickStunnedTransportPhaseTimers(float dt)
+    {
+        var safeDt = Mathf.Max(0f, dt);
+        var draggedCandidate = _beingGrabbedRefCount == 1 && _isGrounded;
+        var carriedCandidate = _beingGrabbedRefCount > 0 && !draggedCandidate;
+
+        _draggedStunnedCandidateTimer = draggedCandidate
+            ? Mathf.Min(StunnedTransportPhaseSwitchDelay, _draggedStunnedCandidateTimer + safeDt)
+            : 0f;
+        _beingCarriedStunnedCandidateTimer = carriedCandidate
+            ? Mathf.Min(StunnedTransportPhaseSwitchDelay, _beingCarriedStunnedCandidateTimer + safeDt)
+            : 0f;
+    }
+
+    private static PhysicalPhase ResolveStunnedGrabTransportPhase(
+        PhysicalPhase previousPhase,
+        int beingGrabbedRefCount,
+        bool isGrounded,
+        bool draggedTransitionQualified,
+        bool carriedTransitionQualified)
+    {
+        if (beingGrabbedRefCount <= 0)
+            return previousPhase;
+
+        if (beingGrabbedRefCount > 1)
+            return PhysicalPhase.BeingCarriedStunned;
+
+        if (previousPhase == PhysicalPhase.DraggedStunned)
+            return carriedTransitionQualified ? PhysicalPhase.BeingCarriedStunned : PhysicalPhase.DraggedStunned;
+
+        if (previousPhase == PhysicalPhase.BeingCarriedStunned)
+            return draggedTransitionQualified ? PhysicalPhase.DraggedStunned : PhysicalPhase.BeingCarriedStunned;
+
+        return draggedTransitionQualified ? PhysicalPhase.DraggedStunned : PhysicalPhase.BeingCarriedStunned;
     }
 
     private bool ShouldUseDraggedStunnedPhase()
@@ -2198,11 +2261,8 @@ public sealed partial class NetworkPlayer
                _stunnedFloorSettleTimer >= SettledStunnedEntryDuration;
     }
 
-    private bool ShouldUseGroundedPlainStunNoCollapseEntry()
+    private bool ShouldUseGroundedPlainStunNoCollapseEntry(bool forceGroundedStunCollapse = false)
     {
-        if (_beingGrabbedRefCount > 0 || !_isGrounded)
-            return false;
-
         var rootVelocity = rigidbody3D != null && !rigidbody3D.isKinematic
             ? rigidbody3D.velocity
             : Vector3.zero;
@@ -2212,10 +2272,32 @@ public sealed partial class NetworkPlayer
         ResolveStartupLaunchPelvisPosition(out var pelvisVelocity);
 
         var rootPlanarSpeed = new Vector2(rootVelocity.x, rootVelocity.z).magnitude;
+        return ShouldUseGroundedPlainStunNoCollapseEntry(
+            _beingGrabbedRefCount > 0,
+            _isGrounded,
+            rootPlanarSpeed,
+            Mathf.Abs(rootVelocity.y),
+            rootAngularSpeed,
+            Mathf.Abs(pelvisVelocity.y),
+            forceGroundedStunCollapse);
+    }
+
+    private static bool ShouldUseGroundedPlainStunNoCollapseEntry(
+        bool beingGrabbed,
+        bool isGrounded,
+        float rootPlanarSpeed,
+        float rootVerticalSpeed,
+        float rootAngularSpeed,
+        float pelvisVerticalSpeed,
+        bool forceGroundedStunCollapse)
+    {
+        if (forceGroundedStunCollapse || beingGrabbed || !isGrounded)
+            return false;
+
         return rootPlanarSpeed <= GroundedPlainStunNoCollapsePlanarThreshold &&
-               Mathf.Abs(rootVelocity.y) <= GroundedPlainStunNoCollapseVerticalThreshold &&
+               rootVerticalSpeed <= GroundedPlainStunNoCollapseVerticalThreshold &&
                rootAngularSpeed <= GroundedPlainStunNoCollapseAngularThreshold &&
-               Mathf.Abs(pelvisVelocity.y) <= GroundedPlainStunNoCollapsePelvisVerticalThreshold;
+               pelvisVerticalSpeed <= GroundedPlainStunNoCollapsePelvisVerticalThreshold;
     }
 
     private static SSAFYPlayTime.Character.BodyPartPhysicsProfile.CharacterPhysicsState ResolveImmediateStunBodyState(PhysicalPhase phase)
@@ -2819,6 +2901,35 @@ public sealed partial class NetworkPlayer
         }
     }
 
+    private void ClearCarryReleaseSettle(string source)
+    {
+        if (_carryReleaseSettleRemaining <= 0f &&
+            _lastCarryAnchorPosition == Vector3.zero &&
+            _lastCarryAnchorForward == Vector3.zero &&
+            !_hasCarriedVictimRootOffset)
+        {
+            return;
+        }
+
+        _carryReleaseSettleRemaining = 0f;
+        _lastCarryAnchorPosition = Vector3.zero;
+        _lastCarryAnchorForward = Vector3.zero;
+        _lastObservedCarryMode = SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.None;
+        _hasCarriedVictimRootOffset = false;
+        _carriedVictimRootOffset = Vector3.zero;
+
+        TraceCarryDebugSample(
+            "ClearCarryReleaseSettle",
+            $"source={source} phase={_localPhysicalPhase}",
+            forceSample: true);
+    }
+
+    private void ResetStunnedTransportPhaseTimers()
+    {
+        _draggedStunnedCandidateTimer = 0f;
+        _beingCarriedStunnedCandidateTimer = 0f;
+    }
+
     private void ApplyRootPositionInternal(Vector3 nextRootPosition, bool resetVelocity, string writerSource)
     {
         var rootBefore = transform.position;
@@ -2867,6 +2978,7 @@ public sealed partial class NetworkPlayer
         if (!TryResolveRootSyncTargetPosition(out var targetPos))
             return;
 
+        var phase = GetPhysicalPhase();
         var originalTargetPos = targetPos;
         if (ShouldUseCollapseAnchor())
         {
@@ -2886,9 +2998,27 @@ public sealed partial class NetworkPlayer
             var minRootY = _recoverAnchorPosition.y + GroundedCollapseRootMinYOffset;
             if (targetPos.y < minRootY)
                 targetPos.y = minRootY;
+
+            var maxRootY = _recoverAnchorPosition.y + GroundedCollapseRootMaxYOffset;
+            if (targetPos.y > maxRootY)
+                targetPos.y = maxRootY;
         }
 
-        var upwardSyncStep = StunRootUpwardSyncStep;
+        var suppressRecoveryUpwardCorrection = ShouldSuppressRecoveryUpwardCorrection();
+        if (suppressRecoveryUpwardCorrection && targetPos.y > transform.position.y)
+            targetPos.y = transform.position.y;
+
+        var suppressGroundedPlainStunUpwardCorrection =
+            ShouldSuppressGroundedPlainStunUpwardRootCorrection(
+                phase,
+                HasRecentStunnedGroundContact(),
+                _isRecovering,
+                _isRecoverStabilizing,
+                _beingGrabbedRefCount);
+        if (suppressGroundedPlainStunUpwardCorrection && targetPos.y > transform.position.y)
+            targetPos.y = transform.position.y;
+
+        var upwardSyncStep = suppressGroundedPlainStunUpwardCorrection ? 0f : StunRootUpwardSyncStep;
         if ((!_isActiveRagdoll || _isRecovering || _isRecoverStabilizing) &&
             targetPos.y > transform.position.y + upwardSyncStep)
         {
@@ -2903,7 +3033,7 @@ public sealed partial class NetworkPlayer
                 "SyncRootToPhysicsBody",
                 targetPos,
                 force: true,
-                note: $"originalTargetY={originalTargetPos.y:F2} upwardTarget={upwardTarget:F2} collapseAnchor={ShouldUseCollapseAnchor()} groundedAnchorClamp={(clampToGroundedAnchorFloor ? 1 : 0)} anchorY={_recoverAnchorPosition.y:F2}");
+                note: $"originalTargetY={originalTargetPos.y:F2} upwardTarget={upwardTarget:F2} collapseAnchor={ShouldUseCollapseAnchor()} groundedAnchorClamp={(clampToGroundedAnchorFloor ? 1 : 0)} recoveryYClamp={(suppressRecoveryUpwardCorrection ? 1 : 0)} plainStunYClamp={(suppressGroundedPlainStunUpwardCorrection ? 1 : 0)} anchorY={_recoverAnchorPosition.y:F2}");
         }
 
         if (delta.sqrMagnitude < 0.001f)
@@ -2966,6 +3096,20 @@ public sealed partial class NetworkPlayer
         var smoothDt = Runner != null ? Runner.DeltaTime : Time.fixedDeltaTime;
         var nextSmoothRootPosition = Vector3.Lerp(transform.position, targetPos, 8f * smoothDt);
         ApplyCarryRootPosition(nextSmoothRootPosition, resetVelocity: false);
+    }
+
+    internal static bool ShouldSuppressGroundedPlainStunUpwardRootCorrection(
+        PhysicalPhase phase,
+        bool hasRecentGroundContact,
+        bool isRecovering,
+        bool isRecoverStabilizing,
+        int beingGrabbedRefCount)
+    {
+        return IsPlainStunPhase(phase) &&
+               hasRecentGroundContact &&
+               !isRecovering &&
+               !isRecoverStabilizing &&
+               beingGrabbedRefCount <= 0;
     }
 
     private void SimulateLocomotion(PlayerNetworkInput input, float dt)
@@ -3754,7 +3898,8 @@ public sealed partial class NetworkPlayer
     private void TriggerStun(
         float duration,
         bool applyEntryDamping = true,
-        bool suppressImplicitPlainStunDamping = false)
+        bool suppressImplicitPlainStunDamping = false,
+        bool forceGroundedStunCollapse = false)
     {
         if (Runner != null && Object != null && Object.IsValid && !HasStateAuthority)
             return;
@@ -3772,6 +3917,9 @@ public sealed partial class NetworkPlayer
             NetworkedLocomotionState = (byte)PresentationLocomotionState.Idle;
             NetworkedIsSprinting = false;
         }
+
+        if (_externalAnimationDriver != null)
+            _externalAnimationDriver.InterruptAerialKickAnimationForPresentationHandoff("trigger-stun");
 
         if (!ShouldDisablePhysicsAnimationSync && mainJoint != null)
         {
@@ -3814,10 +3962,13 @@ public sealed partial class NetworkPlayer
         SetStunTimeRemaining(duration);
         SetAccumulatedStun(0f);
         ResetDownedHitRecoveryState();
+        _suppressRecoveryUpwardCorrectionAfterHandoff = false;
         _stunnedFloorSettleTimer = 0f;
         _stunnedGroundContactTimer = _isGrounded ? StunnedGroundContactMemory : 0f;
+        ResetStunnedTransportPhaseTimers();
         var plainStunEntry = _beingGrabbedRefCount <= 0;
-        var suppressCollapseForGroundedPlainStun = plainStunEntry && ShouldUseGroundedPlainStunNoCollapseEntry();
+        var suppressCollapseForGroundedPlainStun =
+            plainStunEntry && ShouldUseGroundedPlainStunNoCollapseEntry(forceGroundedStunCollapse);
         _stunCollapseTimer = _beingGrabbedRefCount > 0 || suppressCollapseForGroundedPlainStun
             ? 0f
             : Mathf.Min(duration, StunCollapseDuration);
@@ -3831,7 +3982,7 @@ public sealed partial class NetworkPlayer
 
         ArmStunDiagnosticsWindow(
             "TriggerStun",
-            $"duration={duration:F2} applyEntryDamping={(applyEntryDamping ? 1 : 0)} suppressImplicit={(suppressImplicitPlainStunDamping ? 1 : 0)} effectiveDamping={(shouldDampenEntry ? 1 : 0)} groundedPlainNoCollapse={(suppressCollapseForGroundedPlainStun ? 1 : 0)} initialPhase={initialStunnedPhase}");
+            $"duration={duration:F2} applyEntryDamping={(applyEntryDamping ? 1 : 0)} suppressImplicit={(suppressImplicitPlainStunDamping ? 1 : 0)} effectiveDamping={(shouldDampenEntry ? 1 : 0)} groundedPlainNoCollapse={(suppressCollapseForGroundedPlainStun ? 1 : 0)} forceGroundedCollapse={(forceGroundedStunCollapse ? 1 : 0)} initialPhase={initialStunnedPhase}");
         ArmStunForceDiagnostics("TriggerStun", $"duration={duration:F2}");
         TraceStunCollapsePose("TriggerStun-Entry", true);
         if (shouldDampenEntry)
@@ -4307,6 +4458,7 @@ public sealed partial class NetworkPlayer
         _pendingRecoveryStandUpPosition = recoveryPosition;
         _pendingRecoveryStandUpRotation = recoveryRotation;
         _hasPendingRecoveryStandUpHandoff = true;
+        _suppressRecoveryUpwardCorrectionAfterHandoff = false;
 
         _localMoveSpeed = 0f;
         _localPresentationLocomotionState = PresentationLocomotionState.Idle;
@@ -4366,6 +4518,7 @@ public sealed partial class NetworkPlayer
         _stunCollapseTimer = 0f;
         _stunnedFloorSettleTimer = 0f;
         _stunnedGroundContactTimer = 0f;
+        ResetStunnedTransportPhaseTimers();
 
         SetStunTimeRemaining(0f);
         SetAccumulatedStun(0f);
@@ -4410,6 +4563,7 @@ public sealed partial class NetworkPlayer
         AlignCharacterUpright(_pendingRecoveryStandUpRotation);
         TeleportToSafeStandUpPosition(_pendingRecoveryStandUpPosition, _pendingRecoveryStandUpRotation);
         DampenAllPhysicsBoneVelocities();
+        _suppressRecoveryUpwardCorrectionAfterHandoff = true;
         SyncRootToPhysicsBody();
         QueueRecoveryAnimationForVisuals();
         RaiseAnimationEvent(AnimationEventType.StunRecover, H_StunRecover);
@@ -5338,7 +5492,14 @@ public sealed partial class NetworkPlayer
         var currentVelocity = rigidbody3D.velocity;
         if (_activeAerialKickWindowEndTick < 0)
         {
-            var hasLandedAfterLaunch = _activeAerialKickHasLeftGround && _isGrounded;
+            var footLandingSignal = HasAerialKickFootLandingSignal();
+            var hasRecentGroundContact = HasRecentAerialKickGroundContact();
+            var hasLandedAfterLaunch = _activeAerialKickHasLeftGround &&
+                                       _isGrounded &&
+                                       HasConfirmedAerialKickLandingContact(
+                                           _activeAerialKickRawGrounded,
+                                           footLandingSignal,
+                                           hasRecentGroundContact);
             if (hasLandedAfterLaunch)
             {
                 BeginAerialKickSpringRestore("landing-confirmed");
@@ -5362,7 +5523,7 @@ public sealed partial class NetworkPlayer
                     _isGrounded,
                     currentVelocity.y,
                     _activeAerialKickNearGround,
-                    HasRecentAerialKickGroundContact()))
+                    hasRecentGroundContact))
             {
                 EnterAerialKickBallisticFall("descent-started");
                 return;
@@ -5516,7 +5677,10 @@ public sealed partial class NetworkPlayer
         var footLandingSignal = HasAerialKickFootLandingSignal();
         _activeAerialKickNearGround = IsNearGroundForAerialKickLanding(footLandingSignal);
         var hasRecentGroundContact = HasRecentAerialKickGroundContact();
-        var hasLandingSignal = _activeAerialKickNearGround || hasRecentGroundContact;
+        var hasLandingSignal = HasConfirmedAerialKickLandingContact(
+            rawGrounded,
+            footLandingSignal,
+            hasRecentGroundContact);
         var isDescendingEnough = rigidbody3D == null ||
                                  rigidbody3D.velocity.y <= AerialKickLandingMaxVerticalSpeed ||
                                  hasRecentGroundContact;
@@ -5551,6 +5715,17 @@ public sealed partial class NetworkPlayer
         }
 
         return false;
+    }
+
+    private static bool HasConfirmedAerialKickLandingContact(
+        bool rawGrounded,
+        bool footLandingSignal,
+        bool hasRecentGroundContact)
+    {
+        if (rawGrounded)
+            return true;
+
+        return footLandingSignal && hasRecentGroundContact;
     }
 
     private bool HasRecentAerialKickGroundContact()

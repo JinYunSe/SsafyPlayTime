@@ -37,6 +37,8 @@ namespace SSAFYPlayTime.Character
         private const float PlainStunCollapseLegDynamicFrictionFloor = 0.58f;
         private const float PlainStunStaticFrictionFloor = 0.70f;
         private const float PlainStunDynamicFrictionFloor = 0.46f;
+        private const float DownedRootStaticFrictionCap = 0.18f;
+        private const float DownedRootDynamicFrictionCap = 0.10f;
 
         [Header("References")]
         [SerializeField] private BodyPartPhysicsProfile profile;
@@ -66,6 +68,12 @@ namespace SSAFYPlayTime.Character
 
         [Header("Limp Structural Support")]
         [SerializeField] private bool enableLimpStructuralSupport = true;
+
+        [Header("Local Soft Flop")]
+        [SerializeField] private bool enableLocalSoftFlopPresentation = true;
+        [SerializeField, Range(0f, 1f)] private float localSoftFlopCollapseScale = 0.72f;
+        [SerializeField, Range(0f, 1f)] private float localSoftFlopStunnedScale = 0.84f;
+        [SerializeField, Range(0f, 1f)] private float localSoftFlopSettledScale = 0.92f;
 
         private BodyPartPhysicsProfile.CharacterPhysicsState _currentState = BodyPartPhysicsProfile.CharacterPhysicsState.Normal;
         private BodyPartPhysicsProfile.CharacterPhysicsState _targetState = BodyPartPhysicsProfile.CharacterPhysicsState.Normal;
@@ -115,6 +123,12 @@ namespace SSAFYPlayTime.Character
         private float _wobbleAmount;
         private bool _motionSampleInitialized;
 
+        private PuppetMasterLOD _lodComponent;
+
+        private const float OverlayUpdateInterval = 0.05f; // 20Hz
+        private float _nextOverlayUpdate;
+        private float _overlayAccumulatedDt;
+
         private void Awake()
         {
             EnsureDynamicDefaults();
@@ -122,6 +136,7 @@ namespace SSAFYPlayTime.Character
             if (puppetMaster == null)
                 puppetMaster = GetComponentInChildren<PuppetMaster>();
 
+            _lodComponent = GetComponentInParent<PuppetMasterLOD>(true);
             ResolveNetworkPlayer();
             ResolveMotionReferences();
         }
@@ -173,10 +188,20 @@ namespace SSAFYPlayTime.Character
                 }
             }
 
-            ApplyDynamicWobble(Time.deltaTime);
-            TickCombatFlinch(Time.deltaTime);
-            ApplyAnchorGrabOverlay();
-            TickCarriedPoseRestore(Time.deltaTime);
+            _overlayAccumulatedDt += Time.deltaTime;
+            if (Time.time >= _nextOverlayUpdate)
+            {
+                var lodLevel = _lodComponent != null ? _lodComponent.CurrentLOD : PuppetMasterLOD.LODLevel.Full;
+                if (lodLevel == PuppetMasterLOD.LODLevel.Full)
+                {
+                    ApplyDynamicWobble(_overlayAccumulatedDt);
+                    TickCombatFlinch(_overlayAccumulatedDt);
+                }
+                ApplyAnchorGrabOverlay();
+                TickCarriedPoseRestore(_overlayAccumulatedDt);
+                _overlayAccumulatedDt = 0f;
+                _nextOverlayUpdate = Time.time + OverlayUpdateInterval;
+            }
 
             if (networkPlayer != null &&
                 previousCurrentState != _currentState &&
@@ -491,6 +516,24 @@ namespace SSAFYPlayTime.Character
             return IsShapeCriticalState(state);
         }
 
+        private bool ShouldUseLocalSoftFlopPresentation()
+        {
+            return enableLocalSoftFlopPresentation &&
+                   networkPlayer != null &&
+                   networkPlayer.UsesAnimatedVisualPresentationRig();
+        }
+
+        private float ResolveLocalSoftFlopScale(BodyPartPhysicsProfile.CharacterPhysicsState state)
+        {
+            return state switch
+            {
+                BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse => localSoftFlopCollapseScale,
+                BodyPartPhysicsProfile.CharacterPhysicsState.Stunned => localSoftFlopStunnedScale,
+                BodyPartPhysicsProfile.CharacterPhysicsState.SettledStunned => localSoftFlopSettledScale,
+                _ => 1f
+            };
+        }
+
         private float UpdateWobbleAmount(float dt)
         {
             ResolveMotionReferences();
@@ -615,6 +658,17 @@ namespace SSAFYPlayTime.Character
                     break;
             }
 
+            if (!ShouldUseLocalSoftFlopPresentation())
+                return settings;
+
+            var localSoftFlopScale = ResolveLocalSoftFlopScale(state);
+            if (localSoftFlopScale >= 1f)
+                return settings;
+
+            // Keep the authoritative phase intact, but let plain stun/down presentation relax a little more.
+            settings.pinWeight *= localSoftFlopScale;
+            settings.muscleWeight *= localSoftFlopScale;
+
             return settings;
         }
 
@@ -709,6 +763,16 @@ namespace SSAFYPlayTime.Character
                 BodyPartPhysicsProfile.GetSettingsForCategory(
                 stateProfile,
                 BodyPartPhysicsProfile.BodyPartCategory.Leg));
+
+            if (_targetState == BodyPartPhysicsProfile.CharacterPhysicsState.StunnedCollapse ||
+                _targetState == BodyPartPhysicsProfile.CharacterPhysicsState.Stunned ||
+                _targetState == BodyPartPhysicsProfile.CharacterPhysicsState.DraggedStunned)
+            {
+                settings.staticFriction = Mathf.Min(settings.staticFriction, DownedRootStaticFrictionCap);
+                settings.dynamicFriction = Mathf.Min(settings.dynamicFriction, DownedRootDynamicFrictionCap);
+                settings.frictionCombine = PhysicMaterialCombine.Minimum;
+            }
+
             ApplyMaterialSettings(_rootDriveMaterials, settings);
         }
 
@@ -1056,6 +1120,8 @@ namespace SSAFYPlayTime.Character
                 .Append(_targetState)
                 .Append(",preserve=")
                 .Append(preserveShape ? 1 : 0)
+                .Append(",softFlop=")
+                .Append(ShouldUseLocalSoftFlopPresentation() ? 1 : 0)
                 .Append(",wobble=").Append(_wobbleAmount.ToString("F2"))
                 .Append(",flinch=").Append(_combatFlinchActive ? 1 : 0)
                 .Append(",anchors=").Append(_activeAnchorGrabs.Count)

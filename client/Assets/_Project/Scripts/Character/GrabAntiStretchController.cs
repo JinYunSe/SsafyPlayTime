@@ -32,6 +32,12 @@ namespace SSAFYPlayTime.Character
         [SerializeField] private float recoveringLimitDamperMultiplier = 1.65f;
         [SerializeField] private bool applyDuringRecovering = true;
 
+        [Header("Local Soft Flop")]
+        [SerializeField] private bool enableLocalSoftFlopPresentation = true;
+        [SerializeField, Range(0f, 1f)] private float localSoftFlopCollapseScale = 0.42f;
+        [SerializeField, Range(0f, 1f)] private float localSoftFlopStunnedScale = 0.60f;
+        [SerializeField, Range(0f, 1f)] private float localSoftFlopSettledScale = 0.78f;
+
         [Header("Core Grab Drive")]
         [SerializeField] private float holdingCoreSpringMultiplier = 1.04f;
         [SerializeField] private float holdingCoreDamperMultiplier = 1.03f;
@@ -206,6 +212,27 @@ namespace SSAFYPlayTime.Character
 
             if (puppetMaster == null)
                 puppetMaster = GetComponentInChildren<PuppetMaster>(true);
+        }
+
+        private bool ShouldUseLocalSoftFlopPresentation()
+        {
+            return enableLocalSoftFlopPresentation &&
+                   networkPlayer != null &&
+                   networkPlayer.UsesAnimatedVisualPresentationRig();
+        }
+
+        private float ResolveLocalSoftFlopScale(NetworkPlayer.PhysicalPhase phase)
+        {
+            if (!ShouldUseLocalSoftFlopPresentation())
+                return 1f;
+
+            return phase switch
+            {
+                NetworkPlayer.PhysicalPhase.StunnedCollapse => localSoftFlopCollapseScale,
+                NetworkPlayer.PhysicalPhase.Stunned => localSoftFlopStunnedScale,
+                NetworkPlayer.PhysicalPhase.SettledStunned => localSoftFlopSettledScale,
+                _ => 1f
+            };
         }
 
         private void BuildLinkDefinitions()
@@ -809,13 +836,16 @@ namespace SSAFYPlayTime.Character
             if (networkPlayer == null)
                 return;
 
-            switch (networkPlayer.GetPhysicalPhase())
+            var phase = networkPlayer.GetPhysicalPhase();
+            var localSoftFlopScale = ResolveLocalSoftFlopScale(phase);
+
+            switch (phase)
             {
                 case NetworkPlayer.PhysicalPhase.StunnedCollapse:
                 case NetworkPlayer.PhysicalPhase.Stunned:
                 case NetworkPlayer.PhysicalPhase.SettledStunned:
-                    springMultiplier = stunnedLimpLimitSpringMultiplier;
-                    damperMultiplier = stunnedLimpLimitDamperMultiplier;
+                    springMultiplier = stunnedLimpLimitSpringMultiplier * localSoftFlopScale;
+                    damperMultiplier = stunnedLimpLimitDamperMultiplier * localSoftFlopScale;
                     return;
                 case NetworkPlayer.PhysicalPhase.Recovering:
                     if (applyDuringRecovering)
@@ -841,6 +871,9 @@ namespace SSAFYPlayTime.Character
         private void ApplyCoreDrive(CoreDriveMode mode)
         {
             ResolveCoreDriveMultipliers(mode, out var springMultiplier, out var damperMultiplier);
+            var localSoftFlopScale = mode == CoreDriveMode.StunnedLimp && networkPlayer != null
+                ? ResolveLocalSoftFlopScale(networkPlayer.GetPhysicalPhase())
+                : 1f;
 
             ApplyDriveScale(_coreDriveLinks, springMultiplier, damperMultiplier);
 
@@ -851,7 +884,10 @@ namespace SSAFYPlayTime.Character
             }
             else if (mode == CoreDriveMode.StunnedLimp && _limbDriveLinks != null && _limbDriveResolved)
             {
-                ApplyDriveScale(_limbDriveLinks, stunnedLimpLimbSpringMultiplier, stunnedLimpLimbDamperMultiplier);
+                ApplyDriveScale(
+                    _limbDriveLinks,
+                    stunnedLimpLimbSpringMultiplier * localSoftFlopScale,
+                    stunnedLimpLimbDamperMultiplier * localSoftFlopScale);
             }
             else if (mode == CoreDriveMode.Recovering && _limbDriveLinks != null && _limbDriveResolved)
             {
@@ -914,6 +950,10 @@ namespace SSAFYPlayTime.Character
 
         private void ResolveCoreDriveMultipliers(CoreDriveMode mode, out float springMultiplier, out float damperMultiplier)
         {
+            var localSoftFlopScale = mode == CoreDriveMode.StunnedLimp && networkPlayer != null
+                ? ResolveLocalSoftFlopScale(networkPlayer.GetPhysicalPhase())
+                : 1f;
+
             switch (mode)
             {
                 case CoreDriveMode.Holding:
@@ -937,8 +977,8 @@ namespace SSAFYPlayTime.Character
                     break;
 
                 case CoreDriveMode.StunnedLimp:
-                    springMultiplier = stunnedLimpCoreSpringMultiplier;
-                    damperMultiplier = stunnedLimpCoreDamperMultiplier;
+                    springMultiplier = stunnedLimpCoreSpringMultiplier * localSoftFlopScale;
+                    damperMultiplier = stunnedLimpCoreDamperMultiplier * localSoftFlopScale;
                     break;
 
                 case CoreDriveMode.Recovering:
@@ -1075,9 +1115,11 @@ namespace SSAFYPlayTime.Character
             var desiredMode = ResolveCoreDriveMode();
             ResolveCoreDriveMultipliers(desiredMode, out var springMultiplier, out var damperMultiplier);
             var antiStretchEnabled = networkPlayer != null && ShouldEnableAntiStretch();
+            var localSoftFlopEnabled = ShouldUseLocalSoftFlopPresentation();
 
             return $"antiStretchActive={(_active ? 1 : 0)} antiStretchEnabled={(antiStretchEnabled ? 1 : 0)} " +
                    $"coreMode={desiredMode} currentMode={_currentCoreDriveMode} " +
+                   $"softFlop={(localSoftFlopEnabled ? 1 : 0)} " +
                    $"springMult={springMultiplier:F2} damperMult={damperMultiplier:F2} " +
                    $"dynamicLinks={_dynamicGrabLinks.Count} coreResolved={(_coreDriveResolved ? 1 : 0)}";
         }

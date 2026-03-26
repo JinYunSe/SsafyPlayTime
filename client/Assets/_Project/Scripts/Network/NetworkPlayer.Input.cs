@@ -355,6 +355,33 @@ public sealed partial class NetworkPlayer
         SynchronizeStunPresentationPhase();
     }
 
+    private void PublishInitialNetworkSimulationState()
+    {
+        if (!IsNetworkReady || !HasStateAuthority)
+            return;
+
+        if (_handGrabHandlers != null)
+            UpdateGrabHandlers();
+        else
+            SyncGrabNetworkState();
+
+        RefreshPhysicalPhaseAfterGrabHandlers();
+        SynchronizeNetworkSimulationState();
+
+        if (_puppetMaster != null)
+        {
+            WritePuppetSyncState(
+                _puppetMaster.pinWeight,
+                _puppetMaster.muscleWeight,
+                (int)_puppetMaster.state,
+                (int)_puppetMaster.mode);
+        }
+        else
+        {
+            WritePuppetSyncState(1f, 1f, 0, 0);
+        }
+    }
+
     private void UpdateGrabHandlers()
     {
         foreach (var handler in _handGrabHandlers)
