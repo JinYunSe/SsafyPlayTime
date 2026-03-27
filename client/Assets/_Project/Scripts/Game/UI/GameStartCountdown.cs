@@ -22,6 +22,14 @@ public class GameStartCountdown : NetworkBehaviour
             StartCoroutine(RunCountdown());
     }
 
+    public override void Despawned(NetworkRunner runner, bool hasState)
+    {
+        // 씬 전환 또는 호스트 퇴장으로 Despawn될 때 static 플래그를 리셋한다.
+        // 리셋하지 않으면 다음 게임에서 Spawned() 호출 전까지 true가 유지되어
+        // 카운트다운 중 입력이 허용되는 버그가 발생한다.
+        InputEnabled = false;
+    }
+
     public override void Render()
     {
         if (CountdownValue == _prevCountdownValue) return;
