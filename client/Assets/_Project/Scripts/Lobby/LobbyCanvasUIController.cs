@@ -480,6 +480,21 @@ namespace SSAFYPlayTime
 
         private IEnumerator CoLeaveGameVoluntarily()
         {
+            // KillImmediately 직후 TriggerGameEnd가 발동될 수 있다.
+            // LoadSceneAfterSync가 RPC_BroadcastRankings를 전송(2프레임 후)하고
+            // _pendingGameEndPanel을 세울 때까지 충분히 양보한다.
+            yield return null;
+            yield return null;
+            yield return null;
+
+            if (_pendingGameEndPanel || _isShowingGameEndPanel)
+            {
+                // TriggerGameEnd가 씬 전환을 담당하므로 여기서는 아무것도 하지 않는다.
+                // 클라이언트는 runner.LoadScene + OnSceneLoadDone 경로로 GameEndPanel을 표시한다.
+                _isProcessing = false;
+                yield break;
+            }
+
             SceneManager.LoadScene(launcherSceneName);
             while (!IsActiveSceneNamed(launcherSceneName))
                 yield return null;
