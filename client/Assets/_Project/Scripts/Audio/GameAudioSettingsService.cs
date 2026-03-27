@@ -114,6 +114,16 @@ namespace SSAFYPlayTime
             LoadSettings();
             ApplyAudioListenerVolume();
             SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
+        private void Start()
+        {
+            // Awake()가 아닌 Start()에서 호출해야 한다.
+            // Awake()에서 호출하면 GameAudioSource.OnEnable()보다 먼저 실행되어
+            // AudioSource.volume을 카테고리 볼륨 * 0 = 0으로 만든 뒤,
+            // GameAudioSource.OnEnable()이 그 0을 _baseVolume으로 캡처하는 버그가 발생한다.
+            // Start()에서 호출하면 OnEnable()이 먼저 원본 볼륨을 캡처하고
+            // _baseVolumeCaptured = true가 되어 재캡처가 방지된다.
             RegisterSceneAudioSources();
         }
 
