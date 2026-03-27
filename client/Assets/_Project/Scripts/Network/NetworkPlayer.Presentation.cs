@@ -310,7 +310,7 @@ public sealed partial class NetworkPlayer
 
         return GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing ||
                UsesBufferedProxyPosePhase(GetPhysicalPhase()) ||
-               IsRemotePhysicsPresentationResetLocked();
+               (IsRemotePhysicsPresentationResetLocked() && !ShouldSuppressRemoteRecoveryPresentationReset());
     }
 
     private bool ShouldUseProxyPlainStunPoseAuthority()
@@ -351,6 +351,9 @@ public sealed partial class NetworkPlayer
             return false;
 
         if (HasStateAuthority || ShouldUseHardPhysicsVisualMode() || ShouldUseProxyPlainStunPoseAuthority())
+            return false;
+
+        if (IsRemoteRecoveryPresentationResetWindowActive())
             return false;
 
         if (!HasInputAuthority)
@@ -443,6 +446,29 @@ public sealed partial class NetworkPlayer
 
         if (TryApplyProxyStartupPresentationSnap(presentationRoot, targetPosition, pelvisBefore, visualBefore))
             return;
+
+        if (IsRemoteRecoveryPresentationResetWindowActive())
+        {
+            var targetRotation = transform.rotation;
+            if ((presentationRoot.position - targetPosition).sqrMagnitude > 0.0001f ||
+                Quaternion.Angle(presentationRoot.rotation, targetRotation) > 0.1f)
+            {
+                presentationRoot.SetPositionAndRotation(targetPosition, targetRotation);
+                TraceStunTransformWriter(
+                    "Writer.UpdateProxyPresentationRoot",
+                    transform.position,
+                    transform.position,
+                    pelvisBefore: pelvisBefore,
+                    pelvisAfter: ResolveStartupLaunchPelvisPosition(out _),
+                    visualBefore: visualBefore,
+                    visualAfter: presentationRoot.position,
+                    note: $"actualRoot=0 mode=recoveryResetSnap targetY={targetPosition.y:F2}",
+                    force: Mathf.Abs(presentationRoot.position.y - visualBefore.y) > 0.03f);
+            }
+
+            _proxyPresentationRootSmoothingActive = false;
+            return;
+        }
 
         if (ShouldUseProxyPlainStunPoseAuthority() &&
             (ShouldUseHardPhysicsVisualMode() || ShouldUseProxyLocalSoftFlopPresentation()))

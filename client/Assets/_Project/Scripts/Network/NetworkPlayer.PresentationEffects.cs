@@ -5,12 +5,17 @@ using UnityEngine;
 public sealed partial class NetworkPlayer
 {
     private const string RunDustResourcePath = "_Project/Effects/CharacterRunDust";
+    private const string StunAuraResourcePath = "_Project/Effects/StatusAilment_01_Aura";
     private const float WalkDustInterval = 0.22f;
     private const float SprintDustInterval = 0.15f;
     private const float FootDustProbeHeight = 0.25f;
     private const float FootDustProbeDistance = 0.9f;
     private const float FootDustSurfaceOffset = 0.02f;
     private const float FootDustFallbackOffset = 0.18f;
+    private const float StunAuraVerticalOffset = -0.9f;
+    private const float StunAuraFallbackHeadHeight = 1.35f;
+    private const float StunAuraFollowSharpness = 22f;
+    private const float StunAuraScaleMultiplier = 1.2f;
 
     // Object Pool — 씬 전체에서 공유하는 static 풀
     private static readonly Stack<GameObject> s_runDustPool = new();
@@ -32,15 +37,21 @@ public sealed partial class NetworkPlayer
     private readonly List<UpperBodySwayBinding> _upperBodySwayBindings = new();
     private bool _presentationEffectsDirty = true;
     private GameObject _runDustPrefab;
+    private GameObject _stunAuraPrefab;
+    private GameObject _stunAuraInstance;
     private float _nextDustAt;
     private bool _nextDustLeftFoot = true;
     private int _lastPresentationEffectsFrame = -1;
     private Transform _leftFootVisual;
     private Transform _rightFootVisual;
+    private Transform _stunAuraFollowTarget;
+    private bool _stunAuraMissingTargetLogged;
+    private bool _stunAuraMissingPrefabLogged;
 
     private void MarkPresentationEffectsDirty()
     {
         _presentationEffectsDirty = true;
+        _stunAuraFollowTarget = null;
     }
 
     private void UpdateCharacterPresentationEffects()
@@ -52,6 +63,7 @@ public sealed partial class NetworkPlayer
 
         ApplyActiveUpperBodySway();
         TickRunDust();
+        TickStunAura();
     }
 
     private void EnsurePresentationEffectBindings()
@@ -63,6 +75,7 @@ public sealed partial class NetworkPlayer
         _upperBodySwayBindings.Clear();
         _leftFootVisual = null;
         _rightFootVisual = null;
+        _stunAuraFollowTarget = ResolveHeadbuttHeadTransform();
 
         if (animator == null)
             return;
@@ -239,6 +252,110 @@ public sealed partial class NetworkPlayer
         _nextDustLeftFoot = true;
     }
 
+    private void TickStunAura()
+    {
+        if (!ShouldShowStunAura())
+        {
+            SetStunAuraActive(false);
+            return;
+        }
+
+        var prefab = LoadStunAuraPrefab();
+        if (prefab == null)
+        {
+            SetStunAuraActive(false);
+            return;
+        }
+
+        EnsurePresentationEffectBindings();
+
+        var created = false;
+        if (_stunAuraInstance == null)
+        {
+            _stunAuraInstance = Instantiate(prefab, transform);
+            _stunAuraInstance.name = $"{prefab.name} (Runtime)";
+            created = true;
+        }
+
+        _stunAuraInstance.transform.localScale = prefab.transform.localScale * StunAuraScaleMultiplier;
+
+        var wasInactive = !_stunAuraInstance.activeSelf;
+        if (wasInactive)
+            _stunAuraInstance.SetActive(true);
+
+        UpdateStunAuraTransform(created || wasInactive);
+
+        if (created || wasInactive)
+            RestartParticleSystems(_stunAuraInstance);
+    }
+
+    private bool ShouldShowStunAura()
+    {
+        if (GetIsDeadState())
+            return false;
+
+        return GetPhysicalPhase() switch
+        {
+            PhysicalPhase.StunnedCollapse => true,
+            PhysicalPhase.Stunned => true,
+            PhysicalPhase.SettledStunned => true,
+            PhysicalPhase.DraggedStunned => true,
+            PhysicalPhase.BeingCarriedStunned => true,
+            _ => false
+        };
+    }
+
+    private void SetStunAuraActive(bool active)
+    {
+        if (_stunAuraInstance == null || _stunAuraInstance.activeSelf == active)
+            return;
+
+        _stunAuraInstance.SetActive(active);
+    }
+
+    private void UpdateStunAuraTransform(bool snapImmediately)
+    {
+        if (_stunAuraInstance == null)
+            return;
+
+        var targetPosition = ResolveStunAuraTargetPosition();
+        var effectTransform = _stunAuraInstance.transform;
+        if (snapImmediately || Time.deltaTime <= 0f)
+        {
+            effectTransform.position = targetPosition;
+        }
+        else
+        {
+            var alpha = 1f - Mathf.Exp(-StunAuraFollowSharpness * Time.deltaTime);
+            effectTransform.position = Vector3.Lerp(effectTransform.position, targetPosition, alpha);
+        }
+
+        effectTransform.rotation = Quaternion.identity;
+    }
+
+    private Vector3 ResolveStunAuraTargetPosition()
+    {
+        if (_stunAuraFollowTarget == null)
+        {
+            EnsurePresentationEffectBindings();
+            _stunAuraFollowTarget = ResolveHeadbuttHeadTransform();
+        }
+
+        if (_stunAuraFollowTarget != null)
+        {
+            _stunAuraMissingTargetLogged = false;
+            return _stunAuraFollowTarget.position + Vector3.up * StunAuraVerticalOffset;
+        }
+
+        if (!_stunAuraMissingTargetLogged)
+        {
+            Debug.LogWarning($"[NetworkPlayer] {name} is stunned but no head transform was resolved for the stun aura.", this);
+            _stunAuraMissingTargetLogged = true;
+        }
+
+        return transform.position + Vector3.up * (StunAuraFallbackHeadHeight + StunAuraVerticalOffset);
+    }
+
     private PresentationLocomotionState ResolvePresentationLocomotionState()
     {
         if (Runner != null && Object != null && Object.IsValid)
@@ -304,6 +421,35 @@ public sealed partial class NetworkPlayer
             _runDustPrefab = Resources.Load<GameObject>(RunDustResourcePath);
 
         return _runDustPrefab;
+    }
+
+    private GameObject LoadStunAuraPrefab()
+    {
+        if (_stunAuraPrefab == null)
+        {
+            _stunAuraPrefab = Resources.Load<GameObject>(StunAuraResourcePath);
+            if (_stunAuraPrefab == null && !_stunAuraMissingPrefabLogged)
+            {
+                Debug.LogWarning($"[NetworkPlayer] Missing stun aura prefab at Resources/{StunAuraResourcePath}.", this);
+                _stunAuraMissingPrefabLogged = true;
+            }
+        }
+
+        return _stunAuraPrefab;
+    }
+
+    private static void RestartParticleSystems(GameObject root)
+    {
+        var particleSystems = root.GetComponentsInChildren<ParticleSystem>(true);
+        for (var i = 0; i < particleSystems.Length; i++)
+        {
+            var particleSystem = particleSystems[i];
+            if (particleSystem == null)
+                continue;
+
+            particleSystem.Clear(true);
+            particleSystem.Play(true);
+        }
     }
 
     // ── Object Pool ────────────────────────────────────────────────────────────
