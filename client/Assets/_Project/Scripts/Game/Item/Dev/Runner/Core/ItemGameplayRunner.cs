@@ -50,7 +50,7 @@ namespace SSAFYPlayTime.Gameplay.Items
 
         [Header("프리젠테이션")]
         [SerializeField] private bool enableRuntimePresentation = true;
-        [SerializeField] private bool disableRuntimeAudioOutput = true;
+        [SerializeField] private bool disableRuntimeAudioOutput = false;
         [SerializeField] private string soundAssetTableRelativePath = ItemCatalogLoader.DefaultSoundAssetPath;
         [SerializeField] private string vfxAssetTableRelativePath = ItemCatalogLoader.DefaultVfxAssetPath;
         [SerializeField] private float defaultSfxVolume = 1f;
