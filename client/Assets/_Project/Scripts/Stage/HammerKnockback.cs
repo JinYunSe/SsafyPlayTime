@@ -128,11 +128,8 @@ namespace SSAFYPlayTime.Stage
                 ? recoveringKnockbackScale
                 : 1f;
 
+            // 1) 래그돌 전환: 0.15초 날아가는 동안 정상 속도를 유지한 뒤 스턴 적용
             StartCoroutine(DelayedStunRoutine(networkPlayer, healthDamage, stunDamage));
-
-            // 1) 래그돌 전환
-            // networkPlayer?.ApplyCombinedDamage(healthDamage, stunDamage, "HammerKnockback");
-            networkPlayer?.ApplyCombinedDamage(healthDamage, stunDamage, "HammerKnockback", 0f, 0f, 1f, deferStunEntryDamping: true, null);
 
             // 이동
             if (networkPlayer != null)

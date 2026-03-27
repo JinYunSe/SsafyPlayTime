@@ -171,12 +171,17 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
             player.OnNetworkPlayerDied += OnNetworkPlayerDied;
         }
 
-        // 등록된 모든 플레이어가 구독 완료되면 주기 탐색 중단
-        if (_allRegisteredPlayerIds.Count > 0 &&
+        // 등록된 모든 플레이어가 구독 완료되면 주기 탐색 중단.
+        // Runner.ActivePlayers 수와 비교해 HOST만 스폰된 시점에 조기 중단하는 버그를 방지한다.
+        var expectedPlayerCount = Runner != null
+            ? Runner.ActivePlayers.Count(p => p.IsRealPlayer)
+            : 0;
+        if (expectedPlayerCount > 0 &&
+            _allRegisteredPlayerIds.Count >= expectedPlayerCount &&
             _subscribedPlayers.Count >= _allRegisteredPlayerIds.Count)
         {
             _allPlayersSubscribed = true;
-            Debug.Log("[GameEnd] 모든 플레이어 구독 완료 → FindObjectsByType 주기 탐색 중단");
+            Debug.Log($"[GameEnd] 모든 플레이어 구독 완료 ({_allRegisteredPlayerIds.Count}/{expectedPlayerCount}) → FindObjectsByType 주기 탐색 중단");
 
             // 초기화 전 사망/퇴장한 플레이어가 있을 수 있으므로 생존자 수를 즉시 재확인한다.
             // 스폰 직후 0.5초 이내 즉사 시 TriggerGameEnd가 발동되지 않는 문제를 방지한다.
