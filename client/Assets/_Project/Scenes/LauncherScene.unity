@@ -3159,7 +3159,7 @@ MonoBehaviour:
     - {fileID: 282333193}
     - {fileID: 160373005}
     - {fileID: 1293392384}
-  allowSoloStart: 0
+  allowSoloStart: 1
   nicknamePanel: {fileID: 860748352}
   lobbyPanel: {fileID: 1519384042}
   roomPanel: {fileID: 1953091418}
