@@ -36,7 +36,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private float runnerLookupIntervalSec = 1f;
 
         [Header("디버그")]
-        [SerializeField] private bool enableDebugLog = true;
+    [SerializeField] private bool enableDebugLog = false;
 
         private NetworkRunner _runnerCache;
         private float _nextRunnerLookupTime;

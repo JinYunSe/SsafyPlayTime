@@ -10,7 +10,7 @@ public class ImmediateDeath : MonoBehaviour
 {
     [SerializeField] private bool destroyFieldItems = true;
     [SerializeField] private bool killPlayers = true;
-    [SerializeField] private bool enableDebugLog = true;
+    [SerializeField] private bool enableDebugLog = false;
 
     private ItemRandomSpawnManager[] _spawnManagers;
 
