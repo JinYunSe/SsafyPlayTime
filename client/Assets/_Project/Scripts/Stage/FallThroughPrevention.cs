@@ -12,7 +12,7 @@ using UnityEngine;
 public class FallThroughPrevention : MonoBehaviour
 {
     [Tooltip("복귀시킬 Y 위치")]
-    [SerializeField] private float repositionY = 8f;
+    [SerializeField] private float repositionY = 16f;
 
     [Tooltip("같은 캐릭터에 대한 최소 재처리 간격 (초)")]
     [SerializeField] private float cooldownSeconds = 1f;
