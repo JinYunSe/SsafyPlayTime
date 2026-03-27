@@ -177,14 +177,27 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
         {
             _allPlayersSubscribed = true;
             Debug.Log("[GameEnd] 모든 플레이어 구독 완료 → FindObjectsByType 주기 탐색 중단");
+
+            // 초기화 전 사망/퇴장한 플레이어가 있을 수 있으므로 생존자 수를 즉시 재확인한다.
+            // 스폰 직후 0.5초 이내 즉사 시 TriggerGameEnd가 발동되지 않는 문제를 방지한다.
+            if (!_triggered && _deathOrder.Count > 0)
+            {
+                var aliveCount = _allRegisteredPlayerIds.Count(id =>
+                    !_deathOrder.Contains(id) && !_leftPlayerIds.Contains(id));
+                Debug.Log($"[GameEnd] 초기화 완료 후 생존자 재확인: {aliveCount}명");
+                if (aliveCount <= 1)
+                    TriggerGameEnd();
+            }
         }
     }
 
     private void OnNetworkPlayerDied(NetworkPlayer deadPlayer)
     {
-        if (!HasStateAuthority || _triggered)
+        if (!HasStateAuthority)
             return;
 
+        // 사망 순서 기록은 _triggered 이후에도 계속 수행한다.
+        // 동시 사망 시 두 번째 사망자도 _deathOrder에 포함되어야 정확한 순위가 보장된다.
         if (deadPlayer?.Object != null && deadPlayer.Object.InputAuthority.IsRealPlayer)
         {
             var playerId = deadPlayer.Object.InputAuthority.PlayerId;
@@ -195,7 +208,11 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
             }
         }
 
+        if (_triggered)
+            return;
+
         // _allRegisteredPlayerIds가 비어있으면 아직 초기화 전이므로 계산하지 않는다.
+        // SubscribeToPlayers 완료 후 재확인된다.
         if (_allRegisteredPlayerIds.Count == 0) return;
 
         // PlayerLeft와 동일한 캐시 기반 계산으로 통일
@@ -234,11 +251,9 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
 
         _triggered = true;
 
-        // _allRegisteredPlayerIds - _deathOrder = 마지막 생존자 ID
-        // NetworkObject 상태 의존 없이 캐시만으로 winner를 결정한다.
-        var winnerPlayerId = _allRegisteredPlayerIds.FirstOrDefault(id => !_deathOrder.Contains(id));
-
-        AssignDeathOrderRankings(winnerPlayerId);
+        // winner 결정과 순위 배정은 LoadSceneAfterSync에서 2프레임 대기 후 수행한다.
+        // _triggered=true 이후에도 OnNetworkPlayerDied가 _deathOrder에 기록을 계속하므로
+        // 동시 사망 이벤트가 모두 반영된 뒤 정확한 순위를 계산하기 위함이다.
         StartCoroutine(LoadSceneAfterSync());
     }
 
@@ -299,6 +314,16 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
     {
         yield return null;
         yield return null;
+
+        // 동시 사망한 플레이어들의 _deathOrder 기록이 완료될 때까지 2프레임 대기 후 순위 결정.
+        // TriggerDebugGameEnd 경로는 AssignRandomRankings를 먼저 호출하므로
+        // NetworkedPlayerCount > 0이면 이미 순위가 설정된 상태다.
+        if (NetworkedPlayerCount == 0)
+        {
+            var winnerPlayerId = _allRegisteredPlayerIds.FirstOrDefault(id =>
+                !_deathOrder.Contains(id) && !_leftPlayerIds.Contains(id));
+            AssignDeathOrderRankings(winnerPlayerId);
+        }
 
         runner ??= Runner ?? FindAnyObjectByType<NetworkRunner>();
         if (runner != null && runner.IsRunning)
