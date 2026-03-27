@@ -944,15 +944,46 @@ namespace SSAFYPlayTime.Gameplay.Items
 
             _spawnedHeldVisual.transform.position = handAnchor.TransformPoint(_currentHeldLocalPositionOffset);
 
-            if (_hasMuzzleAimTarget &&
-                string.Equals(_currentHeldItemId, ItemIds.Flamethrower, StringComparison.Ordinal))
+            if (string.Equals(_currentHeldItemId, ItemIds.Flamethrower, StringComparison.Ordinal))
             {
-                var aimDirection = _muzzleAimTarget - _spawnedHeldVisual.transform.position;
+                // Keep the held flamethrower facing the aim/owner forward direction instead of inheriting wrist twist.
+                var upAxis = handAnchor.up.sqrMagnitude > 0.0001f
+                    ? handAnchor.up.normalized
+                    : Vector3.up;
+                var aimDirection = Vector3.zero;
+
+                if (_hasMuzzleAimTarget)
+                {
+                    aimDirection = _muzzleAimTarget - _spawnedHeldVisual.transform.position;
+                }
+                else
+                {
+                    var searchRoot = characterRoot != null
+                        ? characterRoot
+                        : itemRuntimeHost != null && itemRuntimeHost.OwnerTransform != null
+                            ? itemRuntimeHost.OwnerTransform
+                            : transform;
+
+                    upAxis = searchRoot.up.sqrMagnitude > 0.0001f
+                        ? searchRoot.up.normalized
+                        : Vector3.up;
+                    aimDirection = Vector3.ProjectOnPlane(searchRoot.forward, upAxis);
+                    if (aimDirection.sqrMagnitude <= 0.0001f)
+                    {
+                        aimDirection = searchRoot.forward;
+                    }
+                }
+
                 if (aimDirection.sqrMagnitude > 0.0001f)
                 {
                     _spawnedHeldVisual.transform.rotation =
-                        Quaternion.LookRotation(aimDirection.normalized, handAnchor.up) *
+                        Quaternion.LookRotation(aimDirection.normalized, upAxis) *
                         Quaternion.Euler(flamethrowerAimEulerOffset);
+                }
+                else
+                {
+                    _spawnedHeldVisual.transform.rotation =
+                        handAnchor.rotation * Quaternion.Euler(_currentHeldEulerOffset);
                 }
             }
             else

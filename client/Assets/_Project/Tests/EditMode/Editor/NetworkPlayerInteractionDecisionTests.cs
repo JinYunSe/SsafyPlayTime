@@ -251,6 +251,30 @@ public sealed class NetworkPlayerInteractionDecisionTests
         field.SetValue(target, value);
     }
 
+    private static object GetPrivateField(object target, string fieldName)
+    {
+        var field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(field, Is.Not.Null);
+        return field.GetValue(target);
+    }
+
+    private static void InvokePrivateMethod(object target, string methodName)
+    {
+        var method = target.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(method, Is.Not.Null);
+        method.Invoke(target, null);
+    }
+
+    private static void InvokeApplyAerialKickMissPenalty(NetworkPlayer player)
+    {
+        var method = typeof(NetworkPlayer).GetMethod(
+            "ApplyAerialKickMissPenalty",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.That(method, Is.Not.Null);
+        method.Invoke(player, null);
+    }
+
     private static string InvokeResolveAuthorityPhysicalPhaseCore(
         object currentPhase,
         float instability,
@@ -262,7 +286,8 @@ public sealed class NetworkPlayerInteractionDecisionTests
         bool hasHeldEquipment,
         bool isGroggy,
         bool beingGrabbed,
-        bool dragged)
+        bool dragged,
+        bool isDualGrabbingStunnedPlayer = false)
     {
         var physicalPhaseType = ResolvePhysicalPhaseType();
         var method = typeof(NetworkPlayer).GetMethod(
@@ -273,6 +298,7 @@ public sealed class NetworkPlayerInteractionDecisionTests
             {
                 physicalPhaseType,
                 typeof(float),
+                typeof(bool),
                 typeof(bool),
                 typeof(bool),
                 typeof(bool),
@@ -296,6 +322,7 @@ public sealed class NetworkPlayerInteractionDecisionTests
                 isRecoverStabilizing,
                 anyHolding,
                 isHoldingStunnedPlayer,
+                isDualGrabbingStunnedPlayer,
                 isGrabActive,
                 hasHeldEquipment,
                 isGroggy,
@@ -307,7 +334,8 @@ public sealed class NetworkPlayerInteractionDecisionTests
     private static bool InvokeShouldStartCarryReleaseSettle(
         CarryPhysicsProfile.CarryMode previousMode,
         CarryPhysicsProfile.CarryMode newMode,
-        bool suppressNextCarryReleaseSettle)
+        bool suppressNextCarryReleaseSettle,
+        bool stillGrabbed = false)
     {
         var method = typeof(NetworkPlayer).GetMethod(
             "ShouldStartCarryReleaseSettle",
@@ -316,7 +344,7 @@ public sealed class NetworkPlayerInteractionDecisionTests
         Assert.That(method, Is.Not.Null);
         return (bool)method.Invoke(
             null,
-            new object[] { previousMode, newMode, suppressNextCarryReleaseSettle });
+            new object[] { previousMode, newMode, suppressNextCarryReleaseSettle, stillGrabbed });
     }
 
     private static bool InvokeShouldEnterAerialKickBallisticFall(
@@ -419,6 +447,130 @@ public sealed class NetworkPlayerInteractionDecisionTests
         return (float)method.Invoke(null, new object[] { configuredSelfStunDuration, groundedPlop });
     }
 
+    private static bool InvokeShouldApplyAerialKickMissStun(
+        float configuredSelfStunDuration,
+        bool groundedPlop,
+        bool shouldApplySelfStun)
+    {
+        var method = typeof(NetworkPlayer).GetMethod(
+            "ShouldApplyAerialKickMissStun",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.That(method, Is.Not.Null);
+        return (bool)method.Invoke(
+            null,
+            new object[]
+            {
+                configuredSelfStunDuration,
+                groundedPlop,
+                shouldApplySelfStun
+            });
+    }
+
+    private static float InvokeResolveAerialKickVictimLinearKnockback(
+        float finalKnockback,
+        float reactionKnockback,
+        bool repeatDownedHit,
+        bool groundedStunEntry,
+        bool enteredStunThisHit)
+    {
+        var method = typeof(NetworkPlayer).GetMethod(
+            "ResolveAerialKickVictimLinearKnockback",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.That(method, Is.Not.Null);
+        return (float)method.Invoke(
+            null,
+            new object[]
+            {
+                finalKnockback,
+                reactionKnockback,
+                repeatDownedHit,
+                groundedStunEntry,
+                enteredStunThisHit
+            });
+    }
+
+    private static float InvokeResolveAerialKickVictimToppleKnockback(
+        float finalKnockback,
+        float reactionKnockback,
+        bool groundedStunEntry,
+        bool enteredStunThisHit)
+    {
+        var method = typeof(NetworkPlayer).GetMethod(
+            "ResolveAerialKickVictimToppleKnockback",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.That(method, Is.Not.Null);
+        return (float)method.Invoke(
+            null,
+            new object[]
+            {
+                finalKnockback,
+                reactionKnockback,
+                groundedStunEntry,
+                enteredStunThisHit
+            });
+    }
+
+    private static float InvokeResolveAerialKickVictimRotationScale(
+        bool groundedStunEntry,
+        bool collapseVictim,
+        bool isStunnedAfterHit,
+        float heightRatio)
+    {
+        var method = typeof(NetworkPlayer).GetMethod(
+            "ResolveAerialKickVictimRotationScale",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.That(method, Is.Not.Null);
+        return (float)method.Invoke(
+            null,
+            new object[]
+            {
+                groundedStunEntry,
+                collapseVictim,
+                isStunnedAfterHit,
+                heightRatio
+            });
+    }
+
+    private static bool InvokeShouldApplyAerialKickVictimYawTorque(bool groundedStunEntry, float lateralRatio)
+    {
+        var method = typeof(NetworkPlayer).GetMethod(
+            "ShouldApplyAerialKickVictimYawTorque",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.That(method, Is.Not.Null);
+        return (bool)method.Invoke(
+            null,
+            new object[]
+            {
+                groundedStunEntry,
+                lateralRatio
+            });
+    }
+
+    private static bool InvokeShouldTreatAerialKickVictimStunEntryAsGrounded(
+        bool isGrounded,
+        bool rawGrounded,
+        bool hasGroundedGrace)
+    {
+        var method = typeof(NetworkPlayer).GetMethod(
+            "ShouldTreatAerialKickVictimStunEntryAsGrounded",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.That(method, Is.Not.Null);
+        return (bool)method.Invoke(
+            null,
+            new object[]
+            {
+                isGrounded,
+                rawGrounded,
+                hasGroundedGrace
+            });
+    }
+
     private static bool InvokeShouldEndAerialKickProxyPresentation(
         bool isGrounded,
         object aerialKickPresentationState,
@@ -479,7 +631,8 @@ public sealed class NetworkPlayerInteractionDecisionTests
         float rootVerticalSpeed,
         float rootAngularSpeed,
         float pelvisVerticalSpeed,
-        bool forceGroundedStunCollapse)
+        bool forceGroundedStunCollapse,
+        bool forceGroundedPlainStunNoCollapse = false)
     {
         var method = typeof(NetworkPlayer).GetMethod(
             "ShouldUseGroundedPlainStunNoCollapseEntry",
@@ -493,6 +646,7 @@ public sealed class NetworkPlayerInteractionDecisionTests
                 typeof(float),
                 typeof(float),
                 typeof(float),
+                typeof(bool),
                 typeof(bool)
             },
             null);
@@ -508,7 +662,8 @@ public sealed class NetworkPlayerInteractionDecisionTests
                 rootVerticalSpeed,
                 rootAngularSpeed,
                 pelvisVerticalSpeed,
-                forceGroundedStunCollapse
+                forceGroundedStunCollapse,
+                forceGroundedPlainStunNoCollapse
             });
     }
 
@@ -611,6 +766,31 @@ public sealed class NetworkPlayerInteractionDecisionTests
         return resolved.ToString();
     }
 
+    private static bool InvokeShouldDelayStunnedRecoveryAfterRelease(
+        float releaseRecoveryGraceRemaining,
+        bool hasRecentGroundContact)
+    {
+        var method = typeof(NetworkPlayer).GetMethod(
+            "ShouldDelayStunnedRecoveryAfterRelease",
+            BindingFlags.NonPublic | BindingFlags.Static,
+            null,
+            new[]
+            {
+                typeof(float),
+                typeof(bool)
+            },
+            null);
+
+        Assert.That(method, Is.Not.Null);
+        return (bool)method.Invoke(
+            null,
+            new object[]
+            {
+                releaseRecoveryGraceRemaining,
+                hasRecentGroundContact
+            });
+    }
+
     [Test]
     public void KickFallback_RequiresEmptyHands()
     {
@@ -642,6 +822,48 @@ public sealed class NetworkPlayerInteractionDecisionTests
                 CarryPhysicsProfile.CarryMode.None,
                 CarryPhysicsProfile.CarryMode.None,
                 suppressNextCarryReleaseSettle: false),
+            Is.False);
+    }
+
+    [Test]
+    public void CarryReleaseSettle_DoesNotStartWhenVictimIsStillGrabbedAfterCarryToDragTransition()
+    {
+        Assert.That(
+            InvokeShouldStartCarryReleaseSettle(
+                CarryPhysicsProfile.CarryMode.CarriedVictim,
+                CarryPhysicsProfile.CarryMode.None,
+                suppressNextCarryReleaseSettle: false,
+                stillGrabbed: true),
+            Is.False);
+
+        Assert.That(
+            InvokeShouldStartCarryReleaseSettle(
+                CarryPhysicsProfile.CarryMode.CarriedVictim,
+                CarryPhysicsProfile.CarryMode.None,
+                suppressNextCarryReleaseSettle: false,
+                stillGrabbed: false),
+            Is.True);
+    }
+
+    [Test]
+    public void StunnedReleaseRecoveryGrace_DelaysAirborneRecoveryButNotGroundedRecovery()
+    {
+        Assert.That(
+            InvokeShouldDelayStunnedRecoveryAfterRelease(
+                releaseRecoveryGraceRemaining: 0.22f,
+                hasRecentGroundContact: false),
+            Is.True);
+
+        Assert.That(
+            InvokeShouldDelayStunnedRecoveryAfterRelease(
+                releaseRecoveryGraceRemaining: 0.22f,
+                hasRecentGroundContact: true),
+            Is.False);
+
+        Assert.That(
+            InvokeShouldDelayStunnedRecoveryAfterRelease(
+                releaseRecoveryGraceRemaining: 0f,
+                hasRecentGroundContact: false),
             Is.False);
     }
 
@@ -1142,6 +1364,61 @@ public sealed class NetworkPlayerInteractionDecisionTests
     }
 
     [Test]
+    public void ProceduralHeadbutt_TryTriggerStartsWhenAnimatedPresentationRigIsAvailable()
+    {
+        var root = new GameObject("ProceduralHeadbutt_WithAnimatedPresentationRig");
+        try
+        {
+            var visualRoot = new GameObject("VisualRoot");
+            visualRoot.transform.SetParent(root.transform, false);
+
+            var player = root.AddComponent<NetworkPlayer>();
+            SetPrivateField(player, "_animatedVisualRoot", visualRoot.transform);
+            SetPrivateField(player, "useAnimatedVisualOnly", true);
+            SetPrivateField(player, "disablePhysicsAnimationSync", true);
+
+            var headbutt = root.AddComponent<ProceduralHeadbutt>();
+
+            Assert.That(headbutt.TryTriggerHeadbutt(Vector3.forward), Is.True);
+            Assert.That(headbutt.IsHeadbutting, Is.True);
+        }
+        finally
+        {
+            Object.DestroyImmediate(root);
+        }
+    }
+
+    [Test]
+    public void ProceduralHeadbutt_LateUpdateUsesPhysicsBindingPresentationWithoutVisualRestPose()
+    {
+        var root = new GameObject("ProceduralHeadbutt_PhysicsBindingPresentation");
+        try
+        {
+            var visualRoot = new GameObject("VisualRoot");
+            visualRoot.transform.SetParent(root.transform, false);
+
+            var player = root.AddComponent<NetworkPlayer>();
+            SetPrivateField(player, "_animatedVisualRoot", visualRoot.transform);
+            SetPrivateField(player, "useAnimatedVisualOnly", true);
+            SetPrivateField(player, "disablePhysicsAnimationSync", true);
+
+            var headbutt = root.AddComponent<ProceduralHeadbutt>();
+            var phaseField = typeof(ProceduralHeadbutt).GetField("_phase", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(phaseField, Is.Not.Null);
+            phaseField.SetValue(headbutt, System.Enum.Parse(phaseField.FieldType, "WindUp"));
+            SetPrivateField(headbutt, "_phaseStartTime", Time.time);
+
+            InvokePrivateMethod(headbutt, "LateUpdate");
+
+            Assert.That((bool)GetPrivateField(headbutt, "_usingNetworkedBoneBlend"), Is.True);
+        }
+        finally
+        {
+            Object.DestroyImmediate(root);
+        }
+    }
+
+    [Test]
     public void PhysicalPhaseCore_PrioritizesExplicitHoldAndGrabStatesOverInstability()
     {
         Assert.That(
@@ -1197,6 +1474,23 @@ public sealed class NetworkPlayerInteractionDecisionTests
                 isRecoverStabilizing: false,
                 anyHolding: true,
                 isHoldingStunnedPlayer: true,
+                isDualGrabbingStunnedPlayer: false,
+                isGrabActive: false,
+                hasHeldEquipment: false,
+                isGroggy: false,
+                beingGrabbed: false,
+                dragged: false),
+            Is.EqualTo("Holding"));
+
+        Assert.That(
+            InvokeResolveAuthorityPhysicalPhaseCore(
+                currentPhase: ResolvePhysicalPhase("Stable"),
+                instability: 1f,
+                isRecovering: false,
+                isRecoverStabilizing: false,
+                anyHolding: true,
+                isHoldingStunnedPlayer: true,
+                isDualGrabbingStunnedPlayer: true,
                 isGrabActive: false,
                 hasHeldEquipment: false,
                 isGroggy: false,
@@ -1432,6 +1726,145 @@ public sealed class NetworkPlayerInteractionDecisionTests
     }
 
     [Test]
+    public void AerialKickMissPenalty_GroundedPlopForcesShortPlainStunEvenWhenChancePathWouldSkip()
+    {
+        Assert.That(
+            InvokeShouldApplyAerialKickMissStun(
+                configuredSelfStunDuration: 0.38f,
+                groundedPlop: true,
+                shouldApplySelfStun: false),
+            Is.True);
+
+        Assert.That(
+            InvokeShouldApplyAerialKickMissStun(
+                configuredSelfStunDuration: 0.38f,
+                groundedPlop: false,
+                shouldApplySelfStun: false),
+            Is.False);
+
+        Assert.That(
+            InvokeShouldApplyAerialKickMissStun(
+                configuredSelfStunDuration: 0f,
+                groundedPlop: true,
+                shouldApplySelfStun: false),
+            Is.False);
+    }
+
+    [Test]
+    public void AerialKickMissPenalty_GroundedPlopEntersPlainStunWithoutCollapse()
+    {
+        var go = new GameObject("NetworkPlayerInteractionDecisionTests_AerialKickMissPenalty");
+        try
+        {
+            var player = go.AddComponent<NetworkPlayer>();
+            SetPrivateField(player, "syncPhysicsObjects", System.Array.Empty<SyncPhysicsObject>());
+            SetPrivateField(player, "_isActiveRagdoll", true);
+            SetPrivateField(player, "_isGrounded", true);
+            SetPrivateField(player, "_activeAerialKickHasHit", false);
+            SetPrivateField(player, "_activeAerialKickSelfStunDuration", 0.38f);
+            SetPrivateField(player, "_activeAerialKickSelfStunChance", 0f);
+            SetPrivateField(player, "_activeAerialKickRawGrounded", true);
+            SetPrivateField(player, "_activeAerialKickLastGroundContactTime", Time.time);
+
+            InvokeApplyAerialKickMissPenalty(player);
+
+            Assert.That(
+                GetPrivateField(player, "_localPhysicalPhase"),
+                Is.EqualTo(ResolvePhysicalPhase("Stunned")));
+            Assert.That(
+                (float)GetPrivateField(player, "_stunCollapseTimer"),
+                Is.EqualTo(0f).Within(0.0001f));
+        }
+        finally
+        {
+            Object.DestroyImmediate(go);
+        }
+    }
+
+    [Test]
+    public void AerialKickVictimGroundedStunEntry_UsesLocalPlopForceProfile()
+    {
+        Assert.That(
+            InvokeResolveAerialKickVictimLinearKnockback(
+                finalKnockback: 20f,
+                reactionKnockback: 9f,
+                repeatDownedHit: false,
+                groundedStunEntry: true,
+                enteredStunThisHit: true),
+            Is.EqualTo(0.20f).Within(0.0001f));
+
+        Assert.That(
+            InvokeResolveAerialKickVictimToppleKnockback(
+                finalKnockback: 20f,
+                reactionKnockback: 9f,
+                groundedStunEntry: true,
+                enteredStunThisHit: true),
+            Is.EqualTo(4.0f).Within(0.0001f));
+
+        Assert.That(
+            InvokeResolveAerialKickVictimRotationScale(
+                groundedStunEntry: true,
+                collapseVictim: true,
+                isStunnedAfterHit: true,
+                heightRatio: 1f),
+            Is.EqualTo(0.05f).Within(0.0001f));
+    }
+
+    [Test]
+    public void AerialKickVictimGroundedStunEntry_TreatsRawGroundOrCoyoteAsGrounded()
+    {
+        Assert.That(
+            InvokeShouldTreatAerialKickVictimStunEntryAsGrounded(
+                isGrounded: false,
+                rawGrounded: false,
+                hasGroundedGrace: false),
+            Is.False);
+
+        Assert.That(
+            InvokeShouldTreatAerialKickVictimStunEntryAsGrounded(
+                isGrounded: true,
+                rawGrounded: false,
+                hasGroundedGrace: false),
+            Is.True);
+
+        Assert.That(
+            InvokeShouldTreatAerialKickVictimStunEntryAsGrounded(
+                isGrounded: false,
+                rawGrounded: true,
+                hasGroundedGrace: false),
+            Is.True);
+
+        Assert.That(
+            InvokeShouldTreatAerialKickVictimStunEntryAsGrounded(
+                isGrounded: false,
+                rawGrounded: false,
+                hasGroundedGrace: true),
+            Is.True);
+    }
+
+    [Test]
+    public void AerialKickVictimGroundedStunEntry_SuppressesYawTorqueButKeepsAirborneTurn()
+    {
+        Assert.That(
+            InvokeShouldApplyAerialKickVictimYawTorque(
+                groundedStunEntry: true,
+                lateralRatio: 0.6f),
+            Is.False);
+
+        Assert.That(
+            InvokeShouldApplyAerialKickVictimYawTorque(
+                groundedStunEntry: false,
+                lateralRatio: 0.10f),
+            Is.False);
+
+        Assert.That(
+            InvokeShouldApplyAerialKickVictimYawTorque(
+                groundedStunEntry: false,
+                lateralRatio: 0.35f),
+            Is.True);
+    }
+
+    [Test]
     public void PlainStunEntryDamping_CanBeSuppressedForSoftFlopMissPenalties()
     {
         Assert.That(
@@ -1491,6 +1924,18 @@ public sealed class NetworkPlayerInteractionDecisionTests
                 pelvisVerticalSpeed: 0.05f,
                 forceGroundedStunCollapse: false),
             Is.False);
+
+        Assert.That(
+            InvokeShouldUseGroundedPlainStunNoCollapseEntry(
+                beingGrabbed: false,
+                isGrounded: true,
+                rootPlanarSpeed: 4.0f,
+                rootVerticalSpeed: 1.5f,
+                rootAngularSpeed: 4.0f,
+                pelvisVerticalSpeed: 1.2f,
+                forceGroundedStunCollapse: false,
+                forceGroundedPlainStunNoCollapse: true),
+            Is.True);
     }
 
     [Test]
@@ -1543,7 +1988,7 @@ public sealed class NetworkPlayerInteractionDecisionTests
     }
 
     [Test]
-    public void StunnedGrabTransportPhase_UsesHysteresisWhenSwitchingBetweenDraggedAndCarried()
+    public void StunnedGrabTransportPhase_UsesDraggedForSingleGrabAndCarryForDualGrab()
     {
         Assert.That(
             InvokeResolveStunnedGrabTransportPhase(
@@ -1552,7 +1997,7 @@ public sealed class NetworkPlayerInteractionDecisionTests
                 isGrounded: true,
                 draggedTransitionQualified: false,
                 carriedTransitionQualified: false),
-            Is.EqualTo("BeingCarriedStunned"));
+            Is.EqualTo("DraggedStunned"));
 
         Assert.That(
             InvokeResolveStunnedGrabTransportPhase(
@@ -1570,7 +2015,7 @@ public sealed class NetworkPlayerInteractionDecisionTests
                 isGrounded: false,
                 draggedTransitionQualified: false,
                 carriedTransitionQualified: true),
-            Is.EqualTo("BeingCarriedStunned"));
+            Is.EqualTo("DraggedStunned"));
 
         Assert.That(
             InvokeResolveStunnedGrabTransportPhase(
@@ -1579,7 +2024,7 @@ public sealed class NetworkPlayerInteractionDecisionTests
                 isGrounded: true,
                 draggedTransitionQualified: false,
                 carriedTransitionQualified: false),
-            Is.EqualTo("BeingCarriedStunned"));
+            Is.EqualTo("DraggedStunned"));
 
         Assert.That(
             InvokeResolveStunnedGrabTransportPhase(
