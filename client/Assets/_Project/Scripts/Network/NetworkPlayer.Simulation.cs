@@ -373,6 +373,9 @@ public sealed partial class NetworkPlayer
     private const float RECOVER_STABILIZE_DURATION = 0.4f;
     private const float GroundedCollapseRootMinYOffset = -0.12f;
     private const float GroundedCollapseRootMaxYOffset = 0.16f;
+    private const float MinRecoveryStandUpPelvisHeight = 0.45f;
+    private const float MaxRecoveryStandUpPelvisHeight = 1.10f;
+    private const float RecoveryStandUpClearanceOvershootLimit = 0.12f;
     private float _recoverMinColliderY = float.NegativeInfinity;
     private bool _hasRecoverAnchorPose;
     private Vector3 _recoverAnchorPosition;
@@ -382,8 +385,14 @@ public sealed partial class NetworkPlayer
     private Vector3 _pendingRecoveryStandUpPosition;
     private Quaternion _pendingRecoveryStandUpRotation = Quaternion.identity;
     private bool _suppressRecoveryUpwardCorrectionAfterHandoff;
+    private float _cachedRecoveryStandUpPelvisHeight = 0.85f;
     private float _draggedStunnedCandidateTimer;
     private float _beingCarriedStunnedCandidateTimer;
+
+    private bool ShouldDriveRecoveryTransform()
+    {
+        return _isRecoverStabilizing || (_isRecovering && _hasPendingRecoveryStandUpHandoff);
+    }
 
     private bool ShouldSuppressRecoveryUpwardCorrection()
     {
@@ -401,7 +410,44 @@ public sealed partial class NetworkPlayer
             return false;
         }
 
-        return !_isActiveRagdoll || _isRecovering || _isRecoverStabilizing;
+        return !_isActiveRagdoll || ShouldDriveRecoveryTransform();
+    }
+
+    private void CacheRecoveryStandUpPelvisHeight()
+    {
+        if (!_isGrounded ||
+            !_isActiveRagdoll ||
+            _isRecovering ||
+            _isRecoverStabilizing ||
+            _beingGrabbedRefCount > 0 ||
+            IsAnyHandHoldingStunnedPlayer ||
+            IsDualGrabbingStunnedPlayer)
+        {
+            return;
+        }
+
+        if (!TryGetRecoverReferencePosition(out var pelvisPosition) ||
+            !TryGetCharacterLowestColliderY(out var lowestColliderY))
+        {
+            return;
+        }
+
+        var pelvisHeightAboveGround = pelvisPosition.y - lowestColliderY;
+        if (!float.IsFinite(pelvisHeightAboveGround) || pelvisHeightAboveGround <= 0.05f)
+            return;
+
+        _cachedRecoveryStandUpPelvisHeight = Mathf.Clamp(
+            pelvisHeightAboveGround,
+            MinRecoveryStandUpPelvisHeight,
+            MaxRecoveryStandUpPelvisHeight);
+    }
+
+    private float ResolveRecoveryStandUpPelvisHeight()
+    {
+        return Mathf.Clamp(
+            _cachedRecoveryStandUpPelvisHeight,
+            MinRecoveryStandUpPelvisHeight,
+            MaxRecoveryStandUpPelvisHeight);
     }
 
     private void CaptureCollapseAnchorPose(Vector3 position, Quaternion rotation)
@@ -464,23 +510,28 @@ public sealed partial class NetworkPlayer
             return;
 
         // recover 중에도 root를 pelvis에 동기화 유지
-        var suppressRecoveryUpwardCorrection = ShouldSuppressRecoveryUpwardCorrection();
-        MaintainRecoveringHorizontalAnchor();
-        MaintainRecoveringUprightRotation();
-        if (!suppressRecoveryUpwardCorrection)
-            MaintainRecoveringAboveGround();
-        SyncRootToPhysicsBody();
-        TraceStunnedMotionSample("UpdateRecoveringWindow");
+        if (ShouldDriveRecoveryTransform())
+        {
+            var suppressRecoveryUpwardCorrection = ShouldSuppressRecoveryUpwardCorrection();
+            MaintainRecoveringHorizontalAnchor();
+            MaintainRecoveringUprightRotation();
+            if (!suppressRecoveryUpwardCorrection)
+                MaintainRecoveringAboveGround();
+            SyncRootToPhysicsBody();
+            TraceStunnedMotionSample("UpdateRecoveringWindow");
+        }
 
         _recoveringTimer -= dt;
         if (_recoveringTimer <= 0f)
         {
+            var wasDrivingRecoveryTransform = ShouldDriveRecoveryTransform();
             _isRecovering = false;
             _suppressRecoveryUpwardCorrectionAfterHandoff = false;
             _recoverMinColliderY = float.NegativeInfinity;
             _hasRecoverAnchorPose = false;
             // 복구 완료 시 최종 root-to-pelvis 스냅
-            SyncRootToPhysicsBody();
+            if (wasDrivingRecoveryTransform)
+                SyncRootToPhysicsBody();
             SetLocalPhysicalPhase(PhysicalPhase.Stable, 0f, false);
             FlagPhysicsPresentationReset();
         }
@@ -709,9 +760,7 @@ public sealed partial class NetworkPlayer
             _activeAerialKickGroundedGraceTimer -= dt;
             if (_activeAerialKickGroundedGraceTimer <= 0f)
             {
-                ApplyAerialKickMissPenalty();
-                ClearAerialKickHitDetectionWindow();
-                BeginAerialKickSpringRestore("grounded-during-hit-window");
+                HandleAerialKickMiss("grounded-during-hit-window");
                 return;
             }
         }
@@ -722,18 +771,10 @@ public sealed partial class NetworkPlayer
 
         if (currentTick > _activeAerialKickWindowEndTick)
         {
-            // 공중에서 윈도우가 만료되면 착지 시점까지 미스 패널티를 지연한다.
-            // 즉시 스턴을 걸면 짧은 스턴이 공중에서 끝나 Idle 포즈로 서있는 버그가 발생한다.
-            if (!_isGrounded && !_activeAerialKickNearGround && _activeAerialKickHasLeftGround)
-            {
-                if (!_activeAerialKickHasHit)
-                    _aerialKickMissPenaltyPending = true;
-                ClearAerialKickHitDetectionWindow();
-                return;
-            }
-
-            ApplyAerialKickMissPenalty();
-            ClearAerialKickHitDetectionWindow();
+            var missReason = !_isGrounded && !_activeAerialKickNearGround && _activeAerialKickHasLeftGround
+                ? "window-ended-airborne"
+                : "window-ended-near-ground";
+            HandleAerialKickMiss(missReason);
             return;
         }
 
@@ -808,13 +849,14 @@ public sealed partial class NetworkPlayer
         // 공중에서 지연된 미스 패널티가 있으면 착지 시점에 적용한다.
         // ApplyAerialKickMissPenalty → TriggerStun이 _isAerialKickMomentumActive를
         // false로 설정하므로, 이후 spring restore는 불필요해진다.
-        if (_aerialKickMissPenaltyPending)
-        {
-            _aerialKickMissPenaltyPending = false;
-            LogAerialKickDiagnostic("DeferredMissPenalty", $"reason={reason}");
-            ApplyAerialKickMissPenalty();
+        // Non-miss recovery keeps the short spring blend.
+        StartAerialKickSpringRestore(reason);
+    }
+
+    private void StartAerialKickSpringRestore(string reason)
+    {
+        if (!_isAerialKickMomentumActive || _aerialKickSpringRestoreTimer > 0f)
             return;
-        }
 
         _aerialKickSpringRestoreStartLerp = _aerialKickCurrentSpringLerp;
         _activeAerialKickBallisticFallActive = false;
@@ -1861,91 +1903,16 @@ public sealed partial class NetworkPlayer
         }
     }
 
-    private void ApplyAerialKickMissPenalty()
+    private void HandleAerialKickMiss(string reason)
     {
         if (_activeAerialKickHasHit || !_isActiveRagdoll || GetIsDeadState())
             return;
 
-        var footLandingSignal = HasAerialKickFootLandingSignal();
-        var hasRecentGroundContact = Time.time - _activeAerialKickLastGroundContactTime <= AerialKickGroundContactMemory;
-        var groundedPlop = ShouldUseGroundedAerialKickMissPlop(
-            _isGrounded,
-            _activeAerialKickRawGrounded,
-            footLandingSignal,
-            hasRecentGroundContact);
-        var shouldApplySelfStun = ShouldApplyAerialKickSelfStun();
-        if (!ShouldApplyAerialKickMissStun(_activeAerialKickSelfStunDuration, groundedPlop, shouldApplySelfStun))
-        {
-            LogAerialKickDiagnostic(
-                "MissPenaltySkipped",
-                $"selfStunDuration={_activeAerialKickSelfStunDuration:F2} chance={_activeAerialKickSelfStunChance:F2} groundedPlop={(groundedPlop ? 1 : 0)}");
-            ArmHitInstabilityBoost(1.1f);
-            _hitRecoilTimer = Mathf.Max(_hitRecoilTimer, HIT_RECOIL_DURATION * 0.75f);
-            return;
-        }
-
-        var forceGroundedPlainStunNoCollapse = false;
         LogAerialKickDiagnostic(
-            "MissPenaltyApplied",
-            $"selfStunDuration={_activeAerialKickSelfStunDuration:F2} chance={_activeAerialKickSelfStunChance:F2} groundedPlop={(groundedPlop ? 1 : 0)} forceNoCollapse={(forceGroundedPlainStunNoCollapse ? 1 : 0)}");
-        TraceRootGapAnomaly(
-            "AerialKick.PreMissPenaltyStun",
-            $"selfStunDuration={_activeAerialKickSelfStunDuration:F2} chance={_activeAerialKickSelfStunChance:F2} grounded={(_isGrounded ? 1 : 0)} rawGrounded={(_activeAerialKickRawGrounded ? 1 : 0)} nearGround={(_activeAerialKickNearGround ? 1 : 0)} leftGround={(_activeAerialKickHasLeftGround ? 1 : 0)} groundedPlop={(groundedPlop ? 1 : 0)} forceNoCollapse={(forceGroundedPlainStunNoCollapse ? 1 : 0)}",
-            force: true);
-        var missPenaltyDuration = ResolveAerialKickMissPenaltyDuration(_activeAerialKickSelfStunDuration, groundedPlop);
-        LogAerialKickDiagnostic(
-            "MissPenaltyResolved",
-            $"resolvedDuration={missPenaltyDuration:F2} groundedPlop={(groundedPlop ? 1 : 0)} foot={footLandingSignal} nearGround={(_activeAerialKickNearGround ? 1 : 0)} recentGround={(hasRecentGroundContact ? 1 : 0)}");
-        TriggerStun(
-            missPenaltyDuration,
-            applyEntryDamping: false,
-            suppressImplicitPlainStunDamping: true,
-            forceGroundedPlainStunNoCollapse: forceGroundedPlainStunNoCollapse);
-        DampenStunEntryVelocities(groundedPlopEntry: groundedPlop);
-    }
-
-    private static bool ShouldApplyAerialKickMissStun(
-        float configuredSelfStunDuration,
-        bool groundedPlop,
-        bool shouldApplySelfStun)
-    {
-        if (configuredSelfStunDuration <= 0.01f)
-            return false;
-
-        return groundedPlop || shouldApplySelfStun;
-    }
-
-    private bool ShouldApplyAerialKickSelfStun()
-    {
-        if (_activeAerialKickSelfStunChance <= 0f)
-            return false;
-
-        if (_activeAerialKickSelfStunChance >= 1f)
-            return true;
-
-        var seed = ResolveCurrentSimulationTick() * 12.9898f
-            + transform.position.x * 78.233f
-            + transform.position.z * 37.719f;
-        var pseudoRandom = Mathf.Abs(Mathf.Sin(seed) * 43758.5453f);
-        pseudoRandom -= Mathf.Floor(pseudoRandom);
-        return pseudoRandom <= _activeAerialKickSelfStunChance;
-    }
-
-    private static bool ShouldUseGroundedAerialKickMissPlop(
-        bool isGrounded,
-        bool rawGrounded,
-        bool footLandingSignal,
-        bool hasRecentGroundContact)
-    {
-        return rawGrounded ||
-               (isGrounded && hasRecentGroundContact) ||
-               HasConfirmedAerialKickLandingContact(rawGrounded, footLandingSignal, hasRecentGroundContact);
-    }
-
-    private static float ResolveAerialKickMissPenaltyDuration(float configuredSelfStunDuration, bool groundedPlop)
-    {
-        // collapse 연출(풀썩)이 재생될 최소 시간만 확보하고, 패널티 자체는 거의 없게
-        return StunCollapseDuration;
+            "MissRecovery",
+            $"reason={reason} selfStunDuration={_activeAerialKickSelfStunDuration:F2} chance={_activeAerialKickSelfStunChance:F2} grounded={(_isGrounded ? 1 : 0)} rawGrounded={(_activeAerialKickRawGrounded ? 1 : 0)} nearGround={(_activeAerialKickNearGround ? 1 : 0)}");
+        ClearAerialKickHitDetectionWindow();
+        RestoreJointSpringsAfterAerialKick();
     }
 
     private Vector3 BuildPunchKnockbackDirection(NetworkPlayer victimPlayer, Vector3 forward)
@@ -3143,6 +3110,10 @@ public sealed partial class NetworkPlayer
 
     private void SyncRootToPhysicsBody(bool forceImmediate = false)
     {
+        var recoveryTransformDriven = ShouldDriveRecoveryTransform();
+        if (_isRecovering && !recoveryTransformDriven)
+            return;
+
         if (!TryResolveRootSyncTargetPosition(out var targetPos))
             return;
 
@@ -3159,8 +3130,7 @@ public sealed partial class NetworkPlayer
             _recoverAnchorCapturedWhileGrounded &&
             _isGrounded &&
             !_isActiveRagdoll &&
-            !_isRecovering &&
-            !_isRecoverStabilizing;
+            !recoveryTransformDriven;
         if (clampToGroundedAnchorFloor)
         {
             var minRootY = _recoverAnchorPosition.y + GroundedCollapseRootMinYOffset;
@@ -3180,14 +3150,14 @@ public sealed partial class NetworkPlayer
             ShouldSuppressGroundedPlainStunUpwardRootCorrection(
                 phase,
                 HasRecentStunnedGroundContact(),
-                _isRecovering,
+                recoveryTransformDriven,
                 _isRecoverStabilizing,
                 _beingGrabbedRefCount);
         if (suppressGroundedPlainStunUpwardCorrection && targetPos.y > transform.position.y)
             targetPos.y = transform.position.y;
 
         var upwardSyncStep = suppressGroundedPlainStunUpwardCorrection ? 0f : StunRootUpwardSyncStep;
-        if ((!_isActiveRagdoll || _isRecovering || _isRecoverStabilizing) &&
+        if ((!_isActiveRagdoll || recoveryTransformDriven) &&
             targetPos.y > transform.position.y + upwardSyncStep)
         {
             targetPos.y = transform.position.y + upwardSyncStep;
@@ -3207,7 +3177,7 @@ public sealed partial class NetworkPlayer
         if (delta.sqrMagnitude < 0.001f)
             return;
 
-        var downedRootSync = !_isActiveRagdoll || _isRecovering || _isRecoverStabilizing;
+        var downedRootSync = !_isActiveRagdoll || recoveryTransformDriven;
         if (downedRootSync)
         {
             var verticalGap = Mathf.Abs(targetPos.y - transform.position.y);
@@ -3321,7 +3291,10 @@ public sealed partial class NetworkPlayer
             _lastGroundedTime = Time.time;
             // 안정적으로 서 있을 때 안전 위치 기억 — recover 시 활용
             if (_isActiveRagdoll && !_isRecovering)
+            {
                 RememberSafeTransform(transform.position, transform.rotation);
+                CacheRecoveryStandUpPelvisHeight();
+            }
         }
         else
         {
@@ -3702,7 +3675,7 @@ public sealed partial class NetworkPlayer
         var phase = ResolveAuthorityPhysicalPhaseCore(
             _localPhysicalPhase,
             _localInstability,
-            _isRecovering,
+            ShouldDriveRecoveryTransform(),
             _isRecoverStabilizing,
             anyHolding,
             IsAnyHandHoldingStunnedPlayer,
@@ -3735,7 +3708,7 @@ public sealed partial class NetworkPlayer
         var phase = ResolveAuthorityPhysicalPhaseCore(
             _localPhysicalPhase,
             _localInstability,
-            _isRecovering,
+            ShouldDriveRecoveryTransform(),
             _isRecoverStabilizing,
             anyHolding,
             IsAnyHandHoldingStunnedPlayer,
@@ -3805,7 +3778,7 @@ public sealed partial class NetworkPlayer
         return ResolveAuthorityPhysicalPhaseCore(
             _localPhysicalPhase,
             _localInstability,
-            _isRecovering,
+            ShouldDriveRecoveryTransform(),
             _isRecoverStabilizing,
             anyHolding,
             IsAnyHandHoldingStunnedPlayer,
@@ -4126,7 +4099,6 @@ public sealed partial class NetworkPlayer
         _isActiveRagdoll = false;
         RestorePuppetMasterMappingAfterAerialKick();
         _isAerialKickMomentumActive = false;
-        _aerialKickMissPenaltyPending = false;
         _aerialKickSpringRestoreTimer = 0f;
         SetStunShield(0f);
         SetStunShieldRecoverDelayRemaining(0f);
@@ -4687,7 +4659,6 @@ public sealed partial class NetworkPlayer
         _isActiveRagdoll = true;
         RestorePuppetMasterMappingAfterAerialKick();
         _isAerialKickMomentumActive = false;
-        _aerialKickMissPenaltyPending = false;
         _aerialKickSpringRestoreTimer = 0f;
         RestoreRecoveryStunShield();
         SetGroggyRemaining(0f);
@@ -4843,7 +4814,6 @@ public sealed partial class NetworkPlayer
         const float rayOriginOffset = 1.5f;
         const float rayDistance = 5f;
         const float standUpHeightOffset = 0.15f;
-        const float pelvisHeightAboveGround = 0.85f;
         const float minColliderClearance = 0.04f;
 
         var recoveryAnchor = recoveryPosition;
@@ -4884,6 +4854,7 @@ public sealed partial class NetworkPlayer
         }
 
         // pelvis는 엉덩이 높이에 배치, root는 pelvis를 따라가므로 같은 위치로
+        var pelvisHeightAboveGround = ResolveRecoveryStandUpPelvisHeight();
         var pelvisPos = new Vector3(safePos.x, safePos.y + pelvisHeightAboveGround, safePos.z);
         var lowestColliderY = basePos.y - pelvisHeightAboveGround;
         if (!TryGetCharacterLowestColliderY(out lowestColliderY))
@@ -4892,7 +4863,13 @@ public sealed partial class NetworkPlayer
         var desiredLowestColliderY = foundGround
             ? groundPoint.y + minColliderClearance
             : safePos.y;
-        var shiftY = Mathf.Max(pelvisPos.y - basePos.y, desiredLowestColliderY - lowestColliderY);
+        var targetPelvisLift = pelvisPos.y - basePos.y;
+        var minimumClearanceLift = desiredLowestColliderY - lowestColliderY;
+        var shiftY = targetPelvisLift;
+        if (minimumClearanceLift > shiftY)
+            shiftY = Mathf.Min(
+                minimumClearanceLift,
+                targetPelvisLift + RecoveryStandUpClearanceOvershootLimit);
         var delta = new Vector3(safePos.x - basePos.x, shiftY, safePos.z - basePos.z);
 
         // root/rigidbody/targetRoot → pelvis 높이로 재배치 (SyncRootToPhysicsBody가 root=pelvis 기준)
@@ -5280,7 +5257,6 @@ public sealed partial class NetworkPlayer
     private float _nextAerialKickDiagnosticsSampleTime = float.NegativeInfinity;
     private Vector3 _activeAerialKickPreviousSamplePosition;
     private readonly Collider[] _aerialKickHitResults = new Collider[AerialKickHitBufferSize];
-    private bool _aerialKickMissPenaltyPending;
     private float _lastGroundedTime = float.NegativeInfinity;
 
     // ─── 히트스탑 상태 ───
@@ -5781,7 +5757,6 @@ public sealed partial class NetworkPlayer
 
         RestorePuppetMasterMappingAfterAerialKick();
         _isAerialKickMomentumActive = false;
-        _aerialKickMissPenaltyPending = false;
         _activeAerialKickBallisticFallActive = false;
         _aerialKickSpringRestoreTimer = 0f;
         _activeAerialKickTargetPlanarSpeed = 0f;
