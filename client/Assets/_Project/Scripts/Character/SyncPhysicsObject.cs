@@ -47,6 +47,9 @@ public class SyncPhysicsObject : MonoBehaviour
         rigidbody3D = GetComponent<Rigidbody>();
         joint = GetComponent<ConfigurableJoint>();
 
+        if (rigidbody3D != null && rigidbody3D.collisionDetectionMode == CollisionDetectionMode.Discrete)
+            rigidbody3D.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+
         startLocalRotation = transform.localRotation;
 
         // ConfigurableJoint가 있는 경우에만 스프링 값 기록
