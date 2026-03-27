@@ -23,10 +23,10 @@ namespace SSAFYPlayTime
 
         private void OnEnable()
         {
-            // OnEnable 시 재캡처 허용 여부에 따라 플래그를 리셋한다.
-            // RegisterSceneAudioSources()에서 호출되는 RegisterOrUpdate()는
-            // _baseVolumeCaptured = true이면 재캡처하지 않으므로 누적 감소가 방지된다.
-            if (captureBaseVolumeOnEnable)
+            // 아직 한 번도 캡처되지 않은 경우에만 재캡처를 허용한다.
+            // 이미 캡처된 상태에서 리셋하면 service가 수정한 source.volume(= base * 0 = 0)을
+            // baseVolume으로 잘못 캡처하는 버그가 발생한다.
+            if (captureBaseVolumeOnEnable && !_baseVolumeCaptured)
                 _baseVolumeCaptured = false;
             RegisterOrUpdate();
         }
