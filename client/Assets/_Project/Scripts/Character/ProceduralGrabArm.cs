@@ -52,7 +52,7 @@ public class ProceduralGrabArm : MonoBehaviour
     [SerializeField] CarryPoseProfile carryPoseProfile;
 
     [Header("Debug")]
-    [SerializeField] bool debugLog = true;
+    [SerializeField] bool debugLog = false;
     float _debugLogTimer;
     float _debugPhysicsLogTimer;
     float _debugCarryLogTimer;
@@ -94,7 +94,7 @@ public class ProceduralGrabArm : MonoBehaviour
 
     void Awake()
     {
-        debugLog = true; // 디버그 진단용 강제 활성화
+        debugLog = false;
         _networkPlayer = GetComponent<NetworkPlayer>();
         _grabController = GetComponent<CharacterGrabController>();
 
@@ -699,12 +699,12 @@ public class ProceduralGrabArm : MonoBehaviour
     {
         // CarrySolveFrame: 기절자 운반 중이면 carrier anchor 기준으로 target 계산
         if (_carryRig != null && _networkPlayer != null && handler != null &&
-            handler.GrabbedTargetKind == GrabDriveProfile.GrabTargetType.StunnedPlayer)
+            handler.GrabbedTargetKind == GrabDriveProfile.GrabTargetType.StunnedPlayer &&
+            IsStunnedCarrySupportHand(handler))
         {
             var carryMode = _networkPlayer.GetLocalCarryMode();
             var holdVariant = ResolveCarryHoldVariant(carryMode);
-            if (carryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedSingleCarry ||
-                carryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry)
+            if (carryMode == SSAFYPlayTime.Character.CarryPhysicsProfile.CarryMode.StunnedDualCarry)
             {
                 if (_carryRig.TryGetCarrierSupportFrameWorld(carryMode, holdVariant, out var carrierSupportPos, out var carrierSupportFwd))
                 {
@@ -857,6 +857,9 @@ public class ProceduralGrabArm : MonoBehaviour
 
     void ApplyTorsoFacingAssist(Transform bodyRoot, Vector3 handWorld, float depth)
     {
+        if (ShouldSuppressTorsoFacingAssist())
+            return;
+
         if ((_hipsBodyRb == null || _hipsBodyRb.isKinematic) &&
             (_chestBodyRb == null || _chestBodyRb.isKinematic))
         {
@@ -928,6 +931,11 @@ public class ProceduralGrabArm : MonoBehaviour
         return _networkPlayer.GetPhysicalPhase() == NetworkPlayer.PhysicalPhase.CarryingStunned
             ? carryingTurnAssistMultiplier
             : 1f;
+    }
+
+    bool ShouldSuppressTorsoFacingAssist()
+    {
+        return IsAnyStunnedHoldActive() && !IsDualStunnedHoldActive();
     }
 
     Vector3 GetReachDirection(Transform physicsHand, bool isLeft)
@@ -1073,7 +1081,7 @@ public class ProceduralGrabArm : MonoBehaviour
 
         return phase == NetworkPlayer.PhysicalPhase.CarryingStunned &&
                _networkPlayer != null &&
-               _networkPlayer.IsAnyHandHoldingStunnedPlayer;
+               _networkPlayer.IsDualGrabbingStunnedPlayer;
     }
 
     bool IsStunnedCarrySupportHand(HandGrabHandler handler)
@@ -1084,7 +1092,9 @@ public class ProceduralGrabArm : MonoBehaviour
         if (_grabController != null)
             return _grabController.GetHandMode(handler.Side) == CharacterGrabController.HandHoldMode.CarrySupport;
 
-        return handler.GrabbedTargetKind == GrabDriveProfile.GrabTargetType.StunnedPlayer;
+        return handler.GrabbedTargetKind == GrabDriveProfile.GrabTargetType.StunnedPlayer &&
+               _networkPlayer != null &&
+               _networkPlayer.IsDualGrabbingStunnedPlayer;
     }
 
     CharacterGrabController.HoldVariant ResolveCarryHoldVariant(

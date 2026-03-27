@@ -35,7 +35,7 @@ public sealed class RandomBoxSpawnManager : NetworkBehaviour
 
     // ── 디버그 ──
     [Header("디버그")]
-    [SerializeField] private bool enableDebugLog = true;
+    [SerializeField] private bool enableDebugLog = false;
 
     // ── 네트워크 상태 ──
     [Networked] private NetworkBool SpawnLoopEnabled { get; set; }
