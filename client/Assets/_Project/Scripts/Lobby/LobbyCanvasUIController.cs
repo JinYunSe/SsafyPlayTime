@@ -2535,6 +2535,9 @@ namespace SSAFYPlayTime
             _readyStateByPlayerId.Clear();
             _spawnedGameplayNetworkCharacters.Clear();
             _spawnedCharacterIndexByPlayerId.Clear();
+            UntrackAllGameplayPlayers();
+            if (!_isMigrating)
+                _deadGameplayPlayerIds.Clear();
             _currentOwnerPlayerId = -1;
             // GameEndPanel 표시 중에는 리셋하지 않는다.
             // StartAutoRoomJoinFromGameEndAsync에서 호출될 때 _isShowingGameEndPanel이 true이면
