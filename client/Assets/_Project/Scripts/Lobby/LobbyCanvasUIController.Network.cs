@@ -976,10 +976,24 @@ namespace SSAFYPlayTime
                     var normalized = SanitizeCharacterIndexOrNone(selected);
                     if (normalized >= 0)
                     {
-                        _selectedCharacterIndexByPlayerId[player.PlayerId] = normalized;
-                        if (_roomParticipantsByPlayerId.TryGetValue(player.PlayerId, out var presence) && presence != null)
+                        // Random(4)이 아닌 캐릭터는 다른 플레이어가 이미 선택했는지 확인
+                        var isTakenByOther = normalized != (int)CharacterKind.Random &&
+                            _selectedCharacterIndexByPlayerId.Any(kvp =>
+                                kvp.Key != player.PlayerId &&
+                                SanitizeCharacterIndexOrNone(kvp.Value) == normalized);
+
+                        if (!isTakenByOther)
                         {
-                            presence.CharacterIndex = normalized;
+                            _selectedCharacterIndexByPlayerId[player.PlayerId] = normalized;
+                            if (_roomParticipantsByPlayerId.TryGetValue(player.PlayerId, out var presence) && presence != null)
+                            {
+                                presence.CharacterIndex = normalized;
+                            }
+                            Debug.Log($"[Lobby] Character selection accepted: player={player.PlayerId}, charIdx={normalized}");
+                        }
+                        else
+                        {
+                            Debug.LogWarning($"[Lobby] Character selection rejected (already taken): player={player.PlayerId}, charIdx={normalized}");
                         }
 
                         BroadcastPlayerRoster();
