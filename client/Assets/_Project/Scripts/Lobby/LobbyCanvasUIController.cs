@@ -2407,15 +2407,47 @@ namespace SSAFYPlayTime
 
             var isHost = _runner != null && _runner.IsRunning && _runner.IsServer;
             var btnText = startGameButton.GetComponentInChildren<TMP_Text>();
+
+            // 글자색 변경
+            Color normalTextColor = new Color(0.2f, 0.2f, 0.2f, 1f); // 평소 글자색 (어두운 색)
+            Color disabledTextColor = new Color(0.3f, 0.3f, 0.3f, 1f); // 비활성화 글자색 (회색)
+
+            // 방장일 경우
             if (isHost)
             {
-                startGameButton.interactable = allowSoloStart || (currentPlayers > 1 && AreAllNonHostPlayersReady());
-                if (btnText != null) btnText.text = "게임 시작";
+                bool canStart = allowSoloStart || (currentPlayers > 1 && AreAllNonHostPlayersReady());
+                startGameButton.interactable = canStart;
+
+                if (btnText != null)
+                {
+                    btnText.text = "게임 시작";
+                    // 시작 가능하면 검은색, 불가능하면 회색 텍스트 적용
+                    btnText.color = canStart ? normalTextColor : disabledTextColor;
+                }
+
+                // 방장은 interactable 값으로 배경색이 자동 변경되므로 이미지 색상은 기본(하얀색) 유지
+                if (startGameButton.image != null)
+                {
+                    startGameButton.image.color = Color.white;
+                }
                 return;
             }
 
+            // 방장이 아닐 경우
             startGameButton.interactable = _runner != null && _runner.IsRunning && _runner.LocalPlayer.IsRealPlayer;
-            if (btnText != null) btnText.text = _localIsReady ? "준비 취소" : "준비";
+
+            if (btnText != null)
+            {
+                btnText.text = _localIsReady ? "준비 취소" : "준비";
+                // 레디 상태면 취소 글자를 회색으로, 아니면 검은색으로
+                btnText.color = _localIsReady ? disabledTextColor : normalTextColor;
+            }
+
+            // 레디를 눌렀다면 버튼 배경 이미지를 강제로 회색(Disabled 색)으로
+            if (startGameButton.image != null)
+            {
+                startGameButton.image.color = _localIsReady ? new Color(0.78f, 0.78f, 0.78f, 1f) : Color.white;
+            }
         }
 
         private void UpdateReadyBadge(GameObject badge, bool visible)
