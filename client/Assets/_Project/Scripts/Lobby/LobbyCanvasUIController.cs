@@ -1551,6 +1551,13 @@ namespace SSAFYPlayTime
                 // SceneManager.LoadScene은 Fusion 경로가 아니므로 OnSceneLoadDone이 발동하지 않는다.
                 // 캐릭터 슬롯 재초기화를 허용하도록 수동으로 리셋한다.
                 ResetCharacterSlotState();
+                // _playerIdBySlot/selectedCharacterIndexBySlot은 ExecuteReturnFromGameEndAsync 경로에서만
+                // 초기화되므로 호스트 이탈 경로에서 수동으로 초기화해 isSamePlayer 오판을 방지한다.
+                for (var s = 0; s < _playerIdBySlot.Length; s++)
+                {
+                    _playerIdBySlot[s] = -1;
+                    _selectedCharacterIndexBySlot[s] = -1;
+                }
             }
 
             _currentRoomName = string.Empty;
