@@ -41,5 +41,6 @@ MonoBehaviour:
   grabbedPinWeight: 0.3
   grabbedMuscleWeight: 0.3
   throwUpComponent: 0.4
+  stunnedThrowUpComponent: 0.22
   consciousPushForceScale: 0.4
   consciousPushUpComponent: 0.1

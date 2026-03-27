@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Fusion;
 using SSAFYPlayTime.Gameplay.Items;
 using UnityEngine;
@@ -9,6 +10,26 @@ public sealed partial class NetworkPlayer
     private float _recentlyThrownTargetRootAUntilTime;
     private Transform _recentlyThrownTargetRootB;
     private float _recentlyThrownTargetRootBUntilTime;
+
+    private void EmitThrowRuntimeLog(string source, string details)
+    {
+        if (!SSAFYPlayTime.RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            return;
+
+        Debug.Log($"[ThrowDiag] holder={name} {source} {details}", this);
+    }
+
+    private static string DescribeThrowHandlerState(HandGrabHandler handler)
+    {
+        if (handler == null)
+            return "null";
+
+        return
+            $"hand={handler.Side} holding={(handler.IsHolding ? 1 : 0)} throwable={(handler.IsHoldingThrowableTarget ? 1 : 0)} " +
+            $"stunned={(handler.IsHoldingStunnedPlayer ? 1 : 0)} conscious={(handler.IsHoldingConsciousPlayer ? 1 : 0)} " +
+            $"recovering={(handler.IsHoldingRecoveringPlayer ? 1 : 0)} kind={handler.GrabbedTargetKind} " +
+            $"target={(handler.GrabTargetRoot != null ? handler.GrabTargetRoot.name : "None")}";
+    }
 
     private void ProcessInteractions(PlayerNetworkInput input)
     {
@@ -205,9 +226,9 @@ public sealed partial class NetworkPlayer
 
         var handAnchor = ResolveHeldItemHandAnchor();
         var anchorTransform = handAnchor != null ? handAnchor : transform;
-        var throwForward = anchorTransform.forward;
+        var throwForward = ResolveThrowFacingForwardPlanar();
         if (throwForward.sqrMagnitude < 0.0001f)
-            throwForward = transform.forward;
+            throwForward = anchorTransform.forward;
 
         throwForward.y = Mathf.Max(0.1f, throwForward.y);
         throwForward.Normalize();
@@ -238,24 +259,47 @@ public sealed partial class NetworkPlayer
 
     private bool TryProcessThrow()
     {
+        if (!TryGetDualHandThrowablePair(out _, out _))
+        {
+            if (_handGrabHandlers != null)
+            {
+                for (var i = 0; i < _handGrabHandlers.Length; i++)
+                    EmitThrowRuntimeLog("GateBlocked", DescribeThrowHandlerState(_handGrabHandlers[i]));
+            }
+            return false;
+        }
+
         var didThrow = false;
-        Transform thrownStunnedTargetRoot = null;
+        var processedTargetKeys = new HashSet<int>();
         foreach (var handler in _handGrabHandlers)
         {
             if (handler == null || !handler.IsHoldingThrowableTarget)
                 continue;
 
-            var targetRoot = handler.GrabTargetRoot;
-            var isStunnedTarget = handler.IsHoldingStunnedPlayer;
-            if (thrownStunnedTargetRoot != null && targetRoot == thrownStunnedTargetRoot)
+            if (!handler.TryBuildThrowImpulse(out var throwData))
                 continue;
 
-            handler.Throw();
-            didThrow = true;
-            RegisterThrownTargetRegrabIgnore(targetRoot);
+            EmitThrowRuntimeLog(
+                "ProcessThrow",
+                $"hand={handler.Side} target={(throwData.TargetRoot != null ? throwData.TargetRoot.name : "None")} " +
+                $"impulse=({throwData.Impulse.x:F2},{throwData.Impulse.y:F2},{throwData.Impulse.z:F2}) stunned={(throwData.IsStunnedPlayer ? 1 : 0)}");
 
-            if (isStunnedTarget && targetRoot != null)
-                thrownStunnedTargetRoot = targetRoot;
+            var targetKey = throwData.TargetRoot != null
+                ? throwData.TargetRoot.GetInstanceID()
+                : throwData.ConnectedBody != null
+                    ? throwData.ConnectedBody.GetInstanceID()
+                    : handler.GetInstanceID();
+            if (!processedTargetKeys.Add(targetKey))
+                continue;
+
+            if (throwData.TargetRoot == null && throwData.ConnectedBody == null)
+                handler.ReleaseHeldTargetForThrow();
+            else
+                ReleaseThrowableHandlersForTarget(throwData.TargetRoot, throwData.ConnectedBody);
+
+            HandGrabHandler.ApplyThrowImpulse(throwData);
+            didThrow = true;
+            RegisterThrownTargetRegrabIgnore(throwData.TargetRoot);
         }
 
         if (didThrow)
@@ -265,6 +309,70 @@ public sealed partial class NetworkPlayer
         }
 
         return didThrow;
+    }
+
+    private bool TryGetDualHandThrowablePair(out HandGrabHandler left, out HandGrabHandler right)
+    {
+        left = null;
+        right = null;
+
+        if (_handGrabHandlers == null || _handGrabHandlers.Length < 2)
+            return false;
+
+        foreach (var handler in _handGrabHandlers)
+        {
+            if (handler == null)
+                continue;
+
+            if (handler.Side == HandGrabHandler.HandSide.Left)
+                left = handler;
+            else if (handler.Side == HandGrabHandler.HandSide.Right)
+                right = handler;
+        }
+
+        if (left == null || right == null)
+            return false;
+
+        if (!left.IsHoldingThrowableTarget || !right.IsHoldingThrowableTarget)
+            return false;
+
+        return AreThrowableTargetsEquivalent(left, right);
+    }
+
+    private static bool AreThrowableTargetsEquivalent(HandGrabHandler left, HandGrabHandler right)
+    {
+        if (left == null || right == null)
+            return false;
+
+        if (left.GrabTargetRoot != null && left.GrabTargetRoot == right.GrabTargetRoot)
+            return true;
+
+        return left.GrabTarget != null && left.GrabTarget == right.GrabTarget;
+    }
+
+    private void ReleaseThrowableHandlersForTarget(Transform targetRoot, Rigidbody targetBody)
+    {
+        foreach (var candidate in _handGrabHandlers)
+        {
+            if (!ShouldReleaseThrowableHandlerForTarget(candidate, targetRoot, targetBody))
+                continue;
+
+            candidate.ReleaseHeldTargetForThrow();
+        }
+    }
+
+    private static bool ShouldReleaseThrowableHandlerForTarget(
+        HandGrabHandler candidate,
+        Transform targetRoot,
+        Rigidbody targetBody)
+    {
+        if (candidate == null || !candidate.IsHoldingThrowableTarget)
+            return false;
+
+        if (targetRoot != null && candidate.GrabTargetRoot == targetRoot)
+            return true;
+
+        return targetBody != null && candidate.GrabTarget == targetBody;
     }
 
     private void BeginGrabDisableWindow(float duration = 1f)
@@ -809,8 +917,10 @@ public sealed partial class NetworkPlayer
         if (runtimeHost != null && !string.IsNullOrWhiteSpace(runtimeHost.HeldItemId))
             return true;
 
-        return !string.IsNullOrWhiteSpace(NetworkedHeldItemId.ToString()) ||
-               !string.IsNullOrWhiteSpace(_lastReplicatedHeldItemId);
+        if (IsNetworkReady && !string.IsNullOrWhiteSpace(NetworkedHeldItemId.ToString()))
+            return true;
+
+        return !string.IsNullOrWhiteSpace(_lastReplicatedHeldItemId);
     }
 
     private bool IsHoldingRuntimeItem(string itemId)
@@ -827,7 +937,7 @@ public sealed partial class NetworkPlayer
             string.Equals(runtimeHost.HeldItemId, itemId, System.StringComparison.Ordinal))
             return true;
 
-        var replicatedHeldItemId = NetworkedHeldItemId.ToString();
+        var replicatedHeldItemId = IsNetworkReady ? NetworkedHeldItemId.ToString() : string.Empty;
         return string.Equals(replicatedHeldItemId, itemId, System.StringComparison.Ordinal) ||
                string.Equals(_lastReplicatedHeldItemId, itemId, System.StringComparison.Ordinal);
     }

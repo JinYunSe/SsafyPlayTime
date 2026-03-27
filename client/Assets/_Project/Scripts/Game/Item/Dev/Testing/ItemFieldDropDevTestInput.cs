@@ -37,7 +37,7 @@ namespace SSAFYPlayTime.Gameplay.Items
         [SerializeField] private string spawnAmericanoItemId = ItemIds.Americano;
 
         [Header("디버그")]
-        [SerializeField] private bool enableDebugLog = true;
+    [SerializeField] private bool enableDebugLog = false;
 
         private void Awake()
         {
