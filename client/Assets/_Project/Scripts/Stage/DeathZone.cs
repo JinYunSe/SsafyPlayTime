@@ -67,7 +67,9 @@ public class DeathZone : MonoBehaviour
             yield return new WaitForSeconds(damageInterval);
         }
 
-        if (damageCoroutines.ContainsKey(player))
+        // player가 파괴되면 Unity == null이지만 C# Dictionary 키로 null을 전달하면
+        // ArgumentNullException이 발생하므로 명시적으로 null 체크한다.
+        if (player != null && damageCoroutines.ContainsKey(player))
             damageCoroutines.Remove(player);
     }
 
