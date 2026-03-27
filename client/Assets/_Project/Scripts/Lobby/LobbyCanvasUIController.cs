@@ -302,6 +302,9 @@ namespace SSAFYPlayTime
         // 로컬 플레이어의 준비 상태. ShutdownRunnerAsync로 초기화되지 않으며
         // 호스트 마이그레이션 후 새 방장에게 준비 상태를 재전송할 때 사용된다.
         private bool _localIsReady;
+        // 로컬 플레이어가 준비 상태를 변경했지만 호스트 로스터에 아직 반영되지 않은 경우 true.
+        // ApplyRosterPayload가 구(舊) 로스터로 _localIsReady를 덮어쓰는 것을 방지한다.
+        private bool _hasPendingReadyStateChange;
         private readonly Dictionary<int, bool> _readyStateByPlayerId = new();
         private bool _gameEndReturnTransitionStarted;
         // 게임 종료 후 순위 화면 표시 중 여부. IsActiveSceneNamed("GameEndScene") 대신 사용한다.
@@ -477,6 +480,21 @@ namespace SSAFYPlayTime
 
         private IEnumerator CoLeaveGameVoluntarily()
         {
+            // KillImmediately 직후 TriggerGameEnd가 발동될 수 있다.
+            // LoadSceneAfterSync가 RPC_BroadcastRankings를 전송(2프레임 후)하고
+            // _pendingGameEndPanel을 세울 때까지 충분히 양보한다.
+            yield return null;
+            yield return null;
+            yield return null;
+
+            if (_pendingGameEndPanel || _isShowingGameEndPanel)
+            {
+                // TriggerGameEnd가 씬 전환을 담당하므로 여기서는 아무것도 하지 않는다.
+                // 클라이언트는 runner.LoadScene + OnSceneLoadDone 경로로 GameEndPanel을 표시한다.
+                _isProcessing = false;
+                yield break;
+            }
+
             SceneManager.LoadScene(launcherSceneName);
             while (!IsActiveSceneNamed(launcherSceneName))
                 yield return null;
@@ -1238,6 +1256,7 @@ namespace SSAFYPlayTime
             // 다음 방 입장 시 ? 기본 선택이 다시 적용되도록 리셋한다.
             _localSelectedCharacterIndex = -1;
             _localIsReady = false;
+            _hasPendingReadyStateChange = false;
 
             await ShutdownRunnerAsync();
             ShowLobbyPanel();
@@ -1299,6 +1318,7 @@ namespace SSAFYPlayTime
                 _isProcessing = false;
                 _isShowingGameEndPanel = false;
                 _localIsReady = false;
+                _hasPendingReadyStateChange = false;
                 _localSelectedCharacterIndex = -1;
 
                 foreach (var obj in _spawnedGameEndCharacters)
@@ -1342,6 +1362,7 @@ namespace SSAFYPlayTime
                 _currentRoomPassword = string.Empty;
                 _localSelectedCharacterIndex = -1;
                 _localIsReady = false;
+                _hasPendingReadyStateChange = false;
                 try
                 {
                     await ShutdownRunnerAsync();
@@ -1359,6 +1380,7 @@ namespace SSAFYPlayTime
                 _isProcessing = false;
                 _isShowingGameEndPanel = false;
                 _localIsReady = false;
+                _hasPendingReadyStateChange = false;
                 _localSelectedCharacterIndex = -1;
 
                 foreach (var obj in _spawnedGameEndCharacters)
@@ -1385,6 +1407,7 @@ namespace SSAFYPlayTime
                 if (_runner != null && _runner.IsRunning && !_runner.IsServer && _runner.LocalPlayer.IsRealPlayer)
                 {
                     _localIsReady = false;
+                    _hasPendingReadyStateChange = false;
                     var localPid = _runner.LocalPlayer.PlayerId;
                     _readyStateByPlayerId[localPid] = false;
                     if (_roomParticipantsByPlayerId.TryGetValue(localPid, out var pres) && pres != null)
@@ -1522,6 +1545,7 @@ namespace SSAFYPlayTime
             _currentRoomPassword = string.Empty;
             _localSelectedCharacterIndex = -1;
             _localIsReady = false;
+            _hasPendingReadyStateChange = false;
             _localPlayerRankForAutoJoin = 0;
             // OnHostMigration이 저장한 준비 상태를 클리어해 재입장 시 Ready 복원을 방지한다.
             _migrationReadyStateByClientId.Clear();
@@ -1659,6 +1683,7 @@ namespace SSAFYPlayTime
 
             await ShutdownRunnerAsync();
             _localIsReady = false;
+            _hasPendingReadyStateChange = false;
             // 게임 종료 후 방으로 돌아올 때 캐릭터 선택을 ?로 초기화한다.
             _localSelectedCharacterIndex = -1;
 
@@ -2007,6 +2032,23 @@ namespace SSAFYPlayTime
             }
             _localSelectedCharacterIndex = normalizedIndex;
             var localPlayerId = _runner.LocalPlayer.PlayerId;
+
+            // 호스트 본인 선택 시 다른 플레이어가 이미 선택한 캐릭터인지 확인
+            if (_runner.IsServer)
+            {
+                var isTakenByOther = normalizedIndex != (int)CharacterKind.Random &&
+                    _selectedCharacterIndexByPlayerId.Any(kvp =>
+                        kvp.Key != localPlayerId &&
+                        SanitizeCharacterIndexOrNone(kvp.Value) == normalizedIndex);
+
+                if (isTakenByOther)
+                {
+                    Debug.LogWarning($"[Lobby] Host character selection rejected (already taken): charIdx={normalizedIndex}");
+                    RefreshCharacterSelectionUiState();
+                    return;
+                }
+            }
+
             _selectedCharacterIndexByPlayerId[localPlayerId] = normalizedIndex;
 
             if (_roomParticipantsByPlayerId.TryGetValue(localPlayerId, out var localPresence) && localPresence != null)
@@ -2052,6 +2094,7 @@ namespace SSAFYPlayTime
             }
 
             _localIsReady = !_localIsReady;
+            _hasPendingReadyStateChange = true;
 
             var localPlayerId = _runner.LocalPlayer.PlayerId;
             _readyStateByPlayerId[localPlayerId] = _localIsReady;
@@ -2567,6 +2610,9 @@ namespace SSAFYPlayTime
             _readyStateByPlayerId.Clear();
             _spawnedGameplayNetworkCharacters.Clear();
             _spawnedCharacterIndexByPlayerId.Clear();
+            UntrackAllGameplayPlayers();
+            if (!_isMigrating)
+                _deadGameplayPlayerIds.Clear();
             _currentOwnerPlayerId = -1;
             // GameEndPanel 표시 중에는 리셋하지 않는다.
             // StartAutoRoomJoinFromGameEndAsync에서 호출될 때 _isShowingGameEndPanel이 true이면
@@ -2860,12 +2906,23 @@ namespace SSAFYPlayTime
             SyncCurrentRoomOwnerFromRoster();
 
             // 로스터 수신 후 로컬 플레이어의 준비 상태를 동기화한다.
+            // _hasPendingReadyStateChange가 true면 아직 호스트에 전달 중인 변경이 있으므로
+            // 로스터가 해당 변경을 반영했을 때만 _localIsReady를 갱신한다.
             if (_runner != null && _runner.IsRunning && _runner.LocalPlayer.IsRealPlayer)
             {
                 var localId = _runner.LocalPlayer.PlayerId;
                 if (_readyStateByPlayerId.TryGetValue(localId, out var localReady))
                 {
-                    _localIsReady = localReady;
+                    if (!_hasPendingReadyStateChange)
+                    {
+                        _localIsReady = localReady;
+                    }
+                    else if (localReady == _localIsReady)
+                    {
+                        // 호스트가 변경을 확인했으므로 펜딩 해제
+                        _hasPendingReadyStateChange = false;
+                    }
+                    // localReady != _localIsReady이고 펜딩 중이면 덮어쓰지 않음
                 }
             }
 
@@ -3395,6 +3452,10 @@ namespace SSAFYPlayTime
             input.keyboardType = TouchScreenKeyboardType.NumberPad;
             input.characterValidation = TMP_InputField.CharacterValidation.Integer;
             input.lineType = TMP_InputField.LineType.SingleLine;
+            input.characterLimit = 10;
+            input.inputType = TMP_InputField.InputType.Standard;
+            input.onSelect.AddListener(_ => Input.imeCompositionMode = IMECompositionMode.Off);
+            input.onDeselect.AddListener(_ => Input.imeCompositionMode = IMECompositionMode.Auto);
         }
 
         // 비밀번호 입력 필드에서 숫자 외 문자가 포함된 경우 필터링해 교체한다.

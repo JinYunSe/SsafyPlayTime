@@ -265,14 +265,44 @@ public sealed class NetworkPlayerInteractionDecisionTests
         method.Invoke(target, null);
     }
 
-    private static void InvokeApplyAerialKickMissPenalty(NetworkPlayer player)
+    private static void InvokeHandleAerialKickMiss(NetworkPlayer player, string reason)
     {
         var method = typeof(NetworkPlayer).GetMethod(
-            "ApplyAerialKickMissPenalty",
+            "HandleAerialKickMiss",
             BindingFlags.Instance | BindingFlags.NonPublic);
 
         Assert.That(method, Is.Not.Null);
-        method.Invoke(player, null);
+        method.Invoke(player, new object[] { reason });
+    }
+
+    private static bool InvokeShouldDriveRecoveryTransform(NetworkPlayer player)
+    {
+        var method = typeof(NetworkPlayer).GetMethod(
+            "ShouldDriveRecoveryTransform",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.That(method, Is.Not.Null);
+        return (bool)method.Invoke(player, null);
+    }
+
+    private static bool InvokeShouldUseBufferedProxyPoseInterpolation(NetworkPlayer player)
+    {
+        var method = typeof(NetworkPlayer).GetMethod(
+            "ShouldUseBufferedProxyPoseInterpolation",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.That(method, Is.Not.Null);
+        return (bool)method.Invoke(player, null);
+    }
+
+    private static bool InvokeShouldSmoothProxyPresentationRoot(NetworkPlayer player, Transform presentationRoot)
+    {
+        var method = typeof(NetworkPlayer).GetMethod(
+            "ShouldSmoothProxyPresentationRoot",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.That(method, Is.Not.Null);
+        return (bool)method.Invoke(player, new object[] { presentationRoot });
     }
 
     private static string InvokeResolveAuthorityPhysicalPhaseCore(
@@ -395,28 +425,6 @@ public sealed class NetworkPlayerInteractionDecisionTests
             });
     }
 
-    private static bool InvokeShouldUseGroundedAerialKickMissPlop(
-        bool isGrounded,
-        bool rawGrounded,
-        bool footLandingSignal,
-        bool hasRecentGroundContact)
-    {
-        var method = typeof(NetworkPlayer).GetMethod(
-            "ShouldUseGroundedAerialKickMissPlop",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        Assert.That(method, Is.Not.Null);
-        return (bool)method.Invoke(
-            null,
-            new object[]
-            {
-                isGrounded,
-                rawGrounded,
-                footLandingSignal,
-                hasRecentGroundContact
-            });
-    }
-
     private static bool InvokeHasConfirmedAerialKickLandingContact(
         bool rawGrounded,
         bool footLandingSignal,
@@ -434,36 +442,6 @@ public sealed class NetworkPlayerInteractionDecisionTests
                 rawGrounded,
                 footLandingSignal,
                 hasRecentGroundContact
-            });
-    }
-
-    private static float InvokeResolveAerialKickMissPenaltyDuration(float configuredSelfStunDuration, bool groundedPlop)
-    {
-        var method = typeof(NetworkPlayer).GetMethod(
-            "ResolveAerialKickMissPenaltyDuration",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        Assert.That(method, Is.Not.Null);
-        return (float)method.Invoke(null, new object[] { configuredSelfStunDuration, groundedPlop });
-    }
-
-    private static bool InvokeShouldApplyAerialKickMissStun(
-        float configuredSelfStunDuration,
-        bool groundedPlop,
-        bool shouldApplySelfStun)
-    {
-        var method = typeof(NetworkPlayer).GetMethod(
-            "ShouldApplyAerialKickMissStun",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        Assert.That(method, Is.Not.Null);
-        return (bool)method.Invoke(
-            null,
-            new object[]
-            {
-                configuredSelfStunDuration,
-                groundedPlop,
-                shouldApplySelfStun
             });
     }
 
@@ -1564,6 +1542,88 @@ public sealed class NetworkPlayerInteractionDecisionTests
     }
 
     [Test]
+    public void RecoveryTransformDrive_EndsAfterStandUpHandoffEvenWhileRecoveringWindowRemains()
+    {
+        var go = new GameObject("NetworkPlayerInteractionDecisionTests_RecoveryTransformDrive");
+        try
+        {
+            var player = go.AddComponent<NetworkPlayer>();
+            SetPrivateField(player, "_isRecovering", true);
+            SetPrivateField(player, "_isRecoverStabilizing", false);
+            SetPrivateField(player, "_hasPendingRecoveryStandUpHandoff", true);
+
+            Assert.That(InvokeShouldDriveRecoveryTransform(player), Is.True);
+
+            SetPrivateField(player, "_hasPendingRecoveryStandUpHandoff", false);
+
+            Assert.That(InvokeShouldDriveRecoveryTransform(player), Is.False);
+        }
+        finally
+        {
+            Object.DestroyImmediate(go);
+        }
+    }
+
+    [Test]
+    public void ProxyRecoveryResetWindow_DisablesBufferedInterpolationAndPresentationRootSmoothing()
+    {
+        var go = new GameObject("NetworkPlayerInteractionDecisionTests_ProxyRecoveryResetWindow");
+        var visualRoot = new GameObject("VisualRoot");
+        try
+        {
+            visualRoot.transform.SetParent(go.transform, false);
+            var player = go.AddComponent<NetworkPlayer>();
+            SetPrivateField(player, "_localPhysicalPhase", ResolvePhysicalPhase("Stable"));
+            SetPrivateField(player, "_isActiveRagdoll", true);
+            SetPrivateField(player, "_isRecoverStabilizing", false);
+            SetPrivateField(player, "_remotePhysicsPresentationHoldUntilFrame", Time.frameCount + 2);
+            SetPrivateField(player, "_animatedVisualRoot", visualRoot.transform);
+
+            Assert.That(InvokeShouldUseBufferedProxyPoseInterpolation(player), Is.False);
+            Assert.That(InvokeShouldSmoothProxyPresentationRoot(player, visualRoot.transform), Is.False);
+        }
+        finally
+        {
+            Object.DestroyImmediate(visualRoot);
+            Object.DestroyImmediate(go);
+        }
+    }
+
+    [Test]
+    public void ProxyRecoveryResetWindow_SnapsPresentationRootBackToAuthoritativeRoot()
+    {
+        var go = new GameObject("NetworkPlayerInteractionDecisionTests_ProxyRecoveryResetSnap");
+        var visualRoot = new GameObject("VisualRoot");
+        try
+        {
+            visualRoot.transform.SetParent(go.transform, false);
+            var player = go.AddComponent<NetworkPlayer>();
+            go.transform.SetPositionAndRotation(new Vector3(1.25f, 0.6f, -0.4f), Quaternion.Euler(0f, 32f, 0f));
+            visualRoot.transform.SetPositionAndRotation(
+                go.transform.position + new Vector3(0.08f, 0.09f, -0.03f),
+                Quaternion.Euler(0f, 77f, 0f));
+
+            SetPrivateField(player, "_localPhysicalPhase", ResolvePhysicalPhase("Stable"));
+            SetPrivateField(player, "_isActiveRagdoll", true);
+            SetPrivateField(player, "_isRecoverStabilizing", false);
+            SetPrivateField(player, "_remotePhysicsPresentationHoldUntilFrame", Time.frameCount + 2);
+            SetPrivateField(player, "_animatedVisualRoot", visualRoot.transform);
+            SetPrivateField(player, "_proxyPresentationRootSmoothingActive", true);
+
+            InvokePrivateMethod(player, "UpdateProxyPresentationRoot");
+
+            Assert.That(Vector3.Distance(visualRoot.transform.position, go.transform.position), Is.LessThan(0.0001f));
+            Assert.That(Quaternion.Angle(visualRoot.transform.rotation, go.transform.rotation), Is.LessThan(0.01f));
+            Assert.That((bool)GetPrivateField(player, "_proxyPresentationRootSmoothingActive"), Is.False);
+        }
+        finally
+        {
+            Object.DestroyImmediate(visualRoot);
+            Object.DestroyImmediate(go);
+        }
+    }
+
+    [Test]
     public void AerialKickBallisticFall_RequiresAirborneDescentOrLandingSignal()
     {
         Assert.That(
@@ -1622,58 +1682,6 @@ public sealed class NetworkPlayerInteractionDecisionTests
     }
 
     [Test]
-    public void AerialKickMissPenalty_UsesGroundedPlopWhenLandingSignalsExist()
-    {
-        Assert.That(
-            InvokeShouldUseGroundedAerialKickMissPlop(
-                isGrounded: true,
-                rawGrounded: false,
-                footLandingSignal: false,
-                hasRecentGroundContact: false),
-            Is.False);
-
-        Assert.That(
-            InvokeShouldUseGroundedAerialKickMissPlop(
-                isGrounded: false,
-                rawGrounded: true,
-                footLandingSignal: false,
-                hasRecentGroundContact: false),
-            Is.True);
-
-        Assert.That(
-            InvokeShouldUseGroundedAerialKickMissPlop(
-                isGrounded: false,
-                rawGrounded: false,
-                footLandingSignal: true,
-                hasRecentGroundContact: false),
-            Is.False);
-
-        Assert.That(
-            InvokeShouldUseGroundedAerialKickMissPlop(
-                isGrounded: false,
-                rawGrounded: false,
-                footLandingSignal: false,
-                hasRecentGroundContact: true),
-            Is.False);
-
-        Assert.That(
-            InvokeShouldUseGroundedAerialKickMissPlop(
-                isGrounded: true,
-                rawGrounded: false,
-                footLandingSignal: true,
-                hasRecentGroundContact: true),
-            Is.True);
-
-        Assert.That(
-            InvokeShouldUseGroundedAerialKickMissPlop(
-                isGrounded: false,
-                rawGrounded: false,
-                footLandingSignal: false,
-                hasRecentGroundContact: false),
-            Is.False);
-    }
-
-    [Test]
     public void AerialKickLandingContact_RequiresRawGroundOrFootSignalWithRecentContact()
     {
         Assert.That(
@@ -1706,52 +1714,7 @@ public sealed class NetworkPlayerInteractionDecisionTests
     }
 
     [Test]
-    public void AerialKickMissPenalty_ResolvesShorterFlopDurationThanConfiguredSelfStun()
-    {
-        Assert.That(
-            InvokeResolveAerialKickMissPenaltyDuration(configuredSelfStunDuration: 0.4f, groundedPlop: true),
-            Is.EqualTo(0.26f).Within(0.0001f));
-
-        Assert.That(
-            InvokeResolveAerialKickMissPenaltyDuration(configuredSelfStunDuration: 0.4f, groundedPlop: false),
-            Is.EqualTo(0.20f).Within(0.0001f));
-
-        Assert.That(
-            InvokeResolveAerialKickMissPenaltyDuration(configuredSelfStunDuration: 1.0f, groundedPlop: true),
-            Is.EqualTo(0.34f).Within(0.0001f));
-
-        Assert.That(
-            InvokeResolveAerialKickMissPenaltyDuration(configuredSelfStunDuration: 0.05f, groundedPlop: false),
-            Is.EqualTo(0.16f).Within(0.0001f));
-    }
-
-    [Test]
-    public void AerialKickMissPenalty_GroundedPlopForcesShortPlainStunEvenWhenChancePathWouldSkip()
-    {
-        Assert.That(
-            InvokeShouldApplyAerialKickMissStun(
-                configuredSelfStunDuration: 0.38f,
-                groundedPlop: true,
-                shouldApplySelfStun: false),
-            Is.True);
-
-        Assert.That(
-            InvokeShouldApplyAerialKickMissStun(
-                configuredSelfStunDuration: 0.38f,
-                groundedPlop: false,
-                shouldApplySelfStun: false),
-            Is.False);
-
-        Assert.That(
-            InvokeShouldApplyAerialKickMissStun(
-                configuredSelfStunDuration: 0f,
-                groundedPlop: true,
-                shouldApplySelfStun: false),
-            Is.False);
-    }
-
-    [Test]
-    public void AerialKickMissPenalty_GroundedPlopEntersPlainStunWithoutCollapse()
+    public void AerialKickMissHandling_GroundedMissRestoresImmediatelyWithoutEnteringStun()
     {
         var go = new GameObject("NetworkPlayerInteractionDecisionTests_AerialKickMissPenalty");
         try
@@ -1759,6 +1722,7 @@ public sealed class NetworkPlayerInteractionDecisionTests
             var player = go.AddComponent<NetworkPlayer>();
             SetPrivateField(player, "syncPhysicsObjects", System.Array.Empty<SyncPhysicsObject>());
             SetPrivateField(player, "_isActiveRagdoll", true);
+            SetPrivateField(player, "_isAerialKickMomentumActive", true);
             SetPrivateField(player, "_isGrounded", true);
             SetPrivateField(player, "_activeAerialKickHasHit", false);
             SetPrivateField(player, "_activeAerialKickSelfStunDuration", 0.38f);
@@ -1766,13 +1730,25 @@ public sealed class NetworkPlayerInteractionDecisionTests
             SetPrivateField(player, "_activeAerialKickRawGrounded", true);
             SetPrivateField(player, "_activeAerialKickLastGroundContactTime", Time.time);
 
-            InvokeApplyAerialKickMissPenalty(player);
+            InvokeHandleAerialKickMiss(player, "test");
 
             Assert.That(
                 GetPrivateField(player, "_localPhysicalPhase"),
-                Is.EqualTo(ResolvePhysicalPhase("Stunned")));
+                Is.EqualTo(ResolvePhysicalPhase("Stable")));
             Assert.That(
                 (float)GetPrivateField(player, "_stunCollapseTimer"),
+                Is.EqualTo(0f).Within(0.0001f));
+            Assert.That(
+                (bool)GetPrivateField(player, "_isActiveRagdoll"),
+                Is.True);
+            Assert.That(
+                (float)GetPrivateField(player, "_aerialKickSpringRestoreTimer"),
+                Is.EqualTo(0f).Within(0.0001f));
+            Assert.That(
+                (bool)GetPrivateField(player, "_isAerialKickMomentumActive"),
+                Is.False);
+            Assert.That(
+                (float)GetPrivateField(player, "_hitRecoilTimer"),
                 Is.EqualTo(0f).Within(0.0001f));
         }
         finally
