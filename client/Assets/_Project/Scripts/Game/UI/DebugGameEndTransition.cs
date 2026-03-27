@@ -77,8 +77,8 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
         _leftPlayerIds.Add(player.PlayerId);
 
         // 캐시 기반 aliveCount 계산: NetworkObject 상태에 의존하지 않는다.
-        var deadOrLeft = new HashSet<int>(_deathOrder) { player.PlayerId };
-        var aliveCount = _allRegisteredPlayerIds.Count(id => !deadOrLeft.Contains(id));
+        // _leftPlayerIds 전체(이전 탈주자 포함)를 반영해 중복 이탈 시에도 정확한 생존자 수를 계산한다.
+        var aliveCount = _allRegisteredPlayerIds.Count(id => !_deathOrder.Contains(id) && !_leftPlayerIds.Contains(id));
 
         Debug.Log($"[GameEnd] Player{player.PlayerId} 퇴장 → 생존자 수: {aliveCount}명");
 
@@ -184,8 +184,8 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
             Debug.Log($"[GameEnd] 모든 플레이어 구독 완료 ({_allRegisteredPlayerIds.Count}/{expectedPlayerCount}) → FindObjectsByType 주기 탐색 중단");
 
             // 초기화 전 사망/퇴장한 플레이어가 있을 수 있으므로 생존자 수를 즉시 재확인한다.
-            // 스폰 직후 0.5초 이내 즉사 시 TriggerGameEnd가 발동되지 않는 문제를 방지한다.
-            if (!_triggered && _deathOrder.Count > 0)
+            // 스폰 직후 0.5초 이내 즉사/이탈 시 TriggerGameEnd가 발동되지 않는 문제를 방지한다.
+            if (!_triggered && (_deathOrder.Count > 0 || _leftPlayerIds.Count > 0))
             {
                 var aliveCount = _allRegisteredPlayerIds.Count(id =>
                     !_deathOrder.Contains(id) && !_leftPlayerIds.Contains(id));
@@ -221,7 +221,7 @@ public class DebugGameEndTransition : NetworkBehaviour, IPlayerLeft
         if (_allRegisteredPlayerIds.Count == 0) return;
 
         // PlayerLeft와 동일한 캐시 기반 계산으로 통일
-        var aliveCount = _allRegisteredPlayerIds.Count(id => !_deathOrder.Contains(id));
+        var aliveCount = _allRegisteredPlayerIds.Count(id => !_deathOrder.Contains(id) && !_leftPlayerIds.Contains(id));
 
         Debug.Log($"[GameEnd] Alive real players: {aliveCount}");
 
