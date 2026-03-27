@@ -231,18 +231,20 @@ namespace SSAFYPlayTime
                 return;
             }
 
-            if (_isShowingGameEndPanel && !_gameEndReturnTransitionStarted)
+            // _pendingGameEndPanel: 씬 전환 중(_isShowingGameEndPanel = false)에도 stale runner를 올바르게 감지한다.
+            if ((_isShowingGameEndPanel || _pendingGameEndPanel) && !_gameEndReturnTransitionStarted)
             {
                 // 자동 방 입장이 완료된 새 방 세션에서 발생한 migration은 normal path로 처리한다.
-                // 아직 자동 입장 전(이전 게임 세션)이거나 입장 중인 경우에만 runner를 종료한다.
+                // 아직 자동 입장 전(이전 게임 세션)이거나 새 세션 연결 전인 경우에만 runner를 종료한다.
+                // _autoJoinSessionEstablished: StartGame 성공 직후 true로 세워져 새 세션 runner를 stale로 오판하는 버그를 방지한다.
                 var autoJoinDone = _gameEndAutoRoomJoinTask?.IsCompletedSuccessfully == true;
-                if (!autoJoinDone)
+                if (!autoJoinDone && !_autoJoinSessionEstablished)
                 {
                     Debug.Log("[Lobby] 게임 종료 화면 대기 중 stale runner 감지 - 즉시 종료.");
                     _ = ShutdownRunnerAsync();
                     return;
                 }
-                // autoJoinDone: 새 방 세션의 host migration → normal path로 fall-through
+                // autoJoinDone 또는 _autoJoinSessionEstablished: 새 방 세션의 host migration → normal path로 fall-through
                 Debug.Log("[Lobby] 게임 종료 화면의 새 방 세션에서 host migration 발생 - normal path 처리.");
             }
 
@@ -340,31 +342,6 @@ namespace SSAFYPlayTime
                         _ = ShutdownRunnerAsync();
                     }
                     return;
-                }
-
-                // GameScene에서 마이그레이션 발생 시 ShutdownRunnerAsync 전에 위치를 캡처한다.
-                // NetworkObject가 아직 살아있는 상태에서 읽어야 정확한 위치를 얻을 수 있다.
-                if (IsActiveGameplayScene())
-                {
-                    _isMigrating = true;
-                    CaptureCharacterStatesForMigration();
-                    CaptureEnvironmentStatesForMigration();
-
-                    // CaptureCharacterStatesForMigration()이 NetworkPlayer.CharacterTypeIndex를 읽어
-                    // _selectedCharacterIndexByPlayerId를 실제 스폰 캐릭터 인덱스(0~3)로 갱신한다.
-                    // savedAllCharacterIndices·savedCharacterIndex는 이 갱신 전에 캡처됐으므로
-                    // ? 선택자의 경우 여전히 4(Random)를 갖는다.
-                    // ShutdownRunnerAsync 이후 이 값으로 복원하면 재추첨이 발생하므로
-                    // 갱신된 dict를 기반으로 재캡처한다.
-                    savedAllCharacterIndices = _selectedCharacterIndexByPlayerId
-                        .Where(kvp => SanitizeCharacterIndexOrNone(kvp.Value) >= 0)
-                        .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-                    if (_selectedCharacterIndexByPlayerId.TryGetValue(localPlayerId, out var scResolved))
-                    {
-                        var resolvedIdx = SanitizeCharacterIndexOrNone(scResolved);
-                        if (resolvedIdx >= 0)
-                            savedCharacterIndex = resolvedIdx;
-                    }
                 }
 
                 // StartGame 후 새 PlayerId를 알 수 있으므로 로컬 플레이어의 구 PlayerId를 미리 저장한다.
