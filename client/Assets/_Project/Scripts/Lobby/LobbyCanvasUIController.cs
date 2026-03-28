@@ -307,6 +307,9 @@ namespace SSAFYPlayTime
         private bool _hasPendingReadyStateChange;
         private readonly Dictionary<int, bool> _readyStateByPlayerId = new();
         private bool _gameEndReturnTransitionStarted;
+        // StartAutoRoomJoinFromGameEndAsync에서 StartGame이 성공한 직후 true로 세워진다.
+        // OnHostMigration이 stale 게임 세션 runner와 새 auto-join runner를 구분하는 데 사용한다.
+        private bool _autoJoinSessionEstablished;
         // 게임 종료 후 순위 화면 표시 중 여부. IsActiveSceneNamed("GameEndScene") 대신 사용한다.
         private bool _isShowingGameEndPanel;
         // 게임 종료 씬 전환 직전에 세워두는 플래그. OnSceneLoadDone에서 ShowGameEndPanel 호출 트리거.
@@ -518,7 +521,6 @@ namespace SSAFYPlayTime
 
                 _launcherBackgroundMusicCategory = sourceRoot.AddComponent<GameAudioSource>();
                 _launcherBackgroundMusicCategory.SetCategory(GameAudioCategory.BackgroundSound);
-                _launcherBackgroundMusicCategory.RefreshBaseVolumeFromCurrentSource();
             }
 
             _launcherBackgroundMusicSource.clip = launcherBackgroundMusicClip;
@@ -1312,6 +1314,15 @@ namespace SSAFYPlayTime
                 joined = false;
             }
 
+            // joined=true여도 Host Migration 실패 등으로 runner가 유효하지 않은 경우 실패로 처리한다.
+            // _isProcessing 가드로 migration 진행 중에는 이 지점에 도달하지 않으므로,
+            // 여기서 runner가 없다면 migration이 실패한 것이다.
+            if (joined && (_runner == null || !_runner.IsRunning))
+            {
+                Debug.LogWarning("[Lobby] ExecuteReturnFromGameEndAsync: runner 유효하지 않음 (migration 실패 추정) → joined=false 처리.");
+                joined = false;
+            }
+
             if (!joined)
             {
                 // 방 자동 입장 실패 → goToLobby 여부에 따라 분기하되 gameEndPanel은 무조건 닫는다.
@@ -1402,16 +1413,20 @@ namespace SSAFYPlayTime
                 ShowRoomPanel();
                 UpdateRoomPanel();
 
-                // 클라이언트(비방장)는 준비 취소 상태를 HOST에 명시적으로 전파한다.
-                // ApplyRosterPayload가 비동기로 _localIsReady를 덮어쓸 수 있으므로 강제 전송.
-                if (_runner != null && _runner.IsRunning && !_runner.IsServer && _runner.LocalPlayer.IsRealPlayer)
+                // 방으로 복귀 시 로컬 준비 상태를 명시적으로 초기화한다.
+                // HOST/CLIENT 모두 _readyStateByPlayerId에서 stale 값을 제거해 roster 오염을 방지한다.
+                if (_runner != null && _runner.IsRunning && _runner.LocalPlayer.IsRealPlayer)
                 {
-                    _localIsReady = false;
-                    _hasPendingReadyStateChange = false;
                     var localPid = _runner.LocalPlayer.PlayerId;
                     _readyStateByPlayerId[localPid] = false;
                     if (_roomParticipantsByPlayerId.TryGetValue(localPid, out var pres) && pres != null)
                         pres.IsReady = false;
+                }
+
+                // 클라이언트(비방장)는 준비 취소 상태를 HOST에 명시적으로 전파한다.
+                // ApplyRosterPayload가 비동기로 _localIsReady를 덮어쓸 수 있으므로 강제 전송.
+                if (_runner != null && _runner.IsRunning && !_runner.IsServer && _runner.LocalPlayer.IsRealPlayer)
+                {
                     SendReadyStateToHost(false);
                     RefreshReadyButtonState();
                     RefreshRoomActionButtonState();
@@ -1536,6 +1551,13 @@ namespace SSAFYPlayTime
                 // SceneManager.LoadScene은 Fusion 경로가 아니므로 OnSceneLoadDone이 발동하지 않는다.
                 // 캐릭터 슬롯 재초기화를 허용하도록 수동으로 리셋한다.
                 ResetCharacterSlotState();
+                // _playerIdBySlot/selectedCharacterIndexBySlot은 ExecuteReturnFromGameEndAsync 경로에서만
+                // 초기화되므로 호스트 이탈 경로에서 수동으로 초기화해 isSamePlayer 오판을 방지한다.
+                for (var s = 0; s < _playerIdBySlot.Length; s++)
+                {
+                    _playerIdBySlot[s] = -1;
+                    _selectedCharacterIndexBySlot[s] = -1;
+                }
             }
 
             _currentRoomName = string.Empty;
@@ -1750,6 +1772,10 @@ namespace SSAFYPlayTime
                 return false;
             }
 
+            // StartGame 성공 → 새 방 세션에 연결된 상태임을 표시한다.
+            // OnHostMigration이 이 runner를 stale로 오판해 종료하지 않도록 보호한다.
+            _autoJoinSessionEstablished = true;
+
             _currentRoomName = roomName;
             _currentRoomIsPrivate = isPrivate;
             _currentRoomPassword = roomPassword;
@@ -1766,6 +1792,24 @@ namespace SSAFYPlayTime
                 _currentOwnerPlayerId = _runner.LocalPlayer.PlayerId;
                 UpdateOwnerSessionProperty();
                 BroadcastPlayerRoster();
+
+                // 게임이 진행 중이던 기존 세션을 재사용한 경우 started 플래그가 true로 남아
+                // OnSessionListUpdated의 BuildSnapshot에서 이름을 비워 로비 목록에서 제외된다.
+                // 서버(방장)로 입장했을 때 명시적으로 false로 리셋해 방 목록에 다시 표시한다.
+                if (_runner.SessionInfo.IsValid)
+                {
+                    try
+                    {
+                        _runner.SessionInfo.UpdateCustomProperties(new Dictionary<string, SessionProperty>
+                        {
+                            { StartedKey, false }
+                        });
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogWarning($"[Lobby] AutoRoomJoin: started 플래그 리셋 실패. {e.Message}");
+                    }
+                }
             }
             else if (_localSelectedCharacterIndex >= 0)
             {
@@ -2383,6 +2427,7 @@ namespace SSAFYPlayTime
         public async void ShowLobbyPanel()
         {
             if (gamePanel != null) gamePanel.SetActive(false);
+            if (gameEndPanel != null) gameEndPanel.SetActive(false);
             nicknamePanel.SetActive(false);
             if (mainPanel != null) mainPanel.SetActive(false);
             lobbyPanel.SetActive(true);
@@ -2614,6 +2659,8 @@ namespace SSAFYPlayTime
             if (!_isMigrating)
                 _deadGameplayPlayerIds.Clear();
             _currentOwnerPlayerId = -1;
+            _autoJoinSessionEstablished = false;
+            _cachedNicknamesByPlayerId.Clear();
             // GameEndPanel 표시 중에는 리셋하지 않는다.
             // StartAutoRoomJoinFromGameEndAsync에서 호출될 때 _isShowingGameEndPanel이 true이면
             // 리셋하면 Network.cs의 가드가 뚫려 ShowRoomPanel이 잘못 호출될 수 있다.

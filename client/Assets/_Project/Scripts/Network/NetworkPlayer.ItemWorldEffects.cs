@@ -345,9 +345,6 @@ public sealed partial class NetworkPlayer
                 request.StunDamagePerTick,
                 request.PushForce);
 
-            // 프록시 동기화 제거: 화염방사기는 무기에 부착된 비주얼로 통합됨.
-            // EnsureOrUpdateFlamethrowerEffectProxy(muzzleOrigin, safeForward, request.Range, request.Radius);
-            
             EnsureOrUpdateFlamethrowerEffectProxy(muzzleOrigin, safeForward, request.Range, request.Radius);
 
             if (enableItemWorldEffectLog)
@@ -821,7 +818,6 @@ public sealed partial class NetworkPlayer
 
         var categorizedSource = go.AddComponent<global::SSAFYPlayTime.GameAudioSource>();
         categorizedSource.SetCategory(global::SSAFYPlayTime.GameAudioCategory.EffectSound);
-        categorizedSource.RefreshBaseVolumeFromCurrentSource();
 
         source.Play();
         Destroy(go, clip.length + 0.1f);
