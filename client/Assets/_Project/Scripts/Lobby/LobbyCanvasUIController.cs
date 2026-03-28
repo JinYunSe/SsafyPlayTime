@@ -105,6 +105,7 @@ namespace SSAFYPlayTime
         [SerializeField] private GameObject mainPanel;
         [SerializeField] private GameObject gameSettingModal;
         [SerializeField] private GameObject editNicknameModal;
+        [SerializeField] private GameObject gameDescriptionModal;
 
         [Header("Game End Panel")]
         [Tooltip("게임 종료 후 순위를 표시하는 패널 (LauncherScene 캔버스 하위)")]
@@ -257,10 +258,15 @@ namespace SSAFYPlayTime
         [SerializeField] private string accessPublic = "공개";
         [SerializeField] private string roomStateJoinable = "입장가능";
         [SerializeField] private string roomStateFull = "가득참";
-        [SerializeField] private string roomTagPrivate = "[비공개]";
-        [SerializeField] private string roomTagPublic = "[공개]";
+        [SerializeField] private string roomTagPrivate = "[비공개방]";
+        [SerializeField] private string roomTagPublic = "[공개방]";
         [SerializeField] private string emptyPlayerSlot = "-";
-        [SerializeField] private string nicknameHeaderFormat = "{0}님 파이팅!";
+        [SerializeField] private string nicknameHeaderFormat = "닉네임: {0}";
+
+        [Header("Game Description Pages")]
+        [SerializeField] private GameObject page1Object;
+        [SerializeField] private GameObject page2Object;
+
 
         private readonly List<RoomSnapshot> _roomSnapshots = new();
 
@@ -2496,9 +2502,16 @@ namespace SSAFYPlayTime
             var isHost = _runner != null && _runner.IsRunning && _runner.IsServer;
             var btnText = startGameButton.GetComponentInChildren<TMP_Text>();
 
-            // 글자색 변경
+            // 글자색
             Color normalTextColor = new Color(0.2f, 0.2f, 0.2f, 1f); // 평소 글자색 (어두운 색)
             Color disabledTextColor = new Color(0.3f, 0.3f, 0.3f, 1f); // 비활성화 글자색 (회색)
+
+            // 비활성화 버튼색
+            Color customDisabledBgColor = new Color(0.78f, 0.78f, 0.78f, 1f);
+
+            var btnColors = startGameButton.colors;
+            btnColors.disabledColor = customDisabledBgColor;
+            startGameButton.colors = btnColors;
 
             // 방장일 경우
             if (isHost)
@@ -2513,7 +2526,7 @@ namespace SSAFYPlayTime
                     btnText.color = canStart ? normalTextColor : disabledTextColor;
                 }
 
-                // 방장은 interactable 값으로 배경색이 자동 변경되므로 이미지 색상은 기본(하얀색) 유지
+                // 방장은 interactable=false가 되면 위에서 덮어씌운 회색으로 자동 변신
                 if (startGameButton.image != null)
                 {
                     startGameButton.image.color = Color.white;
@@ -2534,7 +2547,7 @@ namespace SSAFYPlayTime
             // 레디를 눌렀다면 버튼 배경 이미지를 강제로 회색(Disabled 색)으로
             if (startGameButton.image != null)
             {
-                startGameButton.image.color = _localIsReady ? new Color(0.78f, 0.78f, 0.78f, 1f) : Color.white;
+                startGameButton.image.color = _localIsReady ? customDisabledBgColor : Color.white;
             }
         }
 
@@ -3584,6 +3597,22 @@ namespace SSAFYPlayTime
             UnityEditor.EditorApplication.isPlaying = false;
 #endif
         }
+
+        public void ShowPage1()
+        {
+            if (page1Object != null) page1Object.SetActive(true);
+            if (page2Object != null) page2Object.SetActive(false);
+        }
+
+        public void ShowPage2()
+        {
+            if (page1Object != null) page1Object.SetActive(false);
+            if (page2Object != null) page2Object.SetActive(true);
+        }
+
+        public void OpenGameDescriptionModal()
+        {
+            if (gameDescriptionModal != null) gameDescriptionModal.SetActive(false);
+        }
     }
 }
-
