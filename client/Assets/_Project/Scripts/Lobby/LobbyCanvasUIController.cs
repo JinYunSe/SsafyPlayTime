@@ -263,11 +263,6 @@ namespace SSAFYPlayTime
         [SerializeField] private string emptyPlayerSlot = "-";
         [SerializeField] private string nicknameHeaderFormat = "닉네임: {0}";
 
-        [Header("Game Description Pages")]
-        [SerializeField] private GameObject page1Object;
-        [SerializeField] private GameObject page2Object;
-
-
         private readonly List<RoomSnapshot> _roomSnapshots = new();
 
         private NetworkRunner _runner;
@@ -2398,13 +2393,19 @@ namespace SSAFYPlayTime
         // 닉네임 입력 패널만 활성화하고 나머지 패널·슬롯을 모두 숨긴다.
         private void ShowNicknamePanel()
         {
-            if (gamePanel != null) gamePanel.SetActive(false);
+            if (gamePanel != null)
+                gamePanel.SetActive(false);
             nicknamePanel.SetActive(true);
-            if (mainPanel != null) mainPanel.SetActive(false);
+            if (mainPanel != null)
+                mainPanel.SetActive(false);
             lobbyPanel.SetActive(false);
             roomPanel.SetActive(false);
             createRoomModal.SetActive(false);
             passwordModal.SetActive(false);
+            if (gameSettingModal != null)
+                gameSettingModal.SetActive(false);
+            if (gameDescriptionModal != null)
+                gameDescriptionModal.SetActive(false);
             HideAllCharacterSlots();
             RefreshCharacterSelectionUiState();
         }
@@ -2417,7 +2418,10 @@ namespace SSAFYPlayTime
             roomPanel.SetActive(false);
             createRoomModal.SetActive(false);
             passwordModal.SetActive(false);
-            if (gameSettingModal != null) gameSettingModal.SetActive(false);
+            if (gameSettingModal != null)
+                gameSettingModal.SetActive(false);
+            if (gameDescriptionModal != null)
+                gameDescriptionModal.SetActive(false);
 
             if (mainPanel != null) mainPanel.SetActive(true);
 
@@ -3596,23 +3600,6 @@ namespace SSAFYPlayTime
 #if UNITY_EDITOR
             UnityEditor.EditorApplication.isPlaying = false;
 #endif
-        }
-
-        public void ShowPage1()
-        {
-            if (page1Object != null) page1Object.SetActive(true);
-            if (page2Object != null) page2Object.SetActive(false);
-        }
-
-        public void ShowPage2()
-        {
-            if (page1Object != null) page1Object.SetActive(false);
-            if (page2Object != null) page2Object.SetActive(true);
-        }
-
-        public void OpenGameDescriptionModal()
-        {
-            if (gameDescriptionModal != null) gameDescriptionModal.SetActive(false);
         }
     }
 }
