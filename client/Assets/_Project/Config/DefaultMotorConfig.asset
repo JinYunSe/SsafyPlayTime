@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8868e1f255c733b45b3df8c45f5b2a19, type: 3}
+  m_Name: DefaultMotorConfig
+  m_EditorClassIdentifier: 
+  maxSpeed: 5.3
+  acceleration: 38
+  airAcceleration: 14
+  brakingAcceleration: 28
+  rotateSpeedDeg: 210
+  sprintSpeedMultiplier: 1.55
+  groundStickForce: 10
+  stopSpeedEpsilon: 0.06
+  grabYawSoftLimitDeg: 60
+  grabYawHardLimitDeg: 75
+  grabTurnSpeedScale: 0.45
+  jumpImpulse: 100
+  extraGravity: 3
+  groundProbeRadius: 0.1
+  groundProbeDistance: 0.5
+  fallEnterSec: 0.75
+  freeFallEnterSec: 1.7

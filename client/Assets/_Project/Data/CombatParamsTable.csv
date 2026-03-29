@@ -1,0 +1,46 @@
+paramId,paramName,value,description
+KNOCKOUT_BASE_THRESHOLD,Stun threshold,45,Base accumulated stun needed to enter stun.
+KNOCKOUT_ACCUMULATE_DECAY,Stun decay per second,3.2,How quickly accumulated stun drains over time.
+KNOCKOUT_GROGGY_MULTIPLIER,Groggy multiplier,1.8,Extra stun taken while groggy.
+KNOCKOUT_AIRBORNE_MULTIPLIER,Airborne multiplier,1.3,Extra stun taken while airborne.
+KNOCKOUT_RECOVERING_MULTIPLIER,Recovering multiplier,1.6,Extra stun taken while in recovery.
+DOWNED_RECOVER_SCALE_START,Downed recover scale start,1.0,Base stun timer consume scale while knocked down.
+DOWNED_RECOVER_SCALE_MIN,Downed recover scale min,0.35,Lower bound for knocked down recover scale after repeated hits.
+DOWNED_RECOVER_SCALE_HIT_PENALTY,Downed recover hit penalty,0.18,How much each valid downed hit slows stun timer consumption.
+DOWNED_HIT_PENALTY_COOLDOWN,Downed hit penalty cooldown,0.22,Minimum interval between repeated downed hit penalties.
+STUN_MIN_DURATION,Min stun duration,1.2,Minimum stun duration in seconds.
+STUN_MAX_DURATION,Max stun duration,4.8,Maximum stun duration in seconds.
+STUN_VELOCITY_BONUS,Velocity bonus,0.08,Extra stun duration from attacker speed.
+STUN_WEIGHT_BONUS,Impulse bonus,0.015,Extra stun duration from impact impulse.
+STUN_REHIT_IMMUNITY,Stun rehit immunity,0.18,Duration that sharply reduces repeated stun accumulation.
+STUN_NO_STAGGER_WINDOW,No stagger window,0.24,Duration that suppresses repeated hit-stagger reactions.
+STUN_REPEAT_DAMAGE_SCALE,Repeat stun scale,0.28,Scale applied to stun damage during the rehit immunity window.
+STUN_SHIELD_CAPACITY,Stun shield capacity,10,Amount of stun absorbed before knockout accumulation starts.
+STUN_SHIELD_RECOVER_PER_SEC,Stun shield recover per sec,5,Automatic stun shield recovery per second while safe.
+STUN_SHIELD_RECOVER_DELAY,Stun shield recover delay,1.25,Delay after a stun hit before shield recovery starts.
+STUN_SHIELD_RECOVERY_REFILL,Stun shield recovery refill,12,Shield restored when leaving the stunned state.
+STUN_AUTO_RECOVER,Auto recover,1,1 keeps automatic recovery enabled.
+GROGGY_DURATION,Groggy duration,2.0,Base groggy duration in seconds.
+GROGGY_TO_STUN_CHANCE,Groggy to stun chance,0.7,Chance to transition from groggy to stun.
+HEADBUTT_SELF_STUN_WALL,Headbutt wall self stun,2.5,Self stun duration when headbutting a wall.
+HEADBUTT_SELF_STUN_FLOOR,Headbutt floor self stun,1.5,Self stun duration when headbutting the floor.
+HIDDEN_HEALTH_MAX,Hidden max health,260,Hidden health pool used for death.
+HIDDEN_HEALTH_HIT_IMMUNITY,Health hit immunity,0.12,Short immunity window between health hits.
+HIDDEN_HEALTH_RECENT_WINDOW,Recent health window,3.5,Window used for recent health damage cap.
+HIDDEN_HEALTH_RECENT_CAP,Recent health cap,85,Maximum health damage allowed inside the recent window.
+HIDDEN_HEALTH_LOW_HP_STUN_BONUS,Low health stun bonus,0.35,Extra stun vulnerability when health is low.
+ENVIRONMENT_COLLISION_MIN_IMPACT,Collision min impact,18,Minimum impact that starts collision damage.
+ENVIRONMENT_COLLISION_MAX_IMPACT,Collision max impact,55,Impact level treated as max collision damage.
+ENVIRONMENT_COLLISION_MIN_STUN,Collision min stun,3,Minimum stun from environment collision.
+ENVIRONMENT_COLLISION_MAX_STUN,Collision max stun,9,Maximum stun from environment collision.
+ENVIRONMENT_COLLISION_MIN_HEALTH,Collision min health,0,Minimum health damage from environment collision.
+ENVIRONMENT_COLLISION_MAX_HEALTH,Collision max health,14,Maximum health damage from environment collision.
+BODY_PART_HEAD_MULTIPLIER,Head multiplier,1.5,Head hits amplify stun.
+BODY_PART_BODY_MULTIPLIER,Body multiplier,1.0,Torso hits use the default stun multiplier.
+BODY_PART_LIMB_MULTIPLIER,Limb multiplier,0.7,Limb hits reduce stun.
+GRAB_THROW_FORCE_OBJECT,Object throw force,12,Impulse applied when throwing an object.
+GRAB_THROW_FORCE_PLAYER_NORMAL,Normal player throw force,10,Throw force for an active ragdoll player.
+GRAB_THROW_FORCE_PLAYER_STUNNED,Stunned player throw force,10,Throw force for a stunned player.
+THROWN_OBJECT_STUN_DAMAGE,Thrown object stun damage,20,Stun damage dealt by a thrown object.
+THROWN_PLAYER_STUN_DAMAGE,Thrown player stun damage,25,Stun damage dealt by a thrown player.
+DROP_WEAPON_KEY,Drop key,70,Keyboard key code used for drop in docs only.

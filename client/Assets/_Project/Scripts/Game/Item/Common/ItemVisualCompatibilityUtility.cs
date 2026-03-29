@@ -1,0 +1,522 @@
+using System;
+using UnityEngine;
+using UnityEngine.Rendering;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
+namespace SSAFYPlayTime.Gameplay.Items
+{
+    internal static class ItemVisualCompatibilityUtility
+    {
+        internal static void ApplyUrpMaterialFallback(GameObject root, bool forceLitOverride = false)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            var renderers = root.GetComponentsInChildren<Renderer>(true);
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                var renderer = renderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                var useInstancedMaterials = ShouldUseInstancedMaterials(renderer);
+                var materials = useInstancedMaterials
+                    ? renderer.materials
+                    : renderer.sharedMaterials;
+                if (materials == null || materials.Length == 0)
+                {
+                    continue;
+                }
+
+                var replaced = false;
+                for (var m = 0; m < materials.Length; m++)
+                {
+                    var source = materials[m];
+                    if (source == null)
+                    {
+                        continue;
+                    }
+
+                    if (!forceLitOverride && !NeedsFallback(source) && !ShouldForceGlowFallback(renderer, source))
+                    {
+                        continue;
+                    }
+
+                    var preferParticleShader = ShouldPreferParticleFallback(renderer, source);
+                    var fallbackShader = ResolveFallbackShader(renderer, source, preferParticleShader, forceLitOverride)
+                        // 최후 방어: 빌드에서 Shader.Find가 null을 반환하는 경우 Unlit으로 대체한다.
+                        ?? Shader.Find("Universal Render Pipeline/Unlit");
+                    if (fallbackShader == null)
+                    {
+                        continue;
+                    }
+
+                    var fallback = new Material(fallbackShader)
+                    {
+                        name = $"{(source != null ? source.name : "MissingMaterial")}_Compat"
+                    };
+
+                    CopySurfaceProperties(source, fallback);
+                    ConfigureTransparencyIfNeeded(source, fallback);
+                    materials[m] = fallback;
+                    replaced = true;
+                }
+
+                if (renderer is ParticleSystemRenderer particleRenderer)
+                {
+                    replaced |= ApplyParticleTrailMaterialFallback(particleRenderer, forceLitOverride);
+                }
+
+                if (replaced)
+                {
+                    if (useInstancedMaterials)
+                    {
+                        renderer.materials = materials;
+                    }
+                    else
+                    {
+                        renderer.sharedMaterials = materials;
+                    }
+                }
+
+                // fallback이 성공적으로 적용된 경우에는 renderer를 끄지 않는다.
+                // replaced=false인 경우(fallback 불필요 또는 실패)만 Distort 계통 체크를 수행한다.
+                if (!replaced && ShouldDisableRenderer(renderer, useInstancedMaterials))
+                {
+                    renderer.enabled = false;
+                }
+            }
+        }
+
+        private static bool NeedsFallback(Material material)
+        {
+            if (material == null || material.shader == null)
+            {
+                return true;
+            }
+
+            var shaderName = material.shader.name ?? string.Empty;
+            if (shaderName.IndexOf("Hidden/InternalErrorShader", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            // URP 프로젝트인 경우 먼저 셰이더 네임스페이스를 확인한다.
+            // Built-in RP 셰이더는 URP에서 isSupported=true를 반환하더라도
+            // 실제로 렌더링이 깨지므로, URP 네임스페이스 외의 셰이더는 교체 대상으로 처리한다.
+            if (GraphicsSettings.currentRenderPipeline != null)
+            {
+                if (shaderName.StartsWith("Universal Render Pipeline/", StringComparison.OrdinalIgnoreCase) ||
+                    shaderName.StartsWith("Hidden/Universal Render Pipeline/", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                // URP 프로젝트 + 비URP 셰이더 → 항상 교체가 필요하다.
+                return true;
+            }
+
+            // Built-in RP 프로젝트인 경우 기존 isSupported 기반 판단을 유지한다.
+            return !material.shader.isSupported;
+        }
+
+        private static bool ShouldForceGlowFallback(Renderer renderer, Material source)
+        {
+            if (renderer == null || source == null || GraphicsSettings.currentRenderPipeline == null)
+            {
+                return false;
+            }
+
+            // isSupported 조기 반환을 제거한다.
+            // Built-in RP 셰이더는 URP에서 isSupported=true여도 렌더링이 올바르지 않아
+            // 렌더러/머티리얼 이름으로만 glow fallback 강제 적용 여부를 판단한다.
+            var rendererName = renderer.gameObject.name ?? string.Empty;
+            var materialName = source.name ?? string.Empty;
+            return rendererName.IndexOf("Glow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   rendererName.IndexOf("Trail", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   materialName.IndexOf("PolySpriteGlow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   materialName.IndexOf("PolySolidGlow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   materialName.IndexOf("PolySprite", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   materialName.IndexOf("PolyProton", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   materialName.IndexOf("PolyTrail", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool ShouldPreferParticleFallback(Renderer renderer, Material source)
+        {
+            if (renderer is ParticleSystemRenderer)
+            {
+                return true;
+            }
+
+            var rendererName = renderer != null ? renderer.gameObject.name ?? string.Empty : string.Empty;
+            var materialName = source != null ? source.name ?? string.Empty : string.Empty;
+            var shaderName = source != null && source.shader != null ? source.shader.name ?? string.Empty : string.Empty;
+            return rendererName.IndexOf("particle", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   rendererName.IndexOf("trail", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   rendererName.IndexOf("glow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   rendererName.IndexOf("outerlayer", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   rendererName.IndexOf("circling", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   materialName.IndexOf("glow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   materialName.IndexOf("outerlayer", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   shaderName.IndexOf("Particles", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool ShouldDisableRenderer(Renderer renderer, bool useInstancedMaterials)
+        {
+            if (renderer == null)
+            {
+                return false;
+            }
+
+            var rendererName = renderer.gameObject.name ?? string.Empty;
+            if (rendererName.IndexOf("Distort", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            var materials = useInstancedMaterials
+                ? renderer.materials
+                : renderer.sharedMaterials;
+            if (materials == null || materials.Length == 0)
+            {
+                return false;
+            }
+
+            var hasValidMaterial = false;
+            for (var i = 0; i < materials.Length; i++)
+            {
+                var material = materials[i];
+                if (material == null)
+                {
+                    continue;
+                }
+
+                hasValidMaterial = true;
+                if (material.shader == null)
+                {
+                    return true;
+                }
+
+                var shader = material.shader;
+                var shaderName = shader.name ?? string.Empty;
+                // isSupported만으로는 비활성화하지 않는다: ApplyUrpMaterialFallback이 이미
+                // URP 셰이더로 교체하므로, 교체 후에도 isSupported=false인 경우는 없다.
+                // 명백히 렌더 불가한 셰이더(Distort/Grab/InternalError)만 꺼야 한다.
+                if (shaderName.IndexOf("Hidden/InternalErrorShader", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    shaderName.IndexOf("Grab", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    shaderName.IndexOf("Distortion", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    material.name.IndexOf("Distort", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return !hasValidMaterial;
+        }
+
+        private static bool ShouldUseInstancedMaterials(Renderer renderer)
+        {
+            if (!Application.isPlaying || renderer == null)
+            {
+                return false;
+            }
+
+#if UNITY_EDITOR
+            if (PrefabUtility.IsPartOfPrefabAsset(renderer.gameObject))
+            {
+                return false;
+            }
+#endif
+            return true;
+        }
+
+        private static bool ApplyParticleTrailMaterialFallback(ParticleSystemRenderer particleRenderer, bool forceLitOverride)
+        {
+            if (particleRenderer == null)
+            {
+                return false;
+            }
+
+            var trailMaterial = particleRenderer.trailMaterial;
+            if (!forceLitOverride &&
+                !NeedsFallback(trailMaterial) &&
+                !ShouldForceGlowFallback(particleRenderer, trailMaterial))
+            {
+                return false;
+            }
+
+            var fallbackShader = ResolveFallbackShader(particleRenderer, trailMaterial, true, forceLitOverride);
+            if (fallbackShader == null)
+            {
+                return false;
+            }
+
+            var fallback = new Material(fallbackShader)
+            {
+                name = $"{(trailMaterial != null ? trailMaterial.name : "MissingTrailMaterial")}_Compat"
+            };
+
+            CopySurfaceProperties(trailMaterial, fallback);
+            ConfigureTransparencyIfNeeded(trailMaterial, fallback);
+            particleRenderer.trailMaterial = fallback;
+            return true;
+        }
+
+        private static Shader ResolveFallbackShader(Renderer renderer, Material source, bool preferParticleShader, bool forceLitOverride)
+        {
+            if (forceLitOverride)
+            {
+                return Shader.Find("Universal Render Pipeline/Lit") ??
+                       Shader.Find("Universal Render Pipeline/Unlit") ??
+                       Shader.Find("Universal Render Pipeline/Simple Lit");
+            }
+
+            if (preferParticleShader)
+            {
+                // 한국어: 빌드에서 파티클 전용 셰이더 variant가 빠지는 경우가 있어 Unlit만 사용한다.
+                return Shader.Find("Universal Render Pipeline/Particles/Unlit") ??
+                       Shader.Find("Universal Render Pipeline/Particles/Lit") ??
+                       Shader.Find("Universal Render Pipeline/Particles/Simple Lit") ??
+                       Shader.Find("Universal Render Pipeline/Unlit") ??
+                       Shader.Find("Universal Render Pipeline/Lit") ??
+                       Shader.Find("Universal Render Pipeline/Simple Lit");
+            }
+
+            return Shader.Find("Universal Render Pipeline/Lit") ??
+                   Shader.Find("Universal Render Pipeline/Unlit") ??
+                   Shader.Find("Universal Render Pipeline/Simple Lit");
+        }
+
+        private static void CopySurfaceProperties(Material source, Material destination)
+        {
+            if (source == null || destination == null)
+            {
+                return;
+            }
+
+            var sourceTexture = source.HasProperty("_BaseMap")
+                ? source.GetTexture("_BaseMap")
+                : source.HasProperty("_MainTex")
+                    ? source.GetTexture("_MainTex")
+                    : null;
+            if (sourceTexture != null)
+            {
+                if (destination.HasProperty("_BaseMap"))
+                {
+                    destination.SetTexture("_BaseMap", sourceTexture);
+                }
+                if (destination.HasProperty("_MainTex"))
+                {
+                    destination.SetTexture("_MainTex", sourceTexture);
+                }
+
+                if (source.HasProperty("_MainTex"))
+                {
+                    var scale = source.GetTextureScale("_MainTex");
+                    var offset = source.GetTextureOffset("_MainTex");
+                    if (destination.HasProperty("_BaseMap"))
+                    {
+                        destination.SetTextureScale("_BaseMap", scale);
+                        destination.SetTextureOffset("_BaseMap", offset);
+                    }
+                    if (destination.HasProperty("_MainTex"))
+                    {
+                        destination.SetTextureScale("_MainTex", scale);
+                        destination.SetTextureOffset("_MainTex", offset);
+                    }
+                }
+            }
+
+            var sourceColor = ResolveSourceColor(source);
+            if (destination.HasProperty("_BaseColor"))
+            {
+                destination.SetColor("_BaseColor", sourceColor);
+            }
+            if (destination.HasProperty("_Color"))
+            {
+                destination.SetColor("_Color", sourceColor);
+            }
+            if (destination.HasProperty("_TintColor"))
+            {
+                destination.SetColor("_TintColor", sourceColor);
+            }
+
+            var emissionTexture = source.HasProperty("_EmissionMap")
+                ? source.GetTexture("_EmissionMap")
+                : null;
+            if (emissionTexture != null)
+            {
+                if (destination.HasProperty("_EmissionMap"))
+                {
+                    destination.SetTexture("_EmissionMap", emissionTexture);
+                }
+                destination.EnableKeyword("_EMISSION");
+            }
+
+            if (source.HasProperty("_EmissionColor"))
+            {
+                var emissionColor = source.GetColor("_EmissionColor");
+                if (destination.HasProperty("_EmissionColor"))
+                {
+                    destination.SetColor("_EmissionColor", emissionColor);
+                }
+
+                if (emissionColor.maxColorComponent > 0.001f)
+                {
+                    destination.EnableKeyword("_EMISSION");
+                }
+            }
+
+            var destinationShaderName = destination.shader != null ? destination.shader.name ?? string.Empty : string.Empty;
+            if (destinationShaderName.IndexOf("/Particles/", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (destination.HasProperty("_BaseColor"))
+                {
+                    destination.SetColor("_BaseColor", sourceColor);
+                }
+                if (destination.HasProperty("_Color"))
+                {
+                    destination.SetColor("_Color", sourceColor);
+                }
+                if (destination.HasProperty("_EmissionColor"))
+                {
+                    destination.SetColor("_EmissionColor", sourceColor * 1.5f);
+                    destination.EnableKeyword("_EMISSION");
+                }
+            }
+        }
+
+        private static Color ResolveSourceColor(Material source)
+        {
+            if (source == null)
+            {
+                return Color.white;
+            }
+
+            var materialName = source.name ?? string.Empty;
+            if (materialName.IndexOf("PolyProton", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                source.HasProperty("_RimColor"))
+            {
+                var protonColor = source.GetColor("_RimColor");
+                protonColor.a = 1f;
+                return protonColor;
+            }
+
+            var shaderName = source.shader != null ? source.shader.name ?? string.Empty : string.Empty;
+            var isParticleLikeShader = shaderName.IndexOf("Particles", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (isParticleLikeShader && source.HasProperty("_TintColor"))
+            {
+                return source.GetColor("_TintColor");
+            }
+
+            if (source.HasProperty("_BaseColor"))
+            {
+                return source.GetColor("_BaseColor");
+            }
+
+            if (source.HasProperty("_Color"))
+            {
+                return source.GetColor("_Color");
+            }
+
+            if (source.HasProperty("_TintColor"))
+            {
+                return source.GetColor("_TintColor");
+            }
+
+            if (source.HasProperty("_RimColor"))
+            {
+                return source.GetColor("_RimColor");
+            }
+
+            if (source.HasProperty("_InnerColor"))
+            {
+                return source.GetColor("_InnerColor");
+            }
+
+            return Color.white;
+        }
+
+        private static void ConfigureTransparencyIfNeeded(Material source, Material destination)
+        {
+            if (source == null || destination == null)
+            {
+                return;
+            }
+
+            var useAdditiveBlend = IsAdditiveLike(source);
+            var alpha = ResolveSourceColor(source).a;
+            if (alpha >= 0.999f && !useAdditiveBlend)
+            {
+                return;
+            }
+
+            if (destination.HasProperty("_Surface"))
+            {
+                destination.SetFloat("_Surface", 1f);
+            }
+            if (destination.HasProperty("_Blend"))
+            {
+                destination.SetFloat("_Blend", 0f);
+            }
+            if (destination.HasProperty("_SrcBlend"))
+            {
+                destination.SetFloat("_SrcBlend", (float)(useAdditiveBlend ? BlendMode.SrcAlpha : BlendMode.SrcAlpha));
+            }
+            if (destination.HasProperty("_DstBlend"))
+            {
+                destination.SetFloat("_DstBlend", (float)(useAdditiveBlend ? BlendMode.One : BlendMode.OneMinusSrcAlpha));
+            }
+            if (destination.HasProperty("_ZWrite"))
+            {
+                destination.SetFloat("_ZWrite", 0f);
+            }
+            if (destination.HasProperty("_Mode"))
+            {
+                destination.SetFloat("_Mode", useAdditiveBlend ? 4f : 3f);
+            }
+
+            destination.SetOverrideTag("RenderType", "Transparent");
+            destination.renderQueue = (int)RenderQueue.Transparent;
+            destination.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            destination.EnableKeyword("_ALPHABLEND_ON");
+            destination.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        }
+
+        private static bool IsAdditiveLike(Material source)
+        {
+            if (source == null)
+            {
+                return false;
+            }
+
+            var materialName = source.name ?? string.Empty;
+            var shaderName = source.shader != null ? source.shader.name ?? string.Empty : string.Empty;
+            if (materialName.IndexOf("_ADD", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                materialName.IndexOf("Glow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                shaderName.IndexOf("Additive", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            if (source.HasProperty("_DstBlend") && Mathf.Approximately(source.GetFloat("_DstBlend"), (float)BlendMode.One))
+            {
+                return true;
+            }
+
+            if (source.HasProperty("_Mode") && Mathf.Approximately(source.GetFloat("_Mode"), 4f))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+    }
+}
