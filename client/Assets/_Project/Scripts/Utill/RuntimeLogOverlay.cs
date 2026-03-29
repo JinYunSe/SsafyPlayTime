@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -20,15 +20,28 @@ namespace SSAFYPlayTime
 
         private GameObject _panel;
         private TMP_Text _text;
+        private ScrollRect _scrollRect;
+        private RectTransform _textRect;
+        private bool _uiDirty;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
+            if (!RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            {
+                return;
+            }
+
             EnsureInstance();
         }
 
         public static void EnsureInstance()
         {
+            if (!RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            {
+                return;
+            }
+
             if (_instance != null || FindObjectOfType<RuntimeLogOverlay>() != null)
             {
                 return;
@@ -41,6 +54,12 @@ namespace SSAFYPlayTime
 
         private void Awake()
         {
+            if (!RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
             if (_instance != null && _instance != this)
             {
                 Destroy(gameObject);
@@ -57,6 +76,11 @@ namespace SSAFYPlayTime
 
         private void OnEnable()
         {
+            if (!RuntimeLoggingSettings.AreRuntimeLogsEnabled)
+            {
+                return;
+            }
+
             Application.logMessageReceived += OnUnityLogReceived;
             AppendLine("Runtime log overlay initialized. Press F6 to show/hide.");
         }
@@ -68,10 +92,14 @@ namespace SSAFYPlayTime
 
         private void Update()
         {
+            EnsureEventSystem();
+
             if (Input.GetKeyDown(KeyCode.F6))
             {
                 TogglePanel();
             }
+
+            FlushPendingUi();
         }
 
         private void OnGUI()
@@ -124,13 +152,37 @@ namespace SSAFYPlayTime
             var panelImage = _panel.GetComponent<Image>();
             panelImage.color = new Color(0f, 0f, 0f, 0.7f);
 
+            var scrollViewObject = new GameObject("ScrollView", typeof(RectTransform), typeof(Image), typeof(Mask), typeof(ScrollRect));
+            scrollViewObject.transform.SetParent(_panel.transform, false);
+            var scrollViewRect = scrollViewObject.GetComponent<RectTransform>();
+            scrollViewRect.anchorMin = Vector2.zero;
+            scrollViewRect.anchorMax = Vector2.one;
+            scrollViewRect.offsetMin = new Vector2(10f, 10f);
+            scrollViewRect.offsetMax = new Vector2(-10f, -46f);
+
+            var scrollViewImage = scrollViewObject.GetComponent<Image>();
+            scrollViewImage.color = new Color(0f, 0f, 0f, 0.15f);
+            var scrollViewMask = scrollViewObject.GetComponent<Mask>();
+            scrollViewMask.showMaskGraphic = false;
+
+            var contentObject = new GameObject("Content", typeof(RectTransform));
+            contentObject.transform.SetParent(scrollViewObject.transform, false);
+            var contentRect = contentObject.GetComponent<RectTransform>();
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = new Vector2(1f, 1f);
+            contentRect.pivot = new Vector2(0.5f, 1f);
+            contentRect.anchoredPosition = Vector2.zero;
+            contentRect.sizeDelta = Vector2.zero;
+
             var textObject = new GameObject("Text", typeof(RectTransform), typeof(TextMeshProUGUI));
-            textObject.transform.SetParent(_panel.transform, false);
+            textObject.transform.SetParent(contentObject.transform, false);
             var textRect = textObject.GetComponent<RectTransform>();
-            textRect.anchorMin = Vector2.zero;
-            textRect.anchorMax = Vector2.one;
-            textRect.offsetMin = new Vector2(10f, 10f);
-            textRect.offsetMax = new Vector2(-52f, -10f);
+            textRect.anchorMin = new Vector2(0f, 1f);
+            textRect.anchorMax = new Vector2(1f, 1f);
+            textRect.pivot = new Vector2(0.5f, 1f);
+            textRect.anchoredPosition = Vector2.zero;
+            textRect.sizeDelta = new Vector2(0f, 0f);
+            _textRect = textRect;
 
             var text = textObject.GetComponent<TextMeshProUGUI>();
             var fallbackFont = TmpFontFallbackBootstrap.ActiveFallbackFont;
@@ -140,14 +192,24 @@ namespace SSAFYPlayTime
             }
             text.fontSize = 18f;
             text.enableWordWrapping = false;
-            text.alignment = TextAlignmentOptions.BottomLeft;
+            text.alignment = TextAlignmentOptions.TopLeft;
             text.color = new Color(0.9f, 0.95f, 1f, 1f);
             text.text = string.Empty;
             _text = text;
 
+            _scrollRect = scrollViewObject.GetComponent<ScrollRect>();
+            _scrollRect.content = contentRect;
+            _scrollRect.viewport = scrollViewRect;
+            _scrollRect.horizontal = false;
+            _scrollRect.vertical = true;
+            _scrollRect.movementType = ScrollRect.MovementType.Clamped;
+            _scrollRect.scrollSensitivity = 28f;
+
             CreateTopRightButton("CloseButton", "X", new Vector2(-8f, -8f), 32f, ClosePanel);
             CreateTopRightButton("CopyButton", "Copy", new Vector2(-48f, -8f), 72f, CopyLogsToClipboard);
             CreateTopRightButton("ClearButton", "Clear", new Vector2(-126f, -8f), 72f, ClearLogs);
+
+            _panel.SetActive(RuntimeLoggingSettings.ShowRuntimeLogOverlayOnStart);
         }
 
         private void CreateTopRightButton(string objectName, string labelText, Vector2 anchoredPosition, float width, UnityEngine.Events.UnityAction onClick)
@@ -181,14 +243,17 @@ namespace SSAFYPlayTime
             label.fontSize = 16f;
             label.alignment = TextAlignmentOptions.Center;
             label.color = Color.white;
+            label.raycastTarget = false;
         }
 
         private void InitializeLogFile()
         {
             try
             {
-                _logFilePath = Path.Combine(Application.persistentDataPath, "runtime-log.txt");
-                File.WriteAllText(_logFilePath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Runtime log started.{Environment.NewLine}");
+                _logFilePath = RuntimeLoggingSettings.ResolveRuntimeLogPath();
+                File.WriteAllText(
+                    _logFilePath,
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Runtime log started. pid={System.Diagnostics.Process.GetCurrentProcess().Id}{Environment.NewLine}");
                 AppendLine($"Log file: {_logFilePath}");
             }
             catch (Exception e)
@@ -259,8 +324,35 @@ namespace SSAFYPlayTime
 
             if (_text != null)
             {
-                _text.text = string.Join("\n", _lines);
+                _uiDirty = true;
             }
+        }
+
+        private void FlushPendingUi()
+        {
+            if (!_uiDirty || _text == null)
+            {
+                return;
+            }
+
+            _text.text = string.Join("\n", _lines);
+            if (_textRect != null && _scrollRect != null)
+            {
+                var viewportWidth = _scrollRect.viewport != null ? _scrollRect.viewport.rect.width : _textRect.rect.width;
+                var preferredHeight = _text.GetPreferredValues(_text.text, viewportWidth, 0f).y;
+                _textRect.sizeDelta = new Vector2(0f, preferredHeight);
+
+                var contentRect = _scrollRect.content;
+                if (contentRect != null)
+                {
+                    contentRect.sizeDelta = new Vector2(contentRect.sizeDelta.x, preferredHeight);
+                }
+
+                Canvas.ForceUpdateCanvases();
+                _scrollRect.verticalNormalizedPosition = 0f;
+            }
+
+            _uiDirty = false;
         }
 
         private void TogglePanel()

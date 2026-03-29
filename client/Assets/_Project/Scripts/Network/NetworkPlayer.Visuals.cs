@@ -1,0 +1,947 @@
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+public sealed partial class NetworkPlayer
+{
+    private struct PhysicsPoseBinding
+    {
+        public Transform physics;
+        public Transform visual;
+        public Quaternion physicsRestLocalRotation;
+        public Quaternion visualRestLocalRotation;
+        public float carryBlendMultiplier;
+        /// <summary>앵커 그랩에 의한 per-bone 물리 복사 가중치 (0=영향없음, 1=완전 물리)</summary>
+        public float anchorGrabBlendWeight;
+    }
+
+    private bool ShouldDisablePhysicsAnimationSync =>
+        useAnimatedVisualOnly && disablePhysicsAnimationSync && _animatedVisualRoot != null;
+    private bool _hasAlternateVisualSwapTargets;
+    private readonly List<PhysicsPoseBinding> _physicsPoseBindings = new();
+    private bool _physicsPoseBindingsDirty = true;
+    private bool _wasUsingPhysicsPresentation;
+    private bool _isAuthorityAnimatedPlainStunVisualMeshActive;
+    private int _lastPhysicsPresentationSyncFrame = -1;
+    private bool _pendingAnimatorDrivenPoseReset;
+    private bool _recoveryRestoreBlockedLogged;
+    private readonly List<Rigidbody> _proxyLocalSoftFlopBodies = new();
+    private bool[] _proxyLocalSoftFlopBodyKinematicStates;
+    private bool _proxyLocalSoftFlopActive;
+    private float _proxyLocalSoftFlopSavedMappingWeight = 1f;
+    private float _proxyLocalSoftFlopSavedMainJointSpring = -1f;
+    internal bool IsProxyLocalSoftFlopActive => _proxyLocalSoftFlopActive;
+    private const float HitReactionBoneCopyThreshold = 0.58f;
+    private const float HitReactionBoneCopyFullThreshold = 0.88f;
+
+    /// <summary>
+    /// 호스트 전용 로컬 래치: 회복 진입 시 켜지고, Stable로 돌아오면 꺼진다.
+    /// 래치 활성 동안 PuppetMaster.mappingWeight를 0으로 내려 Map()이 target skeleton을
+    /// 덮어쓰지 않게 하고, 물리 뼈→비주얼 복사도 건너뛴다.
+    /// </summary>
+    private bool _forceAnimatorVisualLatch;
+    private float _savedMappingWeight = 1f;
+    private float _hardPhysicsVisualPoseCopyWeight;
+    private float _carryVisualPoseCopyWeight;
+    private const float HardPhysicsPoseBlendInSpeed = 22f;
+    private const float HardPhysicsPoseBlendOutSpeed = 12f;
+    private const float CarryVisualPoseBlendInSpeed = 14f;
+    private const float CarryVisualPoseBlendOutSpeed = 10f;
+    private const float CarryVisualPoseTargetWeight = 0.60f;
+    private const float AnimatorRestoreBlendThreshold = 0.06f;
+
+    private void ConfigureAnimatedVisualMode()
+    {
+        if (!useAnimatedVisualOnly)
+            return;
+
+        _animatedVisualRoot = FindAnimatedVisualRoot();
+        if (_animatedVisualRoot == null)
+            return;
+
+        MarkPhysicsPoseBindingsDirty();
+
+        _hasAlternateVisualSwapTargets = HasAlternateVisibleRenderers(_animatedVisualRoot);
+
+        var preferredAnimator = _animatedVisualRoot.GetComponent<Animator>()
+            ?? _animatedVisualRoot.GetComponentInChildren<Animator>(true);
+        if (preferredAnimator != null)
+            animator = preferredAnimator;
+
+        SetVisibleRendererState(_animatedVisualRoot);
+        DisableNonVisualAnimators();
+        SetSyncAnimationEnabledForAll(!disablePhysicsAnimationSync);
+    }
+
+    private Transform FindAnimatedVisualRoot()
+    {
+        if (_puppetMaster != null && _puppetMaster.targetRoot != null)
+            return _puppetMaster.targetRoot;
+
+        if (animator != null && animator.transform != transform)
+            return animator.transform;
+
+        var animationDriver = transform.Find("_AnimationDriver");
+        if (animationDriver != null)
+            return animationDriver;
+
+        var model = transform.Find("Model");
+        if (model != null)
+        {
+            for (var i = 0; i < model.childCount; i++)
+            {
+                var child = model.GetChild(i);
+                if (IsAnimatedVisualRoot(child))
+                    return child;
+            }
+        }
+
+        var animators = GetComponentsInChildren<Animator>(true);
+        for (var i = 0; i < animators.Length; i++)
+        {
+            var candidate = animators[i];
+            if (candidate != null && IsAnimatedVisualRoot(candidate.transform))
+                return candidate.transform;
+        }
+
+        if (animators.Length == 1 && animators[0] != null && animators[0].transform != transform)
+            return animators[0].transform;
+
+        return null;
+    }
+
+    private static bool IsAnimatedVisualRoot(Transform candidate)
+    {
+        if (candidate == null)
+            return false;
+
+        return candidate.name == "_AnimationDriver" || candidate.name.Contains("Animated");
+    }
+
+    private bool HasAlternateVisibleRenderers(Transform visibleRoot)
+    {
+        var renderers = GetComponentsInChildren<Renderer>(true);
+        for (var i = 0; i < renderers.Length; i++)
+        {
+            var candidate = renderers[i];
+            if (candidate != null && !IsUnderVisualRoot(candidate.transform, visibleRoot))
+                return true;
+        }
+
+        return false;
+    }
+
+    private void SetVisibleRendererState(Transform visibleRoot)
+    {
+        var skinnedMeshRenderers = GetComponentsInChildren<SkinnedMeshRenderer>(true);
+        for (var i = 0; i < skinnedMeshRenderers.Length; i++)
+            skinnedMeshRenderers[i].enabled = IsUnderVisualRoot(skinnedMeshRenderers[i].transform, visibleRoot);
+
+        var meshRenderers = GetComponentsInChildren<MeshRenderer>(true);
+        for (var i = 0; i < meshRenderers.Length; i++)
+            meshRenderers[i].enabled = IsUnderVisualRoot(meshRenderers[i].transform, visibleRoot);
+    }
+
+    private static bool IsUnderVisualRoot(Transform target, Transform visibleRoot)
+    {
+        return target == visibleRoot || target.IsChildOf(visibleRoot);
+    }
+
+    private void DisableNonVisualAnimators()
+    {
+        if (animator == null)
+            return;
+
+        var animators = GetComponentsInChildren<Animator>(true);
+        for (var i = 0; i < animators.Length; i++)
+        {
+            var candidate = animators[i];
+            if (candidate == null || candidate == animator)
+                continue;
+
+            candidate.enabled = false;
+        }
+    }
+
+    private void SetSyncAnimationEnabledForAll(bool enabled)
+    {
+        if (syncPhysicsObjects == null)
+            return;
+
+        for (var i = 0; i < syncPhysicsObjects.Length; i++)
+        {
+            if (syncPhysicsObjects[i] != null)
+                syncPhysicsObjects[i].SetSyncAnimationEnabled(enabled);
+        }
+    }
+
+    internal bool UsesAnimatedVisualPresentationRig()
+    {
+        return ShouldDisablePhysicsAnimationSync;
+    }
+
+    internal bool ShouldUseHardPhysicsVisualMode()
+    {
+        if (!ShouldUseHardPhysicsPresentation())
+            return false;
+
+        if (ShouldUseProxyLocalSoftFlopPresentation())
+            return false;
+
+        // Carry keeps the animated visual rig visible and blends only key bones toward physics.
+        if (GetPhysicalPhase() == PhysicalPhase.BeingCarriedStunned)
+            return false;
+
+        // 비호스트 RecoverStabilizing: SetStunVisualMode(false)가 이미 애니메이션 메시를
+        // 복원했으므로 하드 물리 본 복사를 끄지 않으면 래그돌 포즈가 일어서기 애니메이션을 덮어쓴다.
+        // 호스트는 stabilization 완료까지 물리 비주얼을 유지해야 하므로 호스트만 true.
+        if (!HasStateAuthority &&
+            GetStunPresentationPhase() == StunPresentationPhase.RecoverStabilizing &&
+            !ShouldUseProxyPlainStunPoseAuthority())
+            return false;
+
+        return true;
+    }
+
+    private void TickVisualPoseBlendWeights()
+    {
+        var hardTarget = ShouldUseHardPhysicsVisualMode() ? 1f : 0f;
+        var hardBlendSpeed = hardTarget >= _hardPhysicsVisualPoseCopyWeight
+            ? HardPhysicsPoseBlendInSpeed
+            : HardPhysicsPoseBlendOutSpeed;
+        _hardPhysicsVisualPoseCopyWeight = DampVisualPoseWeight(
+            _hardPhysicsVisualPoseCopyWeight,
+            hardTarget,
+            hardBlendSpeed);
+
+        var carryTarget = GetPhysicalPhase() == PhysicalPhase.BeingCarriedStunned
+            ? CarryVisualPoseTargetWeight
+            : 0f;
+        var carryBlendSpeed = carryTarget >= _carryVisualPoseCopyWeight
+            ? CarryVisualPoseBlendInSpeed
+            : CarryVisualPoseBlendOutSpeed;
+        _carryVisualPoseCopyWeight = DampVisualPoseWeight(
+            _carryVisualPoseCopyWeight,
+            carryTarget,
+            carryBlendSpeed);
+    }
+
+    private static float DampVisualPoseWeight(float current, float target, float speed)
+    {
+        if (Mathf.Approximately(current, target))
+            return target;
+
+        if (speed <= 0f)
+            return target;
+
+        var alpha = 1f - Mathf.Exp(-speed * Time.deltaTime);
+        return Mathf.Lerp(current, target, alpha);
+    }
+
+    // ─── 기절/회복 비주얼 모드 전환 ───
+    private void TickProxyLocalSoftFlopPresentation()
+    {
+        if (HasStateAuthority || !UsesAnimatedVisualPresentationRig())
+        {
+            SetProxyLocalSoftFlopActive(false);
+            return;
+        }
+
+        var shouldActivate = ShouldUseProxyLocalSoftFlopPresentation();
+        if (shouldActivate && !_proxyLocalSoftFlopActive && _externalAnimationDriver != null)
+            _externalAnimationDriver.InterruptAerialKickAnimationForPresentationHandoff("proxy-soft-flop");
+
+        SetProxyLocalSoftFlopActive(shouldActivate);
+
+        if (shouldActivate)
+            ApplyProxyLocalSoftFlopSpringState();
+    }
+
+    private void EnsureProxyLocalSoftFlopBodies()
+    {
+        if (_proxyLocalSoftFlopBodyKinematicStates != null)
+            return;
+
+        _proxyLocalSoftFlopBodies.Clear();
+        if (_puppetMaster?.muscles == null)
+        {
+            _proxyLocalSoftFlopBodyKinematicStates = Array.Empty<bool>();
+            return;
+        }
+
+        var uniqueBodies = new HashSet<Rigidbody>();
+        for (var i = 0; i < _puppetMaster.muscles.Length; i++)
+        {
+            var joint = _puppetMaster.muscles[i].joint;
+            var body = joint != null ? joint.GetComponent<Rigidbody>() : null;
+            if (body != null && uniqueBodies.Add(body))
+                _proxyLocalSoftFlopBodies.Add(body);
+        }
+
+        _proxyLocalSoftFlopBodyKinematicStates = new bool[_proxyLocalSoftFlopBodies.Count];
+    }
+
+    private void SetProxyLocalSoftFlopActive(bool active)
+    {
+        if (_proxyLocalSoftFlopActive == active)
+            return;
+
+        if (_puppetMaster == null)
+            return;
+
+        EnsureProxyLocalSoftFlopBodies();
+
+        if (active)
+        {
+            if (_puppetMaster.mappingWeight > 0.001f)
+                _proxyLocalSoftFlopSavedMappingWeight = _puppetMaster.mappingWeight;
+            else if (_proxyLocalSoftFlopSavedMappingWeight <= 0.001f)
+                _proxyLocalSoftFlopSavedMappingWeight = 1f;
+
+            _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Active;
+            _puppetMaster.mappingWeight = _proxyLocalSoftFlopSavedMappingWeight;
+
+            if (mainJoint != null)
+            {
+                if (_proxyLocalSoftFlopSavedMainJointSpring < 0f)
+                    _proxyLocalSoftFlopSavedMainJointSpring = mainJoint.slerpDrive.positionSpring;
+
+                var drive = mainJoint.slerpDrive;
+                var relaxedSpring = _startSlerpPositionSpring > 0f
+                    ? Mathf.Max(1f, _startSlerpPositionSpring * 0.08f)
+                    : 1f;
+                drive.positionSpring = relaxedSpring;
+                mainJoint.slerpDrive = drive;
+            }
+
+            for (var i = 0; i < _proxyLocalSoftFlopBodies.Count; i++)
+            {
+                var body = _proxyLocalSoftFlopBodies[i];
+                if (body == null)
+                    continue;
+
+                _proxyLocalSoftFlopBodyKinematicStates[i] = body.isKinematic;
+                body.isKinematic = false;
+                body.velocity = Vector3.down * 0.35f;
+                body.angularVelocity = Vector3.zero;
+                body.WakeUp();
+            }
+        }
+        else
+        {
+            for (var i = 0; i < _proxyLocalSoftFlopBodies.Count; i++)
+            {
+                var body = _proxyLocalSoftFlopBodies[i];
+                if (body == null)
+                    continue;
+
+                var restoreKinematic = _proxyLocalSoftFlopBodyKinematicStates != null &&
+                                       i < _proxyLocalSoftFlopBodyKinematicStates.Length
+                    ? _proxyLocalSoftFlopBodyKinematicStates[i]
+                    : true;
+
+                if (restoreKinematic)
+                {
+                    if (!body.isKinematic)
+                    {
+                        body.velocity = Vector3.zero;
+                        body.angularVelocity = Vector3.zero;
+                    }
+
+                    body.isKinematic = true;
+                }
+                else
+                {
+                    if (body.isKinematic)
+                        body.isKinematic = false;
+
+                    body.velocity = Vector3.zero;
+                    body.angularVelocity = Vector3.zero;
+                }
+            }
+
+            _puppetMaster.mappingWeight = 0f;
+
+            if (mainJoint != null && _proxyLocalSoftFlopSavedMainJointSpring >= 0f)
+            {
+                var drive = mainJoint.slerpDrive;
+                drive.positionSpring = _proxyLocalSoftFlopSavedMainJointSpring;
+                mainJoint.slerpDrive = drive;
+            }
+
+            RestoreProxyLocalSoftFlopSpringState();
+        }
+
+        _proxyLocalSoftFlopActive = active;
+        MarkPhysicsPoseBindingsDirty();
+        MarkPresentationEffectsDirty();
+    }
+
+    private void ApplyProxyLocalSoftFlopSpringState()
+    {
+        if (syncPhysicsObjects == null)
+            return;
+
+        for (var i = 0; i < syncPhysicsObjects.Length; i++)
+        {
+            var sync = syncPhysicsObjects[i];
+            if (sync == null)
+                continue;
+
+            sync.MakeRagdoll();
+        }
+    }
+
+    private void RestoreProxyLocalSoftFlopSpringState()
+    {
+        if (syncPhysicsObjects == null)
+            return;
+
+        for (var i = 0; i < syncPhysicsObjects.Length; i++)
+        {
+            var sync = syncPhysicsObjects[i];
+            if (sync == null)
+                continue;
+
+            if (_isActiveRagdoll)
+                sync.MakeActiveRagdoll();
+            else
+                sync.MakeRagdoll();
+        }
+    }
+
+    private void MarkPhysicsPoseBindingsDirty()
+    {
+        _physicsPoseBindingsDirty = true;
+    }
+
+    private void UpdatePhysicsDrivenVisualPose()
+    {
+        TickProxyLocalSoftFlopPresentation();
+        SynchronizePhysicsPresentationState();
+        TickAuthorityAnimatorVisualLatch();
+        TickVisualPoseBlendWeights();
+
+        if (_pendingAnimatorDrivenPoseReset)
+            TryRestoreAnimatorDrivenPresentation();
+
+        var hardPhysicsCopyWeight = _hardPhysicsVisualPoseCopyWeight;
+        var hitReactionCopyWeight = ResolveHitReactionBoneCopyWeight();
+        var carryCopyWeight = _carryVisualPoseCopyWeight;
+        if (Mathf.Max(hardPhysicsCopyWeight, hitReactionCopyWeight, carryCopyWeight) <= 0.001f)
+            return;
+
+        // 호스트 래치 활성: 물리 뼈→비주얼 복사를 건너뛰어 animator pose를 유지
+        var presentationRoot = GetPresentationRootTransform();
+        if (presentationRoot == null || syncPhysicsObjects == null || syncPhysicsObjects.Length == 0)
+            return;
+
+        EnsurePhysicsPoseBindings(presentationRoot);
+        for (var i = 0; i < _physicsPoseBindings.Count; i++)
+        {
+            var binding = _physicsPoseBindings[i];
+            if (binding.physics == null || binding.visual == null)
+                continue;
+
+            var physicsRotation = ResolveVisualLocalRotation(binding);
+            var bindingWeight = Mathf.Max(hardPhysicsCopyWeight, hitReactionCopyWeight);
+            if (carryCopyWeight > 0f && binding.carryBlendMultiplier > 0f)
+                bindingWeight = Mathf.Max(bindingWeight, carryCopyWeight * binding.carryBlendMultiplier);
+            // 앵커 그랩: 잡힌 본은 물리 복사 가중치 적용
+            if (binding.anchorGrabBlendWeight > 0f)
+                bindingWeight = Mathf.Max(bindingWeight, binding.anchorGrabBlendWeight);
+            if (bindingWeight <= 0.001f)
+                continue;
+
+            binding.visual.localRotation = bindingWeight >= 0.999f
+                ? physicsRotation
+                : Quaternion.Slerp(binding.visual.localRotation, physicsRotation, bindingWeight);
+        }
+    }
+
+    private float ResolveHitReactionBoneCopyWeight()
+    {
+        if (GetPhysicalPhase() != PhysicalPhase.Unstable)
+            return 0f;
+
+        var instability = GetPhysicalInstability();
+        var instabilityWeight = Mathf.InverseLerp(
+            HitReactionBoneCopyThreshold,
+            HitReactionBoneCopyFullThreshold,
+            instability);
+        var hitWeight = 0f;
+        if (IsInHitRecoil)
+            hitWeight = 0.72f;
+        else if (_hitInstabilityBoost > 0.01f)
+            hitWeight = Mathf.Lerp(0.45f, 0.85f, Mathf.Clamp01(_hitInstabilityBoost / HitInstabilityBoostMax));
+
+        return Mathf.Clamp01(Mathf.Max(instabilityWeight, hitWeight));
+    }
+
+    /// <summary>
+    /// ForceRecover()에서 직접 호출: 호스트의 PuppetMaster.mappingWeight를 즉시 0으로 내리고 래치 활성화.
+    /// LateUpdate의 전환 감지를 기다리지 않으므로 FixedUpdate→LateUpdate 사이에
+    /// PuppetMaster.Map()이 물리 포즈를 target skeleton에 덮어쓰는 것을 방지.
+    /// </summary>
+    private void ActivateAuthorityAnimatorVisualLatch()
+    {
+        if (_puppetMaster == null || !HasStateAuthority || _forceAnimatorVisualLatch)
+            return;
+
+        _savedMappingWeight = _puppetMaster.mappingWeight;
+        _puppetMaster.mappingWeight = 0f;
+        _forceAnimatorVisualLatch = true;
+        _pendingAnimatorDrivenPoseReset = true;
+    }
+
+    /// <summary>
+    /// TriggerStun()에서 호출: 래치가 활성 상태면 해제하고 mappingWeight 복원.
+    /// 기절 시 Map()이 래그돌 포즈를 target skeleton에 써야 하므로 mappingWeight가 정상이어야 한다.
+    /// </summary>
+    private void DeactivateAuthorityAnimatorVisualLatch()
+    {
+        if (!_forceAnimatorVisualLatch || _puppetMaster == null)
+            return;
+
+        _puppetMaster.mappingWeight = _savedMappingWeight;
+        _forceAnimatorVisualLatch = false;
+    }
+
+    /// <summary>
+    /// 호스트 래치를 매 프레임 틱: phase가 Recovering/Unstable을 벗어나면 해제하고 mappingWeight 복원.
+    /// </summary>
+    private void TickAuthorityAnimatorVisualLatch()
+    {
+        if (!_forceAnimatorVisualLatch)
+            return;
+
+        var phase = GetPhysicalPhase();
+        if (phase != PhysicalPhase.Recovering && phase != PhysicalPhase.Unstable)
+        {
+            _forceAnimatorVisualLatch = false;
+            if (_puppetMaster != null)
+                _puppetMaster.mappingWeight = _savedMappingWeight;
+        }
+    }
+
+    private void SynchronizePhysicsPresentationState()
+    {
+        if (_lastPhysicsPresentationSyncFrame == Time.frameCount)
+            return;
+
+        _lastPhysicsPresentationSyncFrame = Time.frameCount;
+
+        var usingPhysicsPresentation = ShouldUseHardPhysicsVisualMode();
+        var keepAuthorityAnimatedVisualMesh = usingPhysicsPresentation &&
+                                             ShouldKeepAuthorityAnimatedVisualMeshForPlainStun();
+        if (usingPhysicsPresentation == _wasUsingPhysicsPresentation &&
+            keepAuthorityAnimatedVisualMesh == _isAuthorityAnimatedPlainStunVisualMeshActive)
+            return;
+
+        var previousPhysicsPresentation = _wasUsingPhysicsPresentation;
+        var previousAuthorityAnimatedVisualMesh = _isAuthorityAnimatedPlainStunVisualMeshActive;
+        _wasUsingPhysicsPresentation = usingPhysicsPresentation;
+
+        if (usingPhysicsPresentation && IsStunDiagnosticsRelevantPhase(GetPhysicalPhase()))
+        {
+            ArmStunDiagnosticsWindow(
+                "Visuals.PhysicsPresentation",
+                $"usingPhysicsPresentation={previousPhysicsPresentation}->{usingPhysicsPresentation} authorityAnimatedMesh={previousAuthorityAnimatedVisualMesh}->{keepAuthorityAnimatedVisualMesh}");
+        }
+
+        if (usingPhysicsPresentation && !previousPhysicsPresentation && _externalAnimationDriver != null)
+        {
+            _externalAnimationDriver.InterruptAerialKickAnimationForPresentationHandoff(
+                $"physics-presentation phase={GetPhysicalPhase()}");
+        }
+
+        SyncPuppetMasterMode(usingPhysicsPresentation);
+
+        SetPhysicsPresentationVisualMode(usingPhysicsPresentation);
+        MarkPhysicsPoseBindingsDirty();
+        MarkPresentationEffectsDirty();
+
+        TraceStunDiagnosticSnapshot(
+            "Visuals.PhysicsPresentationChanged",
+            $"usingPhysicsPresentation={previousPhysicsPresentation}->{usingPhysicsPresentation} authorityAnimatedMesh={previousAuthorityAnimatedVisualMesh}->{keepAuthorityAnimatedVisualMesh}",
+            force: true);
+
+        if (!usingPhysicsPresentation)
+        {
+            _pendingAnimatorDrivenPoseReset = true;
+            _recoveryRestoreBlockedLogged = false;
+        }
+    }
+
+    /// <summary>
+    /// PuppetMaster mode를 physics presentation 상태에 맞춰 전환한다.
+    /// - 비호스트(proxy): mode를 Active/Disabled로 직접 전환.
+    /// - 호스트(authority): mode는 건드리지 않되, 회복 시 로컬 비주얼 래치를 켜서
+    ///   Map()이 visual pose를 덮어쓰지 않게 한다.
+    /// </summary>
+    private void SyncPuppetMasterMode(bool usingPhysicsPresentation)
+    {
+        if (_puppetMaster == null)
+            return;
+
+        if (!HasStateAuthority)
+        {
+            // 비호스트: physics presentation 전환 시 PuppetMaster mode 토글.
+            // Active → Map()이 muscle→target 매핑 실행 (기절/잡힘 물리 포즈 필요)
+            // Disabled → Map() 스킵, Animator가 target skeleton 단독 구동
+            if (UsesAnimatedVisualPresentationRig())
+            {
+                _puppetMaster.mode = RootMotion.Dynamics.PuppetMaster.Mode.Active;
+
+                if (_proxyLocalSoftFlopActive)
+                {
+                    if (_puppetMaster.mappingWeight <= 0.001f)
+                        _puppetMaster.mappingWeight = _proxyLocalSoftFlopSavedMappingWeight > 0.001f
+                            ? _proxyLocalSoftFlopSavedMappingWeight
+                            : 1f;
+                }
+                else if (_puppetMaster.mappingWeight > 0.001f)
+                {
+                    _puppetMaster.mappingWeight = 0f;
+                }
+
+                return;
+            }
+
+            _puppetMaster.mode = usingPhysicsPresentation
+                ? RootMotion.Dynamics.PuppetMaster.Mode.Active
+                : RootMotion.Dynamics.PuppetMaster.Mode.Disabled;
+        }
+        else
+        {
+            // 호스트: PuppetMaster mode는 유지 (물리 시뮬레이션 책임).
+            // 회복 진입 시 mappingWeight를 0으로 내려 Map()이 target skeleton을 덮어쓰지 않게 한다.
+            if (!usingPhysicsPresentation && !_forceAnimatorVisualLatch)
+            {
+                _savedMappingWeight = _puppetMaster.mappingWeight;
+                _puppetMaster.mappingWeight = 0f;
+                _forceAnimatorVisualLatch = true;
+            }
+            else if (usingPhysicsPresentation && _forceAnimatorVisualLatch)
+            {
+                // 기절 재진입: 래치 해제하고 mappingWeight 복원
+                _puppetMaster.mappingWeight = _savedMappingWeight;
+                _forceAnimatorVisualLatch = false;
+            }
+        }
+    }
+
+    private void TryRestoreAnimatorDrivenPresentation()
+    {
+        if (!_pendingAnimatorDrivenPoseReset)
+            return;
+
+        if (ShouldUseHardPhysicsVisualMode() ||
+            _hardPhysicsVisualPoseCopyWeight > AnimatorRestoreBlendThreshold)
+        {
+            if (!_recoveryRestoreBlockedLogged)
+            {
+                TraceStunDiagnosticSnapshot(
+                    "Visuals.AnimatorRestoreBlocked",
+                    $"hardVisual={ShouldUseHardPhysicsVisualMode()} hardWeight={_hardPhysicsVisualPoseCopyWeight:F2}",
+                    force: true);
+                _recoveryRestoreBlockedLogged = true;
+            }
+            return;
+        }
+
+        _pendingAnimatorDrivenPoseReset = false;
+        _recoveryRestoreBlockedLogged = false;
+        MarkPhysicsPoseBindingsDirty();
+        MarkPresentationEffectsDirty();
+
+        if (_externalAnimationDriver != null)
+        {
+            _externalAnimationDriver.RestoreAnimatorAfterPhysicsPresentation();
+            return;
+        }
+
+        if (animator == null)
+            return;
+
+        animator.enabled = true;
+        if (!animator.isInitialized)
+            animator.Rebind();
+        animator.Update(0f);
+        TraceStunDiagnosticSnapshot("Visuals.AnimatorRestored", force: true);
+    }
+
+    private void EnsurePhysicsPoseBindings(Transform presentationRoot)
+    {
+        if (!_physicsPoseBindingsDirty && _physicsPoseBindings.Count > 0)
+            return;
+
+        _physicsPoseBindingsDirty = false;
+        _physicsPoseBindings.Clear();
+
+        var visualByName = new Dictionary<string, Transform>(StringComparer.Ordinal);
+        var visualTransforms = presentationRoot.GetComponentsInChildren<Transform>(true);
+        for (var i = 0; i < visualTransforms.Length; i++)
+        {
+            var candidate = visualTransforms[i];
+            if (candidate != null && !visualByName.ContainsKey(candidate.name))
+                visualByName.Add(candidate.name, candidate);
+        }
+
+        for (var i = 0; i < syncPhysicsObjects.Length; i++)
+        {
+            var physicsTransform = syncPhysicsObjects[i] != null ? syncPhysicsObjects[i].transform : null;
+            if (physicsTransform == null)
+                continue;
+
+            if (!visualByName.TryGetValue(physicsTransform.name, out var visualTransform))
+                continue;
+
+            if (visualTransform == physicsTransform)
+                continue;
+
+            _physicsPoseBindings.Add(new PhysicsPoseBinding
+            {
+                physics = physicsTransform,
+                visual = visualTransform,
+                physicsRestLocalRotation = physicsTransform.localRotation,
+                visualRestLocalRotation = visualTransform.localRotation,
+                carryBlendMultiplier = ResolveCarryPoseBindingMultiplier(visualTransform)
+            });
+        }
+    }
+
+    private static float ResolveCarryPoseBindingMultiplier(Transform visualTransform)
+    {
+        if (visualTransform == null)
+            return 0f;
+
+        var boneName = visualTransform.name;
+        if (boneName.IndexOf("Hips", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("Pelvis", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 0.85f;
+
+        if (boneName.IndexOf("Spine", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("Chest", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("Neck", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("Head", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 0.75f;
+
+        if (boneName.IndexOf("Shoulder", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("UpperArm", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("LowerArm", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 0.55f;
+
+        if (boneName.IndexOf("Hand", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 0.40f;
+
+        if (boneName.IndexOf("UpperLeg", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("LowerLeg", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 0.25f;
+
+        if (boneName.IndexOf("Foot", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            boneName.IndexOf("Toe", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 0.15f;
+
+        return 0.30f;
+    }
+
+    // =========================================================
+    // 앵커 그랩 per-bone 물리 블렌드
+    // =========================================================
+
+    /// <summary>
+    /// 특정 앵커 부위가 잡혔을 때, 해당 본과 인접 본의 물리 복사 가중치를 설정.
+    /// 잡힌 본은 물리 포즈를 더 강하게 따라가 시각적으로 정확한 잡기를 표현.
+    /// </summary>
+    public void SetAnchorGrabBoneBlend(SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId anchorId, float weight = 0.75f)
+    {
+        if (_physicsPoseBindings.Count == 0)
+        {
+            var presentationRoot = GetPresentationRootTransform();
+            if (presentationRoot != null)
+                EnsurePhysicsPoseBindings(presentationRoot);
+        }
+
+        if (_physicsPoseBindings.Count == 0) return;
+
+        var boneNames = ResolveAnchorBoneNames(anchorId);
+        if (boneNames == null) return;
+
+        for (int i = 0; i < _physicsPoseBindings.Count; i++)
+        {
+            var binding = _physicsPoseBindings[i];
+            if (binding.visual == null) continue;
+
+            var name = binding.visual.name;
+            bool isMatch = false;
+            foreach (var boneName in boneNames)
+            {
+                if (name.IndexOf(boneName, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    isMatch = true;
+                    break;
+                }
+            }
+
+            if (isMatch)
+            {
+                binding.anchorGrabBlendWeight = weight;
+                _physicsPoseBindings[i] = binding;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 앵커 그랩 해제 시 per-bone 블렌드 가중치 초기화.
+    /// </summary>
+    public void ClearAnchorGrabBoneBlend(SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId anchorId)
+    {
+        if (_physicsPoseBindings.Count == 0)
+        {
+            var presentationRoot = GetPresentationRootTransform();
+            if (presentationRoot != null)
+                EnsurePhysicsPoseBindings(presentationRoot);
+        }
+
+        if (_physicsPoseBindings.Count == 0) return;
+
+        var boneNames = ResolveAnchorBoneNames(anchorId);
+        if (boneNames == null) return;
+
+        for (int i = 0; i < _physicsPoseBindings.Count; i++)
+        {
+            var binding = _physicsPoseBindings[i];
+            if (binding.visual == null) continue;
+
+            var name = binding.visual.name;
+            bool isMatch = false;
+            foreach (var boneName in boneNames)
+            {
+                if (name.IndexOf(boneName, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    isMatch = true;
+                    break;
+                }
+            }
+
+            if (isMatch)
+            {
+                binding.anchorGrabBlendWeight = 0f;
+                _physicsPoseBindings[i] = binding;
+            }
+        }
+    }
+
+    private static string[] ResolveAnchorBoneNames(SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId anchorId)
+    {
+        return anchorId switch
+        {
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.Chest =>
+                new[] { "Spine", "Chest", "Spine1", "Spine2" },
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.Hips =>
+                new[] { "Hips", "Pelvis" },
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.LeftUpperArm =>
+                new[] { "LeftUpperArm", "LeftArm", "LeftShoulder" },
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.RightUpperArm =>
+                new[] { "RightUpperArm", "RightArm", "RightShoulder" },
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.LeftForearm =>
+                new[] { "LeftForeArm", "LeftLowerArm", "LeftHand" },
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.RightForearm =>
+                new[] { "RightForeArm", "RightLowerArm", "RightHand" },
+            SSAFYPlayTime.Character.GrabAnchorPoint.AnchorId.Head =>
+                new[] { "Head", "Neck" },
+            _ => null
+        };
+    }
+
+    private static Quaternion ResolveVisualLocalRotation(in PhysicsPoseBinding binding)
+    {
+        return ResolveRelativeLocalRotation(
+            binding.physicsRestLocalRotation,
+            binding.physics.localRotation,
+            binding.visualRestLocalRotation);
+    }
+
+    private static Quaternion ResolveRelativeLocalRotation(
+        Quaternion physicsRestLocalRotation,
+        Quaternion currentPhysicsLocalRotation,
+        Quaternion visualRestLocalRotation)
+    {
+        var localDelta = Quaternion.Inverse(physicsRestLocalRotation) * currentPhysicsLocalRotation;
+        return visualRestLocalRotation * localDelta;
+    }
+
+    private bool _isStunVisualMode;
+
+    private bool ShouldKeepAuthorityAnimatedVisualMeshForPlainStun()
+    {
+        return ShouldUseAuthorityAnimatedPlainStunPresentation();
+    }
+
+    /// <summary>
+    /// 기절 시: PuppetMaster 타겟 스켈레톤(물리 매핑 대상)의 메시를 보여주고
+    ///          애니메이션 비주얼 루트의 메시를 숨긴다.
+    ///          → 보이는 모델이 래그돌 물리 결과를 따라감.
+    /// 회복 시: 애니메이션 비주얼 루트의 메시를 복원.
+    ///          → 보이는 모델이 애니메이터 구동으로 돌아감.
+    /// </summary>
+    private void SetPhysicsPresentationVisualMode(bool usePhysicsPresentation)
+    {
+        if (!ShouldDisablePhysicsAnimationSync || _animatedVisualRoot == null || !_hasAlternateVisualSwapTargets)
+            return;
+
+        var keepAuthorityAnimatedVisualMesh = usePhysicsPresentation &&
+                                             ShouldKeepAuthorityAnimatedVisualMeshForPlainStun();
+
+        if (_isStunVisualMode == usePhysicsPresentation &&
+            _isAuthorityAnimatedPlainStunVisualMeshActive == keepAuthorityAnimatedVisualMesh)
+            return;
+
+        var previousVisualMode = _isStunVisualMode;
+        var previousAuthorityAnimatedVisualMesh = _isAuthorityAnimatedPlainStunVisualMeshActive;
+        _isStunVisualMode = usePhysicsPresentation;
+        _isAuthorityAnimatedPlainStunVisualMeshActive = keepAuthorityAnimatedVisualMesh;
+
+        if (usePhysicsPresentation && IsStunDiagnosticsRelevantPhase(GetPhysicalPhase()))
+        {
+            ArmStunDiagnosticsWindow(
+                "Visuals.SetPhysicsPresentationVisualMode",
+                $"stunVisual={previousVisualMode}->{usePhysicsPresentation} authorityAnimatedMesh={previousAuthorityAnimatedVisualMesh}->{keepAuthorityAnimatedVisualMesh}");
+        }
+
+        if (usePhysicsPresentation)
+        {
+            // 물리 타겟 스켈레톤의 렌더러를 보이게, 애니메이션 비주얼 렌더러를 숨기기
+            if (keepAuthorityAnimatedVisualMesh)
+            {
+                SetVisibleRendererState(_animatedVisualRoot);
+            }
+            else
+            {
+                var skinnedMeshRenderers = GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                for (var i = 0; i < skinnedMeshRenderers.Length; i++)
+                    skinnedMeshRenderers[i].enabled = !IsUnderVisualRoot(skinnedMeshRenderers[i].transform, _animatedVisualRoot);
+
+                var meshRenderers = GetComponentsInChildren<MeshRenderer>(true);
+                for (var i = 0; i < meshRenderers.Length; i++)
+                    meshRenderers[i].enabled = !IsUnderVisualRoot(meshRenderers[i].transform, _animatedVisualRoot);
+            }
+        }
+        else
+        {
+            // 원래 상태 복원: 애니메이션 비주얼만 보이게
+            SetVisibleRendererState(_animatedVisualRoot);
+        }
+
+        TraceStunDiagnosticSnapshot(
+            "Visuals.SetPhysicsPresentationVisualMode",
+            $"stunVisual={previousVisualMode}->{usePhysicsPresentation} authorityAnimatedMesh={previousAuthorityAnimatedVisualMesh}->{keepAuthorityAnimatedVisualMesh}",
+            force: true);
+    }
+
+    private void SetStunVisualMode(bool stunned)
+    {
+        SetPhysicsPresentationVisualMode(stunned);
+    }
+}

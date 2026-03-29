@@ -1,0 +1,429 @@
+/*
+ * 파일 개요:
+ * - ItemGameplayRunner.DebugController 스크립트가 들어 있는 파일이다.
+ * - Dev/Runner/Debug 계층에서 로컬 디버그 제어와 개발 편의 기능을 담당한다.
+ * - 디버그 경로가 본 게임 흐름을 오염시키지 않도록, 테스트 전용 분기와 상태만 제한적으로 둔다.
+ */
+using System;
+using UnityEngine;
+
+namespace SSAFYPlayTime.Gameplay.Items
+{
+    public sealed partial class ItemGameplayRunner
+    {
+        private void TickLocalDebugController()
+        {
+            if (!ShouldRunLocalDebugController())
+            {
+                return;
+            }
+
+            EnsureLocalDebugControllerInitialized();
+            EnsureStableDebugState();
+            HandleLocalDebugMovement();
+            HandleLocalDebugCameraInput();
+
+            // 점프(Space)와 충돌하지 않도록 리셋 키를 분리한다.
+            if (Input.GetKeyDown(localResetKey))
+            {
+                ResetLocalDebugState();
+            }
+        }
+
+        private void LateUpdate()
+        {
+            UpdateLocalDebugCameraPose();
+        }
+
+        private void EnsureLocalDebugControllerInitialized()
+        {
+            if (_debugControlInitialized && _debugControlTarget == targetRoot)
+            {
+                return;
+            }
+
+            _debugControlTarget = targetRoot;
+            _debugControlBody = targetRoot.GetComponent<Rigidbody>();
+            _debugInitialPosition = targetRoot.position;
+            _debugInitialRotation = targetRoot.rotation;
+            _debugControlInitialized = true;
+
+            if (_debugControlBody != null)
+            {
+                if (!_debugConstraintsCaptured)
+                {
+                    _debugOriginalConstraints = _debugControlBody.constraints;
+                    _debugConstraintsCaptured = true;
+                }
+
+                // 오뚜기처럼 넘어지지 않게 X/Z 회전을 고정한다.
+                _debugControlBody.constraints = _debugOriginalConstraints |
+                                                RigidbodyConstraints.FreezeRotationX |
+                                                RigidbodyConstraints.FreezeRotationZ;
+            }
+
+            ResolveDebugCamera();
+            ResetDebugCameraState();
+            ResolveDebugDummy();
+            PlaceDummyInFrontOfPlayer();
+        }
+
+        private void HandleLocalDebugMovement()
+        {
+            var horizontal = Input.GetAxisRaw("Horizontal");
+            var vertical = Input.GetAxisRaw("Vertical");
+            var input = new Vector2(horizontal, vertical);
+            if (input.sqrMagnitude > 1f)
+            {
+                input.Normalize();
+            }
+
+            var moveDir = GetCameraRelativeMoveDirection(input);
+            var hasMoveInput = moveDir.sqrMagnitude > 0.0001f;
+
+            if (_debugControlBody != null && !_debugControlBody.isKinematic)
+            {
+                // 외력(블랙홀 흡입)을 살리기 위해 입력이 있을 때만 수평 속도를 덮어쓴다.
+                if (hasMoveInput)
+                {
+                    var velocity = _debugControlBody.velocity;
+                    velocity.x = moveDir.x * localMoveSpeed;
+                    velocity.z = moveDir.z * localMoveSpeed;
+                    _debugControlBody.velocity = velocity;
+                }
+            }
+            else if (hasMoveInput)
+            {
+                targetRoot.position += moveDir * (localMoveSpeed * Time.deltaTime);
+            }
+
+            if (hasMoveInput)
+            {
+                var targetRotation = Quaternion.LookRotation(moveDir, Vector3.up);
+                targetRoot.rotation = Quaternion.Slerp(targetRoot.rotation, targetRotation, localTurnLerp * Time.deltaTime);
+            }
+        }
+
+        private Vector3 GetCameraRelativeMoveDirection(Vector2 input)
+        {
+            var cameraTransform = _debugRuntimeCamera != null ? _debugRuntimeCamera.transform : null;
+            var cameraForward = cameraTransform != null ? cameraTransform.forward : targetRoot.forward;
+            var cameraRight = cameraTransform != null ? cameraTransform.right : targetRoot.right;
+
+            cameraForward.y = 0f;
+            cameraRight.y = 0f;
+
+            if (cameraForward.sqrMagnitude < 0.0001f)
+            {
+                cameraForward = Vector3.forward;
+            }
+
+            if (cameraRight.sqrMagnitude < 0.0001f)
+            {
+                cameraRight = Vector3.right;
+            }
+
+            cameraForward.Normalize();
+            cameraRight.Normalize();
+
+            var moveDir = (cameraForward * input.y) + (cameraRight * input.x);
+            if (moveDir.sqrMagnitude > 1f)
+            {
+                moveDir.Normalize();
+            }
+
+            return moveDir;
+        }
+
+        private void HandleLocalDebugCameraInput()
+        {
+            if (_debugRuntimeCamera == null)
+            {
+                ResolveDebugCamera();
+            }
+
+            if (_debugRuntimeCamera == null)
+            {
+                return;
+            }
+
+            // 우클릭 없이 마우스 이동만으로 카메라를 회전한다.
+            _debugYaw += Input.GetAxis("Mouse X") * localCameraMouseSensitivity;
+            _debugPitch -= Input.GetAxis("Mouse Y") * localCameraMouseSensitivity;
+            _debugPitch = Mathf.Clamp(_debugPitch, localCameraMinPitch, localCameraMaxPitch);
+
+            var scroll = Input.mouseScrollDelta.y;
+            if (Mathf.Abs(scroll) > 0.0001f)
+            {
+                _debugDistance = Mathf.Clamp(
+                    _debugDistance - scroll * localCameraZoomSpeed,
+                    localCameraMinDistance,
+                    localCameraMaxDistance);
+            }
+
+            if (!IsFinite(_debugYaw) || !IsFinite(_debugPitch) || !IsFinite(_debugDistance))
+            {
+                // 카메라 상태값이 오염되면 즉시 기본값으로 되돌린다.
+                ResetDebugCameraState();
+            }
+        }
+
+        private void UpdateLocalDebugCameraPose()
+        {
+            if (!ShouldRunLocalDebugController())
+            {
+                return;
+            }
+
+            if (_debugRuntimeCamera == null)
+            {
+                ResolveDebugCamera();
+                if (_debugRuntimeCamera == null)
+                {
+                    return;
+                }
+            }
+
+            if (!IsFinite(targetRoot.position))
+            {
+                // 타겟 좌표가 비정상(NaN/Infinity)이면 카메라 갱신을 중단한다.
+                return;
+            }
+
+            var pivot = targetRoot.position + Vector3.up * localCameraPivotHeight;
+            var rotation = Quaternion.Euler(_debugPitch, _debugYaw, 0f);
+            var cameraPos = pivot - (rotation * Vector3.forward * _debugDistance);
+
+            if (!IsFinite(pivot) || !IsFinite(cameraPos) || !IsFinite(rotation))
+            {
+                // 프러스텀 계산 오류를 막기 위해 비정상 카메라 포즈를 폐기한다.
+                ResetDebugCameraState();
+                return;
+            }
+
+            _debugRuntimeCamera.transform.position = cameraPos;
+            _debugRuntimeCamera.transform.rotation = rotation;
+            _debugRuntimeCamera.transform.LookAt(pivot);
+        }
+
+        private void EnsureStableDebugState()
+        {
+            if (targetRoot == null)
+            {
+                return;
+            }
+
+            if (!IsFinite(targetRoot.position) || !IsFinite(targetRoot.rotation))
+            {
+                // 플레이어 상태가 깨진 경우 초기 상태로 복구한다.
+                targetRoot.position = _debugInitialPosition;
+                targetRoot.rotation = _debugInitialRotation;
+            }
+
+            if (_debugControlBody != null)
+            {
+                if (!IsFinite(_debugControlBody.velocity) || !IsFinite(_debugControlBody.angularVelocity))
+                {
+                    _debugControlBody.velocity = Vector3.zero;
+                    _debugControlBody.angularVelocity = Vector3.zero;
+                }
+            }
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        private static bool IsFinite(Vector3 value)
+        {
+            return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
+        }
+
+        private static bool IsFinite(Quaternion value)
+        {
+            return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z) && IsFinite(value.w);
+        }
+
+        private void ResolveDebugCamera()
+        {
+            _debugRuntimeCamera = Camera.main;
+            if (_debugRuntimeCamera != null)
+            {
+                return;
+            }
+
+            _debugRuntimeCamera = FindObjectOfType<Camera>();
+            if (_debugRuntimeCamera == null)
+            {
+                var cameraObject = new GameObject("ItemRuntimeCamera");
+                _debugRuntimeCamera = cameraObject.AddComponent<Camera>();
+            }
+        }
+
+        private void ResetDebugCameraState()
+        {
+            if (targetRoot == null)
+            {
+                return;
+            }
+
+            _debugDefaultYaw = targetRoot.eulerAngles.y;
+            _debugYaw = _debugDefaultYaw;
+            _debugPitch = localCameraDefaultPitch;
+            _debugDistance = Mathf.Clamp(localCameraDefaultDistance, localCameraMinDistance, localCameraMaxDistance);
+        }
+
+        private void ResetLocalDebugState()
+        {
+            if (targetRoot == null)
+            {
+                return;
+            }
+
+            targetRoot.position = _debugInitialPosition;
+            targetRoot.rotation = _debugInitialRotation;
+
+            if (_debugControlBody != null)
+            {
+                _debugControlBody.velocity = Vector3.zero;
+                _debugControlBody.angularVelocity = Vector3.zero;
+            }
+
+            if (resetRuntimeStateOnSpace && itemRuntimeHost != null)
+            {
+                itemRuntimeHost.ResetRuntimeState();
+            }
+
+            StopAllBlackholeRoutines();
+
+            StopFlamethrowerParticle();
+            StopAllLoopingSfx();
+            DestroyExistingBlackholeVisuals();
+            PlaceDummyInFrontOfPlayer();
+            ResetDebugCameraState();
+
+            LogStatus($"{localResetKey} reset: player/item state restored.");
+        }
+
+        private bool ShouldRunLocalDebugController()
+        {
+            if (!enableLocalDebugController || targetRoot == null)
+            {
+                ReleaseDebugControlOverride();
+                return false;
+            }
+
+            if (allowLocalDebugControllerForNetworkPlayer)
+            {
+                _debugControllerSkipLogged = false;
+                return true;
+            }
+
+            var networkPlayer = targetRoot.GetComponent<NetworkPlayer>();
+            if (networkPlayer == null)
+            {
+                _debugControllerSkipLogged = false;
+                return true;
+            }
+
+            if (!_debugControllerSkipLogged)
+            {
+                // 실제 캐릭터(NetworkPlayer)에는 디버그 모터를 적용하지 않는다.
+                LogStatus("Local debug controller skipped for NetworkPlayer target.");
+                _debugControllerSkipLogged = true;
+            }
+
+            ReleaseDebugControlOverride();
+            return false;
+        }
+
+        private void ReleaseDebugControlOverride()
+        {
+            if (_debugControlBody != null && _debugConstraintsCaptured)
+            {
+                _debugControlBody.constraints = _debugOriginalConstraints;
+            }
+
+            _debugControlInitialized = false;
+            _debugControlTarget = null;
+            _debugControlBody = null;
+        }
+
+        private void ResolveDebugDummy()
+        {
+            _debugDummyTarget = null;
+            _debugDummyBody = null;
+            if (string.IsNullOrWhiteSpace(localDebugDummyName))
+            {
+                return;
+            }
+
+            var dummy = GameObject.Find(localDebugDummyName);
+            if (dummy == null)
+            {
+                return;
+            }
+
+            _debugDummyTarget = dummy.transform;
+            _debugDummyBody = dummy.GetComponent<Rigidbody>();
+        }
+
+        private void PlaceDummyInFrontOfPlayer()
+        {
+            if (targetRoot == null)
+            {
+                return;
+            }
+
+            if (_debugDummyTarget == null)
+            {
+                ResolveDebugDummy();
+                if (_debugDummyTarget == null)
+                {
+                    return;
+                }
+            }
+
+            var forward = targetRoot.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.0001f)
+            {
+                forward = Vector3.forward;
+            }
+
+            forward.Normalize();
+            var spawnPos = targetRoot.position + forward * Mathf.Max(0.5f, localDebugDummyForwardOffset);
+            spawnPos.y = localDebugDummyHeight;
+
+            _debugDummyTarget.position = spawnPos;
+            _debugDummyTarget.rotation = Quaternion.identity;
+
+            if (_debugDummyBody != null && !_debugDummyBody.isKinematic)
+            {
+                _debugDummyBody.velocity = Vector3.zero;
+                _debugDummyBody.angularVelocity = Vector3.zero;
+            }
+        }
+
+        private void DestroyExistingBlackholeVisuals()
+        {
+            var visuals = FindObjectsOfType<Transform>(true);
+            for (var i = 0; i < visuals.Length; i++)
+            {
+                var t = visuals[i];
+                if (t == null)
+                {
+                    continue;
+                }
+
+                if (string.Equals(t.name, BlackholeVisualName, StringComparison.Ordinal) ||
+                    string.Equals(t.name, "Item_BlackholeFx", StringComparison.Ordinal))
+                {
+                    Destroy(t.gameObject);
+                }
+            }
+        }
+    }
+}
+
