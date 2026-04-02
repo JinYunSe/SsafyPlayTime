@@ -183,13 +183,13 @@
 <table>
   <tr>
     <td align="center">
-      <img src="https://img.shields.io/badge/Unity Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
+      <img src="https://img.shields.io/badge/Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
     </td>
     <td align="center">
-      <img src="https://img.shields.io/badge/Unity Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
+      <img src="https://img.shields.io/badge/Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
     </td>
     <td align="center">
-      <img src="https://img.shields.io/badge/Unity Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
+      <img src="https://img.shields.io/badge/Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
     </td>
   </tr>
   <tr>
@@ -208,13 +208,13 @@
   </tr>
   <tr>
     <td align="center">
-      <img src="https://img.shields.io/badge/Unity Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
+      <img src="https://img.shields.io/badge/Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
     </td>
     <td align="center">
-      <img src="https://img.shields.io/badge/Unity Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
+      <img src="https://img.shields.io/badge/Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
     </td>
     <td align="center">
-      <img src="https://img.shields.io/badge/Unity Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
+      <img src="https://img.shields.io/badge/Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
     </td>
   </tr>
   <tr>
