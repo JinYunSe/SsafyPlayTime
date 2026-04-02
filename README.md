@@ -82,14 +82,18 @@
 
 ### 2. **캐릭터 동작**
 
-<div style="display: flex; gap: 10px; flex-wrap: wrap;">
-  <img src="docs/이동.gif" width="200">
-  <img src="docs/펀치.gif" width="200">
-  <img src="docs/발차기.gif" width="200">
-  <img src="docs/드롭킥.gif" width="200">
-  <img src="docs/박치기.gif" width="200">
-  <img src="docs/잡기.gif" width="200">
-  <img src="docs/던지기.gif" width="200">
+<div style="display: flex; gap: 10px;">
+  <img src="docs/이동.gif" width="280">
+  <img src="docs/펀치.gif" width="280">
+  <img src="docs/발차기.gif" width="280">
+</div>
+<div style="display: flex; gap: 10px; margin-top: 10px;">
+  <img src="docs/드롭킥.gif" width="420">
+  <img src="docs/박치기.gif" width="420">
+</div>
+<div style="display: flex; gap: 10px; margin-top: 10px;">
+  <img src="docs/잡기.gif" width="420">
+  <img src="docs/던지기.gif" width="420">
 </div>
 
 - 이동·점프 등 기본 조작은 직관적으로 누구나 바로 적응할 수 있습니다.
@@ -109,11 +113,13 @@
 
 ### 4. **변신 아이템**
 
-<div style="display: flex; gap: 10px; flex-wrap: wrap;">
-  <img src="docs/거대화.gif" width="210">
-  <img src="docs/소형화.gif" width="210">
-  <img src="docs/투명화.gif" width="210">
-  <img src="docs/아메리카노.gif" width="210">
+<div style="display: flex; gap: 10px;">
+  <img src="docs/거대화.gif" width="420">
+  <img src="docs/소형화.gif" width="420">
+</div>
+<div style="display: flex; gap: 10px; margin-top: 10px;">
+  <img src="docs/투명화.gif" width="420">
+  <img src="docs/아메리카노.gif" width="420">
 </div>
 
 - 커지기·작아지기·투명화 아이템으로 위기 상황을 역전할 수 있습니다.
