@@ -178,3 +178,60 @@
 
 <br>
 
+# 👥 팀원 소개
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="https://img.shields.io/badge/Unity Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
+    </td>
+    <td align="center">
+      <img src="https://img.shields.io/badge/Unity Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
+    </td>
+    <td align="center">
+      <img src="https://img.shields.io/badge/Unity Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img width="130" src="https://github.com/byjun98.png" /><br/>
+      <a href="https://github.com/byjun98">변현준</a>
+    </td>
+    <td align="center">
+      <img width="130" src="https://github.com/kth5352.png" /><br/>
+      <a href="https://github.com/kth5352">김태현</a>
+    </td>
+    <td align="center">
+      <img width="130" src="https://github.com/jumpman-hero.png" /><br/>
+      <a href="https://github.com/jumpman-hero">박준영</a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="https://img.shields.io/badge/Unity Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
+    </td>
+    <td align="center">
+      <img src="https://img.shields.io/badge/Unity Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
+    </td>
+    <td align="center">
+      <img src="https://img.shields.io/badge/Unity Client-000000?style=for-the-badge&logo=unity&logoColor=white"/>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img width="130" src="https://github.com/hyekang222.png" /><br/>
+      <a href="https://github.com/hyekang222">박혜강</a>
+    </td>
+    <td align="center">
+      <img width="130" src="https://github.com/JinYunSe.png" /><br/>
+      <a href="https://github.com/JinYunSe">진윤세</a>
+    </td>
+    <td align="center">
+      <img width="130" src="https://github.com/hungryTiger-roar.png" /><br/>
+      <a href="https://github.com/hungryTiger-roar">한민지</a>
+    </td>
+  </tr>
+</table>
+
+<br>
+
