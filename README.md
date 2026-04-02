@@ -16,7 +16,6 @@
 - [✨ 서비스 주요 기능](#-서비스-주요-기능)
 - [📱 주요 화면 및 기능 소개](#-주요-화면-및-기능-소개)
 - [🛠️ 프로젝트 핵심 기술](#core-tech)
-- [🏗️ 시스템 아키텍처](#architecture)
 - [👥 팀원 소개](#-팀원-소개)
 - [⚙️ 기술 스택](#tech-stack)
 
@@ -232,6 +231,35 @@
     </td>
   </tr>
 </table>
+
+<br>
+
+<a name="tech-stack"></a>
+
+# ⚙️ 기술 스택
+
+### Client
+
+<div>
+  <img src="https://img.shields.io/badge/Unity-000000?style=for-the-badge&logo=unity&logoColor=white"/>
+  <img src="https://img.shields.io/badge/C%23-239120?style=for-the-badge&logo=csharp&logoColor=white"/>
+  <img src="https://img.shields.io/badge/Photon Fusion-004FFF?style=for-the-badge&logo=&logoColor=white"/>
+</div>
+
+### IDE
+
+<div>
+  <img src="https://img.shields.io/badge/Visual Studio-5C2D91?style=for-the-badge&logo=visualstudio&logoColor=white"/>
+  <img src="https://img.shields.io/badge/Rider-000000?style=for-the-badge&logo=rider&logoColor=white"/>
+</div>
+
+### Cooperation
+
+<div>
+  <img src="https://img.shields.io/badge/GitLab-FC6D26?style=for-the-badge&logo=gitlab&logoColor=white"/>
+  <img src="https://img.shields.io/badge/Jira-0052CC?style=for-the-badge&logo=jira&logoColor=white"/>
+  <img src="https://img.shields.io/badge/Notion-000000?style=for-the-badge&logo=notion&logoColor=white"/>
+</div>
 
 <br>
 
