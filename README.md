@@ -90,33 +90,35 @@
 
 <div style="display: flex; gap: 10px;">
   <div style="text-align: center;">
-    <img src="docs/이동.gif" width="280"><br>
+    <img src="docs/이동.gif" width="420"><br>
     <b>이동</b>
   </div>
   <div style="text-align: center;">
-    <img src="docs/펀치.gif" width="280"><br>
+    <img src="docs/펀치.gif" width="420"><br>
     <b>펀치</b>
-  </div>
-  <div style="text-align: center;">
-    <img src="docs/발차기.gif" width="280"><br>
-    <b>발차기</b>
   </div>
 </div>
 <div style="display: flex; gap: 10px; margin-top: 10px;">
+  <div style="text-align: center;">
+    <img src="docs/발차기.gif" width="420"><br>
+    <b>발차기</b>
+  </div>
   <div style="text-align: center;">
     <img src="docs/드롭킥.gif" width="420"><br>
     <b>드롭킥</b>
   </div>
+</div>
+<div style="display: flex; gap: 10px; margin-top: 10px;">
   <div style="text-align: center;">
     <img src="docs/박치기.gif" width="420"><br>
     <b>박치기</b>
   </div>
-</div>
-<div style="display: flex; gap: 10px; margin-top: 10px;">
   <div style="text-align: center;">
     <img src="docs/잡기.gif" width="420"><br>
     <b>잡기</b>
   </div>
+</div>
+<div style="display: flex; gap: 10px; margin-top: 10px;">
   <div style="text-align: center;">
     <img src="docs/던지기.gif" width="420"><br>
     <b>던지기</b>
@@ -129,17 +131,19 @@
 
 ### 3. **공격 아이템**
 
-<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+<div style="display: flex; gap: 10px;">
   <div style="text-align: center;">
-    <img src="docs/블랙홀.gif" width="280"><br>
+    <img src="docs/블랙홀.gif" width="420"><br>
     <b>블랙홀 폭탄</b>
   </div>
   <div style="text-align: center;">
-    <img src="docs/화염방사기.gif" width="280"><br>
+    <img src="docs/화염방사기.gif" width="420"><br>
     <b>화염 방사기</b>
   </div>
+</div>
+<div style="display: flex; gap: 10px; margin-top: 10px;">
   <div style="text-align: center;">
-    <img src="docs/궤도레이저.gif" width="280"><br>
+    <img src="docs/궤도레이저.gif" width="420"><br>
     <b>위성 폭격</b>
   </div>
 </div>
