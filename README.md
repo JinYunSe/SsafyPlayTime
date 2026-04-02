@@ -72,8 +72,14 @@
 ### 1. **로비**
 
 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-  <img src="docs/방%20생성.gif" width="300">
-  <img src="docs/캐릭터선택.gif" width="300">
+  <div style="text-align: center;">
+    <img src="docs/방%20생성.gif" width="300"><br>
+    <b>방 생성</b>
+  </div>
+  <div style="text-align: center;">
+    <img src="docs/캐릭터선택.gif" width="300"><br>
+    <b>캐릭터 선택</b>
+  </div>
 </div>
 
 - 방을 생성하거나 목록에서 방을 선택해 입장할 수 있습니다.
@@ -83,17 +89,38 @@
 ### 2. **캐릭터 동작**
 
 <div style="display: flex; gap: 10px;">
-  <img src="docs/이동.gif" width="280">
-  <img src="docs/펀치.gif" width="280">
-  <img src="docs/발차기.gif" width="280">
+  <div style="text-align: center;">
+    <img src="docs/이동.gif" width="280"><br>
+    <b>이동</b>
+  </div>
+  <div style="text-align: center;">
+    <img src="docs/펀치.gif" width="280"><br>
+    <b>펀치</b>
+  </div>
+  <div style="text-align: center;">
+    <img src="docs/발차기.gif" width="280"><br>
+    <b>발차기</b>
+  </div>
 </div>
 <div style="display: flex; gap: 10px; margin-top: 10px;">
-  <img src="docs/드롭킥.gif" width="420">
-  <img src="docs/박치기.gif" width="420">
+  <div style="text-align: center;">
+    <img src="docs/드롭킥.gif" width="420"><br>
+    <b>드롭킥</b>
+  </div>
+  <div style="text-align: center;">
+    <img src="docs/박치기.gif" width="420"><br>
+    <b>박치기</b>
+  </div>
 </div>
 <div style="display: flex; gap: 10px; margin-top: 10px;">
-  <img src="docs/잡기.gif" width="420">
-  <img src="docs/던지기.gif" width="420">
+  <div style="text-align: center;">
+    <img src="docs/잡기.gif" width="420"><br>
+    <b>잡기</b>
+  </div>
+  <div style="text-align: center;">
+    <img src="docs/던지기.gif" width="420"><br>
+    <b>던지기</b>
+  </div>
 </div>
 
 - 이동·점프 등 기본 조작은 직관적으로 누구나 바로 적응할 수 있습니다.
@@ -103,9 +130,18 @@
 ### 3. **공격 아이템**
 
 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-  <img src="docs/블랙홀.gif" width="280">
-  <img src="docs/화염방사기.gif" width="280">
-  <img src="docs/궤도레이저.gif" width="280">
+  <div style="text-align: center;">
+    <img src="docs/블랙홀.gif" width="280"><br>
+    <b>블랙홀 폭탄</b>
+  </div>
+  <div style="text-align: center;">
+    <img src="docs/화염방사기.gif" width="280"><br>
+    <b>화염 방사기</b>
+  </div>
+  <div style="text-align: center;">
+    <img src="docs/궤도레이저.gif" width="280"><br>
+    <b>위성 폭격</b>
+  </div>
 </div>
 
 - 블랙홀 폭탄·화염 방사기·위성 폭격으로 다른 플레이어를 탈락시킬 수 있습니다.
@@ -114,12 +150,24 @@
 ### 4. **변신 아이템**
 
 <div style="display: flex; gap: 10px;">
-  <img src="docs/거대화.gif" width="420">
-  <img src="docs/소형화.gif" width="420">
+  <div style="text-align: center;">
+    <img src="docs/거대화.gif" width="420"><br>
+    <b>거대화</b>
+  </div>
+  <div style="text-align: center;">
+    <img src="docs/소형화.gif" width="420"><br>
+    <b>소형화</b>
+  </div>
 </div>
 <div style="display: flex; gap: 10px; margin-top: 10px;">
-  <img src="docs/투명화.gif" width="420">
-  <img src="docs/아메리카노.gif" width="420">
+  <div style="text-align: center;">
+    <img src="docs/투명화.gif" width="420"><br>
+    <b>투명화</b>
+  </div>
+  <div style="text-align: center;">
+    <img src="docs/아메리카노.gif" width="420"><br>
+    <b>아메리카노</b>
+  </div>
 </div>
 
 - 커지기·작아지기·투명화 아이템으로 위기 상황을 역전할 수 있습니다.
@@ -128,8 +176,14 @@
 ### 5. **유령 투척 시스템**
 
 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-  <img src="docs/폭탄던지기.gif" width="300">
-  <img src="docs/바나나.gif" width="300">
+  <div style="text-align: center;">
+    <img src="docs/폭탄던지기.gif" width="300"><br>
+    <b>폭탄 던지기</b>
+  </div>
+  <div style="text-align: center;">
+    <img src="docs/바나나.gif" width="300"><br>
+    <b>바나나 껍질 던지기</b>
+  </div>
 </div>
 
 - 탈락 후 유령이 되어 생존자들에게 폭탄·바나나 껍질을 던질 수 있습니다.
@@ -139,11 +193,44 @@
 ### 6. **게임 종료 및 랭킹**
 
 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-  <img src="docs/승리%20포즈.gif" width="400">
+  <div style="text-align: center;">
+    <img src="docs/승리%20포즈.gif" width="400"><br>
+    <b>게임 종료 및 순위 결과</b>
+  </div>
 </div>
 
 - 게임 종료 시 전체 순위 결과가 모든 참가자 화면에 동시에 표시됩니다.
 - 1등이 새로운 방장이 되어 로비로 복귀하고 바로 다음 게임을 시작할 수 있습니다.
+
+<br>
+
+<a name="core-tech"></a>
+
+# 🛠️ 프로젝트 핵심 기술
+
+### 🔗 Photon Fusion — Host Mode 네트워크 구조
+
+- 플레이어 중 한 명이 **Host**가 되어 모든 게임 로직·물리 연산을 처리하는 구조
+- Remote 클라이언트는 입력만 전송하고 Host가 결과를 동기화해 권위 있는 상태 유지
+- Host 접속 종료 시 **Host Migration**으로 다른 플레이어가 자동으로 Host 승계
+
+### 📡 [Networked] — State Synchronization
+
+- `[Networked]` 어트리뷰트로 선언된 변수는 Host → Remote 자동 동기화
+- 캐릭터 위치·회전·애니메이션 상태·아이템 효과 등 게임 상태를 실시간 반영
+- 물리 기반 이동에 **NetworkRigidbody** 적용해 충돌·튕김 동작까지 동기화
+
+### 🌐 AOI (Area of Interest) — 관심 영역 최적화
+
+- 플레이어 주변 일정 범위 내 오브젝트만 네트워크 업데이트 대상으로 한정
+- 맵 전체가 아닌 **근접 영역만 동기화**해 불필요한 패킷 트래픽 제거
+- 참가자 수 증가에도 네트워크 부하가 선형적으로 늘어나지 않도록 제어
+
+### 📨 RPC (Remote Procedure Call) — 이벤트 전달
+
+- 아이템 사용·탈락 판정·게임 시작·종료 등 **일회성 이벤트**는 RPC로 처리
+- `[Rpc(RpcSources.InputAuthority, RpcTargets.All)]` 로 호출자 → 전체 전파
+- State Sync(지속 상태)와 RPC(순간 이벤트)를 역할에 따라 명확히 분리 적용
 
 <br>
 
