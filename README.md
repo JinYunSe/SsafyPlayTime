@@ -72,16 +72,36 @@
 ### 1. **로비**
 
 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-
+  <img src="docs/방%20생성.gif" width="300">
+  <img src="docs/캐릭터선택.gif" width="300">
 </div>
 
 - 방을 생성하거나 목록에서 방을 선택해 입장할 수 있습니다.
 - 캐릭터 선택 시 모든 참가자 화면에 실시간으로 반영됩니다.
 - 방장 외 모든 참가자가 준비 완료하면 방장이 게임을 시작할 수 있습니다.
 
+### 2. **캐릭터 동작**
+
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+  <img src="docs/이동.gif" width="200">
+  <img src="docs/펀치.gif" width="200">
+  <img src="docs/발차기.gif" width="200">
+  <img src="docs/드롭킥.gif" width="200">
+  <img src="docs/박치기.gif" width="200">
+  <img src="docs/잡기.gif" width="200">
+  <img src="docs/던지기.gif" width="200">
+</div>
+
+- 이동·점프 등 기본 조작은 직관적으로 누구나 바로 적응할 수 있습니다.
+- 펀치·발차기·드롭킥·박치기 등 다양한 공격 동작으로 상대를 밀어낼 수 있습니다.
+- 잡기·던지기로 상대를 직접 집어 던지는 물리 기반 플레이가 가능합니다.
+
 ### 3. **공격 아이템**
 
 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+  <img src="docs/블랙홀.gif" width="280">
+  <img src="docs/화염방사기.gif" width="280">
+  <img src="docs/궤도레이저.gif" width="280">
 </div>
 
 - 블랙홀 폭탄·화염 방사기·위성 폭격으로 다른 플레이어를 탈락시킬 수 있습니다.
@@ -90,6 +110,10 @@
 ### 4. **변신 아이템**
 
 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+  <img src="docs/거대화.gif" width="210">
+  <img src="docs/소형화.gif" width="210">
+  <img src="docs/투명화.gif" width="210">
+  <img src="docs/아메리카노.gif" width="210">
 </div>
 
 - 커지기·작아지기·투명화 아이템으로 위기 상황을 역전할 수 있습니다.
@@ -98,6 +122,8 @@
 ### 5. **유령 투척 시스템**
 
 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+  <img src="docs/폭탄던지기.gif" width="300">
+  <img src="docs/바나나.gif" width="300">
 </div>
 
 - 탈락 후 유령이 되어 생존자들에게 폭탄·바나나 껍질을 던질 수 있습니다.
@@ -107,6 +133,7 @@
 ### 6. **게임 종료 및 랭킹**
 
 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+  <img src="docs/승리%20포즈.gif" width="400">
 </div>
 
 - 게임 종료 시 전체 순위 결과가 모든 참가자 화면에 동시에 표시됩니다.
