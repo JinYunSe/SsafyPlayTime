@@ -71,16 +71,9 @@
 
 ### 1. **로비**
 
-<div style="display: flex; gap: 10px; flex-wrap: wrap;">
-  <div style="text-align: center;">
-    <img src="docs/방%20생성.gif" width="300"><br>
-    <b>방 생성</b>
-  </div>
-  <div style="text-align: center;">
-    <img src="docs/캐릭터선택.gif" width="300"><br>
-    <b>캐릭터 선택</b>
-  </div>
-</div>
+| 방 생성 | 캐릭터 선택 |
+|:---:|:---:|
+| <img src="docs/방%20생성.gif" width="420"> | <img src="docs/캐릭터선택.gif" width="420"> |
 
 - 방을 생성하거나 목록에서 방을 선택해 입장할 수 있습니다.
 - 캐릭터 선택 시 모든 참가자 화면에 실시간으로 반영됩니다.
@@ -88,42 +81,21 @@
 
 ### 2. **캐릭터 동작**
 
-<div style="display: flex; gap: 10px;">
-  <div style="text-align: center;">
-    <img src="docs/이동.gif" width="420"><br>
-    <b>이동</b>
-  </div>
-  <div style="text-align: center;">
-    <img src="docs/펀치.gif" width="420"><br>
-    <b>펀치</b>
-  </div>
-</div>
-<div style="display: flex; gap: 10px; margin-top: 10px;">
-  <div style="text-align: center;">
-    <img src="docs/발차기.gif" width="420"><br>
-    <b>발차기</b>
-  </div>
-  <div style="text-align: center;">
-    <img src="docs/드롭킥.gif" width="420"><br>
-    <b>드롭킥</b>
-  </div>
-</div>
-<div style="display: flex; gap: 10px; margin-top: 10px;">
-  <div style="text-align: center;">
-    <img src="docs/박치기.gif" width="420"><br>
-    <b>박치기</b>
-  </div>
-  <div style="text-align: center;">
-    <img src="docs/잡기.gif" width="420"><br>
-    <b>잡기</b>
-  </div>
-</div>
-<div style="display: flex; gap: 10px; margin-top: 10px;">
-  <div style="text-align: center;">
-    <img src="docs/던지기.gif" width="420"><br>
-    <b>던지기</b>
-  </div>
-</div>
+| 이동 | 펀치 |
+|:---:|:---:|
+| <img src="docs/이동.gif" width="420"> | <img src="docs/펀치.gif" width="420"> |
+
+| 발차기 | 드롭킥 |
+|:---:|:---:|
+| <img src="docs/발차기.gif" width="420"> | <img src="docs/드롭킥.gif" width="420"> |
+
+| 박치기 | 잡기 |
+|:---:|:---:|
+| <img src="docs/박치기.gif" width="420"> | <img src="docs/잡기.gif" width="420"> |
+
+| 던지기 | |
+|:---:|:---:|
+| <img src="docs/던지기.gif" width="420"> | |
 
 - 이동·점프 등 기본 조작은 직관적으로 누구나 바로 적응할 수 있습니다.
 - 펀치·발차기·드롭킥·박치기 등 다양한 공격 동작으로 상대를 밀어낼 수 있습니다.
@@ -131,64 +103,35 @@
 
 ### 3. **공격 아이템**
 
-<div style="display: flex; gap: 10px;">
-  <div style="text-align: center;">
-    <img src="docs/블랙홀.gif" width="420"><br>
-    <b>블랙홀 폭탄</b>
-  </div>
-  <div style="text-align: center;">
-    <img src="docs/화염방사기.gif" width="420"><br>
-    <b>화염 방사기</b>
-  </div>
-</div>
-<div style="display: flex; gap: 10px; margin-top: 10px;">
-  <div style="text-align: center;">
-    <img src="docs/궤도레이저.gif" width="420"><br>
-    <b>위성 폭격</b>
-  </div>
-</div>
+| 블랙홀 폭탄 | 화염 방사기 |
+|:---:|:---:|
+| <img src="docs/블랙홀.gif" width="420"> | <img src="docs/화염방사기.gif" width="420"> |
+
+| 위성 폭격 | |
+|:---:|:---:|
+| <img src="docs/궤도레이저.gif" width="420"> | |
 
 - 블랙홀 폭탄·화염 방사기·위성 폭격으로 다른 플레이어를 탈락시킬 수 있습니다.
 - 각 아이템마다 범위·지속시간·효과가 달라 상황에 맞는 선택이 중요합니다.
 
 ### 4. **변신 아이템**
 
-<div style="display: flex; gap: 10px;">
-  <div style="text-align: center;">
-    <img src="docs/거대화.gif" width="420"><br>
-    <b>거대화</b>
-  </div>
-  <div style="text-align: center;">
-    <img src="docs/소형화.gif" width="420"><br>
-    <b>소형화</b>
-  </div>
-</div>
-<div style="display: flex; gap: 10px; margin-top: 10px;">
-  <div style="text-align: center;">
-    <img src="docs/투명화.gif" width="420"><br>
-    <b>투명화</b>
-  </div>
-  <div style="text-align: center;">
-    <img src="docs/아메리카노.gif" width="420"><br>
-    <b>아메리카노</b>
-  </div>
-</div>
+| 거대화 | 소형화 |
+|:---:|:---:|
+| <img src="docs/거대화.gif" width="420"> | <img src="docs/소형화.gif" width="420"> |
+
+| 투명화 | 아메리카노 |
+|:---:|:---:|
+| <img src="docs/투명화.gif" width="420"> | <img src="docs/아메리카노.gif" width="420"> |
 
 - 커지기·작아지기·투명화 아이템으로 위기 상황을 역전할 수 있습니다.
 - 상대의 공격을 피하거나 기믹을 역이용하는 전략 수단으로 활용됩니다.
 
 ### 5. **유령 투척 시스템**
 
-<div style="display: flex; gap: 10px; flex-wrap: wrap;">
-  <div style="text-align: center;">
-    <img src="docs/폭탄던지기.gif" width="300"><br>
-    <b>폭탄 던지기</b>
-  </div>
-  <div style="text-align: center;">
-    <img src="docs/바나나.gif" width="300"><br>
-    <b>바나나 껍질 던지기</b>
-  </div>
-</div>
+| 폭탄 던지기 | 바나나 껍질 던지기 |
+|:---:|:---:|
+| <img src="docs/폭탄던지기.gif" width="420"> | <img src="docs/바나나.gif" width="420"> |
 
 - 탈락 후 유령이 되어 생존자들에게 폭탄·바나나 껍질을 던질 수 있습니다.
 - 탈락 이후에도 경기에 영향을 줄 수 있어 끝까지 긴장감이 유지됩니다.
@@ -196,12 +139,9 @@
 
 ### 6. **게임 종료 및 랭킹**
 
-<div style="display: flex; gap: 10px; flex-wrap: wrap;">
-  <div style="text-align: center;">
-    <img src="docs/승리%20포즈.gif" width="400"><br>
-    <b>게임 종료 및 순위 결과</b>
-  </div>
-</div>
+| 게임 종료 및 순위 결과 |
+|:---:|
+| <img src="docs/승리%20포즈.gif" width="420"> |
 
 - 게임 종료 시 전체 순위 결과가 모든 참가자 화면에 동시에 표시됩니다.
 - 1등이 새로운 방장이 되어 로비로 복귀하고 바로 다음 게임을 시작할 수 있습니다.
