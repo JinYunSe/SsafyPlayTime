@@ -6,7 +6,7 @@
 - **개발 기간**: 2026.02.16 ~ 2026.03.30
 - **개발 인원**: 6명 (Unity Client : 6명)
 
-![alt text](docs/SSAFY PlayTime.png)
+![SSAFY PlayTime](https://raw.githubusercontent.com/JinYunSe/SsafyPlayTime/main/docs/SSAFY%20PlayTime.png)
 
 <br>
 
